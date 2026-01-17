@@ -135,6 +135,7 @@ body {
   height: 100%;
   padding: 0;
   margin: 0;
+  font-size: 14px;
   font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial,
     "Apple Color Emoji", "Segoe UI Emoji";
   background: var(--page-bg);
@@ -569,6 +570,7 @@ input,
 textarea,
 select {
   padding: 9px 12px;
+  font-size: 13px;
   box-shadow: 0 0 0 1px var(--control-inset) inset;
 }
 
@@ -760,6 +762,7 @@ table {
   border-collapse: collapse;
   border-radius: var(--radius);
   overflow: hidden;
+  font-size: 13px;
 }
 
 th,
