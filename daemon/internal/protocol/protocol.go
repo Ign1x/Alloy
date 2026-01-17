@@ -20,6 +20,12 @@ type Hello struct {
 	Features []string `json:"features,omitempty"`
 }
 
+// HelloAck is sent by the panel after it receives Hello.
+// It can be used for panel-binding and feature negotiation.
+type HelloAck struct {
+	PanelID string `json:"panel_id"`
+}
+
 // Heartbeat is sent periodically by the daemon.
 type Heartbeat struct {
 	DaemonID   string            `json:"daemon_id"`

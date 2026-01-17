@@ -22,6 +22,9 @@ type Config struct {
 	JavaCandidates []string
 	PreferredConnectAddrs []string
 
+	BindPanel        bool
+	PanelBindingPath string
+
 	MojangMetaBaseURL string
 	MojangDataBaseURL string
 	PaperAPIBaseURL   string
@@ -72,6 +75,21 @@ func LoadFromEnv() (Config, error) {
 	}
 
 	cfg.PreferredConnectAddrs = splitListEnv(os.Getenv("ELEGANTMC_PREFERRED_CONNECT_ADDRS"))
+
+	// Security: bind this daemon to the first panel it connects to (by panel_id).
+	// Set ELEGANTMC_BIND_PANEL=0 to disable.
+	cfg.BindPanel = true
+	if v := strings.TrimSpace(os.Getenv("ELEGANTMC_BIND_PANEL")); v != "" {
+		switch v {
+		case "1", "true", "TRUE", "yes", "YES", "on", "ON":
+			cfg.BindPanel = true
+		case "0", "false", "FALSE", "no", "NO", "off", "OFF":
+			cfg.BindPanel = false
+		default:
+			return Config{}, errors.New("ELEGANTMC_BIND_PANEL must be 0/1")
+		}
+	}
+	cfg.PanelBindingPath = filepath.Join(cfg.BaseDir, "panel_binding.json")
 
 	cfg.MojangMetaBaseURL = strings.TrimSpace(os.Getenv("ELEGANTMC_MOJANG_META_BASE_URL"))
 	if cfg.MojangMetaBaseURL == "" {

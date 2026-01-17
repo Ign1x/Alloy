@@ -71,6 +71,8 @@ func main() {
 		HeartbeatEvery:  time.Duration(cfg.HeartbeatSec) * time.Second,
 		ReconnectMin:    1 * time.Second,
 		ReconnectMax:    30 * time.Second,
+		BindPanel:       cfg.BindPanel,
+		PanelBindingPath: cfg.PanelBindingPath,
 		Log:             logger,
 		CommandExecutor: exec,
 	})

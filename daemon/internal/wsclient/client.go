@@ -7,7 +7,10 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -30,6 +33,9 @@ type Config struct {
 	ReconnectMin   time.Duration
 	ReconnectMax   time.Duration
 
+	BindPanel        bool
+	PanelBindingPath string
+
 	Log             *log.Logger
 	CommandExecutor CommandExecutor
 }
@@ -43,6 +49,9 @@ type Client struct {
 	writeMu sync.Mutex
 	connMu  sync.RWMutex
 	conn    *websocket.Conn
+
+	bindMu      sync.Mutex
+	boundPanelID string
 }
 
 func New(cfg Config) *Client {
@@ -55,7 +64,13 @@ func New(cfg Config) *Client {
 	if cfg.ReconnectMax <= 0 {
 		cfg.ReconnectMax = 30 * time.Second
 	}
-	return &Client{cfg: cfg, started: time.Now()}
+	c := &Client{cfg: cfg, started: time.Now()}
+	if cfg.BindPanel && strings.TrimSpace(cfg.PanelBindingPath) != "" {
+		if id, err := loadPanelBinding(cfg.PanelBindingPath); err == nil {
+			c.boundPanelID = id
+		}
+	}
+	return c
 }
 
 func (c *Client) Run(ctx context.Context) error {
@@ -139,14 +154,25 @@ func (c *Client) runOnce(ctx context.Context) error {
 		if err := json.Unmarshal(data, &msg); err != nil {
 			continue
 		}
-		if msg.Type != "command" {
+
+		if msg.Type == "hello_ack" {
+			var ack protocol.HelloAck
+			if err := json.Unmarshal(msg.Payload, &ack); err == nil {
+				if err := c.checkAndBindPanel(ack.PanelID); err != nil {
+					return err
+				}
+			}
 			continue
 		}
-		var cmd protocol.Command
-		if err := json.Unmarshal(msg.Payload, &cmd); err != nil {
+
+		if msg.Type == "command" {
+			var cmd protocol.Command
+			if err := json.Unmarshal(msg.Payload, &cmd); err != nil {
+				continue
+			}
+			go c.handleCommand(ctx, msg.ID, cmd)
 			continue
 		}
-		go c.handleCommand(ctx, msg.ID, cmd)
 	}
 }
 
@@ -228,6 +254,94 @@ func (c *Client) send(ctx context.Context, msg protocol.Message) error {
 
 	if err := conn.Write(ctx, websocket.MessageText, data); err != nil {
 		return err
+	}
+	return nil
+}
+
+type panelBindingFile struct {
+	PanelID     string `json:"panel_id"`
+	DaemonID    string `json:"daemon_id,omitempty"`
+	BoundAtUnix int64  `json:"bound_at_unix,omitempty"`
+}
+
+func loadPanelBinding(path string) (string, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+
+	var f panelBindingFile
+	if err := json.Unmarshal(b, &f); err == nil && strings.TrimSpace(f.PanelID) != "" {
+		return strings.TrimSpace(f.PanelID), nil
+	}
+
+	// Backward/repair: allow plain-text panel_id file.
+	id := strings.TrimSpace(string(b))
+	if id != "" && len(id) <= 128 {
+		return id, nil
+	}
+	return "", errors.New("invalid panel binding file")
+}
+
+func writePanelBinding(path string, panelID string, daemonID string) error {
+	if strings.TrimSpace(path) == "" {
+		return errors.New("panel binding path is empty")
+	}
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	tmp := fmt.Sprintf("%s.tmp-%d", path, time.Now().UnixNano())
+	payload, _ := json.MarshalIndent(panelBindingFile{
+		PanelID:     panelID,
+		DaemonID:    daemonID,
+		BoundAtUnix: time.Now().Unix(),
+	}, "", "  ")
+	payload = append(payload, '\n')
+	if err := os.WriteFile(tmp, payload, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
+func (c *Client) checkAndBindPanel(panelID string) error {
+	if !c.cfg.BindPanel {
+		return nil
+	}
+	pid := strings.TrimSpace(panelID)
+	if pid == "" {
+		return nil
+	}
+	if len(pid) > 128 {
+		return errors.New("panel_id too long")
+	}
+	bindPath := strings.TrimSpace(c.cfg.PanelBindingPath)
+	if bindPath == "" {
+		return nil
+	}
+
+	c.bindMu.Lock()
+	defer c.bindMu.Unlock()
+
+	if c.boundPanelID == "" {
+		if existing, err := loadPanelBinding(bindPath); err == nil {
+			c.boundPanelID = strings.TrimSpace(existing)
+		}
+	}
+
+	if c.boundPanelID == "" {
+		if err := writePanelBinding(bindPath, pid, c.cfg.DaemonID); err != nil {
+			return err
+		}
+		c.boundPanelID = pid
+		if c.cfg.Log != nil {
+			c.cfg.Log.Printf("panel bound: panel_id=%s", pid)
+		}
+		return nil
+	}
+
+	if c.boundPanelID != pid {
+		return fmt.Errorf("panel binding mismatch: bound=%s got=%s (delete %s to rebind)", c.boundPanelID, pid, bindPath)
 	}
 	return nil
 }

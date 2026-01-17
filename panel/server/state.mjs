@@ -12,12 +12,16 @@ const PANEL_DATA_DIR = process.env.ELEGANTMC_PANEL_DATA_DIR
   : path.resolve(process.cwd(), ".elegantmc-panel");
 const FRP_PROFILES_PATH = path.join(PANEL_DATA_DIR, "frp_profiles.json");
 const DAEMON_TOKENS_PATH = path.join(PANEL_DATA_DIR, "daemon_tokens.json");
+const PANEL_ID_PATH = path.join(PANEL_DATA_DIR, "panel_id.txt");
 
 let frpLoaded = false;
 let frpWriteChain = Promise.resolve();
 
 let tokensLoaded = false;
 let tokensWriteChain = Promise.resolve();
+
+let panelIDLoaded = false;
+let panelID = "";
 
 function nowUnix() {
   return Math.floor(Date.now() / 1000);
@@ -32,12 +36,36 @@ function safeJsonParse(text) {
 }
 
 export const state = {
+  panel_id: "",
   daemons: new Map(),
   connections: new Map(),
   pending: new Map(), // commandId -> { resolve, reject, timeout }
   frpProfiles: [],
   daemonTokens: {},
 };
+
+async function ensurePanelID() {
+  if (panelIDLoaded && panelID) return panelID;
+  await fs.mkdir(PANEL_DATA_DIR, { recursive: true });
+  try {
+    const raw = await fs.readFile(PANEL_ID_PATH, "utf8");
+    const v = String(raw || "").trim();
+    if (v && v.length <= 128) {
+      panelID = v;
+    }
+  } catch {
+    // ignore
+  }
+
+  if (!panelID) {
+    panelID = randomUUID().replace(/-/g, "");
+    await writeFileAtomic(PANEL_ID_PATH, `${panelID}\n`);
+  }
+
+  panelIDLoaded = true;
+  state.panel_id = panelID;
+  return panelID;
+}
 
 async function ensureTokensLoaded() {
   if (tokensLoaded) return;
@@ -102,6 +130,7 @@ function normalizeToken(token) {
 }
 
 export async function ensureReady() {
+  await ensurePanelID();
   await ensureTokensLoaded();
   await ensureFrpLoaded();
 }
@@ -275,6 +304,20 @@ export function handleDaemonMessage(daemonId, raw) {
   const type = msg.type;
   if (type === "hello") {
     d.hello = msg.payload ?? null;
+    try {
+      const ws = state.connections.get(daemonId);
+      if (ws) {
+        ws.send(
+          JSON.stringify({
+            type: "hello_ack",
+            ts_unix: nowUnix(),
+            payload: { panel_id: state.panel_id || "" },
+          })
+        );
+      }
+    } catch {
+      // ignore
+    }
     return;
   }
   if (type === "heartbeat") {
