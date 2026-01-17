@@ -1,3 +1,7 @@
+ARG ELEGANTMC_VERSION=dev
+ARG ELEGANTMC_REVISION=unknown
+ARG ELEGANTMC_BUILD_DATE=unknown
+
 FROM golang:1.22-bookworm AS builder
 WORKDIR /src
 
@@ -20,7 +24,19 @@ WORKDIR /app
 
 COPY --from=builder /out/elegantmc-daemon /usr/local/bin/elegantmc-daemon
 
+ARG ELEGANTMC_VERSION
+ARG ELEGANTMC_REVISION
+ARG ELEGANTMC_BUILD_DATE
+
+LABEL org.opencontainers.image.title="ElegantMC Daemon" \
+  org.opencontainers.image.description="ElegantMC Daemon (Go + WebSocket client + Minecraft/FRP manager)" \
+  org.opencontainers.image.version="$ELEGANTMC_VERSION" \
+  org.opencontainers.image.revision="$ELEGANTMC_REVISION" \
+  org.opencontainers.image.created="$ELEGANTMC_BUILD_DATE"
+
 ENV ELEGANTMC_BASE_DIR=/data
 VOLUME ["/data"]
+
+HEALTHCHECK --interval=10s --timeout=2s --start-period=10s --retries=3 CMD ["sh","-c","kill -0 1"]
 
 ENTRYPOINT ["elegantmc-daemon"]
