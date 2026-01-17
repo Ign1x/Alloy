@@ -125,6 +125,12 @@ export default function NodesView() {
                         type="button"
                         className="iconBtn"
                         onClick={async () => {
+                          const ok = await confirmDialog(`Reveal and copy token for node ${n.id}?`, {
+                            title: "Reveal Token",
+                            confirmLabel: "Reveal",
+                            cancelLabel: "Cancel",
+                          });
+                          if (!ok) return;
                           try {
                             const res = await apiFetch(`/api/nodes/${encodeURIComponent(n.id)}/token`, { cache: "no-store" });
                             const json = await res.json();
