@@ -7,9 +7,24 @@ export const metadata = {
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
+  const themeInitScript = `
+(() => {
+  try {
+    var mode = localStorage.getItem("elegantmc_theme_mode") || "auto";
+    var mql = window.matchMedia && window.matchMedia("(prefers-color-scheme: light)");
+    var sys = mql && mql.matches ? "light" : "dark";
+    var theme = (mode === "light" || mode === "dark") ? mode : sys;
+    document.documentElement.dataset.theme = theme;
+    document.documentElement.dataset.themeMode = mode;
+  } catch (e) {}
+})();
+`;
   return (
     <html lang="zh-CN">
-      <body>{children}</body>
+      <body>
+        <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
+        {children}
+      </body>
     </html>
   );
 }

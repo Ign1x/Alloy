@@ -41,6 +41,8 @@ type FrpProfile = {
 
 type Tab = "nodes" | "games" | "frp" | "files" | "advanced";
 
+type ThemeMode = "auto" | "dark" | "light";
+
 type GameSettingsSnapshot = {
   jarPath: string;
   javaPath: string;
@@ -320,6 +322,7 @@ function upsertProp(text: string, key: string, value: string) {
 
 export default function HomePage() {
   const [tab, setTab] = useState<Tab>("games");
+  const [themeMode, setThemeMode] = useState<ThemeMode>("auto");
 
   const [daemons, setDaemons] = useState<Daemon[]>([]);
   const [selected, setSelected] = useState<string>("");
@@ -451,6 +454,51 @@ export default function HomePage() {
     }
     return out;
   }, [fsPath]);
+
+  // Theme (auto/light/dark)
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("elegantmc_theme_mode") || "auto";
+      if (saved === "dark" || saved === "light" || saved === "auto") setThemeMode(saved);
+    } catch {
+      // ignore
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    const mode: ThemeMode = themeMode === "dark" || themeMode === "light" ? themeMode : "auto";
+    try {
+      localStorage.setItem("elegantmc_theme_mode", mode);
+    } catch {
+      // ignore
+    }
+    try {
+      const mql = window.matchMedia ? window.matchMedia("(prefers-color-scheme: light)") : null;
+      const apply = () => {
+        const sys = mql && mql.matches ? "light" : "dark";
+        const theme = mode === "auto" ? sys : mode;
+        document.documentElement.dataset.theme = theme;
+        document.documentElement.dataset.themeMode = mode;
+      };
+      apply();
+      if (mode !== "auto" || !mql) return;
+      const onChange = () => apply();
+      if (typeof mql.addEventListener === "function") {
+        mql.addEventListener("change", onChange);
+        return () => mql.removeEventListener("change", onChange);
+      }
+      // eslint-disable-next-line deprecation/deprecation
+      if (typeof (mql as any).addListener === "function") {
+        // eslint-disable-next-line deprecation/deprecation
+        (mql as any).addListener(onChange);
+        // eslint-disable-next-line deprecation/deprecation
+        return () => (mql as any).removeListener(onChange);
+      }
+    } catch {
+      // ignore
+    }
+  }, [themeMode]);
 
   // Panel auth (cookie-based)
   useEffect(() => {
@@ -1590,17 +1638,25 @@ export default function HomePage() {
           ))}
         </nav>
 
-        <div className="sidebarFooter">
-          <div className="hint">Panel MVP · Daemon 出站连接 · Vanilla 安装 · FRP 配置复用 · 文件管理（沙箱）</div>
-          <div className="row" style={{ marginTop: 10, justifyContent: "space-between" }}>
-            <span className={`badge ${authed === true ? "ok" : ""}`}>{authed === true ? "admin" : "locked"}</span>
-            {authed === true ? (
-              <button type="button" onClick={logout}>
-                Logout
-              </button>
-            ) : null}
-          </div>
-        </div>
+	        <div className="sidebarFooter">
+	          <div className="hint">Panel MVP · Daemon 出站连接 · Vanilla 安装 · FRP 配置复用 · 文件管理（沙箱）</div>
+	          <div className="row" style={{ marginTop: 10, justifyContent: "space-between" }}>
+	            <span className={`badge ${authed === true ? "ok" : ""}`}>{authed === true ? "admin" : "locked"}</span>
+	            {authed === true ? (
+	              <button type="button" onClick={logout}>
+	                Logout
+	              </button>
+	            ) : null}
+	          </div>
+	          <div className="row" style={{ marginTop: 10, justifyContent: "space-between" }}>
+	            <span className="muted">Theme</span>
+	            <select value={themeMode} onChange={(e) => setThemeMode(e.target.value as ThemeMode)} style={{ width: 140 }}>
+	              <option value="auto">Auto (System)</option>
+	              <option value="light">Light</option>
+	              <option value="dark">Dark</option>
+	            </select>
+	          </div>
+	        </div>
       </aside>
 
       <div className="main">
