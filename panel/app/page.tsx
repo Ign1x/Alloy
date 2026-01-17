@@ -1700,8 +1700,8 @@ export default function HomePage() {
               <div>
                 <div style={{ fontWeight: 800 }}>Admin Login</div>
                 <div className="hint">
-                  Set <code>ELEGANTMC_PANEL_ADMIN_PASSWORD</code> in your env (docker: <code>.env</code>). If you did not set it, check
-                  the Panel logs for the generated password.
+                  Set <code>ELEGANTMC_PANEL_ADMIN_PASSWORD</code> via environment variables (docker compose: inline env or <code>environment:</code>
+                  in compose). If you did not set it, check Panel logs for the generated password (<code>docker compose logs panel</code>).
                 </div>
               </div>
             </div>
