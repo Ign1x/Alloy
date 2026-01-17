@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AppCtxProvider } from "./appCtx";
 import AdvancedView from "./views/AdvancedView";
 import FilesView from "./views/FilesView";
@@ -334,6 +334,18 @@ export default function HomePage() {
   const [loginPassword, setLoginPassword] = useState<string>("");
   const [loginStatus, setLoginStatus] = useState<string>("");
 
+  // UI dialogs (avoid browser confirm/prompt)
+  const [confirmOpen, setConfirmOpen] = useState<boolean>(false);
+  const [confirmTitle, setConfirmTitle] = useState<string>("Confirm");
+  const [confirmMessage, setConfirmMessage] = useState<string>("");
+  const [confirmDanger, setConfirmDanger] = useState<boolean>(false);
+  const [confirmConfirmLabel, setConfirmConfirmLabel] = useState<string>("Confirm");
+  const [confirmCancelLabel, setConfirmCancelLabel] = useState<string>("Cancel");
+  const confirmResolveRef = useRef<((ok: boolean) => void) | null>(null);
+
+  const [copyOpen, setCopyOpen] = useState<boolean>(false);
+  const [copyValue, setCopyValue] = useState<string>("");
+
   // Logs
   const [logs, setLogs] = useState<any[]>([]);
 
@@ -654,19 +666,46 @@ export default function HomePage() {
     await callOkCommand("fs_write", { path, b64: b64EncodeUtf8(JSON.stringify(payload, null, 2) + "\n") }, 10_000);
   }
 
+  function closeConfirm(ok: boolean) {
+    setConfirmOpen(false);
+    const resolve = confirmResolveRef.current;
+    confirmResolveRef.current = null;
+    if (resolve) resolve(ok);
+  }
+
+  async function confirmDialog(
+    message: string,
+    opts: { title?: string; confirmLabel?: string; cancelLabel?: string; danger?: boolean } = {}
+  ) {
+    const msg = String(message || "");
+    if (!msg) return false;
+    return new Promise<boolean>((resolve) => {
+      confirmResolveRef.current = resolve;
+      setConfirmTitle(opts.title || "Confirm");
+      setConfirmMessage(msg);
+      setConfirmDanger(!!opts.danger);
+      setConfirmConfirmLabel(opts.confirmLabel || (opts.danger ? "Delete" : "OK"));
+      setConfirmCancelLabel(opts.cancelLabel || "Cancel");
+      setConfirmOpen(true);
+    });
+  }
+
+  function openCopyModal(text: string) {
+    setCopyValue(String(text || ""));
+    setCopyOpen(true);
+  }
+
   async function copyText(text: string) {
     const t = String(text || "");
     if (!t) return;
     try {
       await navigator.clipboard.writeText(t);
       setServerOpStatus("Copied");
+      return;
     } catch {
-      try {
-        window.prompt("Copy:", t);
-      } catch {
-        // ignore
-      }
+      // ignore
     }
+    openCopyModal(t);
   }
 
   // Daemon polling
@@ -963,17 +1002,18 @@ export default function HomePage() {
     }
   }
 
-  async function deleteFsEntry(entry: any) {
-    const name = String(entry?.name || "");
-    if (!name) return;
-    const isDir = !!entry?.isDir;
-    const target = joinRelPath(fsPath, name);
-    const label = isDir ? `folder ${target} (recursive)` : `file ${target}`;
-    if (!confirm(`Delete ${label}?`)) return;
+	  async function deleteFsEntry(entry: any) {
+	    const name = String(entry?.name || "");
+	    if (!name) return;
+	    const isDir = !!entry?.isDir;
+	    const target = joinRelPath(fsPath, name);
+	    const label = isDir ? `folder ${target} (recursive)` : `file ${target}`;
+	    const ok = await confirmDialog(`Delete ${label}?`, { title: "Delete", confirmLabel: "Delete", danger: true });
+	    if (!ok) return;
 
-    setFsStatus(`Deleting ${target} ...`);
-    try {
-      await callOkCommand("fs_delete", { path: target }, 60_000);
+	    setFsStatus(`Deleting ${target} ...`);
+	    try {
+	      await callOkCommand("fs_delete", { path: target }, 60_000);
       if (fsSelectedFile === target || fsSelectedFile.startsWith(`${target}/`)) {
         setFsSelectedFile("");
         setFsFileText("");
@@ -1344,20 +1384,25 @@ export default function HomePage() {
     }
   }
 
-  async function deleteServer(instanceOverride?: string) {
-    setServerOpStatus("");
-    try {
-      const id = String(instanceOverride ?? instanceId).trim();
-      if (!id) {
-        setServerOpStatus("instance_id 不能为空");
-        return;
-      }
-      if (!confirm(`Delete server ${id}? This will remove its folder under servers/`)) return;
+	  async function deleteServer(instanceOverride?: string) {
+	    setServerOpStatus("");
+	    try {
+	      const id = String(instanceOverride ?? instanceId).trim();
+	      if (!id) {
+	        setServerOpStatus("instance_id 不能为空");
+	        return;
+	      }
+	      const ok = await confirmDialog(`Delete server ${id}? This will remove its folder under servers/`, {
+	        title: "Delete Server",
+	        confirmLabel: "Delete",
+	        danger: true,
+	      });
+	      if (!ok) return;
 
-      if (enableFrp) {
-        try {
-          await callOkCommand("frp_stop", {});
-          setFrpOpStatus("FRP stopped");
+	      if (enableFrp) {
+	        try {
+	          await callOkCommand("frp_stop", {});
+	          setFrpOpStatus("FRP stopped");
         } catch {
           // ignore
         }
@@ -1557,16 +1602,17 @@ export default function HomePage() {
     cmdResult,
     runAdvancedCommand,
 
-    // Helpers
-    apiFetch,
-    copyText,
-    maskToken,
-    pct,
-    fmtUnix,
-    fmtBytes,
-    joinRelPath,
-    parentRelPath,
-  };
+	    // Helpers
+	    apiFetch,
+	    copyText,
+	    confirmDialog,
+	    maskToken,
+	    pct,
+	    fmtUnix,
+	    fmtBytes,
+	    joinRelPath,
+	    parentRelPath,
+	  };
 
   return (
     <AppCtxProvider value={appCtxValue}>
@@ -1611,10 +1657,76 @@ export default function HomePage() {
             </form>
           </div>
         </div>
-      ) : null}
+	      ) : null}
 
-      <div className="appShell">
-      <aside className="sidebar">
+	      {confirmOpen ? (
+	        <div className="modalOverlay" onClick={() => closeConfirm(false)}>
+	          <div className="modal" style={{ width: "min(520px, 100%)" }} onClick={(e) => e.stopPropagation()}>
+	            <div className="modalHeader">
+	              <div>
+	                <div style={{ fontWeight: 800 }}>{confirmTitle}</div>
+	                <div className="hint" style={{ whiteSpace: "pre-wrap" }}>
+	                  {confirmMessage}
+	                </div>
+	              </div>
+	              <button type="button" onClick={() => closeConfirm(false)}>
+	                Close
+	              </button>
+	            </div>
+	            <div className="btnGroup" style={{ justifyContent: "flex-end" }}>
+	              <button type="button" onClick={() => closeConfirm(false)}>
+	                {confirmCancelLabel}
+	              </button>
+	              <button type="button" className={confirmDanger ? "dangerBtn" : "primary"} onClick={() => closeConfirm(true)}>
+	                {confirmConfirmLabel}
+	              </button>
+	            </div>
+	          </div>
+	        </div>
+	      ) : null}
+
+	      {copyOpen ? (
+	        <div className="modalOverlay" onClick={() => setCopyOpen(false)}>
+	          <div className="modal" style={{ width: "min(720px, 100%)" }} onClick={(e) => e.stopPropagation()}>
+	            <div className="modalHeader">
+	              <div>
+	                <div style={{ fontWeight: 800 }}>Copy</div>
+	                <div className="hint">Clipboard API 不可用，请手动复制下面内容。</div>
+	              </div>
+	              <button type="button" onClick={() => setCopyOpen(false)}>
+	                Close
+	              </button>
+	            </div>
+	            <textarea
+	              readOnly
+	              value={copyValue}
+	              rows={6}
+	              style={{ width: "100%" }}
+	              onFocus={(e) => e.currentTarget.select()}
+	            />
+	            <div className="btnGroup" style={{ marginTop: 10, justifyContent: "flex-end" }}>
+	              <button
+	                type="button"
+	                className="primary"
+	                onClick={async () => {
+	                  try {
+	                    await navigator.clipboard.writeText(copyValue);
+	                    setServerOpStatus("Copied");
+	                    setCopyOpen(false);
+	                  } catch {
+	                    // ignore
+	                  }
+	                }}
+	              >
+	                Try Copy
+	              </button>
+	            </div>
+	          </div>
+	        </div>
+	      ) : null}
+
+	      <div className="appShell">
+	      <aside className="sidebar">
         <div className="sidebarHeader">
           <img className="logo" src="/logo.svg" alt="ElegantMC" />
           <div style={{ minWidth: 0 }}>

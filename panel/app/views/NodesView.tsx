@@ -18,6 +18,7 @@ export default function NodesView() {
     setSelected,
     setTab,
     openAddNodeModal,
+    confirmDialog,
   } = useAppCtx();
 
   return (
@@ -125,7 +126,8 @@ export default function NodesView() {
                       type="button"
                       className="dangerBtn"
                       onClick={async () => {
-                        if (!confirm(`Delete node ${n.id}?`)) return;
+                        const ok = await confirmDialog(`Delete node ${n.id}?`, { title: "Delete Node", confirmLabel: "Delete", danger: true });
+                        if (!ok) return;
                         setNodesStatus("");
                         try {
                           const res = await apiFetch(`/api/nodes/${encodeURIComponent(n.id)}`, { method: "DELETE" });
