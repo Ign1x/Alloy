@@ -19,6 +19,7 @@ export default function NodesView() {
     setSelected,
     setTab,
     openAddNodeModal,
+    openDeployDaemonModal,
     confirmDialog,
   } = useAppCtx();
 
@@ -44,7 +45,6 @@ export default function NodesView() {
           <div className="toolbarLeft" style={{ alignItems: "center" }}>
             <div>
               <h2>Nodes</h2>
-              <div className="hint">这里的 Node 列表用于 Daemon 鉴权（daemon_id → token），保存在 Panel 数据目录。</div>
               {nodesStatus ? <div className="hint">{nodesStatus}</div> : null}
             </div>
           </div>
@@ -123,7 +123,8 @@ export default function NodesView() {
                       <code>{String(n.token_masked || "(hidden)")}</code>
                       <button
                         type="button"
-                        className="iconBtn"
+                        className="iconBtn iconOnly"
+                        title="Copy token"
                         onClick={async () => {
                           const ok = await confirmDialog(`Reveal and copy token for node ${n.id}?`, {
                             title: "Reveal Token",
@@ -144,7 +145,6 @@ export default function NodesView() {
                         }}
                       >
                         <Icon name="copy" />
-                        Copy
                       </button>
                     </div>
                   </div>
@@ -153,6 +153,30 @@ export default function NodesView() {
                     <div className="btnGroup" style={{ justifyContent: "flex-start" }}>
                       <button type="button" onClick={() => openNodeDetails(n.id)}>
                         Details
+                      </button>
+                      <button
+                        type="button"
+                        className="iconBtn"
+                        onClick={async () => {
+                          const ok = await confirmDialog(`Reveal token and generate compose for node ${n.id}?`, {
+                            title: "Deploy Node",
+                            confirmLabel: "Generate",
+                            cancelLabel: "Cancel",
+                          });
+                          if (!ok) return;
+                          setNodesStatus("");
+                          try {
+                            const res = await apiFetch(`/api/nodes/${encodeURIComponent(n.id)}/token`, { cache: "no-store" });
+                            const json = await res.json();
+                            if (!res.ok) throw new Error(json?.error || "failed");
+                            openDeployDaemonModal(n.id, String(json?.token || ""));
+                          } catch (e: any) {
+                            setNodesStatus(String(e?.message || e));
+                          }
+                        }}
+                      >
+                        <Icon name="download" />
+                        Deploy
                       </button>
                       <button
                         type="button"

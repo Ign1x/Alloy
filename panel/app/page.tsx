@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AppCtxProvider } from "./appCtx";
+import Icon from "./ui/Icon";
 import AdvancedView from "./views/AdvancedView";
 import FilesView from "./views/FilesView";
 import FrpView from "./views/FrpView";
@@ -83,7 +84,7 @@ type GameSettingsSnapshot = {
 
 type InstallForm = {
   instanceId: string;
-  kind: "vanilla" | "paper";
+  kind: "vanilla" | "paper" | "zip";
   version: string;
   paperBuild: number;
   xms: string;
@@ -242,6 +243,12 @@ function isLocalLikeHost(hostname: string) {
   return false;
 }
 
+function isDockerBridgeLikeIPv4(hostname: string) {
+  const h = String(hostname || "").trim().toLowerCase();
+  if (!h) return false;
+  return /^172\.(1[7-9]|2\d|3[01])\./.test(h);
+}
+
 function stripPortFromHost(host: string) {
   const v = String(host || "").trim();
   if (!v) return "";
@@ -266,25 +273,34 @@ function stripPortFromHost(host: string) {
 
 function pickBestLocalHost(uiHost: string, preferredAddrs: string[], daemonIPv4: string[]) {
   const host = String(uiHost || "").trim();
+  const dockerishHost = isDockerBridgeLikeIPv4(host);
   const preferred = Array.isArray(preferredAddrs)
     ? preferredAddrs.map((v) => stripPortFromHost(String(v || "").trim())).filter(Boolean)
     : [];
   const ips = Array.isArray(daemonIPv4) ? daemonIPv4.map((v) => String(v || "").trim()).filter(Boolean) : [];
 
-  if (preferred.length) return preferred[0];
-  if (isLocalLikeHost(host)) return host;
+  if (preferred.length) {
+    const nonDocker = preferred.find((h) => !isDockerBridgeLikeIPv4(h));
+    return nonDocker || preferred[0];
+  }
+  if (isLocalLikeHost(host) && !dockerishHost) return host;
 
   const preferredIP = ips.find((ip) => ip.startsWith("192.168.") || ip.startsWith("10.") || ip.startsWith("169.254."));
   if (preferredIP) return preferredIP;
+
+  const nonDockerIP = ips.find((ip) => !ip.startsWith("127.") && !isDockerBridgeLikeIPv4(ip));
+  if (nonDockerIP) return nonDockerIP;
 
   const first = ips.find((ip) => !ip.startsWith("127.")) || ips[0] || "";
   if (first) {
     // In docker-compose, daemon may only see container IPs (172.17-31.*). When panel is accessed via a public hostname,
     // the published ports are typically on the panel host instead of the container IP.
     if (host && !isLocalLikeHost(host) && /^172\.(1[7-9]|2\d|3[01])\./.test(first)) return host;
+    if (dockerishHost && /^172\.(1[7-9]|2\d|3[01])\./.test(first)) return "127.0.0.1";
     return first;
   }
 
+  if (dockerishHost) return "127.0.0.1";
   return host || "127.0.0.1";
 }
 
@@ -293,6 +309,32 @@ function maskToken(token?: string) {
   if (!t) return "(none)";
   if (t.length <= 4) return "****";
   return `${"*".repeat(Math.min(12, t.length - 4))}${t.slice(-4)}`;
+}
+
+function yamlQuote(v: string) {
+  const s = String(v ?? "");
+  return `"${s.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+}
+
+function makeDaemonComposeYml(opts: { daemonId: string; token: string; panelWsUrl: string }) {
+  const daemonId = String(opts.daemonId || "").trim();
+  const token = String(opts.token || "").trim();
+  const panelWsUrl = String(opts.panelWsUrl || "").trim();
+  return [
+    "services:",
+    "  daemon:",
+    `    image: ${yamlQuote("ign1x/elegantmc-daemon:latest")}`,
+    "    network_mode: host",
+    "    restart: unless-stopped",
+    "    environment:",
+    `      ELEGANTMC_PANEL_WS_URL: ${yamlQuote(panelWsUrl || "wss://YOUR_PANEL/ws/daemon")}`,
+    `      ELEGANTMC_DAEMON_ID: ${yamlQuote(daemonId || "my-node")}`,
+    `      ELEGANTMC_TOKEN: ${yamlQuote(token || "your-token")}`,
+    `      ELEGANTMC_BASE_DIR: ${yamlQuote("/data")}`,
+    "    volumes:",
+    "      - ./data:/data",
+    "",
+  ].join("\n");
 }
 
 function normalizeJarName(raw: string) {
@@ -403,6 +445,11 @@ export default function HomePage() {
   const [serverOpStatus, setServerOpStatus] = useState<string>("");
   const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
   const [settingsSnapshot, setSettingsSnapshot] = useState<GameSettingsSnapshot | null>(null);
+  const [modsOpen, setModsOpen] = useState<boolean>(false);
+  const [modsStatus, setModsStatus] = useState<string>("");
+  const [modsEntries, setModsEntries] = useState<any[]>([]);
+  const [modsUploadFile, setModsUploadFile] = useState<File | null>(null);
+  const [modsUploadInputKey, setModsUploadInputKey] = useState<number>(0);
   const [installOpen, setInstallOpen] = useState<boolean>(false);
   const [installRunning, setInstallRunning] = useState<boolean>(false);
   const [installStartUnix, setInstallStartUnix] = useState<number>(0);
@@ -422,6 +469,8 @@ export default function HomePage() {
     frpProfileId: "",
     frpRemotePort: 25566,
   }));
+  const [installZipFile, setInstallZipFile] = useState<File | null>(null);
+  const [installZipInputKey, setInstallZipInputKey] = useState<number>(0);
   const [logView, setLogView] = useState<"all" | "mc" | "install" | "frp">("all");
 
   // Server list (directories under servers/)
@@ -456,6 +505,10 @@ export default function HomePage() {
   const [createdNode, setCreatedNode] = useState<{ id: string; token: string } | null>(null);
   const [newNodeId, setNewNodeId] = useState<string>("");
   const [newNodeToken, setNewNodeToken] = useState<string>("");
+  const [deployOpen, setDeployOpen] = useState<boolean>(false);
+  const [deployNodeId, setDeployNodeId] = useState<string>("");
+  const [deployToken, setDeployToken] = useState<string>("");
+  const [deployPanelWsUrl, setDeployPanelWsUrl] = useState<string>("");
 
   // Advanced command runner
   const [cmdName, setCmdName] = useState<string>("ping");
@@ -467,20 +520,21 @@ export default function HomePage() {
     [profiles, frpProfileId]
   );
 
-  const installValidation = useMemo(() => {
-    const instErr = validateInstanceIDUI(installForm.instanceId);
-    const verErr = String(installForm.version || "").trim() ? "" : "version is required";
-    const jarErr = validateJarNameUI(installForm.jarName);
-    const portErr = validatePortUI(installForm.gamePort, { allowZero: false });
-    const frpRemoteErr = validatePortUI(installForm.frpRemotePort, { allowZero: true });
-    const frpProfileErr =
-      installForm.enableFrp && (!String(installForm.frpProfileId || "").trim() || !profiles.length)
-        ? "select a FRP server (or disable FRP)"
-        : "";
-    const canInstall = !instErr && !verErr && !jarErr && !portErr && !frpRemoteErr;
-    const canInstallAndStart = canInstall && (!installForm.enableFrp || !frpProfileErr);
-    return { instErr, verErr, jarErr, portErr, frpRemoteErr, frpProfileErr, canInstall, canInstallAndStart };
-  }, [installForm, profiles]);
+	  const installValidation = useMemo(() => {
+	    const instErr = validateInstanceIDUI(installForm.instanceId);
+	    const verErr = installForm.kind === "zip" ? "" : String(installForm.version || "").trim() ? "" : "version is required";
+	    const jarErr = validateJarNameUI(installForm.jarName);
+	    const zipErr = installForm.kind === "zip" && !installZipFile ? "zip file is required" : "";
+	    const portErr = validatePortUI(installForm.gamePort, { allowZero: false });
+	    const frpRemoteErr = validatePortUI(installForm.frpRemotePort, { allowZero: true });
+	    const frpProfileErr =
+	      installForm.enableFrp && (!String(installForm.frpProfileId || "").trim() || !profiles.length)
+	        ? "select a FRP server (or disable FRP)"
+	        : "";
+	    const canInstall = !instErr && !verErr && !jarErr && !zipErr && !portErr && !frpRemoteErr;
+	    const canInstallAndStart = canInstall && (!installForm.enableFrp || !frpProfileErr);
+	    return { instErr, verErr, jarErr, zipErr, portErr, frpRemoteErr, frpProfileErr, canInstall, canInstallAndStart };
+	  }, [installForm, installZipFile, profiles]);
 
   const settingsValidation = useMemo(() => {
     const jar = String(jarPath || "").trim();
@@ -508,6 +562,10 @@ export default function HomePage() {
     return Array.isArray(list) ? list.map((v: any) => String(v || "").trim()).filter(Boolean) : [];
   }, [selectedDaemon]);
   const localHost = useMemo(() => pickBestLocalHost(uiHost, preferredConnectAddrs, daemonIPv4), [uiHost, preferredConnectAddrs, daemonIPv4]);
+  const deployComposeYml = useMemo(
+    () => makeDaemonComposeYml({ daemonId: deployNodeId, token: deployToken, panelWsUrl: deployPanelWsUrl }),
+    [deployNodeId, deployToken, deployPanelWsUrl]
+  );
   const fsBreadcrumbs = useMemo(() => {
     const norm = String(fsPath || "")
       .replace(/\\+/g, "/")
@@ -708,6 +766,12 @@ export default function HomePage() {
     setAddNodeOpen(true);
   }
 
+  function openDeployDaemonModal(nodeId: string, token: string) {
+    setDeployNodeId(String(nodeId || "").trim());
+    setDeployToken(String(token || "").trim());
+    setDeployOpen(true);
+  }
+
   function openAddFrpModal() {
     setNewProfileName("");
     setNewProfileAddr("");
@@ -857,6 +921,9 @@ export default function HomePage() {
   useEffect(() => {
     try {
       setUiHost(window.location.hostname || "");
+      const proto = window.location.protocol === "https:" ? "wss" : "ws";
+      const wsUrl = `${proto}://${window.location.host}/ws/daemon`;
+      setDeployPanelWsUrl((prev) => prev || wsUrl);
     } catch {
       // ignore
     }
@@ -1293,75 +1360,129 @@ export default function HomePage() {
     return `server-${Math.floor(Date.now() / 1000)}`;
   }
 
-  function openInstallModal() {
-    const suggested = suggestInstanceId(serverDirs);
-    const jarName = normalizeJarName(jarPath);
-    const profileId =
-      profiles.find((p) => p.id === frpProfileId)?.id || profiles[0]?.id || "";
-    setInstallForm((prev) => ({
-      instanceId: suggested,
-      kind: prev?.kind === "paper" ? "paper" : "vanilla",
-      version: String(prev?.version || "1.20.1"),
-      paperBuild: Number.isFinite(Number(prev?.paperBuild)) ? Number(prev?.paperBuild) : 0,
-      xms,
-      xmx,
-      gamePort,
-      jarName,
-      javaPath,
-      acceptEula: prev?.acceptEula ?? true,
-      enableFrp,
-      frpProfileId: profileId,
-      frpRemotePort,
-    }));
-    setInstallStartUnix(0);
-    setInstallInstance("");
-    setInstallOpen(true);
-  }
+	  function openInstallModal() {
+	    const suggested = suggestInstanceId(serverDirs);
+	    const jarName = normalizeJarName(jarPath);
+	    const profileId =
+	      profiles.find((p) => p.id === frpProfileId)?.id || profiles[0]?.id || "";
+	    setInstallForm((prev) => ({
+	      instanceId: suggested,
+	      kind: prev?.kind === "paper" || prev?.kind === "zip" ? prev.kind : "vanilla",
+	      version: String(prev?.version || "1.20.1"),
+	      paperBuild: Number.isFinite(Number(prev?.paperBuild)) ? Number(prev?.paperBuild) : 0,
+	      xms,
+	      xmx,
+	      gamePort,
+	      jarName,
+	      javaPath,
+	      acceptEula: prev?.acceptEula ?? true,
+	      enableFrp,
+	      frpProfileId: profileId,
+	      frpRemotePort,
+	    }));
+	    setInstallZipFile(null);
+	    setInstallZipInputKey((k) => k + 1);
+	    setInstallStartUnix(0);
+	    setInstallInstance("");
+	    setInstallOpen(true);
+	  }
 
-  async function runInstall(andStart: boolean) {
-    setServerOpStatus("");
-    if (!selectedDaemon?.connected) {
-      setServerOpStatus("daemon offline");
-      return;
-    }
-    const inst = installForm.instanceId.trim();
-    if (!inst) {
-      setServerOpStatus("instance_id 不能为空");
-      return;
-    }
-    const ver = String(installForm.version || "").trim();
-    if (!ver) {
-      setServerOpStatus("version 不能为空");
-      return;
-    }
+	  async function runInstall(andStart: boolean) {
+	    setServerOpStatus("");
+	    if (!selectedDaemon?.connected) {
+	      setServerOpStatus("daemon offline");
+	      return;
+	    }
+	    const inst = installForm.instanceId.trim();
+	    if (!inst) {
+	      setServerOpStatus("instance_id 不能为空");
+	      return;
+	    }
+	    const kind = installForm.kind;
+	    const ver = String(installForm.version || "").trim();
+	    if (kind !== "zip" && !ver) {
+	      setServerOpStatus("version 不能为空");
+	      return;
+	    }
 
-    setInstallInstance(inst);
-    setInstallStartUnix(Math.floor(Date.now() / 1000));
-    setInstallRunning(true);
+	    setInstallInstance(inst);
+	    setInstallStartUnix(Math.floor(Date.now() / 1000));
+	    setInstallRunning(true);
 
-    try {
-      const jarName = normalizeJarName(installForm.jarName);
-      const kind = installForm.kind === "paper" ? "paper" : "vanilla";
-      const build = Math.round(Number(installForm.paperBuild || 0));
-      const cmdName = kind === "paper" ? "mc_install_paper" : "mc_install_vanilla";
-      setServerOpStatus(
-        kind === "paper" && build > 0 ? `Installing Paper ${ver} (build ${build}) ...` : `Installing ${kind === "paper" ? "Paper" : "Vanilla"} ${ver} ...`
-      );
-      const out = await callOkCommand(
-        cmdName,
-        {
-          instance_id: inst,
-          version: ver,
-          ...(kind === "paper" ? { build: Number.isFinite(build) ? build : 0 } : {}),
-          jar_name: jarName,
-          accept_eula: !!installForm.acceptEula,
-        },
-        10 * 60_000
-      );
-      const installedJar = String(out.jar_path || jarName);
+	    try {
+	      const jarName = normalizeJarName(installForm.jarName);
+	      let installedJar = jarName;
+	      if (kind === "zip") {
+	        const file = installZipFile;
+	        if (!file) throw new Error("zip file is required");
 
-      // Apply port right after install so the server listens on the expected port.
-      await applyServerPort(inst, installForm.gamePort);
+	        // Ensure instance dir exists, then upload + extract.
+	        await callOkCommand("fs_mkdir", { path: inst }, 30_000);
+
+	        const zipRel = joinRelPath(inst, "modpack.zip");
+	        const chunkSize = 256 * 1024; // 256KB
+	        let uploadID = "";
+	        setServerOpStatus(`Uploading modpack.zip: 0/${file.size} bytes`);
+	        try {
+	          const begin = await callOkCommand("fs_upload_begin", { path: zipRel }, 30_000);
+	          uploadID = String(begin.upload_id || "");
+	          if (!uploadID) throw new Error("upload_id missing");
+
+	          for (let off = 0; off < file.size; off += chunkSize) {
+	            const end = Math.min(off + chunkSize, file.size);
+	            const ab = await file.slice(off, end).arrayBuffer();
+	            const b64 = b64EncodeBytes(new Uint8Array(ab));
+	            await callOkCommand("fs_upload_chunk", { upload_id: uploadID, b64 }, 60_000);
+	            setServerOpStatus(`Uploading modpack.zip: ${end}/${file.size} bytes`);
+	          }
+
+	          await callOkCommand("fs_upload_commit", { upload_id: uploadID }, 60_000);
+	        } catch (e) {
+	          if (uploadID) {
+	            try {
+	              await callOkCommand("fs_upload_abort", { upload_id: uploadID }, 10_000);
+	            } catch {
+	              // ignore
+	            }
+	          }
+	          throw e;
+	        }
+
+	        setServerOpStatus("Extracting modpack.zip ...");
+	        await callOkCommand(
+	          "fs_unzip",
+	          { zip_path: zipRel, dest_dir: inst, instance_id: inst, strip_top_level: true },
+	          10 * 60_000
+	        );
+	        try {
+	          await callOkCommand("fs_delete", { path: zipRel }, 30_000);
+	        } catch {
+	          // ignore
+	        }
+	        setInstallZipFile(null);
+	        setInstallZipInputKey((k) => k + 1);
+	      } else {
+	        const build = Math.round(Number(installForm.paperBuild || 0));
+	        const cmdName = kind === "paper" ? "mc_install_paper" : "mc_install_vanilla";
+	        setServerOpStatus(
+	          kind === "paper" && build > 0 ? `Installing Paper ${ver} (build ${build}) ...` : `Installing ${kind === "paper" ? "Paper" : "Vanilla"} ${ver} ...`
+	        );
+	        const out = await callOkCommand(
+	          cmdName,
+	          {
+	            instance_id: inst,
+	            version: ver,
+	            ...(kind === "paper" ? { build: Number.isFinite(build) ? build : 0 } : {}),
+	            jar_name: jarName,
+	            accept_eula: !!installForm.acceptEula,
+	          },
+	          10 * 60_000
+	        );
+	        installedJar = String(out.jar_path || jarName);
+	      }
+
+	      // Apply port right after install so the server listens on the expected port.
+	      await applyServerPort(inst, installForm.gamePort);
 
       // Refresh installed games list.
       await refreshServerDirs();
@@ -1416,11 +1537,11 @@ export default function HomePage() {
     }
   }
 
-  function openSettingsModal() {
-    if (!instanceId.trim()) return;
-    setSettingsSnapshot({
-      jarPath,
-      javaPath,
+	  function openSettingsModal() {
+	    if (!instanceId.trim()) return;
+	    setSettingsSnapshot({
+	      jarPath,
+	      javaPath,
       gamePort,
       xms,
       xmx,
@@ -1428,14 +1549,142 @@ export default function HomePage() {
       frpProfileId,
       frpRemotePort,
     });
-    setSettingsOpen(true);
-    setServerOpStatus("");
-  }
+	    setSettingsOpen(true);
+	    setServerOpStatus("");
+	  }
 
-  function cancelEditSettings() {
-    if (settingsSnapshot) {
-      setJarPath(settingsSnapshot.jarPath);
-      setJavaPath(settingsSnapshot.javaPath);
+	  async function refreshModsNow() {
+	    if (!selectedDaemon?.connected) {
+	      setModsEntries([]);
+	      setModsStatus("daemon offline");
+	      return;
+	    }
+	    const inst = instanceId.trim();
+	    if (!inst) {
+	      setModsEntries([]);
+	      setModsStatus("no instance selected");
+	      return;
+	    }
+	    setModsStatus("Loading...");
+	    try {
+	      await callOkCommand("fs_mkdir", { path: joinRelPath(inst, "mods") }, 10_000);
+	      const out = await callOkCommand("fs_list", { path: joinRelPath(inst, "mods") }, 10_000);
+	      const entries = (out.entries || [])
+	        .filter((e: any) => e && !e.isDir && e.name)
+	        .filter((e: any) => {
+	          const n = String(e.name || "").toLowerCase();
+	          return n.endsWith(".jar") || n.endsWith(".jar.disabled");
+	        })
+	        .map((e: any) => ({ name: String(e.name), size: Number(e.size || 0) }));
+	      entries.sort((a: any, b: any) => String(a.name).localeCompare(String(b.name)));
+	      setModsEntries(entries);
+	      setModsStatus("");
+	    } catch (e: any) {
+	      setModsEntries([]);
+	      setModsStatus(String(e?.message || e));
+	    }
+	  }
+
+	  function openModsModal() {
+	    if (!selectedDaemon?.connected) return;
+	    if (!instanceId.trim()) return;
+	    setModsStatus("");
+	    setModsUploadFile(null);
+	    setModsUploadInputKey((k) => k + 1);
+	    setModsOpen(true);
+	    refreshModsNow();
+	  }
+
+	  async function toggleMod(name: string) {
+	    const inst = instanceId.trim();
+	    if (!selectedDaemon?.connected || !inst) return;
+	    const cur = String(name || "");
+	    const lower = cur.toLowerCase();
+	    const isDisabled = lower.endsWith(".jar.disabled");
+	    const nextName = isDisabled ? cur.replace(/\.disabled$/i, "") : `${cur}.disabled`;
+	    setModsStatus("...");
+	    try {
+	      const modsDir = joinRelPath(inst, "mods");
+	      await callOkCommand("fs_move", { from: joinRelPath(modsDir, cur), to: joinRelPath(modsDir, nextName) }, 20_000);
+	      await refreshModsNow();
+	      setModsStatus(isDisabled ? "Enabled" : "Disabled");
+	      setTimeout(() => setModsStatus(""), 800);
+	    } catch (e: any) {
+	      setModsStatus(String(e?.message || e));
+	    }
+	  }
+
+	  async function deleteMod(name: string) {
+	    const inst = instanceId.trim();
+	    if (!selectedDaemon?.connected || !inst) return;
+	    const cur = String(name || "");
+	    const ok = await confirmDialog(`Delete mod ${cur}?`, { title: "Delete Mod", confirmLabel: "Delete", danger: true });
+	    if (!ok) return;
+	    setModsStatus("");
+	    try {
+	      const modsDir = joinRelPath(inst, "mods");
+	      await callOkCommand("fs_delete", { path: joinRelPath(modsDir, cur) }, 30_000);
+	      await refreshModsNow();
+	      setModsStatus("Deleted");
+	      setTimeout(() => setModsStatus(""), 800);
+	    } catch (e: any) {
+	      setModsStatus(String(e?.message || e));
+	    }
+	  }
+
+	  async function uploadMod() {
+	    const inst = instanceId.trim();
+	    if (!selectedDaemon?.connected || !inst) return;
+	    if (!modsUploadFile) {
+	      setModsStatus("Select a .jar file");
+	      return;
+	    }
+	    const file = modsUploadFile;
+	    if (!String(file.name || "").toLowerCase().endsWith(".jar")) {
+	      setModsStatus("Only .jar supported");
+	      return;
+	    }
+
+	    const destPath = joinRelPath(joinRelPath(inst, "mods"), file.name);
+	    const chunkSize = 256 * 1024;
+	    let uploadID = "";
+	    setModsStatus(`Uploading ${file.name}: 0/${file.size} bytes`);
+	    try {
+	      await callOkCommand("fs_mkdir", { path: joinRelPath(inst, "mods") }, 10_000);
+	      const begin = await callOkCommand("fs_upload_begin", { path: destPath }, 30_000);
+	      uploadID = String(begin.upload_id || "");
+	      if (!uploadID) throw new Error("upload_id missing");
+
+	      for (let off = 0; off < file.size; off += chunkSize) {
+	        const end = Math.min(off + chunkSize, file.size);
+	        const ab = await file.slice(off, end).arrayBuffer();
+	        const b64 = b64EncodeBytes(new Uint8Array(ab));
+	        await callOkCommand("fs_upload_chunk", { upload_id: uploadID, b64 }, 60_000);
+	        setModsStatus(`Uploading ${file.name}: ${end}/${file.size} bytes`);
+	      }
+
+	      await callOkCommand("fs_upload_commit", { upload_id: uploadID }, 60_000);
+	      setModsUploadFile(null);
+	      setModsUploadInputKey((k) => k + 1);
+	      await refreshModsNow();
+	      setModsStatus("Uploaded");
+	      setTimeout(() => setModsStatus(""), 900);
+	    } catch (e: any) {
+	      if (uploadID) {
+	        try {
+	          await callOkCommand("fs_upload_abort", { upload_id: uploadID }, 10_000);
+	        } catch {
+	          // ignore
+	        }
+	      }
+	      setModsStatus(String(e?.message || e));
+	    }
+	  }
+
+	  function cancelEditSettings() {
+	    if (settingsSnapshot) {
+	      setJarPath(settingsSnapshot.jarPath);
+	      setJavaPath(settingsSnapshot.javaPath);
       setGamePort(settingsSnapshot.gamePort);
       setXms(settingsSnapshot.xms);
       setXmx(settingsSnapshot.xmx);
@@ -1715,17 +1964,19 @@ export default function HomePage() {
     setNodesStatus,
     openNodeDetails,
     openAddNodeModal,
+    openDeployDaemonModal,
 
     // Games
     serverDirs,
     serverDirsStatus,
     refreshServerDirs,
     instanceId,
-    setInstanceId,
-    openSettingsModal,
-    openInstallModal,
-    startServer,
-    stopServer,
+	    setInstanceId,
+	    openSettingsModal,
+	    openModsModal,
+	    openInstallModal,
+	    startServer,
+	    stopServer,
     restartServer,
     deleteServer,
     frpOpStatus,
@@ -1941,9 +2192,8 @@ export default function HomePage() {
         </nav>
 
 	        <div className="sidebarFooter">
-	          <div className="hint">Panel MVP · Daemon 出站连接 · Vanilla 安装 · FRP 配置复用 · 文件管理（沙箱）</div>
-	          <div className="hint" style={{ marginTop: 8 }}>
-	            panel: <code>{panelInfo?.version || "dev"}</code>
+		          <div className="hint" style={{ marginTop: 8 }}>
+		            panel: <code>{panelInfo?.version || "dev"}</code>
 	            {panelInfo?.revision ? (
 	              <>
 	                {" "}
@@ -2049,45 +2299,67 @@ export default function HomePage() {
 	                      <div className="hint">建议：A-Z a-z 0-9 . _ -（最长 64）</div>
 	                    )}
 	                  </div>
-	                  <div className="field">
-	                    <label>Type</label>
-	                    <select value={installForm.kind} onChange={(e) => setInstallForm((f) => ({ ...f, kind: e.target.value as any }))}>
-	                      <option value="vanilla">Vanilla</option>
-	                      <option value="paper">Paper</option>
-	                    </select>
-	                    <div className="hint">Paper 支持插件且性能更好；Vanilla 为官方原版</div>
-	                  </div>
+		                  <div className="field">
+		                    <label>Type</label>
+		                    <select value={installForm.kind} onChange={(e) => setInstallForm((f) => ({ ...f, kind: e.target.value as any }))}>
+		                      <option value="vanilla">Vanilla</option>
+		                      <option value="paper">Paper</option>
+		                      <option value="zip">Modpack ZIP</option>
+		                    </select>
+		                    <div className="hint">Vanilla/Paper：自动下载服务端；ZIP：上传整合包/服务端包并解压</div>
+		                  </div>
 
-	                  <div className="field" style={{ gridColumn: installForm.kind === "paper" ? undefined : "1 / -1" }}>
-	                    <label>Version</label>
-	                    <input
-	                      value={installForm.version}
-	                      onChange={(e) => setInstallForm((f) => ({ ...f, version: e.target.value }))}
-	                      list="mc-versions"
-	                      placeholder="1.20.1"
-	                    />
-                    <datalist id="mc-versions">
-                      {versions.map((v) => (
-                        <option key={`${v.id}-${v.type || ""}`} value={v.id}>
-                          {v.type || ""}
-                        </option>
-                      ))}
-                    </datalist>
-                    {versionsStatus ? <div className="hint">版本列表：{versionsStatus}</div> : <div className="hint">可直接手输任意版本号</div>}
-                  </div>
-                  {installForm.kind === "paper" ? (
-                    <div className="field">
-                      <label>Paper Build (optional)</label>
-                      <input
-                        type="number"
-                        value={Number.isFinite(installForm.paperBuild) ? installForm.paperBuild : 0}
-                        onChange={(e) => setInstallForm((f) => ({ ...f, paperBuild: Number(e.target.value) }))}
-                        placeholder="0 (latest)"
-                        min={0}
-                      />
-                      <div className="hint">填 0 表示下载最新 build</div>
-                    </div>
-                  ) : null}
+		                  {installForm.kind === "zip" ? (
+		                    <div className="field" style={{ gridColumn: "1 / -1" }}>
+		                      <label>Modpack ZIP</label>
+		                      <input
+		                        key={installZipInputKey}
+		                        type="file"
+		                        accept=".zip"
+		                        onChange={(e) => setInstallZipFile(e.target.files?.[0] || null)}
+		                      />
+		                      {installValidation.zipErr ? (
+		                        <div className="hint" style={{ color: "var(--danger)" }}>
+		                          {installValidation.zipErr}
+		                        </div>
+		                      ) : (
+		                        <div className="hint">将 zip 上传到 <code>servers/&lt;instance&gt;/</code> 并自动解压（默认会剥离单一顶层目录）</div>
+		                      )}
+		                    </div>
+		                  ) : (
+		                    <>
+		                      <div className="field" style={{ gridColumn: installForm.kind === "paper" ? undefined : "1 / -1" }}>
+		                        <label>Version</label>
+		                        <input
+		                          value={installForm.version}
+		                          onChange={(e) => setInstallForm((f) => ({ ...f, version: e.target.value }))}
+		                          list="mc-versions"
+		                          placeholder="1.20.1"
+		                        />
+		                        <datalist id="mc-versions">
+		                          {versions.map((v) => (
+		                            <option key={`${v.id}-${v.type || ""}`} value={v.id}>
+		                              {v.type || ""}
+		                            </option>
+		                          ))}
+		                        </datalist>
+		                        {versionsStatus ? <div className="hint">版本列表：{versionsStatus}</div> : <div className="hint">可直接手输任意版本号</div>}
+		                      </div>
+		                      {installForm.kind === "paper" ? (
+		                        <div className="field">
+		                          <label>Paper Build (optional)</label>
+		                          <input
+		                            type="number"
+		                            value={Number.isFinite(installForm.paperBuild) ? installForm.paperBuild : 0}
+		                            onChange={(e) => setInstallForm((f) => ({ ...f, paperBuild: Number(e.target.value) }))}
+		                            placeholder="0 (latest)"
+		                            min={0}
+		                          />
+		                          <div className="hint">填 0 表示下载最新 build</div>
+		                        </div>
+		                      ) : null}
+		                    </>
+		                  )}
 
 	                  <div className="field">
 	                    <label>Memory</label>
@@ -2123,21 +2395,25 @@ export default function HomePage() {
 	                    )}
 	                  </div>
 
-	                  <div className="field">
-	                    <label>Jar name</label>
-	                    <input
-	                      value={installForm.jarName}
-	                      onChange={(e) => setInstallForm((f) => ({ ...f, jarName: e.target.value }))}
-	                      placeholder="server.jar"
-	                    />
-	                    {installValidation.jarErr ? (
-	                      <div className="hint" style={{ color: "var(--danger)" }}>
-	                        {installValidation.jarErr}
-	                      </div>
-	                    ) : (
-	                      <div className="hint">只填文件名（不含路径），例如 server.jar</div>
-	                    )}
-	                  </div>
+		                  <div className="field">
+		                    <label>{installForm.kind === "zip" ? "Jar path (after extract)" : "Jar name"}</label>
+		                    <input
+		                      value={installForm.jarName}
+		                      onChange={(e) => setInstallForm((f) => ({ ...f, jarName: e.target.value }))}
+		                      placeholder="server.jar"
+		                    />
+		                    {installValidation.jarErr ? (
+		                      <div className="hint" style={{ color: "var(--danger)" }}>
+		                        {installValidation.jarErr}
+		                      </div>
+		                    ) : (
+		                      <div className="hint">
+		                        {installForm.kind === "zip"
+		                          ? "用于一键 Start（默认 server.jar，可在 Settings 里随时修改）"
+		                          : "只填文件名（不含路径），例如 server.jar"}
+		                      </div>
+		                    )}
+		                  </div>
 	                  <div className="field">
 	                    <label>Java (optional)</label>
 	                    <input
@@ -2147,17 +2423,19 @@ export default function HomePage() {
 	                    />
 	                    <div className="hint">留空则由 Daemon 自动选择（推荐）</div>
 	                  </div>
-	                  <div className="field">
-	                    <label>EULA</label>
-	                    <label className="checkRow">
-	                      <input
-	                        type="checkbox"
-	                        checked={!!installForm.acceptEula}
-	                        onChange={(e) => setInstallForm((f) => ({ ...f, acceptEula: e.target.checked }))}
-	                      />
-	                      自动写入 eula.txt（推荐）
-	                    </label>
-	                  </div>
+		                  {installForm.kind !== "zip" ? (
+		                    <div className="field">
+		                      <label>EULA</label>
+		                      <label className="checkRow">
+		                        <input
+		                          type="checkbox"
+		                          checked={!!installForm.acceptEula}
+		                          onChange={(e) => setInstallForm((f) => ({ ...f, acceptEula: e.target.checked }))}
+		                        />
+		                        自动写入 eula.txt（推荐）
+		                      </label>
+		                    </div>
+		                  ) : null}
 
 	                  <div className="field">
 	                    <label>FRP (optional)</label>
@@ -2385,7 +2663,97 @@ export default function HomePage() {
                 </div>
               </div>
             </div>
-          ) : null}
+	          ) : null}
+
+	          {modsOpen ? (
+	            <div className="modalOverlay" onClick={() => setModsOpen(false)}>
+	              <div className="modal" style={{ width: "min(860px, 100%)" }} onClick={(e) => e.stopPropagation()}>
+	                <div className="modalHeader">
+	                  <div>
+	                    <div style={{ fontWeight: 700 }}>Mods</div>
+	                    <div className="hint">
+	                      game: <code>{instanceId.trim() || "-"}</code>
+	                    </div>
+	                    {modsStatus ? <div className="hint">{modsStatus}</div> : null}
+	                  </div>
+	                  <button type="button" onClick={() => setModsOpen(false)}>
+	                    Close
+	                  </button>
+	                </div>
+
+	                <div className="toolbar" style={{ marginBottom: 12 }}>
+	                  <div className="toolbarLeft">
+	                    <div className="hint">提示：禁用会把文件重命名为 <code>*.jar.disabled</code></div>
+	                  </div>
+	                  <div className="toolbarRight">
+	                    <button type="button" className="iconBtn" onClick={refreshModsNow} disabled={!selectedDaemon?.connected || !instanceId.trim()}>
+	                      <Icon name="refresh" />
+	                      Refresh
+	                    </button>
+	                  </div>
+	                </div>
+
+	                <div className="row" style={{ justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+	                  <input
+	                    key={modsUploadInputKey}
+	                    type="file"
+	                    accept=".jar"
+	                    onChange={(e) => setModsUploadFile(e.target.files?.[0] || null)}
+	                  />
+	                  <div className="btnGroup" style={{ justifyContent: "flex-end" }}>
+	                    <button type="button" className="primary iconBtn" onClick={uploadMod} disabled={!modsUploadFile}>
+	                      <Icon name="plus" />
+	                      Upload
+	                    </button>
+	                  </div>
+	                </div>
+
+	                <div className="card" style={{ marginTop: 12 }}>
+	                  <table>
+	                    <thead>
+	                      <tr>
+	                        <th>Mod</th>
+	                        <th>Status</th>
+	                        <th>Size</th>
+	                        <th>Actions</th>
+	                      </tr>
+	                    </thead>
+	                    <tbody>
+	                      {modsEntries.map((m: any) => {
+	                        const name = String(m?.name || "");
+	                        const lower = name.toLowerCase();
+	                        const disabled = lower.endsWith(".jar.disabled");
+	                        return (
+	                          <tr key={name}>
+	                            <td style={{ fontWeight: 650 }}>{name}</td>
+	                            <td>{disabled ? <span className="badge">disabled</span> : <span className="badge ok">enabled</span>}</td>
+	                            <td className="muted">{fmtBytes(Number(m?.size || 0))}</td>
+	                            <td>
+	                              <div className="btnGroup" style={{ justifyContent: "flex-start" }}>
+	                                <button type="button" onClick={() => toggleMod(name)}>
+	                                  {disabled ? "Enable" : "Disable"}
+	                                </button>
+	                                <button type="button" className="dangerBtn" onClick={() => deleteMod(name)}>
+	                                  Delete
+	                                </button>
+	                              </div>
+	                            </td>
+	                          </tr>
+	                        );
+	                      })}
+	                      {!modsEntries.length ? (
+	                        <tr>
+	                          <td colSpan={4} className="muted">
+	                            No mods found
+	                          </td>
+	                        </tr>
+	                      ) : null}
+	                    </tbody>
+	                  </table>
+	                </div>
+	              </div>
+	            </div>
+	          ) : null}
 
 	      {nodeDetailsOpen ? (
 	        <div className="modalOverlay" onClick={() => setNodeDetailsOpen(false)}>
@@ -2502,8 +2870,70 @@ export default function HomePage() {
 	              <div className="hint">No data</div>
 	            )}
 	          </div>
-	        </div>
-	      ) : null}
+        </div>
+      ) : null}
+
+      {deployOpen ? (
+        <div className="modalOverlay" onClick={() => setDeployOpen(false)}>
+          <div className="modal" style={{ width: "min(860px, 100%)" }} onClick={(e) => e.stopPropagation()}>
+            <div className="modalHeader">
+              <div>
+                <div style={{ fontWeight: 800 }}>Deploy Daemon (docker compose)</div>
+                <div className="hint">
+                  node: <code>{deployNodeId || "-"}</code> · 复制/下载后在节点机器上运行 <code>docker compose up -d</code>
+                </div>
+              </div>
+              <button type="button" onClick={() => setDeployOpen(false)}>
+                Close
+              </button>
+            </div>
+
+            <div className="grid2" style={{ alignItems: "start" }}>
+              <div className="field" style={{ gridColumn: "1 / -1" }}>
+                <label>Panel WS URL</label>
+                <input value={deployPanelWsUrl} onChange={(e) => setDeployPanelWsUrl(e.target.value)} placeholder="wss://panel.example.com/ws/daemon" />
+                <div className="hint">如果面板是 HTTPS，请用 wss://；HTTP 则用 ws://</div>
+              </div>
+              <div className="field">
+                <label>daemon_id</label>
+                <input value={deployNodeId} readOnly />
+              </div>
+              <div className="field">
+                <label>token</label>
+                <input value={deployToken} readOnly />
+              </div>
+              <div className="field" style={{ gridColumn: "1 / -1" }}>
+                <label>docker-compose.yml</label>
+                <textarea readOnly rows={12} value={deployComposeYml} style={{ width: "100%" }} onFocus={(e) => e.currentTarget.select()} />
+                <div className="btnGroup" style={{ justifyContent: "flex-end" }}>
+                  <button type="button" className="iconBtn" onClick={() => copyText(deployComposeYml)}>
+                    <Icon name="copy" />
+                    Copy
+                  </button>
+                  <button
+                    type="button"
+                    className="iconBtn"
+                    onClick={() => {
+                      const blob = new Blob([deployComposeYml], { type: "text/yaml;charset=utf-8" });
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement("a");
+                      a.href = url;
+                      a.download = deployNodeId ? `elegantmc-daemon-${deployNodeId}.yml` : "elegantmc-daemon.yml";
+                      document.body.appendChild(a);
+                      a.click();
+                      a.remove();
+                      URL.revokeObjectURL(url);
+                    }}
+                  >
+                    <Icon name="download" />
+                    Download
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {addNodeOpen ? (
         <div className="modalOverlay" onClick={() => setAddNodeOpen(false)}>
@@ -2564,24 +2994,32 @@ export default function HomePage() {
               </button>
             </div>
 
-            {createdNode ? (
-              <div className="card" style={{ marginTop: 12 }}>
-                <h3>Token</h3>
-                <div className="row" style={{ justifyContent: "space-between" }}>
-                  <code>{createdNode.token}</code>
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      await copyText(createdNode.token);
-                      setNodesStatus("Copied");
-                      setTimeout(() => setNodesStatus(""), 800);
-                    }}
-                  >
-                    Copy
-                  </button>
-                </div>
-              </div>
-            ) : null}
+	            {createdNode ? (
+	              <div className="card" style={{ marginTop: 12 }}>
+	                <h3>Token</h3>
+	                <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+	                  <code>{createdNode.token}</code>
+	                  <div className="btnGroup" style={{ justifyContent: "flex-end" }}>
+	                    <button
+	                      type="button"
+	                      className="iconBtn iconOnly"
+	                      title="Copy token"
+	                      onClick={async () => {
+	                        await copyText(createdNode.token);
+	                        setNodesStatus("Copied");
+	                        setTimeout(() => setNodesStatus(""), 800);
+	                      }}
+	                    >
+	                      <Icon name="copy" />
+	                    </button>
+	                    <button type="button" className="iconBtn" onClick={() => openDeployDaemonModal(createdNode.id, createdNode.token)}>
+	                      <Icon name="download" />
+	                      Compose
+	                    </button>
+	                  </div>
+	                </div>
+	              </div>
+	            ) : null}
           </div>
         </div>
       ) : null}

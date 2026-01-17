@@ -13,6 +13,7 @@ export default function GamesView() {
     setInstanceId,
     selectedDaemon,
     openSettingsModal,
+    openModsModal,
     openInstallModal,
     startServer,
     stopServer,
@@ -123,6 +124,10 @@ export default function GamesView() {
               <button type="button" className="iconBtn" onClick={openSettingsModal} disabled={!selectedDaemon?.connected || !instanceId.trim()}>
                 <Icon name="settings" />
                 Settings
+              </button>
+              <button type="button" className="iconBtn" onClick={openModsModal} disabled={!selectedDaemon?.connected || !instanceId.trim()}>
+                <Icon name="settings" />
+                Mods
               </button>
             </div>
             <div className="btnGroup">

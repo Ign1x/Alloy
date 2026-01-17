@@ -1,17 +1,19 @@
 package commands
 
 import (
+	"archive/zip"
 	"context"
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"runtime"
-	"strconv"
 	"strings"
 
 	"elegantmc/daemon/internal/download"
@@ -115,34 +117,6 @@ func (e *Executor) HeartbeatSnapshot() protocol.Heartbeat {
 		for _, v := range e.deps.PreferredConnectAddrs {
 			add(v)
 		}
-		if len(ips) > 0 {
-			tmp := append([]string(nil), ips...)
-			rank := func(ip string) int {
-				if strings.HasPrefix(ip, "10.") || strings.HasPrefix(ip, "192.168.") {
-					return 0
-				}
-				if strings.HasPrefix(ip, "172.") {
-					parts := strings.Split(ip, ".")
-					if len(parts) >= 2 {
-						if n, err := strconv.Atoi(parts[1]); err == nil && n >= 16 && n <= 31 {
-							return 0
-						}
-					}
-				}
-				return 1
-			}
-			sort.SliceStable(tmp, func(i, j int) bool {
-				ri := rank(tmp[i])
-				rj := rank(tmp[j])
-				if ri != rj {
-					return ri < rj
-				}
-				return tmp[i] < tmp[j]
-			})
-			for _, ip := range tmp {
-				add(ip)
-			}
-		}
 		if len(ips) > 0 || host != "" || len(preferred) > 0 {
 			hb.Net = &protocol.NetInfo{
 				Hostname:              host,
@@ -200,6 +174,12 @@ func (e *Executor) Execute(ctx context.Context, cmd protocol.Command) protocol.C
 		return e.fsList(cmd)
 	case "fs_delete":
 		return e.fsDelete(cmd)
+	case "fs_mkdir":
+		return e.fsMkdir(cmd)
+	case "fs_move":
+		return e.fsMove(cmd)
+	case "fs_unzip":
+		return e.fsUnzip(ctx, cmd)
 	case "fs_upload_begin":
 		return e.fsUploadBegin(ctx, cmd)
 	case "fs_upload_chunk":
@@ -520,6 +500,213 @@ func (e *Executor) fsDelete(cmd protocol.Command) protocol.CommandResult {
 		return fail(err.Error())
 	}
 	return ok(map[string]any{"path": path, "deleted": true, "is_dir": info.IsDir()})
+}
+
+func (e *Executor) fsMkdir(cmd protocol.Command) protocol.CommandResult {
+	path, _ := asString(cmd.Args["path"])
+	if strings.TrimSpace(path) == "" {
+		return fail("path is required")
+	}
+	if e.deps.FS == nil {
+		return fail("servers filesystem not configured")
+	}
+	abs, err := e.deps.FS.Resolve(path)
+	if err != nil {
+		return fail(err.Error())
+	}
+	if filepath.Clean(abs) == filepath.Clean(e.deps.FS.Root()) {
+		return fail("refuse to mkdir root")
+	}
+	if err := os.MkdirAll(abs, 0o755); err != nil {
+		return fail(err.Error())
+	}
+	return ok(map[string]any{"path": path, "created": true})
+}
+
+func (e *Executor) fsMove(cmd protocol.Command) protocol.CommandResult {
+	from, _ := asString(cmd.Args["from"])
+	to, _ := asString(cmd.Args["to"])
+	if strings.TrimSpace(from) == "" {
+		return fail("from is required")
+	}
+	if strings.TrimSpace(to) == "" {
+		return fail("to is required")
+	}
+	if e.deps.FS == nil {
+		return fail("servers filesystem not configured")
+	}
+
+	absFrom, err := e.deps.FS.Resolve(from)
+	if err != nil {
+		return fail(err.Error())
+	}
+	absTo, err := e.deps.FS.Resolve(to)
+	if err != nil {
+		return fail(err.Error())
+	}
+	if filepath.Clean(absFrom) == filepath.Clean(e.deps.FS.Root()) || filepath.Clean(absTo) == filepath.Clean(e.deps.FS.Root()) {
+		return fail("refuse to move root")
+	}
+
+	if err := os.MkdirAll(filepath.Dir(absTo), 0o755); err != nil {
+		return fail(err.Error())
+	}
+	if _, err := os.Stat(absTo); err == nil {
+		return fail("destination exists")
+	}
+	if err := os.Rename(absFrom, absTo); err != nil {
+		return fail(err.Error())
+	}
+	return ok(map[string]any{"from": from, "to": to, "moved": true})
+}
+
+func (e *Executor) fsUnzip(ctx context.Context, cmd protocol.Command) protocol.CommandResult {
+	zipPath, _ := asString(cmd.Args["zip_path"])
+	destDir, _ := asString(cmd.Args["dest_dir"])
+	instanceID, _ := asString(cmd.Args["instance_id"])
+	stripTop := true
+	if v, ok := asBool(cmd.Args["strip_top_level"]); ok {
+		stripTop = v
+	}
+	if strings.TrimSpace(zipPath) == "" {
+		return fail("zip_path is required")
+	}
+	if strings.TrimSpace(destDir) == "" {
+		return fail("dest_dir is required")
+	}
+	if e.deps.FS == nil {
+		return fail("servers filesystem not configured")
+	}
+
+	zipAbs, err := e.deps.FS.Resolve(zipPath)
+	if err != nil {
+		return fail(err.Error())
+	}
+	destAbs, err := e.deps.FS.Resolve(destDir)
+	if err != nil {
+		return fail(err.Error())
+	}
+	if filepath.Clean(destAbs) == filepath.Clean(e.deps.FS.Root()) {
+		return fail("refuse to unzip to root")
+	}
+
+	if strings.TrimSpace(instanceID) == "" {
+		instanceID = destDir
+	}
+	e.emitInstall(instanceID, fmt.Sprintf("unzip: %s -> %s", zipPath, destDir))
+
+	zr, err := zip.OpenReader(zipAbs)
+	if err != nil {
+		return fail(err.Error())
+	}
+	defer zr.Close()
+
+	// Detect a single top-level directory for nicer extraction.
+	stripPrefix := ""
+	if stripTop {
+		top := make(map[string]struct{})
+		for _, f := range zr.File {
+			name := strings.ReplaceAll(f.Name, "\\", "/")
+			name = strings.TrimPrefix(name, "/")
+			if name == "" {
+				continue
+			}
+			if strings.HasPrefix(name, "__MACOSX/") {
+				continue
+			}
+			parts := strings.Split(name, "/")
+			if len(parts) == 0 || parts[0] == "" {
+				continue
+			}
+			top[parts[0]] = struct{}{}
+			if len(top) > 1 {
+				break
+			}
+		}
+		if len(top) == 1 {
+			for k := range top {
+				stripPrefix = k + "/"
+			}
+		}
+	}
+
+	var files, dirs int
+	for _, f := range zr.File {
+		select {
+		case <-ctx.Done():
+			return fail(ctx.Err().Error())
+		default:
+		}
+
+		if f == nil {
+			continue
+		}
+		if f.FileInfo().Mode()&os.ModeSymlink != 0 {
+			return fail("zip contains symlink (refuse)")
+		}
+
+		name := strings.ReplaceAll(f.Name, "\\", "/")
+		name = strings.TrimPrefix(name, "/")
+		if name == "" {
+			continue
+		}
+		if strings.HasPrefix(name, "__MACOSX/") {
+			continue
+		}
+		if stripPrefix != "" && strings.HasPrefix(name, stripPrefix) {
+			name = strings.TrimPrefix(name, stripPrefix)
+		}
+		name = strings.TrimPrefix(name, "/")
+		if name == "" {
+			continue
+		}
+
+		clean := path.Clean(name)
+		if clean == "." || clean == "/" {
+			continue
+		}
+		if strings.HasPrefix(clean, "../") || clean == ".." || strings.HasPrefix(clean, "/") {
+			return fail("zip entry escapes destination")
+		}
+
+		rel := filepath.Join(destDir, filepath.FromSlash(clean))
+		outAbs, err := e.deps.FS.Resolve(rel)
+		if err != nil {
+			return fail(err.Error())
+		}
+
+		if f.FileInfo().IsDir() || strings.HasSuffix(clean, "/") {
+			if err := os.MkdirAll(outAbs, 0o755); err != nil {
+				return fail(err.Error())
+			}
+			dirs++
+			continue
+		}
+
+		if err := os.MkdirAll(filepath.Dir(outAbs), 0o755); err != nil {
+			return fail(err.Error())
+		}
+
+		rc, err := f.Open()
+		if err != nil {
+			return fail(err.Error())
+		}
+		dst, err := os.OpenFile(outAbs, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+		if err != nil {
+			rc.Close()
+			return fail(err.Error())
+		}
+		_, copyErr := io.Copy(dst, rc)
+		_ = dst.Close()
+		_ = rc.Close()
+		if copyErr != nil {
+			return fail(copyErr.Error())
+		}
+		files++
+	}
+
+	e.emitInstall(instanceID, fmt.Sprintf("unzip done: files=%d dirs=%d", files, dirs))
+	return ok(map[string]any{"zip_path": zipPath, "dest_dir": destDir, "files": files, "dirs": dirs})
 }
 
 func (e *Executor) mcStart(ctx context.Context, cmd protocol.Command) protocol.CommandResult {

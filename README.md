@@ -94,10 +94,10 @@ ELEGANTMC_PANEL_ADMIN_PASSWORD='change-me' \
 docker compose -f docker-compose.images.yml up -d
 ```
 
-如果你更喜欢「单文件 + 不使用 env」，可以直接改 `compose.single.yml` 里的值并运行：
+如果你更喜欢「单文件 + 不使用 env」，可以直接改 `compose.yml` 里的值并运行：
 
 ```bash
-docker compose -f compose.single.yml up -d
+docker compose -f compose.yml up -d
 ```
 
 ## Smoke Test（5 分钟自检）
@@ -195,7 +195,8 @@ Docker 的 Daemon 运行镜像默认内置 **Java 21**。
 ```bash
 cd panel
 npm install
-cp .env.example .env
+# 可选：使用 .env（仅开发用；不是必须）
+# cp .env.example .env
 npm run dev
 ```
 
