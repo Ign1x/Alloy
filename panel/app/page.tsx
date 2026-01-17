@@ -1834,7 +1834,7 @@ export default function HomePage() {
             </div>
           </div>
 
-	          <div className="row" style={{ alignItems: "flex-end" }}>
+	          <div className="row" style={{ alignItems: "center" }}>
 	            <div className="field" style={{ minWidth: 220 }}>
 	              <label>Daemon</label>
 	              <select value={selected} onChange={(e) => setSelected(e.target.value)} disabled={authed !== true}>
