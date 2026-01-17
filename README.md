@@ -71,6 +71,24 @@ docker compose up -d --build
 DOCKER_BUILDKIT=0 docker compose up -d --build
 ```
 
+## DockerHub 镜像一键启动（无需 build）
+
+适用于你已经把镜像发布到 DockerHub（或其他 registry）的场景。
+
+1) 先配置 `.env`（同上），再额外设置镜像名（示例）：
+
+```bash
+ELEGANTMC_PANEL_IMAGE=YOUR_DOCKERHUB_USER/elegantmc-panel
+ELEGANTMC_DAEMON_IMAGE=YOUR_DOCKERHUB_USER/elegantmc-daemon
+ELEGANTMC_IMAGE_TAG=latest
+```
+
+2) 启动：
+
+```bash
+docker compose -f docker-compose.images.yml up -d
+```
+
 ### 数据持久化
 
 Docker 默认使用两个 volume：
