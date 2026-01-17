@@ -94,6 +94,14 @@ ELEGANTMC_PANEL_ADMIN_PASSWORD='change-me' \
 docker compose -f docker-compose.images.yml up -d
 ```
 
+## Smoke Test（5 分钟自检）
+
+1) 打开 Panel：`http://127.0.0.1:3000`
+2) 若未设置管理员密码：执行 `docker compose logs panel` 查看生成的密码并登录
+3) 进入 **Nodes**：确认 `local-node` 显示 `online`
+4) 进入 **Games**：点击 Install 安装任意 Vanilla/Paper 版本，安装完成后 Start
+5) 在 **Socket** 卡片复制地址，用客户端连接（本机/LAN 直连或 FRP 公网）
+
 ### 数据持久化
 
 Docker 默认使用两个 volume：
