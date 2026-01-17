@@ -35,8 +35,10 @@ LABEL org.opencontainers.image.title="ElegantMC Daemon" \
   org.opencontainers.image.created="$ELEGANTMC_BUILD_DATE"
 
 ENV ELEGANTMC_BASE_DIR=/data
+ENV ELEGANTMC_HEALTH_FILE=/data/healthz.txt
 VOLUME ["/data"]
 
-HEALTHCHECK --interval=10s --timeout=2s --start-period=10s --retries=3 CMD ["sh","-c","kill -0 1"]
+HEALTHCHECK --interval=10s --timeout=2s --start-period=10s --retries=3 \
+  CMD ["sh","-c","test -f /data/healthz.txt && read ts conn < /data/healthz.txt && [ $(( $(date +%s) - ts )) -lt 60 ]"]
 
 ENTRYPOINT ["elegantmc-daemon"]

@@ -68,6 +68,7 @@ func main() {
 		URL:             cfg.PanelWSURL,
 		Token:           cfg.Token,
 		DaemonID:        cfg.DaemonID,
+		HealthFile:      cfg.HealthFile,
 		HeartbeatEvery:  time.Duration(cfg.HeartbeatSec) * time.Second,
 		ReconnectMin:    1 * time.Second,
 		ReconnectMax:    30 * time.Second,

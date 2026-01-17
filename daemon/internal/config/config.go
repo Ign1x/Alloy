@@ -15,6 +15,7 @@ type Config struct {
 	BaseDir      string
 	DaemonID     string
 	HeartbeatSec int
+	HealthFile   string
 
 	FRPCPath   string
 	FRPWorkDir string
@@ -57,6 +58,11 @@ func LoadFromEnv() (Config, error) {
 			return Config{}, errors.New("ELEGANTMC_HEARTBEAT_SEC must be an int in [1,3600]")
 		}
 		cfg.HeartbeatSec = n
+	}
+
+	cfg.HealthFile = strings.TrimSpace(os.Getenv("ELEGANTMC_HEALTH_FILE"))
+	if cfg.HealthFile == "" {
+		cfg.HealthFile = filepath.Join(cfg.BaseDir, "healthz.txt")
 	}
 
 	cfg.FRPWorkDir = strings.TrimSpace(os.Getenv("ELEGANTMC_FRP_WORK_DIR"))

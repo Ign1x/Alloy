@@ -57,6 +57,7 @@ type Executor struct {
 }
 
 var instanceIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
+var sha256HexPattern = regexp.MustCompile(`(?i)^[a-f0-9]{64}$`)
 
 func NewExecutor(deps ExecutorDeps) *Executor {
 	ex := &Executor{deps: deps, cpu: &sysinfo.CPUTracker{}}
@@ -266,6 +267,13 @@ func (e *Executor) frpcInstall(ctx context.Context, cmd protocol.Command) protoc
 	sha256, _ := asString(cmd.Args["sha256"])
 	if strings.TrimSpace(url) == "" {
 		return fail("url is required")
+	}
+	sha256 = strings.TrimSpace(sha256)
+	if sha256 == "" {
+		return fail("sha256 is required")
+	}
+	if !sha256HexPattern.MatchString(sha256) {
+		return fail("sha256 must be 64 hex chars")
 	}
 	if strings.TrimSpace(e.deps.FRPC) == "" {
 		return fail("daemon misconfigured: frpc path is empty")

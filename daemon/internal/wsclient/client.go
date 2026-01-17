@@ -29,6 +29,8 @@ type Config struct {
 	Token    string
 	DaemonID string
 
+	HealthFile string
+
 	HeartbeatEvery time.Duration
 	ReconnectMin   time.Duration
 	ReconnectMax   time.Duration
@@ -82,6 +84,7 @@ func (c *Client) Run(ctx context.Context) error {
 		_ = c.sendWithTimeout(ctx, msg, 5*time.Second)
 	})
 
+	c.writeHealth()
 	go c.heartbeatLoop(ctx)
 
 	backoff := c.cfg.ReconnectMin
@@ -201,6 +204,7 @@ func (c *Client) heartbeatLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			c.writeHealth()
 			_ = c.sendHeartbeat(ctx)
 		}
 	}
@@ -218,6 +222,39 @@ func (c *Client) sendHeartbeat(ctx context.Context) error {
 		TSUnix:  time.Now().Unix(),
 		Payload: payload,
 	}, 5*time.Second)
+}
+
+func (c *Client) writeHealth() {
+	path := strings.TrimSpace(c.cfg.HealthFile)
+	if path == "" {
+		return
+	}
+
+	c.connMu.RLock()
+	connected := c.conn != nil
+	c.connMu.RUnlock()
+
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return
+	}
+	tmp := fmt.Sprintf("%s.tmp-%d", path, time.Now().UnixNano())
+	payload := fmt.Sprintf("%d %d\n", time.Now().Unix(), boolToInt(connected))
+	if err := os.WriteFile(tmp, []byte(payload), 0o644); err != nil {
+		return
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(path)
+		_ = os.Rename(tmp, path)
+	}
+	_ = os.Remove(tmp)
+}
+
+func boolToInt(v bool) int {
+	if v {
+		return 1
+	}
+	return 0
 }
 
 func (c *Client) handleCommand(ctx context.Context, id string, cmd protocol.Command) {
