@@ -334,7 +334,13 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (url.pathname === "/api/config" && req.method === "GET") {
-      return json(res, 200, { enable_advanced: enableAdvanced });
+      return json(res, 200, {
+        enable_advanced: enableAdvanced,
+        panel_id: state.panel_id || "",
+        panel_version: String(process.env.ELEGANTMC_VERSION || "dev"),
+        panel_revision: String(process.env.ELEGANTMC_REVISION || ""),
+        panel_build_date: String(process.env.ELEGANTMC_BUILD_DATE || ""),
+      });
     }
 
     if (url.pathname === "/api/auth/me" && req.method === "GET") {

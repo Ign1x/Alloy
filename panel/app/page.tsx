@@ -325,6 +325,7 @@ export default function HomePage() {
   const [tab, setTab] = useState<Tab>("games");
   const [themeMode, setThemeMode] = useState<ThemeMode>("auto");
   const [enableAdvanced, setEnableAdvanced] = useState<boolean>(false);
+  const [panelInfo, setPanelInfo] = useState<{ id: string; version: string; revision: string; buildDate: string } | null>(null);
 
   const [daemons, setDaemons] = useState<Daemon[]>([]);
   const [selected, setSelected] = useState<string>("");
@@ -820,6 +821,12 @@ export default function HomePage() {
         const json = await res.json();
         if (cancelled) return;
         setEnableAdvanced(!!json?.enable_advanced);
+        setPanelInfo({
+          id: String(json?.panel_id || ""),
+          version: String(json?.panel_version || "dev"),
+          revision: String(json?.panel_revision || ""),
+          buildDate: String(json?.panel_build_date || ""),
+        });
       } catch {
         // ignore
       }
@@ -1870,6 +1877,27 @@ export default function HomePage() {
 
 	        <div className="sidebarFooter">
 	          <div className="hint">Panel MVP · Daemon 出站连接 · Vanilla 安装 · FRP 配置复用 · 文件管理（沙箱）</div>
+	          <div className="hint" style={{ marginTop: 8 }}>
+	            panel: <code>{panelInfo?.version || "dev"}</code>
+	            {panelInfo?.revision ? (
+	              <>
+	                {" "}
+	                (<code>{panelInfo.revision.slice(0, 8)}</code>)
+	              </>
+	            ) : null}
+	            {panelInfo?.id ? (
+	              <>
+	                {" "}
+	                · id: <code>{panelInfo.id.slice(0, 8)}</code>
+	              </>
+	            ) : null}
+	            {selectedDaemon?.hello?.version ? (
+	              <>
+	                {" "}
+	                · daemon: <code>{String(selectedDaemon.hello.version)}</code>
+	              </>
+	            ) : null}
+	          </div>
 	          <div className="row" style={{ marginTop: 10, justifyContent: "space-between" }}>
 	            <span className={`badge ${authed === true ? "ok" : ""}`}>{authed === true ? "admin" : "locked"}</span>
 	            {authed === true ? (

@@ -25,6 +25,10 @@ ARG ELEGANTMC_VERSION
 ARG ELEGANTMC_REVISION
 ARG ELEGANTMC_BUILD_DATE
 
+ENV ELEGANTMC_VERSION=$ELEGANTMC_VERSION \
+  ELEGANTMC_REVISION=$ELEGANTMC_REVISION \
+  ELEGANTMC_BUILD_DATE=$ELEGANTMC_BUILD_DATE
+
 LABEL org.opencontainers.image.title="ElegantMC Panel" \
   org.opencontainers.image.description="ElegantMC Panel (Next.js + custom Node server)" \
   org.opencontainers.image.version="$ELEGANTMC_VERSION" \
