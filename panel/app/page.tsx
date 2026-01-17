@@ -323,6 +323,7 @@ function upsertProp(text: string, key: string, value: string) {
 export default function HomePage() {
   const [tab, setTab] = useState<Tab>("games");
   const [themeMode, setThemeMode] = useState<ThemeMode>("auto");
+  const [enableAdvanced, setEnableAdvanced] = useState<boolean>(false);
 
   const [daemons, setDaemons] = useState<Daemon[]>([]);
   const [selected, setSelected] = useState<string>("");
@@ -793,6 +794,30 @@ export default function HomePage() {
       // ignore
     }
   }, []);
+
+  // Runtime config (server-side env)
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const res = await fetch("/api/config", { cache: "no-store" });
+        const json = await res.json();
+        if (cancelled) return;
+        setEnableAdvanced(!!json?.enable_advanced);
+      } catch {
+        // ignore
+      }
+    }
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // If advanced is disabled, never allow landing on that tab.
+  useEffect(() => {
+    if (!enableAdvanced && tab === "advanced") setTab("games");
+  }, [enableAdvanced, tab]);
 
   // Server dirs polling (only when useful)
   useEffect(() => {
@@ -1567,7 +1592,7 @@ export default function HomePage() {
     { id: "games", label: "Games" },
     { id: "frp", label: "FRP" },
     { id: "files", label: "Files" },
-    { id: "advanced", label: "Advanced" },
+    ...(enableAdvanced ? [{ id: "advanced" as Tab, label: "Advanced" }] : []),
   ];
 
   const activeTab = useMemo(() => tabs.find((t) => t.id === tab) || tabs[0], [tab]);
@@ -2414,7 +2439,7 @@ export default function HomePage() {
 
       {tab === "files" ? <FilesView /> : null}
 
-      {tab === "advanced" ? <AdvancedView /> : null}
+      {enableAdvanced && tab === "advanced" ? <AdvancedView /> : null}
         </div>
       </div>
       </div>

@@ -11,7 +11,6 @@ export default function NodesView() {
     setNodes,
     openNodeDetails,
     copyText,
-    maskToken,
     pct,
     fmtUnix,
     fmtBytes,
@@ -93,13 +92,20 @@ export default function NodesView() {
                   <div className="row" style={{ justifyContent: "space-between", gap: 10, minWidth: 0 }}>
                     <div className="row" style={{ gap: 8, minWidth: 0 }}>
                       <span className="muted">token</span>
-                      <code>{maskToken(n.token)}</code>
+                      <code>{String(n.token_masked || "(hidden)")}</code>
                       <button
                         type="button"
                         onClick={async () => {
-                          await copyText(n.token);
-                          setNodesStatus("Copied");
-                          setTimeout(() => setNodesStatus(""), 800);
+                          try {
+                            const res = await apiFetch(`/api/nodes/${encodeURIComponent(n.id)}/token`, { cache: "no-store" });
+                            const json = await res.json();
+                            if (!res.ok) throw new Error(json?.error || "failed");
+                            await copyText(String(json?.token || ""));
+                            setNodesStatus("Copied");
+                            setTimeout(() => setNodesStatus(""), 800);
+                          } catch (e: any) {
+                            setNodesStatus(String(e?.message || e));
+                          }
                         }}
                       >
                         Copy

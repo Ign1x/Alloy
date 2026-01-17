@@ -88,11 +88,26 @@ function serializeCookie(name, value, options = {}) {
   return parts.join("; ");
 }
 
+function truthy(v) {
+  const t = String(v ?? "").trim().toLowerCase();
+  return t === "1" || t === "true" || t === "yes" || t === "on";
+}
+
+function maskToken(token) {
+  const t = String(token ?? "");
+  if (!t) return "";
+  if (t.length <= 4) return "****";
+  const stars = "*".repeat(Math.min(12, Math.max(0, t.length - 4)));
+  return `${stars}${t.slice(-4)}`;
+}
+
 const host = process.env.ELEGANTMC_PANEL_HOST || "0.0.0.0";
 const port = Number(process.env.ELEGANTMC_PANEL_PORT || "3000");
 
 const dev = process.env.NODE_ENV !== "production";
 const secureCookie = String(process.env.ELEGANTMC_PANEL_SECURE_COOKIE || "").trim() === "1";
+const enableAdvanced = truthy(process.env.ELEGANTMC_ENABLE_ADVANCED);
+const enableHSTS = truthy(process.env.ELEGANTMC_PANEL_HSTS);
 
 const SESSION_COOKIE = "elegantmc_session";
 const SESSION_TTL_SEC = 60 * 60 * 24 * 7;
@@ -167,6 +182,35 @@ function requireAdmin(req, res) {
   if (getSession(req)) return true;
   json(res, 401, { error: "unauthorized" });
   return false;
+}
+
+function setSecurityHeaders(req, res) {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Referrer-Policy", "no-referrer");
+  res.setHeader(
+    "Permissions-Policy",
+    "accelerometer=(), ambient-light-sensor=(), autoplay=(), battery=(), camera=(), display-capture=(), geolocation=(), gyroscope=(), microphone=(), midi=(), payment=(), usb=()"
+  );
+  res.setHeader("Cross-Origin-Resource-Policy", "same-origin");
+  res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
+
+  if (enableHSTS) {
+    res.setHeader("Strict-Transport-Security", "max-age=15552000; includeSubDomains");
+  }
+
+  // Minimal CSP for a Next.js app. Keep dev permissive to avoid breaking HMR.
+  const cspParts = [
+    "default-src 'self'",
+    "base-uri 'self'",
+    "frame-ancestors 'none'",
+    "form-action 'self'",
+    "img-src 'self' data:",
+    "style-src 'self' 'unsafe-inline'",
+    `script-src 'self' 'unsafe-inline'${dev ? " 'unsafe-eval'" : ""}`,
+    "connect-src 'self' ws: wss:",
+  ];
+  res.setHeader("Content-Security-Policy", cspParts.join("; "));
 }
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -283,8 +327,14 @@ const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url || "/", "http://localhost");
 
+    setSecurityHeaders(req, res);
+
     if (url.pathname === "/healthz") {
       return text(res, 200, "ok");
+    }
+
+    if (url.pathname === "/api/config" && req.method === "GET") {
+      return json(res, 200, { enable_advanced: enableAdvanced });
     }
 
     if (url.pathname === "/api/auth/me" && req.method === "GET") {
@@ -335,7 +385,8 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (url.pathname.startsWith("/api/")) {
-      const open = url.pathname === "/api/mc/versions" || url.pathname.startsWith("/api/auth/");
+      res.setHeader("Cache-Control", "no-store");
+      const open = url.pathname === "/api/mc/versions" || url.pathname === "/api/config" || url.pathname.startsWith("/api/auth/");
       if (!open && !requireAdmin(req, res)) return;
     }
 
@@ -401,7 +452,7 @@ const server = http.createServer(async (req, res) => {
         const d = state.daemons.get(id);
         return {
           id,
-          token,
+          token_masked: maskToken(token),
           connected: d?.connected ?? false,
           connectedAtUnix: d?.connectedAtUnix ?? null,
           lastSeenUnix: d?.lastSeenUnix ?? null,
@@ -420,6 +471,13 @@ const server = http.createServer(async (req, res) => {
       } catch (e) {
         return json(res, 400, { error: String(e?.message || e) });
       }
+    }
+    const mNodeToken = url.pathname.match(/^\/api\/nodes\/([^/]+)\/token$/);
+    if (mNodeToken && req.method === "GET") {
+      const id = decodeURIComponent(mNodeToken[1]);
+      const token = getDaemonTokenSync(id);
+      if (!token) return json(res, 404, { error: "not found" });
+      return json(res, 200, { id, token });
     }
     const mNode = url.pathname.match(/^\/api\/nodes\/([^/]+)$/);
     if (mNode && req.method === "DELETE") {
