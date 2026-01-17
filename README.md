@@ -14,14 +14,16 @@ ElegantMC 是一个「公网 Web Panel + 本地 Daemon」的 Minecraft 开服与
   - Node Details：性能曲线（CPU/MEM）+ instances 列表
 - **Games**
   - 选择已安装的游戏实例（`servers/<instance_id>` 目录）
-  - 一键安装 Vanilla（弹窗配置：版本/内存/端口/FRP 等，带安装日志）
+  - 一键安装 Vanilla / Paper（弹窗配置：版本/内存/端口/Java/FRP 等，带安装日志）
   - Start/Stop/Restart/Console/Delete
   - Socket 显示与复制：FRP 显示公网连接地址；不使用 FRP 显示本机/LAN IP:Port
+  - 实例配置持久化：`servers/<instance_id>/.elegantmc.json`（jar/java/内存/端口/FRP）
 - **FRP**
   - 保存/复用 FRP Server（addr/port/token）
   - 在线探测（TCP connect，带延迟/错误信息）
 - **Files**
   - `servers/` 沙箱内文件浏览/编辑
+  - 删除文件/目录（递归删除，带确认）
   - 大文件分片上传（mods/plugins/jar 等）
   - 日志在 Games 页直接查看（MC/Install/FRP）
 
@@ -78,15 +80,56 @@ Docker 默认使用两个 volume：
 
 ## 真实部署建议（公网 Panel + 家用 Daemon）
 
-1) 把 `panel/` 部署到公网 VPS（建议挂 TLS，提供 `wss://`）。
-2) 家用机器只跑 Daemon（可用 Docker），并设置：
-   - `ELEGANTMC_PANEL_WS_URL=wss://<your-panel>/ws/daemon`
-   - `ELEGANTMC_DAEMON_ID=<your-node-id>`
-   - `ELEGANTMC_TOKEN=<token>`（在 Panel 的 Nodes 页面生成/保存）
-3) Panel 建议启用 HTTPS，并设置：
-   - `ELEGANTMC_PANEL_SECURE_COOKIE=1`（只在 HTTPS 下使用 Secure Cookie）
+> 目标：Panel 在公网（VPS），Daemon 在家用机器无公网 IP，通过出站 WebSocket 连接；FRP 用于给朋友公网直连。
 
-> 注意：当前 Panel 是单管理员密码登录（Cookie 会话）。公网部署务必使用 HTTPS，否则登录 Cookie 容易被劫持。
+### 1) 在 VPS 部署 Panel（建议 Docker + HTTPS）
+
+- 建议用反向代理（Nginx/Caddy）提供 HTTPS，并转发 WebSocket（Upgrade）。
+- Panel 环境变量：
+  - `ELEGANTMC_PANEL_ADMIN_PASSWORD`：管理员密码（必填）
+  - `ELEGANTMC_PANEL_SECURE_COOKIE=1`：仅当通过 HTTPS 访问时开启（否则浏览器不会发 Secure Cookie）
+- WS 地址：`wss://<your-panel-domain>/ws/daemon`
+
+> 注意：Panel 是单管理员密码登录（Cookie 会话）。公网部署务必使用 HTTPS，否则登录 Cookie 容易被劫持。
+
+### 2) 在家用机器部署 Daemon（无公网 IP）
+
+Daemon 只需要出站访问你的 Panel（无需端口映射/公网 IP）。常用环境变量：
+
+- `ELEGANTMC_PANEL_WS_URL=wss://<your-panel-domain>/ws/daemon`
+- `ELEGANTMC_DAEMON_ID=<your-node-id>`
+- `ELEGANTMC_TOKEN=<token>`（在 Panel 的 Nodes 页面创建/复制）
+
+### 3) 连接地址显示（Socket）
+
+如果你的部署环境比较复杂（例如 Daemon 跑在 Docker 里，或多网卡），可以在 Daemon 侧显式指定对外连接地址：
+
+- `ELEGANTMC_PREFERRED_CONNECT_ADDRS=192.168.1.10,mc.example.com`
+
+Panel 会优先用这个地址来展示 “Socket”（不影响实际监听端口）。
+
+## FRP 使用指南（推荐）
+
+### 1) 在 VPS 上跑 `frps`
+
+需要开放：
+
+- `bindPort`（例如 7000）给 `frpc` 连接
+- 你计划分配给 MC 的 `remote_port`（例如 25566/25567/...），或按 frps 策略放行一个端口段
+
+### 2) 在 Panel 保存 FRP Server
+
+在 FRP 标签页点击 Add，填写：
+
+- `Server Addr`：你的 frps 域名/IP
+- `Server Port`：bindPort（例如 7000）
+- `Token`：frps token（如有）
+
+### 3) 在 Games 启用 FRP 并启动
+
+在 Settings 里开启 FRP，选择上面保存的服务器，并设置 `FRP Remote Port`（例如 25566）。
+
+启动后，Games 页的 “Socket” 会显示公网地址（可复制给朋友）。
 
 ## Java 自动选择（重要）
 
@@ -104,6 +147,7 @@ Minecraft 新版本会要求更高的 Java（例如 class file 65 对应 Java 21
 手动指定：
 
 - `mc_start` 支持 `java_path` 参数（可通过 Panel 的 Advanced 标签手动下发）。
+- 也可在 Games → Settings 里填写 `Java (optional)`（会写入 `.elegantmc.json`，后续启动自动携带）
 
 Docker 的 Daemon 运行镜像默认内置 **Java 21**。
 
