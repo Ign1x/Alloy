@@ -94,6 +94,12 @@ ELEGANTMC_PANEL_ADMIN_PASSWORD='change-me' \
 docker compose -f docker-compose.images.yml up -d
 ```
 
+如果你更喜欢「单文件 + 不使用 env」，可以直接改 `compose.single.yml` 里的值并运行：
+
+```bash
+docker compose -f compose.single.yml up -d
+```
+
 ## Smoke Test（5 分钟自检）
 
 1) 打开 Panel：`http://127.0.0.1:3000`
