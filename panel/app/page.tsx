@@ -1091,10 +1091,11 @@ export default function HomePage() {
     };
   }, []);
 
-  async function refreshProfiles() {
+  async function refreshProfiles(opts: { force?: boolean } = {}) {
     setProfilesStatus("Loading...");
     try {
-      const res = await apiFetch("/api/frp/profiles", { cache: "no-store" });
+      const qs = opts.force ? "?force=1" : "";
+      const res = await apiFetch(`/api/frp/profiles${qs}`, { cache: "no-store" });
       const json = await res.json();
       if (!res.ok) throw new Error(json?.error || "failed");
       const list = (json.profiles || []) as FrpProfile[];

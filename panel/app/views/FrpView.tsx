@@ -39,6 +39,10 @@ export default function FrpView() {
               <Icon name="refresh" />
               Refresh
             </button>
+            <button type="button" className="iconBtn" onClick={() => refreshProfiles({ force: true })}>
+              <Icon name="refresh" />
+              Probe
+            </button>
           </div>
         </div>
 

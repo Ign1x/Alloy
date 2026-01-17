@@ -292,11 +292,15 @@ async function mapLimit(items, limit, fn) {
   return results;
 }
 
-async function getFrpStatuses(profiles) {
+async function getFrpStatuses(profiles, { force } = {}) {
   const now = Math.floor(Date.now() / 1000);
   const stale = [];
 
   for (const p of profiles) {
+    if (force) {
+      stale.push(p);
+      continue;
+    }
     const cached = frpStatusCache.get(p.id);
     if (cached && now - (cached.checkedAtUnix || 0) < FRP_STATUS_TTL_SEC) continue;
     stale.push(p);
@@ -426,7 +430,8 @@ const server = http.createServer(async (req, res) => {
 
     if (url.pathname === "/api/frp/profiles" && req.method === "GET") {
       const profiles = await listFrpProfiles();
-      const statuses = await getFrpStatuses(profiles);
+      const force = url.searchParams.get("force") === "1";
+      const statuses = await getFrpStatuses(profiles, { force });
       const out = profiles.map((p) => ({
         id: p.id,
         name: p.name,
