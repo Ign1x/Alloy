@@ -220,7 +220,7 @@ export default function PanelView() {
           </div>
           <div className="toolbarRight">
             <button type="button" className="iconBtn" onClick={reloadSchedule} disabled={!selectedDaemon?.connected || scheduleBusy}>
-              Load
+              Reload
             </button>
             <button type="button" className="primary iconBtn" onClick={saveSchedule} disabled={!selectedDaemon?.connected || scheduleBusy || !parsedSchedule.ok}>
               Save

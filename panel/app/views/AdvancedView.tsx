@@ -11,11 +11,11 @@ export default function AdvancedView() {
       <h2>Advanced Command</h2>
       <div className="grid2">
         <div className="field">
-          <label>name</label>
+          <label>Name</label>
           <input value={cmdName} onChange={(e: any) => setCmdName(e.target.value)} placeholder="ping / frp_start / mc_start ..." />
         </div>
         <div className="field">
-          <label>daemon</label>
+          <label>Daemon</label>
           <Select
             value={selected}
             onChange={(v) => setSelected(v)}
@@ -23,7 +23,7 @@ export default function AdvancedView() {
           />
         </div>
         <div className="field" style={{ gridColumn: "1 / -1" }}>
-          <label>args (JSON)</label>
+          <label>Args (JSON)</label>
           <textarea value={cmdArgs} onChange={(e: any) => setCmdArgs(e.target.value)} rows={8} />
         </div>
       </div>

@@ -542,10 +542,10 @@ export default function GamesView() {
               style={{ width: 220 }}
             />
             <label className="checkRow" style={{ userSelect: "none" }}>
-              <input type="checkbox" checked={autoScroll} onChange={(e) => setAutoScroll(e.target.checked)} /> autoscroll
+              <input type="checkbox" checked={autoScroll} onChange={(e) => setAutoScroll(e.target.checked)} /> Auto-scroll
             </label>
             <label className="checkRow" style={{ userSelect: "none" }}>
-              <input type="checkbox" checked={highlightLogs} onChange={(e) => setHighlightLogs(e.target.checked)} /> highlight
+              <input type="checkbox" checked={highlightLogs} onChange={(e) => setHighlightLogs(e.target.checked)} /> Highlight
             </label>
             <button type="button" className="iconBtn" onClick={() => setLogPaused((v) => !v)}>
               {logPaused ? "Resume" : "Pause"}
