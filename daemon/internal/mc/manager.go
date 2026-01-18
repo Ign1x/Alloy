@@ -218,6 +218,7 @@ func (inst *Instance) start(ctx context.Context, fs *sandbox.FS, opt StartOption
 	}
 
 	java := opt.JavaPath
+	javaSource := "explicit"
 	requiredMajor, err := requiredJavaMajorFromJar(jarAbs)
 	detectedMajor := err == nil
 	if err != nil {
@@ -234,20 +235,28 @@ func (inst *Instance) start(ctx context.Context, fs *sandbox.FS, opt StartOption
 	if java == "" {
 		if javaSel == nil {
 			java = "java"
+			javaSource = "default"
 		} else {
+			javaSource = "candidates"
 			var selErr error
 			java, selectedMajor, selErr = javaSel.Select(ctx, requiredMajor)
 			if selErr != nil {
 				if detectedMajor && javaRuntime != nil {
 					if logSink != nil {
-						logSink(inst.ID, "stdout", fmt.Sprintf("[elegantmc] downloading Temurin JRE %d (auto)", requiredMajor))
+						logSink(inst.ID, "stdout", fmt.Sprintf("[elegantmc] ensuring Temurin JRE %d (auto)", requiredMajor))
 					}
 					if ensuredJava, ensuredMajor, err := javaRuntime.EnsureTemurinJRE(ctx, requiredMajor); err == nil {
 						java = ensuredJava
 						selectedMajor = ensuredMajor
+						javaSource = "temurin-auto"
 						selErr = nil
-					} else if logger != nil {
-						logger.Printf("mc: java auto-download failed (major=%d): %v", requiredMajor, err)
+					} else {
+						if logger != nil {
+							logger.Printf("mc: java auto-download failed (major=%d): %v", requiredMajor, err)
+						}
+						if logSink != nil {
+							logSink(inst.ID, "stdout", fmt.Sprintf("[elegantmc] java auto-download failed (major=%d): %v", requiredMajor, err))
+						}
 					}
 				}
 				if selErr != nil {
@@ -256,13 +265,19 @@ func (inst *Instance) start(ctx context.Context, fs *sandbox.FS, opt StartOption
 			}
 			if detectedMajor && javaRuntime != nil && selectedMajor > 0 && selectedMajor < requiredMajor {
 				if logSink != nil {
-					logSink(inst.ID, "stdout", fmt.Sprintf("[elegantmc] downloading Temurin JRE %d (auto)", requiredMajor))
+					logSink(inst.ID, "stdout", fmt.Sprintf("[elegantmc] ensuring Temurin JRE %d (auto)", requiredMajor))
 				}
 				if ensuredJava, ensuredMajor, err := javaRuntime.EnsureTemurinJRE(ctx, requiredMajor); err == nil {
 					java = ensuredJava
 					selectedMajor = ensuredMajor
-				} else if logger != nil {
-					logger.Printf("mc: java auto-download failed (major=%d): %v", requiredMajor, err)
+					javaSource = "temurin-auto"
+				} else {
+					if logger != nil {
+						logger.Printf("mc: java auto-download failed (major=%d): %v", requiredMajor, err)
+					}
+					if logSink != nil {
+						logSink(inst.ID, "stdout", fmt.Sprintf("[elegantmc] java auto-download failed (major=%d): %v", requiredMajor, err))
+					}
 				}
 			}
 		}
@@ -282,6 +297,9 @@ func (inst *Instance) start(ctx context.Context, fs *sandbox.FS, opt StartOption
 		}
 		if requiredMajor > 0 {
 			msg += fmt.Sprintf(", required>=%d", requiredMajor)
+		}
+		if strings.TrimSpace(javaSource) != "" {
+			msg += fmt.Sprintf(", source=%s", javaSource)
 		}
 		logSink(inst.ID, "stdout", msg)
 	}
