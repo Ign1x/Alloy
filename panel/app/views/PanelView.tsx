@@ -53,6 +53,18 @@ export default function PanelView() {
                 <div className="hint">默认：/logo.svg（可填自定义 URL）</div>
               </div>
 
+              <div className="field" style={{ gridColumn: "1 / -1" }}>
+                <label>CurseForge API Key (optional)</label>
+                <input
+                  type="password"
+                  value={String(draft.curseforge_api_key || "")}
+                  onChange={(e) => setDraft((d: any) => ({ ...d, curseforge_api_key: e.target.value }))}
+                  placeholder="cf_..."
+                  autoComplete="off"
+                />
+                <div className="hint">配置后可直接使用 CurseForge 搜索/下载安装（不需要再改环境变量）</div>
+              </div>
+
               <div className="field">
                 <label>Default Version</label>
                 <input
@@ -134,4 +146,3 @@ export default function PanelView() {
     </div>
   );
 }
-

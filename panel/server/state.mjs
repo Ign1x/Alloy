@@ -180,6 +180,9 @@ function normalizePanelSettings(input) {
   const defaultsIn =
     obj.defaults && typeof obj.defaults === "object" && !Array.isArray(obj.defaults) ? obj.defaults : {};
 
+  const curseforgeApiKey = String(obj.curseforge_api_key ?? "").trim();
+  if (curseforgeApiKey.length > 256) throw new Error("curseforge_api_key too long");
+
   const brandName = String(obj.brand_name ?? "").trim() || "ElegantMC";
   if (brandName.length > 64) throw new Error("brand_name too long");
 
@@ -207,6 +210,7 @@ function normalizePanelSettings(input) {
   if (!Number.isFinite(frpRemotePort) || frpRemotePort < 0 || frpRemotePort > 65535) throw new Error("defaults.frp_remote_port invalid");
 
   return {
+    curseforge_api_key: curseforgeApiKey,
     brand_name: brandName,
     brand_tagline: brandTagline,
     logo_url: logoUrl,

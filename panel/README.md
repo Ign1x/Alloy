@@ -49,7 +49,8 @@ Docker 运行时默认挂载到 volume：见根目录 `docker-compose.yml`。
 
 - `ELEGANTMC_MODRINTH_BASE_URL`（默认 `https://api.modrinth.com`）
 - `ELEGANTMC_CURSEFORGE_BASE_URL`（默认 `https://api.curseforge.com`）
-- `ELEGANTMC_CURSEFORGE_API_KEY`（CurseForge 必填）
+- `ELEGANTMC_CURSEFORGE_API_KEY`（可选：也可在 Panel → Settings 里配置）
+- `ELEGANTMC_FABRIC_META_BASE_URL`（可选：默认 `https://meta.fabricmc.net`）
 
 主要接口：
 

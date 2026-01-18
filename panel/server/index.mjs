@@ -269,7 +269,32 @@ async function fetchJsonWithTimeout(url, opts = {}, timeoutMs = 12_000) {
 
 const MODRINTH_BASE_URL = String(process.env.ELEGANTMC_MODRINTH_BASE_URL || "https://api.modrinth.com").replace(/\/+$/, "");
 const CURSEFORGE_BASE_URL = String(process.env.ELEGANTMC_CURSEFORGE_BASE_URL || "https://api.curseforge.com").replace(/\/+$/, "");
-const CURSEFORGE_API_KEY = String(process.env.ELEGANTMC_CURSEFORGE_API_KEY || "").trim();
+const FABRIC_META_BASE_URL = String(process.env.ELEGANTMC_FABRIC_META_BASE_URL || "https://meta.fabricmc.net").replace(/\/+$/, "");
+
+function getCurseForgeApiKey() {
+  const fromSettings = String(state?.panelSettings?.curseforge_api_key || "").trim();
+  if (fromSettings) return fromSettings;
+  return String(process.env.ELEGANTMC_CURSEFORGE_API_KEY || "").trim();
+}
+
+async function fabricResolveServerJar(minecraftVersion, loaderVersion) {
+  const mc = String(minecraftVersion || "").trim();
+  const loader = String(loaderVersion || "").trim();
+  if (!mc) throw new Error("mc is required");
+  if (!loader) throw new Error("loader is required");
+  if (mc.length > 64) throw new Error("mc too long");
+  if (loader.length > 64) throw new Error("loader too long");
+
+  const installerUrl = `${FABRIC_META_BASE_URL}/v2/versions/installer`;
+  const { res, json } = await fetchJsonWithTimeout(installerUrl, { headers: { "User-Agent": "ElegantMC Panel" } }, 12_000);
+  if (!res.ok) throw new Error(json?.error || `fetch failed: ${res.status}`);
+  const list = Array.isArray(json) ? json : [];
+  const installer = String(list?.[0]?.version || "").trim();
+  if (!installer) throw new Error("no fabric installer versions");
+
+  const jarUrl = `${FABRIC_META_BASE_URL}/v2/versions/loader/${encodeURIComponent(mc)}/${encodeURIComponent(loader)}/${encodeURIComponent(installer)}/server/jar`;
+  return { mc, loader, installer, url: jarUrl };
+}
 
 async function modrinthSearchModpacks(query, limit = 12, offset = 0) {
   const q = String(query || "").trim();
@@ -331,9 +356,8 @@ async function modrinthProjectVersions(projectId) {
 }
 
 async function curseforgeSearchModpacks(query, pageSize = 12, index = 0) {
-  if (!CURSEFORGE_API_KEY) {
-    throw new Error("CURSEFORGE API key not configured (set ELEGANTMC_CURSEFORGE_API_KEY)");
-  }
+  const apiKey = getCurseForgeApiKey();
+  if (!apiKey) throw new Error("CurseForge API key not configured (set it in Panel settings or ELEGANTMC_CURSEFORGE_API_KEY)");
   const q = String(query || "").trim();
   if (!q) throw new Error("query is required");
   if (q.length > 120) throw new Error("query too long");
@@ -350,7 +374,7 @@ async function curseforgeSearchModpacks(query, pageSize = 12, index = 0) {
   const url = `${CURSEFORGE_BASE_URL}/v1/mods/search?${params.toString()}`;
   const { res, json } = await fetchJsonWithTimeout(
     url,
-    { headers: { "User-Agent": "ElegantMC Panel", "x-api-key": CURSEFORGE_API_KEY } },
+    { headers: { "User-Agent": "ElegantMC Panel", "x-api-key": apiKey } },
     15_000
   );
   if (!res.ok) throw new Error(json?.error || `fetch failed: ${res.status}`);
@@ -367,9 +391,8 @@ async function curseforgeSearchModpacks(query, pageSize = 12, index = 0) {
 }
 
 async function curseforgeModFiles(modId, pageSize = 25, index = 0) {
-  if (!CURSEFORGE_API_KEY) {
-    throw new Error("CURSEFORGE API key not configured (set ELEGANTMC_CURSEFORGE_API_KEY)");
-  }
+  const apiKey = getCurseForgeApiKey();
+  if (!apiKey) throw new Error("CurseForge API key not configured (set it in Panel settings or ELEGANTMC_CURSEFORGE_API_KEY)");
   const id = String(modId || "").trim();
   if (!id) throw new Error("mod_id is required");
   const size = Math.max(1, Math.min(50, Number(pageSize || 25)));
@@ -381,7 +404,7 @@ async function curseforgeModFiles(modId, pageSize = 25, index = 0) {
   const url = `${CURSEFORGE_BASE_URL}/v1/mods/${encodeURIComponent(id)}/files?${params.toString()}`;
   const { res, json } = await fetchJsonWithTimeout(
     url,
-    { headers: { "User-Agent": "ElegantMC Panel", "x-api-key": CURSEFORGE_API_KEY } },
+    { headers: { "User-Agent": "ElegantMC Panel", "x-api-key": apiKey } },
     15_000
   );
   if (!res.ok) throw new Error(json?.error || `fetch failed: ${res.status}`);
@@ -400,15 +423,14 @@ async function curseforgeModFiles(modId, pageSize = 25, index = 0) {
 }
 
 async function curseforgeFileDownloadUrl(fileId) {
-  if (!CURSEFORGE_API_KEY) {
-    throw new Error("CURSEFORGE API key not configured (set ELEGANTMC_CURSEFORGE_API_KEY)");
-  }
+  const apiKey = getCurseForgeApiKey();
+  if (!apiKey) throw new Error("CurseForge API key not configured (set it in Panel settings or ELEGANTMC_CURSEFORGE_API_KEY)");
   const id = String(fileId || "").trim();
   if (!id) throw new Error("file_id is required");
   const url = `${CURSEFORGE_BASE_URL}/v1/mods/files/${encodeURIComponent(id)}/download-url`;
   const { res, json } = await fetchJsonWithTimeout(
     url,
-    { headers: { "User-Agent": "ElegantMC Panel", "x-api-key": CURSEFORGE_API_KEY } },
+    { headers: { "User-Agent": "ElegantMC Panel", "x-api-key": apiKey } },
     15_000
   );
   if (!res.ok) throw new Error(json?.error || `fetch failed: ${res.status}`);
@@ -606,11 +628,22 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
+    if (url.pathname === "/api/mc/fabric/server-jar" && req.method === "GET") {
+      const mc = String(url.searchParams.get("mc") || "").trim();
+      const loader = String(url.searchParams.get("loader") || "").trim();
+      try {
+        const resolved = await fabricResolveServerJar(mc, loader);
+        return json(res, 200, resolved);
+      } catch (e) {
+        return json(res, 400, { error: String(e?.message || e) });
+      }
+    }
+
     if (url.pathname === "/api/modpacks/providers" && req.method === "GET") {
       return json(res, 200, {
         providers: [
           { id: "modrinth", name: "Modrinth", enabled: true },
-          { id: "curseforge", name: "CurseForge", enabled: !!CURSEFORGE_API_KEY },
+          { id: "curseforge", name: "CurseForge", enabled: !!getCurseForgeApiKey() },
         ],
       });
     }

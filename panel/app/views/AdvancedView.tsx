@@ -1,6 +1,7 @@
 "use client";
 
 import { useAppCtx } from "../appCtx";
+import Select from "../ui/Select";
 
 export default function AdvancedView() {
   const { cmdName, setCmdName, cmdArgs, setCmdArgs, cmdResult, runAdvancedCommand, selectedDaemon, selected, setSelected, daemons } = useAppCtx();
@@ -15,13 +16,11 @@ export default function AdvancedView() {
         </div>
         <div className="field">
           <label>daemon</label>
-          <select value={selected} onChange={(e: any) => setSelected(e.target.value)}>
-            {daemons.map((d: any) => (
-              <option key={d.id} value={d.id}>
-                {d.id} {d.connected ? "(online)" : "(offline)"}
-              </option>
-            ))}
-          </select>
+          <Select
+            value={selected}
+            onChange={(v) => setSelected(v)}
+            options={daemons.map((d: any) => ({ value: d.id, label: `${d.id} ${d.connected ? "(online)" : "(offline)"}` }))}
+          />
         </div>
         <div className="field" style={{ gridColumn: "1 / -1" }}>
           <label>args (JSON)</label>
@@ -45,4 +44,3 @@ export default function AdvancedView() {
     </div>
   );
 }
-

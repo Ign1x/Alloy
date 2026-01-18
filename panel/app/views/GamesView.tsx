@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useAppCtx } from "../appCtx";
 import Icon from "../ui/Icon";
+import Select from "../ui/Select";
 
 export default function GamesView() {
   const {
@@ -13,7 +14,6 @@ export default function GamesView() {
     setInstanceId,
     selectedDaemon,
     openSettingsModal,
-    openModsModal,
     openInstallModal,
     startServer,
     stopServer,
@@ -96,14 +96,13 @@ export default function GamesView() {
           <div className="toolbarLeft">
             <div className="field" style={{ flex: 1, minWidth: 260 }}>
               <label>Game</label>
-              <select value={instanceId} onChange={(e) => setInstanceId(e.target.value)} disabled={!serverDirs.length}>
-                {!serverDirs.length ? <option value="">No games installed</option> : null}
-                {serverDirs.map((id: string) => (
-                  <option key={id} value={id}>
-                    {id}
-                  </option>
-                ))}
-              </select>
+              <Select
+                value={instanceId}
+                onChange={(v) => setInstanceId(v)}
+                disabled={!serverDirs.length}
+                placeholder="No games installed"
+                options={serverDirs.map((id: string) => ({ value: id, label: id }))}
+              />
               <div className="hint">
                 installed: {serverDirs.length}
                 {serverDirsStatus ? ` · ${serverDirsStatus}` : ""}
@@ -131,15 +130,6 @@ export default function GamesView() {
                 className="iconBtn iconOnly"
                 title="Settings"
                 onClick={openSettingsModal}
-                disabled={!selectedDaemon?.connected || !instanceId.trim()}
-              >
-                <Icon name="settings" />
-              </button>
-              <button
-                type="button"
-                className="iconBtn iconOnly"
-                title="Mods"
-                onClick={openModsModal}
                 disabled={!selectedDaemon?.connected || !instanceId.trim()}
               >
                 <Icon name="settings" />
@@ -255,12 +245,16 @@ export default function GamesView() {
           <div className="toolbarLeft">
             <div className="field" style={{ minWidth: 180 }}>
               <label>View</label>
-              <select value={logView} onChange={(e) => setLogView(e.target.value as any)}>
-                <option value="all">All</option>
-                <option value="mc">MC</option>
-                <option value="install">Install</option>
-                <option value="frp">FRP</option>
-              </select>
+              <Select
+                value={logView}
+                onChange={(v) => setLogView(v as any)}
+                options={[
+                  { value: "all", label: "All" },
+                  { value: "mc", label: "MC" },
+                  { value: "install", label: "Install" },
+                  { value: "frp", label: "FRP" },
+                ]}
+              />
             </div>
           </div>
           <div className="toolbarRight">

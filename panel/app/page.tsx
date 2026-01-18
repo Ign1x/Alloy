@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AppCtxProvider } from "./appCtx";
 import Icon from "./ui/Icon";
+import Select from "./ui/Select";
 import AdvancedView from "./views/AdvancedView";
 import FilesView from "./views/FilesView";
 import FrpView from "./views/FrpView";
@@ -105,7 +106,7 @@ type GameSettingsSnapshot = {
 
 type InstallForm = {
   instanceId: string;
-  kind: "vanilla" | "paper" | "fabric" | "zip" | "modrinth" | "curseforge";
+  kind: "vanilla" | "paper" | "zip" | "zip_url" | "modrinth" | "curseforge";
   version: string;
   paperBuild: number;
   xms: string;
@@ -411,6 +412,25 @@ function normalizeJarPath(instanceId: string, jarPath: string) {
   return jar || "server.jar";
 }
 
+function normalizeRelFilePath(raw: string) {
+  const v = String(raw || "")
+    .trim()
+    .replace(/\\+/g, "/")
+    .replace(/\/+/g, "/")
+    .replace(/^\/+/, "")
+    .replace(/^(\.\/)+/, "");
+  const parts = v.split("/").filter(Boolean);
+  if (!parts.length) return "";
+  for (const p of parts) {
+    if (p === "." || p === "..") return "";
+  }
+  return parts.join("/");
+}
+
+function isHex40(v: string) {
+  return /^[0-9a-f]{40}$/i.test(String(v || "").trim());
+}
+
 function getPropValue(text: string, key: string) {
   const k = `${key}=`;
   const lines = String(text || "").split(/\r?\n/);
@@ -506,11 +526,6 @@ export default function HomePage() {
   const [serverOpStatus, setServerOpStatus] = useState<string>("");
   const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
   const [settingsSnapshot, setSettingsSnapshot] = useState<GameSettingsSnapshot | null>(null);
-  const [modsOpen, setModsOpen] = useState<boolean>(false);
-  const [modsStatus, setModsStatus] = useState<string>("");
-  const [modsEntries, setModsEntries] = useState<any[]>([]);
-  const [modsUploadFile, setModsUploadFile] = useState<File | null>(null);
-  const [modsUploadInputKey, setModsUploadInputKey] = useState<number>(0);
   const [installOpen, setInstallOpen] = useState<boolean>(false);
   const [installRunning, setInstallRunning] = useState<boolean>(false);
   const [installStep, setInstallStep] = useState<1 | 2 | 3>(1);
@@ -541,6 +556,8 @@ export default function HomePage() {
   const [marketSelected, setMarketSelected] = useState<any>(null);
   const [marketVersions, setMarketVersions] = useState<any[]>([]);
   const [marketSelectedVersionId, setMarketSelectedVersionId] = useState<string>("");
+  const [modpackProviders, setModpackProviders] = useState<any[]>([]);
+  const [modpackProvidersStatus, setModpackProvidersStatus] = useState<string>("");
   const [logView, setLogView] = useState<"all" | "mc" | "install" | "frp">("all");
 
   // Server list (directories under servers/)
@@ -591,19 +608,27 @@ export default function HomePage() {
     [profiles, frpProfileId]
   );
 
+  const curseforgeEnabled = useMemo(() => {
+    const hit = (Array.isArray(modpackProviders) ? modpackProviders : []).find((p: any) => String(p?.id || "") === "curseforge");
+    if (hit && typeof hit.enabled === "boolean") return !!hit.enabled;
+    return !!String(panelSettings?.curseforge_api_key || "").trim();
+  }, [modpackProviders, panelSettings]);
+
 	  const installValidation = useMemo(() => {
 	    const instErr = validateInstanceIDUI(installForm.instanceId);
 	    const verErr = installForm.kind === "vanilla" || installForm.kind === "paper" ? (String(installForm.version || "").trim() ? "" : "version is required") : "";
-	    const kindErr = installForm.kind === "fabric" ? "Fabric is a placeholder template (not built-in yet). Use ZIP or upload a server jar." : "";
+	    const kindErr = "";
 	    const jarErr =
-	      installForm.kind === "zip" || installForm.kind === "modrinth" || installForm.kind === "curseforge"
+	      installForm.kind === "zip" || installForm.kind === "zip_url" || installForm.kind === "modrinth" || installForm.kind === "curseforge"
 	        ? validateJarPathUI(installForm.jarName)
 	        : validateJarNameUI(installForm.jarName);
 	    const zipErr = installForm.kind === "zip" && !installZipFile ? "zip file is required" : "";
-	    const remoteErr =
-	      (installForm.kind === "modrinth" || installForm.kind === "curseforge") && !String(installForm.remoteUrl || "").trim()
-	        ? "select a modpack file first"
-	        : "";
+	    const remoteErr = (() => {
+	      const url = String(installForm.remoteUrl || "").trim();
+	      if (installForm.kind === "zip_url") return url ? "" : "remote url is required";
+	      if (installForm.kind === "modrinth" || installForm.kind === "curseforge") return url ? "" : "select a modpack file first";
+	      return "";
+	    })();
 	    const portErr = validatePortUI(installForm.gamePort, { allowZero: false });
 	    const frpRemoteErr = validatePortUI(installForm.frpRemotePort, { allowZero: true });
 	    const frpProfileErr =
@@ -841,6 +866,20 @@ export default function HomePage() {
     return res;
   }
 
+  async function refreshModpackProviders() {
+    setModpackProvidersStatus("Loading...");
+    try {
+      const res = await apiFetch("/api/modpacks/providers", { cache: "no-store" });
+      const json = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(json?.error || "failed");
+      setModpackProviders(Array.isArray(json?.providers) ? json.providers : []);
+      setModpackProvidersStatus("");
+    } catch (e: any) {
+      setModpackProviders([]);
+      setModpackProvidersStatus(String(e?.message || e));
+    }
+  }
+
   async function refreshPanelSettings() {
     setPanelSettingsStatus("Loading...");
     try {
@@ -849,6 +888,7 @@ export default function HomePage() {
       if (!res.ok) throw new Error(json?.error || "failed");
       setPanelSettings(json?.settings || null);
       setPanelSettingsStatus("");
+      refreshModpackProviders();
     } catch (e: any) {
       setPanelSettings(null);
       setPanelSettingsStatus(String(e?.message || e));
@@ -866,6 +906,7 @@ export default function HomePage() {
       const json = await res.json().catch(() => null);
       if (!res.ok) throw new Error(json?.error || "failed");
       setPanelSettings(json?.settings || null);
+      refreshModpackProviders();
       setPanelSettingsStatus("Saved");
       setTimeout(() => setPanelSettingsStatus(""), 900);
     } catch (e: any) {
@@ -1673,6 +1714,10 @@ export default function HomePage() {
     if (installRunning) return;
     const provider = installForm.kind;
     if (provider !== "modrinth" && provider !== "curseforge") return;
+    if (provider === "curseforge" && !curseforgeEnabled) {
+      setMarketStatus("CurseForge is disabled (configure API key in Panel settings)");
+      return;
+    }
     const q = String(marketQuery || "").trim();
     if (!q) return;
 
@@ -1697,6 +1742,129 @@ export default function HomePage() {
       setMarketStatus(results.length ? `Found ${results.length} result(s)` : "No results");
     } catch (e: any) {
       setMarketStatus(String(e?.message || e));
+    }
+  }
+
+  async function pickJarFromInstanceRoot(inst: string, fallback: string) {
+    const fb = normalizeJarPath(inst, fallback);
+    try {
+      const out = await callOkCommand("fs_list", { path: inst }, 30_000);
+      const entries = Array.isArray(out?.entries) ? out.entries : [];
+      const jarFiles = entries
+        .filter((e: any) => e && !e.isDir && typeof e.name === "string")
+        .map((e: any) => String(e.name))
+        .filter((n: string) => n.toLowerCase().endsWith(".jar"));
+
+      if (fb && !fb.includes("/") && jarFiles.includes(fb)) return fb;
+      if (jarFiles.includes("server.jar")) return "server.jar";
+      if (jarFiles.includes("fabric-server-launch.jar")) return "fabric-server-launch.jar";
+      if (jarFiles.includes("quilt-server-launch.jar")) return "quilt-server-launch.jar";
+      if (jarFiles.length === 1) return jarFiles[0];
+      const serverish = jarFiles.find((n: string) => /server|launch/i.test(n));
+      if (serverish) return serverish;
+    } catch {
+      // ignore
+    }
+    return fb || "server.jar";
+  }
+
+  async function installModrinthMrpack(inst: string, mrpackRel: string, jarRel: string) {
+    const tmpRoot = joinRelPath(inst, ".elegantmc_tmp");
+    const tmpDir = joinRelPath(tmpRoot, "mrpack");
+
+    // Clean old temp, then unzip to temp (avoid collisions with instance root).
+    try {
+      await callOkCommand("fs_delete", { path: tmpDir }, 30_000);
+    } catch {
+      // ignore
+    }
+    await callOkCommand("fs_mkdir", { path: tmpDir }, 30_000);
+    await callOkCommand("fs_unzip", { zip_path: mrpackRel, dest_dir: tmpDir, instance_id: inst, strip_top_level: true }, 10 * 60_000);
+
+    // Read modrinth index
+    const indexPath = joinRelPath(tmpDir, "modrinth.index.json");
+    const out = await callOkCommand("fs_read", { path: indexPath }, 20_000);
+    const text = b64DecodeUtf8(String(out.b64 || ""));
+    let index: any = null;
+    try {
+      index = JSON.parse(text);
+    } catch {
+      throw new Error("invalid modrinth.index.json");
+    }
+
+    const deps = index?.dependencies || {};
+    const mc = String(deps.minecraft || "").trim();
+    const fabricLoader = String(deps["fabric-loader"] || "").trim();
+    const quiltLoader = String(deps["quilt-loader"] || "").trim();
+    const forge = String(deps.forge || "").trim();
+    const neoForge = String(deps.neoforge || deps["neo-forge"] || "").trim();
+
+    if (!mc) throw new Error("mrpack missing dependencies.minecraft");
+    if (!fabricLoader && !quiltLoader) {
+      if (forge || neoForge) throw new Error("Forge/NeoForge mrpack is not supported yet (please use a server pack zip)");
+      throw new Error("mrpack missing supported loader dependency (fabric-loader/quilt-loader)");
+    }
+    if (quiltLoader) {
+      throw new Error("Quilt mrpack is not supported yet (please use a server pack zip)");
+    }
+
+    // Apply overrides -> instance root (if present).
+    const overridesDir = joinRelPath(tmpDir, "overrides");
+    try {
+      const ls = await callOkCommand("fs_list", { path: overridesDir }, 20_000);
+      const entries = Array.isArray(ls?.entries) ? ls.entries : [];
+      for (const ent of entries) {
+        const name = String(ent?.name || "").trim();
+        if (!name || name === "." || name === "..") continue;
+        await callOkCommand("fs_move", { from: joinRelPath(overridesDir, name), to: joinRelPath(inst, name) }, 60_000);
+      }
+      try {
+        await callOkCommand("fs_delete", { path: overridesDir }, 30_000);
+      } catch {
+        // ignore
+      }
+    } catch {
+      // overrides are optional
+    }
+
+    // Download files (mods/config/etc) listed in the index.
+    const files = Array.isArray(index?.files) ? index.files : [];
+    for (const f of files) {
+      const envServer = String(f?.env?.server || "").trim().toLowerCase();
+      if (envServer === "unsupported") continue;
+
+      const rel = normalizeRelFilePath(String(f?.path || ""));
+      if (!rel) continue;
+      const downloads = Array.isArray(f?.downloads) ? f.downloads : [];
+      const url = String(downloads[0] || "").trim();
+      if (!url) throw new Error(`mrpack file missing download url: ${rel}`);
+
+      const sha1 = String(f?.hashes?.sha1 || "").trim();
+      await callOkCommand(
+        "fs_download",
+        { path: joinRelPath(inst, rel), url, ...(isHex40(sha1) ? { sha1 } : {}), instance_id: inst },
+        10 * 60_000
+      );
+    }
+
+    // Install Fabric server launcher jar.
+    setServerOpStatus(`Installing Fabric server (${mc} / loader ${fabricLoader}) ...`);
+    const res = await apiFetch(
+      `/api/mc/fabric/server-jar?mc=${encodeURIComponent(mc)}&loader=${encodeURIComponent(fabricLoader)}`,
+      { cache: "no-store" }
+    );
+    const resolved = await res.json().catch(() => null);
+    if (!res.ok) throw new Error(resolved?.error || "failed to resolve Fabric server jar");
+
+    const serverJarUrl = String(resolved?.url || "").trim();
+    if (!serverJarUrl) throw new Error("fabric server jar url missing");
+    await callOkCommand("fs_download", { path: joinRelPath(inst, jarRel), url: serverJarUrl, instance_id: inst }, 10 * 60_000);
+
+    // Best-effort cleanup (keep tmpRoot for debugging if deletion fails).
+    try {
+      await callOkCommand("fs_delete", { path: tmpRoot }, 60_000);
+    } catch {
+      // ignore
     }
   }
 
@@ -1786,6 +1954,7 @@ export default function HomePage() {
   }
 
 	  function openInstallModal() {
+	    refreshModpackProviders();
 	    const suggested = suggestInstanceId(serverDirs);
 	    const jarNameOnly = normalizeJarName(jarPath);
 	    const jarRel = normalizeJarPath(suggested, jarPath);
@@ -1805,7 +1974,11 @@ export default function HomePage() {
 	    setInstallForm((prev) => ({
 	      instanceId: suggested,
 	      kind:
-	        prev?.kind === "paper" || prev?.kind === "fabric" || prev?.kind === "zip" || prev?.kind === "modrinth" || prev?.kind === "curseforge"
+	        prev?.kind === "paper" ||
+	        prev?.kind === "zip" ||
+	        prev?.kind === "zip_url" ||
+	        prev?.kind === "modrinth" ||
+	        prev?.kind === "curseforge"
 	          ? prev.kind
 	          : "vanilla",
 	      version: String(prev?.version || defaultVersion),
@@ -1813,7 +1986,7 @@ export default function HomePage() {
 	      xms: defaultXms,
 	      xmx: defaultXmx,
 	      gamePort: defaultGamePort,
-	      jarName: prev?.kind === "zip" || prev?.kind === "modrinth" || prev?.kind === "curseforge" ? jarRel : jarNameOnly,
+	      jarName: prev?.kind === "zip" || prev?.kind === "zip_url" || prev?.kind === "modrinth" || prev?.kind === "curseforge" ? jarRel : jarNameOnly,
 	      javaPath,
 	      acceptEula: prev?.acceptEula ?? defaultAcceptEula,
 	      enableFrp: defaultEnableFrp,
@@ -1842,17 +2015,13 @@ export default function HomePage() {
 	      return;
 	    }
 	    const kind = installForm.kind;
-	    if (kind === "fabric") {
-	      setServerOpStatus("Fabric is a placeholder (use ZIP or upload a server jar)");
-	      return;
-	    }
 	    const ver = String(installForm.version || "").trim();
 	    if ((kind === "vanilla" || kind === "paper") && !ver) {
 	      setServerOpStatus("version 不能为空");
 	      return;
 	    }
 	    const jarErr =
-	      kind === "zip" || kind === "modrinth" || kind === "curseforge"
+	      kind === "zip" || kind === "zip_url" || kind === "modrinth" || kind === "curseforge"
 	        ? validateJarPathUI(installForm.jarName)
 	        : validateJarNameUI(installForm.jarName);
 	    if (jarErr) {
@@ -1918,26 +2087,39 @@ export default function HomePage() {
 	        }
 		        setInstallZipFile(null);
 		        setInstallZipInputKey((k) => k + 1);
-		      } else if (kind === "modrinth" || kind === "curseforge") {
+		      } else if (kind === "zip_url" || kind === "modrinth" || kind === "curseforge") {
 		        const remoteUrl = String(installForm.remoteUrl || "").trim();
 		        if (!remoteUrl) throw new Error("remote url is required");
 
 		        // Ensure instance dir exists, then download + extract.
 		        await callOkCommand("fs_mkdir", { path: inst }, 30_000);
 
-		        const defaultName = kind === "modrinth" ? "modpack.mrpack" : "modpack.zip";
+		        const defaultName =
+		          kind === "modrinth"
+		            ? "modpack.mrpack"
+		            : kind === "zip_url"
+		              ? /\.mrpack(\?|$)/i.test(remoteUrl)
+		                ? "modpack.mrpack"
+		                : "modpack.zip"
+		              : "modpack.zip";
 		        const fileName = normalizeDownloadName(String(installForm.remoteFileName || "").trim(), defaultName);
 		        const zipRel = joinRelPath(inst, fileName);
 
 		        setServerOpStatus(`Downloading ${fileName} ...`);
 		        await callOkCommand("fs_download", { path: zipRel, url: remoteUrl, instance_id: inst }, 10 * 60_000);
 
-		        setServerOpStatus(`Extracting ${fileName} ...`);
-		        await callOkCommand(
-		          "fs_unzip",
-		          { zip_path: zipRel, dest_dir: inst, instance_id: inst, strip_top_level: true },
-		          10 * 60_000
-		        );
+		        if ((kind === "modrinth" || kind === "zip_url") && fileName.toLowerCase().endsWith(".mrpack")) {
+		          setServerOpStatus(`Installing ${fileName} (.mrpack) ...`);
+		          await installModrinthMrpack(inst, zipRel, jarRel);
+		        } else {
+		          setServerOpStatus(`Extracting ${fileName} ...`);
+		          await callOkCommand(
+		            "fs_unzip",
+		            { zip_path: zipRel, dest_dir: inst, instance_id: inst, strip_top_level: true },
+		            10 * 60_000
+		          );
+		          installedJar = await pickJarFromInstanceRoot(inst, installedJar);
+		        }
 		        try {
 		          await callOkCommand("fs_delete", { path: zipRel }, 30_000);
 		        } catch {
@@ -1963,7 +2145,7 @@ export default function HomePage() {
 	        installedJar = String(out.jar_path || jarRel);
 	      }
 
-	      if ((kind === "zip" || kind === "modrinth" || kind === "curseforge") && installForm.acceptEula) {
+	      if ((kind === "zip" || kind === "zip_url" || kind === "modrinth" || kind === "curseforge") && installForm.acceptEula) {
 	        setServerOpStatus("Writing eula.txt ...");
 	        await callOkCommand(
 	          "fs_write",
@@ -2042,134 +2224,6 @@ export default function HomePage() {
     });
 	    setSettingsOpen(true);
 	    setServerOpStatus("");
-	  }
-
-	  async function refreshModsNow() {
-	    if (!selectedDaemon?.connected) {
-	      setModsEntries([]);
-	      setModsStatus("daemon offline");
-	      return;
-	    }
-	    const inst = instanceId.trim();
-	    if (!inst) {
-	      setModsEntries([]);
-	      setModsStatus("no instance selected");
-	      return;
-	    }
-	    setModsStatus("Loading...");
-	    try {
-	      await callOkCommand("fs_mkdir", { path: joinRelPath(inst, "mods") }, 10_000);
-	      const out = await callOkCommand("fs_list", { path: joinRelPath(inst, "mods") }, 10_000);
-	      const entries = (out.entries || [])
-	        .filter((e: any) => e && !e.isDir && e.name)
-	        .filter((e: any) => {
-	          const n = String(e.name || "").toLowerCase();
-	          return n.endsWith(".jar") || n.endsWith(".jar.disabled");
-	        })
-	        .map((e: any) => ({ name: String(e.name), size: Number(e.size || 0) }));
-	      entries.sort((a: any, b: any) => String(a.name).localeCompare(String(b.name)));
-	      setModsEntries(entries);
-	      setModsStatus("");
-	    } catch (e: any) {
-	      setModsEntries([]);
-	      setModsStatus(String(e?.message || e));
-	    }
-	  }
-
-	  function openModsModal() {
-	    if (!selectedDaemon?.connected) return;
-	    if (!instanceId.trim()) return;
-	    setModsStatus("");
-	    setModsUploadFile(null);
-	    setModsUploadInputKey((k) => k + 1);
-	    setModsOpen(true);
-	    refreshModsNow();
-	  }
-
-	  async function toggleMod(name: string) {
-	    const inst = instanceId.trim();
-	    if (!selectedDaemon?.connected || !inst) return;
-	    const cur = String(name || "");
-	    const lower = cur.toLowerCase();
-	    const isDisabled = lower.endsWith(".jar.disabled");
-	    const nextName = isDisabled ? cur.replace(/\.disabled$/i, "") : `${cur}.disabled`;
-	    setModsStatus("...");
-	    try {
-	      const modsDir = joinRelPath(inst, "mods");
-	      await callOkCommand("fs_move", { from: joinRelPath(modsDir, cur), to: joinRelPath(modsDir, nextName) }, 20_000);
-	      await refreshModsNow();
-	      setModsStatus(isDisabled ? "Enabled" : "Disabled");
-	      setTimeout(() => setModsStatus(""), 800);
-	    } catch (e: any) {
-	      setModsStatus(String(e?.message || e));
-	    }
-	  }
-
-	  async function deleteMod(name: string) {
-	    const inst = instanceId.trim();
-	    if (!selectedDaemon?.connected || !inst) return;
-	    const cur = String(name || "");
-	    const ok = await confirmDialog(`Delete mod ${cur}?`, { title: "Delete Mod", confirmLabel: "Delete", danger: true });
-	    if (!ok) return;
-	    setModsStatus("");
-	    try {
-	      const modsDir = joinRelPath(inst, "mods");
-	      await callOkCommand("fs_delete", { path: joinRelPath(modsDir, cur) }, 30_000);
-	      await refreshModsNow();
-	      setModsStatus("Deleted");
-	      setTimeout(() => setModsStatus(""), 800);
-	    } catch (e: any) {
-	      setModsStatus(String(e?.message || e));
-	    }
-	  }
-
-	  async function uploadMod() {
-	    const inst = instanceId.trim();
-	    if (!selectedDaemon?.connected || !inst) return;
-	    if (!modsUploadFile) {
-	      setModsStatus("Select a .jar file");
-	      return;
-	    }
-	    const file = modsUploadFile;
-	    if (!String(file.name || "").toLowerCase().endsWith(".jar")) {
-	      setModsStatus("Only .jar supported");
-	      return;
-	    }
-
-	    const destPath = joinRelPath(joinRelPath(inst, "mods"), file.name);
-	    const chunkSize = 256 * 1024;
-	    let uploadID = "";
-	    setModsStatus(`Uploading ${file.name}: 0/${file.size} bytes`);
-	    try {
-	      await callOkCommand("fs_mkdir", { path: joinRelPath(inst, "mods") }, 10_000);
-	      const begin = await callOkCommand("fs_upload_begin", { path: destPath }, 30_000);
-	      uploadID = String(begin.upload_id || "");
-	      if (!uploadID) throw new Error("upload_id missing");
-
-	      for (let off = 0; off < file.size; off += chunkSize) {
-	        const end = Math.min(off + chunkSize, file.size);
-	        const ab = await file.slice(off, end).arrayBuffer();
-	        const b64 = b64EncodeBytes(new Uint8Array(ab));
-	        await callOkCommand("fs_upload_chunk", { upload_id: uploadID, b64 }, 60_000);
-	        setModsStatus(`Uploading ${file.name}: ${end}/${file.size} bytes`);
-	      }
-
-	      await callOkCommand("fs_upload_commit", { upload_id: uploadID }, 60_000);
-	      setModsUploadFile(null);
-	      setModsUploadInputKey((k) => k + 1);
-	      await refreshModsNow();
-	      setModsStatus("Uploaded");
-	      setTimeout(() => setModsStatus(""), 900);
-	    } catch (e: any) {
-	      if (uploadID) {
-	        try {
-	          await callOkCommand("fs_upload_abort", { upload_id: uploadID }, 10_000);
-	        } catch {
-	          // ignore
-	        }
-	      }
-	      setModsStatus(String(e?.message || e));
-	    }
 	  }
 
 	  function cancelEditSettings() {
@@ -2496,7 +2550,6 @@ export default function HomePage() {
     instanceId,
 	    setInstanceId,
 	    openSettingsModal,
-	    openModsModal,
 	    openInstallModal,
 	    startServer,
 	    stopServer,
@@ -2765,11 +2818,17 @@ export default function HomePage() {
 	        <div className="sidebarFooter">
 	          <div className="row" style={{ marginTop: 8, justifyContent: "space-between" }}>
 	            <span className="muted">Theme</span>
-	            <select value={themeMode} onChange={(e) => setThemeMode(e.target.value as ThemeMode)} style={{ width: 140 }}>
-	              <option value="auto">Auto (System)</option>
-	              <option value="light">Light</option>
-	              <option value="dark">Dark</option>
-	            </select>
+	            <div style={{ width: 170 }}>
+	              <Select
+	                value={themeMode}
+	                onChange={(v) => setThemeMode(v as ThemeMode)}
+	                options={[
+	                  { value: "auto", label: "Auto (System)" },
+	                  { value: "light", label: "Light" },
+	                  { value: "dark", label: "Dark" },
+	                ]}
+	              />
+	            </div>
 	          </div>
 	          <div className="row" style={{ marginTop: 10, justifyContent: "space-between" }}>
 	            <span className={`badge ${authed === true ? "ok" : ""}`}>{authed === true ? "admin" : "locked"}</span>
@@ -2796,13 +2855,17 @@ export default function HomePage() {
 	          <div className="field" style={{ minWidth: 240 }}>
 	            <label>Daemon</label>
 	            <div className="row" style={{ alignItems: "center", gap: 10, flexWrap: "nowrap" }}>
-	              <select value={selected} onChange={(e) => setSelected(e.target.value)} disabled={authed !== true} style={{ flex: 1 }}>
-	                {daemons.map((d) => (
-	                  <option key={d.id} value={d.id}>
-	                    {d.id} {d.connected ? "(online)" : "(offline)"}
-	                  </option>
-	                ))}
-	              </select>
+	              <div style={{ flex: 1 }}>
+	                <Select
+	                  value={selected}
+	                  onChange={(v) => setSelected(v)}
+	                  disabled={authed !== true}
+	                  options={daemons.map((d) => ({
+	                    value: d.id,
+	                    label: `${d.id} ${d.connected ? "(online)" : "(offline)"}`,
+	                  }))}
+	                />
+	              </div>
 	              <span
 	                className={`statusDot ${selectedDaemon?.connected ? "ok" : ""}`}
 	                title={selectedDaemon?.connected ? "online" : "offline"}
@@ -2859,15 +2922,15 @@ export default function HomePage() {
 	                  </div>
 			                  <div className="field">
 			                    <label>Type</label>
-			                    <select
+			                    <Select
 			                      value={installForm.kind}
-			                      onChange={(e) => {
-			                        const k = e.target.value as any;
+			                      onChange={(raw) => {
+			                        const k = raw as any;
 			                        setInstallForm((f) => ({
 			                          ...f,
 			                          kind: k,
 			                          jarName:
-			                            k === "zip" || k === "modrinth" || k === "curseforge"
+			                            k === "zip" || k === "zip_url" || k === "modrinth" || k === "curseforge"
 			                              ? normalizeJarPath(String(f.instanceId || "").trim(), f.jarName)
 			                              : normalizeJarName(f.jarName),
 			                          remoteUrl: "",
@@ -2879,20 +2942,23 @@ export default function HomePage() {
 			                        setMarketVersions([]);
 			                        setMarketSelectedVersionId("");
 			                      }}
-			                    >
-			                      <option value="vanilla">Vanilla</option>
-			                      <option value="paper">Paper</option>
-			                      <option value="fabric">Fabric (Placeholder)</option>
-			                      <option value="modrinth">Modrinth (Search)</option>
-			                      <option value="curseforge">CurseForge (Search)</option>
-			                      <option value="zip">Modpack ZIP (Upload)</option>
-			                    </select>
+			                      options={[
+			                        { value: "vanilla", label: "Vanilla" },
+			                        { value: "paper", label: "Paper" },
+			                        { value: "modrinth", label: "Modrinth (Search)" },
+			                        { value: "curseforge", label: "CurseForge (Search)", disabled: !curseforgeEnabled },
+			                        { value: "zip", label: "Modpack ZIP (Upload)" },
+			                        { value: "zip_url", label: "Modpack ZIP (URL)" },
+			                      ]}
+			                    />
 			                    {installValidation.kindErr ? (
 			                      <div className="hint" style={{ color: "var(--danger)" }}>
 			                        {installValidation.kindErr}
 			                      </div>
 			                    ) : (
-			                      <div className="hint">Vanilla/Paper：自动下载服务端；Modrinth/CurseForge：搜索并拉取压缩包；ZIP：上传并解压</div>
+			                      <div className="hint">
+			                        Vanilla/Paper：自动下载服务端；Modrinth：支持 Fabric mrpack；CurseForge：需要 API Key；ZIP：上传或 URL 下载并解压
+			                      </div>
 			                    )}
 			                  </div>
 
@@ -2913,6 +2979,26 @@ export default function HomePage() {
 		                        <div className="hint">将 zip 上传到 <code>servers/&lt;instance&gt;/</code> 并自动解压（默认会剥离单一顶层目录）</div>
 		                      )}
 		                    </div>
+			                  ) : installForm.kind === "zip_url" ? (
+			                    <div className="field" style={{ gridColumn: "1 / -1" }}>
+			                      <label>Modpack URL</label>
+			                      <input
+			                        value={installForm.remoteUrl}
+			                        onChange={(e) => setInstallForm((f) => ({ ...f, remoteUrl: e.target.value }))}
+			                        placeholder="https://..."
+			                      />
+			                      <div className="hint">
+			                        直接粘贴下载链接（支持 <code>.zip</code> / <code>.mrpack</code>）。CurseForge 无 API Key 时可以用此方式粘贴直链。
+			                      </div>
+			                      <div className="field" style={{ marginTop: 10 }}>
+			                        <label>Filename (optional)</label>
+			                        <input
+			                          value={installForm.remoteFileName}
+			                          onChange={(e) => setInstallForm((f) => ({ ...f, remoteFileName: e.target.value }))}
+			                          placeholder="modpack.zip"
+			                        />
+			                      </div>
+			                    </div>
 			                  ) : installForm.kind === "modrinth" || installForm.kind === "curseforge" ? (
 			                    <div className="field" style={{ gridColumn: "1 / -1" }}>
 			                      <label>{installForm.kind === "modrinth" ? "Modrinth Modpacks" : "CurseForge Modpacks"}</label>
@@ -2927,7 +3013,7 @@ export default function HomePage() {
 			                          type="button"
 			                          className="iconBtn"
 			                          onClick={runMarketSearch}
-			                          disabled={!marketQuery.trim() || installRunning}
+			                          disabled={!marketQuery.trim() || installRunning || (installForm.kind === "curseforge" && !curseforgeEnabled)}
 			                        >
 			                          <Icon name="search" />
 			                          Search
@@ -2948,7 +3034,21 @@ export default function HomePage() {
 			                          Clear
 			                        </button>
 			                      </div>
-			                      {marketStatus ? <div className="hint">{marketStatus}</div> : <div className="hint">提示：CurseForge 需要配置 API Key 才能使用</div>}
+			                      {marketStatus ? (
+			                        <div className="hint">{marketStatus}</div>
+			                      ) : installForm.kind === "curseforge" && !curseforgeEnabled ? (
+			                        <div className="hint">
+			                          CurseForge 搜索需要 API Key（去{" "}
+			                          <button className="linkBtn" onClick={() => setTab("panel")}>
+			                            Panel
+			                          </button>{" "}
+			                          配置）。或者改用 <b>Modpack ZIP (URL)</b> 粘贴下载链接。
+			                        </div>
+			                      ) : installForm.kind === "curseforge" ? (
+			                        <div className="hint">CurseForge 已启用（API Key 已配置）。</div>
+			                      ) : (
+			                        <div className="hint">提示：Modrinth mrpack 目前只支持 Fabric（会自动安装服务端 + 下载 mods）。</div>
+			                      )}
 
 			                      {marketResults.length ? (
 			                        <div className="cardGrid" style={{ marginTop: 10 }}>
@@ -2994,13 +3094,15 @@ export default function HomePage() {
 			                            <>
 			                              <div className="field" style={{ marginTop: 10 }}>
 			                                <label>Version</label>
-			                                <select value={marketSelectedVersionId} onChange={(e) => pickModrinthVersion(e.target.value)} disabled={!marketVersions.length}>
-			                                  {marketVersions.map((v: any) => (
-			                                    <option key={v.id} value={v.id}>
-			                                      {String(v.version_number || v.name || v.id)}
-			                                    </option>
-			                                  ))}
-			                                </select>
+			                                <Select
+			                                  value={marketSelectedVersionId}
+			                                  onChange={(v) => pickModrinthVersion(v)}
+			                                  disabled={!marketVersions.length}
+			                                  options={marketVersions.map((v: any) => ({
+			                                    value: String(v.id),
+			                                    label: String(v.version_number || v.name || v.id),
+			                                  }))}
+			                                />
 			                                <div className="hint">选择后会自动选取该版本的 primary file（若无则取第一个文件）</div>
 			                              </div>
 			                            </>
@@ -3008,13 +3110,15 @@ export default function HomePage() {
 			                            <>
 			                              <div className="field" style={{ marginTop: 10 }}>
 			                                <label>File</label>
-			                                <select value={marketSelectedVersionId} onChange={(e) => pickCurseForgeFile(e.target.value)} disabled={!marketVersions.length}>
-			                                  {marketVersions.map((f: any) => (
-			                                    <option key={f.id} value={f.id}>
-			                                      {String(f.display_name || f.file_name || f.id)}
-			                                    </option>
-			                                  ))}
-			                                </select>
+			                                <Select
+			                                  value={marketSelectedVersionId}
+			                                  onChange={(v) => pickCurseForgeFile(v)}
+			                                  disabled={!marketVersions.length}
+			                                  options={marketVersions.map((f: any) => ({
+			                                    value: String(f.id),
+			                                    label: String(f.display_name || f.file_name || f.id),
+			                                  }))}
+			                                />
 			                                <div className="hint">选择后会解析/获取 download url 并用于安装</div>
 			                              </div>
 			                            </>
@@ -3108,7 +3212,7 @@ export default function HomePage() {
                     <>
 		                  <div className="field">
 		                    <label>
-		                      {installForm.kind === "zip" || installForm.kind === "modrinth" || installForm.kind === "curseforge"
+		                      {installForm.kind === "zip" || installForm.kind === "zip_url" || installForm.kind === "modrinth" || installForm.kind === "curseforge"
 		                        ? "Jar path (after extract)"
 		                        : "Jar name"}
 		                    </label>
@@ -3123,7 +3227,7 @@ export default function HomePage() {
 		                      </div>
 		                    ) : (
 		                      <div className="hint">
-		                        {installForm.kind === "zip" || installForm.kind === "modrinth" || installForm.kind === "curseforge"
+		                        {installForm.kind === "zip" || installForm.kind === "zip_url" || installForm.kind === "modrinth" || installForm.kind === "curseforge"
 		                          ? "相对 instance 目录的 jar 路径（可带子目录），用于一键 Start"
 		                          : "只填文件名（不含路径），例如 server.jar"}
 		                      </div>
@@ -3187,17 +3291,16 @@ export default function HomePage() {
 	                  </div>
 	                  <div className="field" style={{ gridColumn: "1 / -1" }}>
 	                    <label>FRP Server</label>
-	                    <select
+	                    <Select
 	                      value={installForm.frpProfileId}
-	                      onChange={(e) => setInstallForm((f) => ({ ...f, frpProfileId: e.target.value }))}
+	                      onChange={(v) => setInstallForm((f) => ({ ...f, frpProfileId: v }))}
 	                      disabled={!installForm.enableFrp || !profiles.length}
-	                    >
-	                      {profiles.map((p) => (
-	                        <option key={p.id} value={p.id}>
-	                          {p.name} ({p.server_addr}:{p.server_port})
-	                        </option>
-	                      ))}
-	                    </select>
+	                      placeholder={profiles.length ? "Select FRP server…" : "No servers"}
+	                      options={profiles.map((p) => ({
+	                        value: p.id,
+	                        label: `${p.name} (${p.server_addr}:${p.server_port})`,
+	                      }))}
+	                    />
                     {installForm.enableFrp && installValidation.frpProfileErr ? (
                       <div className="hint" style={{ color: "var(--danger)" }}>
                         {installValidation.frpProfileErr}（去{" "}
@@ -3382,13 +3485,16 @@ export default function HomePage() {
                   </div>
                   <div className="field" style={{ gridColumn: "1 / -1" }}>
                     <label>FRP Server</label>
-                    <select value={frpProfileId} onChange={(e) => setFrpProfileId(e.target.value)} disabled={!enableFrp || !profiles.length}>
-                      {profiles.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.name} ({p.server_addr}:{p.server_port})
-                        </option>
-                      ))}
-                    </select>
+                    <Select
+                      value={frpProfileId}
+                      onChange={(v) => setFrpProfileId(v)}
+                      disabled={!enableFrp || !profiles.length}
+                      placeholder={profiles.length ? "Select FRP server…" : "No servers"}
+                      options={profiles.map((p) => ({
+                        value: p.id,
+                        label: `${p.name} (${p.server_addr}:${p.server_port})`,
+                      }))}
+                    />
                   </div>
                 </div>
 
@@ -3408,96 +3514,6 @@ export default function HomePage() {
                 </div>
               </div>
             </div>
-	          ) : null}
-
-	          {modsOpen ? (
-	            <div className="modalOverlay" onClick={() => setModsOpen(false)}>
-	              <div className="modal" style={{ width: "min(860px, 100%)" }} onClick={(e) => e.stopPropagation()}>
-	                <div className="modalHeader">
-	                  <div>
-	                    <div style={{ fontWeight: 700 }}>Mods</div>
-	                    <div className="hint">
-	                      game: <code>{instanceId.trim() || "-"}</code>
-	                    </div>
-	                    {modsStatus ? <div className="hint">{modsStatus}</div> : null}
-	                  </div>
-	                  <button type="button" onClick={() => setModsOpen(false)}>
-	                    Close
-	                  </button>
-	                </div>
-
-	                <div className="toolbar" style={{ marginBottom: 12 }}>
-	                  <div className="toolbarLeft">
-	                    <div className="hint">提示：禁用会把文件重命名为 <code>*.jar.disabled</code></div>
-	                  </div>
-	                  <div className="toolbarRight">
-	                    <button type="button" className="iconBtn" onClick={refreshModsNow} disabled={!selectedDaemon?.connected || !instanceId.trim()}>
-	                      <Icon name="refresh" />
-	                      Refresh
-	                    </button>
-	                  </div>
-	                </div>
-
-	                <div className="row" style={{ justifyContent: "space-between", alignItems: "center", gap: 10 }}>
-	                  <input
-	                    key={modsUploadInputKey}
-	                    type="file"
-	                    accept=".jar"
-	                    onChange={(e) => setModsUploadFile(e.target.files?.[0] || null)}
-	                  />
-	                  <div className="btnGroup" style={{ justifyContent: "flex-end" }}>
-	                    <button type="button" className="primary iconBtn" onClick={uploadMod} disabled={!modsUploadFile}>
-	                      <Icon name="plus" />
-	                      Upload
-	                    </button>
-	                  </div>
-	                </div>
-
-	                <div className="card" style={{ marginTop: 12 }}>
-	                  <table>
-	                    <thead>
-	                      <tr>
-	                        <th>Mod</th>
-	                        <th>Status</th>
-	                        <th>Size</th>
-	                        <th>Actions</th>
-	                      </tr>
-	                    </thead>
-	                    <tbody>
-	                      {modsEntries.map((m: any) => {
-	                        const name = String(m?.name || "");
-	                        const lower = name.toLowerCase();
-	                        const disabled = lower.endsWith(".jar.disabled");
-	                        return (
-	                          <tr key={name}>
-	                            <td style={{ fontWeight: 650 }}>{name}</td>
-	                            <td>{disabled ? <span className="badge">disabled</span> : <span className="badge ok">enabled</span>}</td>
-	                            <td className="muted">{fmtBytes(Number(m?.size || 0))}</td>
-	                            <td>
-	                              <div className="btnGroup" style={{ justifyContent: "flex-start" }}>
-	                                <button type="button" onClick={() => toggleMod(name)}>
-	                                  {disabled ? "Enable" : "Disable"}
-	                                </button>
-	                                <button type="button" className="dangerBtn" onClick={() => deleteMod(name)}>
-	                                  Delete
-	                                </button>
-	                              </div>
-	                            </td>
-	                          </tr>
-	                        );
-	                      })}
-	                      {!modsEntries.length ? (
-	                        <tr>
-	                          <td colSpan={4} className="muted">
-	                            No mods found
-	                          </td>
-	                        </tr>
-	                      ) : null}
-	                    </tbody>
-	                  </table>
-	                </div>
-	              </div>
-	            </div>
 	          ) : null}
 
 	      {nodeDetailsOpen ? (
@@ -3562,13 +3578,17 @@ export default function HomePage() {
 	                    <div className="row" style={{ justifyContent: "space-between", alignItems: "end", gap: 10, marginBottom: 8 }}>
 	                      <div className="field" style={{ minWidth: 180 }}>
 	                        <label>Range</label>
-	                        <select value={String(nodeDetailsRangeSec)} onChange={(e) => setNodeDetailsRangeSec(Number(e.target.value) || 0)}>
-	                          <option value={60}>Last 1m</option>
-	                          <option value={5 * 60}>Last 5m</option>
-	                          <option value={15 * 60}>Last 15m</option>
-	                          <option value={60 * 60}>Last 1h</option>
-	                          <option value={0}>All</option>
-	                        </select>
+	                        <Select
+	                          value={String(nodeDetailsRangeSec)}
+	                          onChange={(v) => setNodeDetailsRangeSec(Number(v) || 0)}
+	                          options={[
+	                            { value: String(60), label: "Last 1m" },
+	                            { value: String(5 * 60), label: "Last 5m" },
+	                            { value: String(15 * 60), label: "Last 15m" },
+	                            { value: String(60 * 60), label: "Last 1h" },
+	                            { value: String(0), label: "All" },
+	                          ]}
+	                        />
 	                      </div>
 	                      <div className="hint" style={{ marginBottom: 4 }}>
 	                        {nodeDetailsHistoryMeta.points
