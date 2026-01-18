@@ -2130,20 +2130,69 @@ export default function HomePage() {
   async function pickJarFromInstanceRoot(inst: string, fallback: string) {
     const fb = normalizeJarPath(inst, fallback);
     try {
-      const out = await callOkCommand("fs_list", { path: inst }, 30_000);
-      const entries = Array.isArray(out?.entries) ? out.entries : [];
-      const jarFiles = entries
-        .filter((e: any) => e && !e.isDir && typeof e.name === "string")
-        .map((e: any) => String(e.name))
-        .filter((n: string) => n.toLowerCase().endsWith(".jar"));
+      const skipDirs = new Set([
+        "mods",
+        "plugins",
+        "libraries",
+        "config",
+        "world",
+        "logs",
+        "crash-reports",
+        "resourcepacks",
+        "shaderpacks",
+        ".elegantmc_tmp",
+        "_backups",
+      ]);
+      const jars: string[] = [];
+      const stack: { abs: string; rel: string; depth: number }[] = [{ abs: inst, rel: "", depth: 0 }];
+      let visitedDirs = 0;
+      const maxDirs = 260;
+      const maxDepth = 4;
 
-      if (fb && !fb.includes("/") && jarFiles.includes(fb)) return fb;
-      if (jarFiles.includes("server.jar")) return "server.jar";
-      if (jarFiles.includes("fabric-server-launch.jar")) return "fabric-server-launch.jar";
-      if (jarFiles.includes("quilt-server-launch.jar")) return "quilt-server-launch.jar";
-      if (jarFiles.length === 1) return jarFiles[0];
-      const serverish = jarFiles.find((n: string) => /server|launch/i.test(n));
-      if (serverish) return serverish;
+      while (stack.length) {
+        const cur = stack.pop()!;
+        visitedDirs++;
+        if (visitedDirs > maxDirs) break;
+
+        const out = await callOkCommand("fs_list", { path: cur.abs }, 30_000);
+        const entries = Array.isArray(out?.entries) ? out.entries : [];
+
+        for (const e of entries) {
+          const name = String(e?.name || "").trim();
+          if (!name || name === "." || name === "..") continue;
+          const lower = name.toLowerCase();
+          if (e?.isDir) {
+            if (skipDirs.has(lower)) continue;
+            if (cur.depth >= maxDepth) continue;
+            stack.push({ abs: joinRelPath(cur.abs, name), rel: joinRelPath(cur.rel, name), depth: cur.depth + 1 });
+            continue;
+          }
+          if (!lower.endsWith(".jar")) continue;
+          const rel = cur.rel ? joinRelPath(cur.rel, name) : name;
+          jars.push(rel);
+        }
+      }
+
+      const exists = (p: string) => jars.includes(p);
+      if (fb && exists(fb)) return fb;
+
+      const score = (p: string) => {
+        const base = p.split("/").pop() || p;
+        const lower = base.toLowerCase();
+        let s = 0;
+        if (lower === "server.jar") s += 100;
+        if (lower === "fabric-server-launch.jar") s += 90;
+        if (lower === "quilt-server-launch.jar") s += 80;
+        if (/\bserver\b/i.test(lower)) s += 40;
+        if (/\blaunch\b/i.test(lower)) s += 30;
+        // Prefer jars closer to root.
+        const depth = p.split("/").length - 1;
+        s += Math.max(0, 12 - depth);
+        return s;
+      };
+
+      jars.sort((a, b) => score(b) - score(a) || a.localeCompare(b));
+      if (jars.length) return jars[0];
     } catch {
       // ignore
     }
