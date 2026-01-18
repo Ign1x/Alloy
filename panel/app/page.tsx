@@ -524,6 +524,7 @@ export default function HomePage() {
   const [xmx, setXmx] = useState<string>("2G");
   const [consoleLine, setConsoleLine] = useState<string>("");
   const [serverOpStatus, setServerOpStatus] = useState<string>("");
+  const [gameActionBusy, setGameActionBusy] = useState<boolean>(false);
   const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
   const [settingsSnapshot, setSettingsSnapshot] = useState<GameSettingsSnapshot | null>(null);
   const [installOpen, setInstallOpen] = useState<boolean>(false);
@@ -2260,6 +2261,8 @@ export default function HomePage() {
   }
 
   async function startServer(instanceOverride?: string, override?: StartOverride) {
+    if (gameActionBusy) return;
+    setGameActionBusy(true);
     setServerOpStatus("");
     setFrpOpStatus("");
     try {
@@ -2326,10 +2329,14 @@ export default function HomePage() {
       }
     } catch (e: any) {
       setServerOpStatus(String(e?.message || e));
+    } finally {
+      setGameActionBusy(false);
     }
   }
 
   async function stopServer(instanceOverride?: string) {
+    if (gameActionBusy) return;
+    setGameActionBusy(true);
     setServerOpStatus("");
     try {
       const inst = String(instanceOverride ?? instanceId).trim();
@@ -2347,10 +2354,14 @@ export default function HomePage() {
       setServerOpStatus("MC stopped");
     } catch (e: any) {
       setServerOpStatus(String(e?.message || e));
+    } finally {
+      setGameActionBusy(false);
     }
   }
 
 	  async function deleteServer(instanceOverride?: string) {
+	    if (gameActionBusy) return;
+	    setGameActionBusy(true);
 	    setServerOpStatus("");
 	    try {
 	      const id = String(instanceOverride ?? instanceId).trim();
@@ -2386,10 +2397,14 @@ export default function HomePage() {
       }
     } catch (e: any) {
       setServerOpStatus(String(e?.message || e));
+    } finally {
+      setGameActionBusy(false);
     }
   }
 
   async function restartServer(instanceOverride?: string) {
+    if (gameActionBusy) return;
+    setGameActionBusy(true);
     setServerOpStatus("");
     try {
       const inst = String(instanceOverride ?? instanceId).trim();
@@ -2433,6 +2448,8 @@ export default function HomePage() {
       }
     } catch (e: any) {
       setServerOpStatus(String(e?.message || e));
+    } finally {
+      setGameActionBusy(false);
     }
   }
 
@@ -2557,6 +2574,7 @@ export default function HomePage() {
     deleteServer,
     frpOpStatus,
     serverOpStatus,
+    gameActionBusy,
     instanceStatus,
     frpStatus,
     localHost,

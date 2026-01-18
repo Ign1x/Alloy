@@ -21,6 +21,7 @@ export default function GamesView() {
     deleteServer,
     frpOpStatus,
     serverOpStatus,
+    gameActionBusy,
     instanceStatus,
     frpStatus,
     localHost,
@@ -41,7 +42,7 @@ export default function GamesView() {
   } = useAppCtx();
 
   const running = !!instanceStatus?.running;
-  const canControl = !!selectedDaemon?.connected && !!instanceId.trim();
+  const canControl = !!selectedDaemon?.connected && !!instanceId.trim() && !gameActionBusy;
 
   const [logQuery, setLogQuery] = useState<string>("");
   const [autoScroll, setAutoScroll] = useState<boolean>(true);
@@ -127,7 +128,7 @@ export default function GamesView() {
 
           <div className="toolbarRight">
             <div className="btnGroup">
-              <button type="button" className="iconBtn" onClick={openInstallModal} disabled={!selectedDaemon?.connected}>
+              <button type="button" className="iconBtn" onClick={openInstallModal} disabled={!selectedDaemon?.connected || gameActionBusy}>
                 <Icon name="plus" />
                 Install
               </button>
@@ -139,7 +140,7 @@ export default function GamesView() {
                 onClick={() => (running ? stopServer() : startServer())}
                 disabled={!canControl}
               >
-                {running ? "Stop" : "Start"}
+                {gameActionBusy ? "Working..." : running ? "Stop" : "Start"}
               </button>
               <Select
                 value=""
@@ -160,7 +161,9 @@ export default function GamesView() {
                   { value: "delete", label: "Delete", disabled: !canControl },
                 ]}
                 style={{ width: 150 }}
+                disabled={!selectedDaemon?.connected || gameActionBusy}
               />
+              {gameActionBusy ? <span className="badge">busy</span> : null}
             </div>
           </div>
         </div>
