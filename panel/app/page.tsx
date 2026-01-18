@@ -1209,11 +1209,8 @@ export default function HomePage() {
     }
     setJarCandidatesStatus("Scanning jars...");
     try {
-      const out = await callOkCommand("fs_list", { path: inst }, 30_000);
-      const jars = (out.entries || [])
-        .filter((e: any) => !e?.isDir && e?.name && String(e.name).toLowerCase().endsWith(".jar"))
-        .map((e: any) => String(e.name))
-        .sort((a: string, b: string) => a.localeCompare(b));
+      const out = await callOkCommand("mc_detect_jar", { instance_id: inst }, 30_000);
+      const jars = (Array.isArray(out?.jars) ? out.jars : []).map((j: any) => String(j || "")).filter(Boolean);
       setJarCandidates(jars);
       setJarCandidatesStatus(jars.length ? "" : "No .jar files found");
     } catch (e: any) {
@@ -2171,74 +2168,9 @@ export default function HomePage() {
   async function pickJarFromInstanceRoot(inst: string, fallback: string) {
     const fb = normalizeJarPath(inst, fallback);
     try {
-      const skipDirs = new Set([
-        "mods",
-        "plugins",
-        "libraries",
-        "config",
-        "world",
-        "logs",
-        "crash-reports",
-        "resourcepacks",
-        "shaderpacks",
-        ".elegantmc_tmp",
-        "_backups",
-      ]);
-      const jars: string[] = [];
-      const stack: { abs: string; rel: string; depth: number }[] = [{ abs: inst, rel: "", depth: 0 }];
-      let visitedDirs = 0;
-      const maxDirs = 260;
-      const maxDepth = 4;
-
-      while (stack.length) {
-        const cur = stack.pop()!;
-        visitedDirs++;
-        if (visitedDirs > maxDirs) break;
-
-        const out = await callOkCommand("fs_list", { path: cur.abs }, 30_000);
-        const entries = Array.isArray(out?.entries) ? out.entries : [];
-
-        for (const e of entries) {
-          const name = String(e?.name || "").trim();
-          if (!name || name === "." || name === "..") continue;
-          const lower = name.toLowerCase();
-          if (e?.isDir) {
-            if (skipDirs.has(lower)) continue;
-            if (cur.depth >= maxDepth) continue;
-            stack.push({ abs: joinRelPath(cur.abs, name), rel: joinRelPath(cur.rel, name), depth: cur.depth + 1 });
-            continue;
-          }
-          if (!lower.endsWith(".jar")) continue;
-          const rel = cur.rel ? joinRelPath(cur.rel, name) : name;
-          jars.push(rel);
-        }
-      }
-
-      const exists = (p: string) => jars.includes(p);
-      if (fb && exists(fb)) return fb;
-
-      const score = (p: string) => {
-        const base = p.split("/").pop() || p;
-        const lower = base.toLowerCase();
-        let s = 0;
-        if (lower.includes("installer")) s -= 120;
-        if (lower.includes("client")) s -= 40;
-        if (lower.includes("shim")) s += 70;
-        if (lower === "server.jar") s += 100;
-        if (lower === "fabric-server-launch.jar") s += 90;
-        if (lower === "quilt-server-launch.jar") s += 80;
-        if (lower.includes("neoforge") || lower.includes("neo-forge")) s += 24;
-        if (lower.includes("forge")) s += 20;
-        if (/\bserver\b/i.test(lower)) s += 40;
-        if (/\blaunch\b/i.test(lower)) s += 30;
-        // Prefer jars closer to root.
-        const depth = p.split("/").length - 1;
-        s += Math.max(0, 12 - depth);
-        return s;
-      };
-
-      jars.sort((a, b) => score(b) - score(a) || a.localeCompare(b));
-      if (jars.length) return jars[0];
+      const out = await callOkCommand("mc_detect_jar", { instance_id: inst }, 30_000);
+      const best = String(out?.best || "").trim();
+      if (best) return normalizeJarPath(inst, best);
     } catch {
       // ignore
     }
@@ -4610,7 +4542,7 @@ export default function HomePage() {
                         <Icon name="refresh" />
                       </button>
                     </div>
-                    <div className="hint">扫描 servers/&lt;instance&gt;/ 顶层的 .jar（不递归子目录）</div>
+                    <div className="hint">递归扫描 servers/&lt;instance&gt;/ 下的 .jar（跳过 mods/libraries/world 等目录）</div>
                   </div>
                   <div className="field">
                     <label>Java (optional)</label>

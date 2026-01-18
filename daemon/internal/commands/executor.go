@@ -329,6 +329,8 @@ func (e *Executor) Execute(ctx context.Context, cmd protocol.Command) protocol.C
 		return ok(map[string]any{"pong": true})
 	case "mc_templates":
 		return e.mcTemplates()
+	case "mc_detect_jar":
+		return e.mcDetectJar(cmd)
 	case "mc_backup":
 		return e.mcBackup(ctx, cmd)
 	case "mc_restore":

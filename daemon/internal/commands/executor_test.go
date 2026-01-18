@@ -310,3 +310,31 @@ func TestExecutor_MCTemplates(t *testing.T) {
 		t.Fatalf("expected templates key")
 	}
 }
+
+func TestExecutor_MCDetectJar_PicksServerJar(t *testing.T) {
+	ex, _, serversRoot := newTestExecutor(t)
+	ctx := context.Background()
+
+	instDir := filepath.Join(serversRoot, "server1")
+	if err := os.MkdirAll(filepath.Join(instDir, "sub"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(instDir, "server.jar"), []byte("jar"), 0o644); err != nil {
+		t.Fatalf("write server.jar: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(instDir, "sub", "other.jar"), []byte("jar2"), 0o644); err != nil {
+		t.Fatalf("write other.jar: %v", err)
+	}
+
+	res := ex.Execute(ctx, protocol.Command{
+		Name: "mc_detect_jar",
+		Args: map[string]any{"instance_id": "server1"},
+	})
+	if !res.OK {
+		t.Fatalf("mc_detect_jar failed: %s", res.Error)
+	}
+	best, _ := res.Output["best"].(string)
+	if best != "server.jar" {
+		t.Fatalf("best=%q want %q", best, "server.jar")
+	}
+}
