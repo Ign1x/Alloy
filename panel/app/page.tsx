@@ -594,6 +594,7 @@ export default function HomePage() {
   const [serverPropsWhitelist, setServerPropsWhitelist] = useState<boolean>(false);
   const [serverPropsSaving, setServerPropsSaving] = useState<boolean>(false);
   const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
+  const [settingsSearch, setSettingsSearch] = useState<string>("");
   const [settingsSnapshot, setSettingsSnapshot] = useState<GameSettingsSnapshot | null>(null);
   const [installOpen, setInstallOpen] = useState<boolean>(false);
   const [installRunning, setInstallRunning] = useState<boolean>(false);
@@ -754,6 +755,10 @@ export default function HomePage() {
     const ok = !jarErr && !portErr && !frpRemoteErr;
     return { jarErr, portErr, frpRemoteErr, ok };
   }, [jarPath, gamePort, frpRemotePort]);
+
+  const settingsSearchQ = settingsSearch.trim().toLowerCase();
+  const showSettingsField = (...terms: string[]) =>
+    !settingsSearchQ || terms.some((t) => String(t || "").toLowerCase().includes(settingsSearchQ));
 
   const nodeDetailsNode = useMemo(() => nodes.find((n: any) => n?.id === nodeDetailsId) || null, [nodes, nodeDetailsId]);
   const nodeDetailsHistory = useMemo(() => {
@@ -3249,6 +3254,7 @@ export default function HomePage() {
       frpProfileId,
       frpRemotePort,
     });
+    setSettingsSearch("");
 	    setSettingsOpen(true);
 	    setServerOpStatus("");
 	  }
@@ -5447,112 +5453,137 @@ export default function HomePage() {
                   </button>
                 </div>
 
-                <div className="grid2" style={{ alignItems: "start" }}>
-                  <div className="field">
-                    <label>Jar path (relative)</label>
-                    <input value={jarPath} onChange={(e) => setJarPath(e.target.value)} placeholder="server.jar" />
-                    {settingsValidation.jarErr ? (
-                      <div className="hint" style={{ color: "var(--danger)" }}>
-                        {settingsValidation.jarErr}
-                      </div>
-                    ) : (
-                      <div className="hint">相对路径（在 servers/&lt;instance&gt;/ 下），例如 server.jar</div>
-                    )}
-                  </div>
-                  <div className="field">
-                    <label>Pick a jar</label>
-                    <div className="row" style={{ gap: 8, alignItems: "center" }}>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <Select
-                          value=""
-                          onChange={(v) => setJarPath(v)}
-                          disabled={!jarCandidates.length}
-                          placeholder={jarCandidates.length ? "Select jar…" : jarCandidatesStatus || "No jars"}
-                          options={jarCandidates.map((j) => ({ value: j, label: j }))}
-                        />
-                      </div>
-                      <button
-                        type="button"
-                        className="iconBtn iconOnly"
-                        title="Refresh jar list"
-                        aria-label="Refresh jar list"
-                        onClick={() => refreshJarCandidates()}
-                        disabled={!selectedDaemon?.connected || !instanceId.trim()}
-                      >
-                        <Icon name="refresh" />
-                      </button>
-                    </div>
-                    <div className="hint">递归扫描 servers/&lt;instance&gt;/ 下的 .jar（跳过 mods/libraries/world 等目录）</div>
-                  </div>
-                  <div className="field">
-                    <label>Java (optional)</label>
-                    <input value={javaPath} onChange={(e) => setJavaPath(e.target.value)} placeholder="java / /opt/jdk21/bin/java" />
-                    <div className="hint">留空则由 Daemon 自动选择（推荐）</div>
-                  </div>
-                  <div className="field">
-                    <label>Memory</label>
-                    <div className="row">
-                      <input value={xms} onChange={(e) => setXms(e.target.value)} placeholder="Xms (e.g. 1G)" />
-                      <input value={xmx} onChange={(e) => setXmx(e.target.value)} placeholder="Xmx (e.g. 2G)" />
-                    </div>
-                  </div>
-                  <div className="field">
-                    <label>Port</label>
-                    <input
-                      type="number"
-                      value={Number.isFinite(gamePort) ? gamePort : 25565}
-                      onChange={(e) => setGamePort(Number(e.target.value))}
-                      min={1}
-                      max={65535}
-                    />
-                    {settingsValidation.portErr ? (
-                      <div className="hint" style={{ color: "var(--danger)" }}>
-                        {settingsValidation.portErr}
-                      </div>
-                    ) : (
-                      <div className="hint">保存后会写入 server.properties（运行中需要重启生效）</div>
-                    )}
-                  </div>
+                <div className="row" style={{ justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                  <input value={settingsSearch} onChange={(e) => setSettingsSearch(e.target.value)} placeholder="Search settings…" style={{ width: 260 }} />
+                  {settingsSearch ? (
+                    <button type="button" className="iconBtn" onClick={() => setSettingsSearch("")}>
+                      Clear
+                    </button>
+                  ) : null}
+                </div>
 
-                  <div className="field">
-                    <label>FRP</label>
-                    <label className="checkRow">
-                      <input type="checkbox" checked={enableFrp} onChange={(e) => setEnableFrp(e.target.checked)} />
-                      启动时自动开启
-                    </label>
-                  </div>
-                  <div className="field">
-                    <label>FRP Remote Port</label>
-                    <input
-                      type="number"
-                      value={Number.isFinite(frpRemotePort) ? frpRemotePort : 0}
-                      onChange={(e) => setFrpRemotePort(Number(e.target.value))}
-                      placeholder="25566"
-                      min={0}
-                      max={65535}
-                      disabled={!enableFrp}
-                    />
-                    {settingsValidation.frpRemoteErr ? (
-                      <div className="hint" style={{ color: "var(--danger)" }}>
-                        {settingsValidation.frpRemoteErr}
+                <div className="grid2" style={{ alignItems: "start" }}>
+                  {showSettingsField("jar path", "jar", "path", "server.jar") ? (
+                    <div className="field">
+                      <label>Jar path (relative)</label>
+                      <input value={jarPath} onChange={(e) => setJarPath(e.target.value)} placeholder="server.jar" />
+                      {settingsValidation.jarErr ? (
+                        <div className="hint" style={{ color: "var(--danger)" }}>
+                          {settingsValidation.jarErr}
+                        </div>
+                      ) : (
+                        <div className="hint">相对路径（在 servers/&lt;instance&gt;/ 下），例如 server.jar</div>
+                      )}
+                    </div>
+                  ) : null}
+                  {showSettingsField("pick a jar", "jar list", "scan", "refresh") ? (
+                    <div className="field">
+                      <label>Pick a jar</label>
+                      <div className="row" style={{ gap: 8, alignItems: "center" }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <Select
+                            value=""
+                            onChange={(v) => setJarPath(v)}
+                            disabled={!jarCandidates.length}
+                            placeholder={jarCandidates.length ? "Select jar…" : jarCandidatesStatus || "No jars"}
+                            options={jarCandidates.map((j) => ({ value: j, label: j }))}
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          className="iconBtn iconOnly"
+                          title="Refresh jar list"
+                          aria-label="Refresh jar list"
+                          onClick={() => refreshJarCandidates()}
+                          disabled={!selectedDaemon?.connected || !instanceId.trim()}
+                        >
+                          <Icon name="refresh" />
+                        </button>
                       </div>
-                    ) : (
-                      <div className="hint">填 0 表示不指定（由 FRP 服务端策略分配）</div>
-                    )}
-                  </div>
-                  <div className="field" style={{ gridColumn: "1 / -1" }}>
-                    <label>FRP Server</label>
-                    <Select
-                      value={frpProfileId}
-                      onChange={(v) => setFrpProfileId(v)}
-                      disabled={!enableFrp || !profiles.length}
-                      placeholder={profiles.length ? "Select FRP server…" : "No servers"}
-                      options={profiles.map((p) => ({
-                        value: p.id,
-                        label: `${p.name} (${p.server_addr}:${p.server_port})`,
-                      }))}
-                    />
-                  </div>
+                      <div className="hint">递归扫描 servers/&lt;instance&gt;/ 下的 .jar（跳过 mods/libraries/world 等目录）</div>
+                    </div>
+                  ) : null}
+                  {showSettingsField("java", "jre", "temurin") ? (
+                    <div className="field">
+                      <label>Java (optional)</label>
+                      <input value={javaPath} onChange={(e) => setJavaPath(e.target.value)} placeholder="java / /opt/jdk21/bin/java" />
+                      <div className="hint">留空则由 Daemon 自动选择（推荐）</div>
+                    </div>
+                  ) : null}
+                  {showSettingsField("memory", "xms", "xmx") ? (
+                    <div className="field">
+                      <label>Memory</label>
+                      <div className="row">
+                        <input value={xms} onChange={(e) => setXms(e.target.value)} placeholder="Xms (e.g. 1G)" />
+                        <input value={xmx} onChange={(e) => setXmx(e.target.value)} placeholder="Xmx (e.g. 2G)" />
+                      </div>
+                    </div>
+                  ) : null}
+                  {showSettingsField("port", "game port", "25565") ? (
+                    <div className="field">
+                      <label>Port</label>
+                      <input
+                        type="number"
+                        value={Number.isFinite(gamePort) ? gamePort : 25565}
+                        onChange={(e) => setGamePort(Number(e.target.value))}
+                        min={1}
+                        max={65535}
+                      />
+                      {settingsValidation.portErr ? (
+                        <div className="hint" style={{ color: "var(--danger)" }}>
+                          {settingsValidation.portErr}
+                        </div>
+                      ) : (
+                        <div className="hint">保存后会写入 server.properties（运行中需要重启生效）</div>
+                      )}
+                    </div>
+                  ) : null}
+
+                  {showSettingsField("frp", "proxy") ? (
+                    <div className="field">
+                      <label>FRP</label>
+                      <label className="checkRow">
+                        <input type="checkbox" checked={enableFrp} onChange={(e) => setEnableFrp(e.target.checked)} />
+                        启动时自动开启
+                      </label>
+                    </div>
+                  ) : null}
+                  {showSettingsField("frp remote port", "remote port", "25566") ? (
+                    <div className="field">
+                      <label>FRP Remote Port</label>
+                      <input
+                        type="number"
+                        value={Number.isFinite(frpRemotePort) ? frpRemotePort : 0}
+                        onChange={(e) => setFrpRemotePort(Number(e.target.value))}
+                        placeholder="25566"
+                        min={0}
+                        max={65535}
+                        disabled={!enableFrp}
+                      />
+                      {settingsValidation.frpRemoteErr ? (
+                        <div className="hint" style={{ color: "var(--danger)" }}>
+                          {settingsValidation.frpRemoteErr}
+                        </div>
+                      ) : (
+                        <div className="hint">填 0 表示不指定（由 FRP 服务端策略分配）</div>
+                      )}
+                    </div>
+                  ) : null}
+                  {showSettingsField("frp server", "server addr", "server port") ? (
+                    <div className="field" style={{ gridColumn: "1 / -1" }}>
+                      <label>FRP Server</label>
+                      <Select
+                        value={frpProfileId}
+                        onChange={(v) => setFrpProfileId(v)}
+                        disabled={!enableFrp || !profiles.length}
+                        placeholder={profiles.length ? "Select FRP server…" : "No servers"}
+                        options={profiles.map((p) => ({
+                          value: p.id,
+                          label: `${p.name} (${p.server_addr}:${p.server_port})`,
+                        }))}
+                      />
+                    </div>
+                  ) : null}
                 </div>
 
                 <div className="row" style={{ marginTop: 12 }}>

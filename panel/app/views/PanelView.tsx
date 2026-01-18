@@ -8,6 +8,7 @@ export default function PanelView() {
     useAppCtx();
 
   const [draft, setDraft] = useState<any>(panelSettings || null);
+  const [settingsQuery, setSettingsQuery] = useState<string>("");
   const [scheduleText, setScheduleText] = useState<string>("");
   const [scheduleStatus, setScheduleStatus] = useState<string>("");
   const [schedulePath, setSchedulePath] = useState<string>("");
@@ -27,6 +28,9 @@ export default function PanelView() {
       return { ok: false, error: String(e?.message || e), schedule: null };
     }
   }, [scheduleText]);
+
+  const q = settingsQuery.trim().toLowerCase();
+  const show = (...terms: string[]) => !q || terms.some((t) => String(t || "").toLowerCase().includes(q));
 
   async function fetchSchedule() {
     const out = await loadSchedule();
@@ -86,6 +90,7 @@ export default function PanelView() {
             </div>
           </div>
           <div className="toolbarRight">
+            <input value={settingsQuery} onChange={(e) => setSettingsQuery(e.target.value)} placeholder="Search settings…" style={{ width: 220 }} />
             <button type="button" className="iconBtn" onClick={refreshPanelSettings}>
               Reload
             </button>
@@ -97,105 +102,127 @@ export default function PanelView() {
         ) : (
           <>
             <div className="grid2" style={{ alignItems: "start" }}>
-              <div className="field">
-                <label>Brand Name</label>
-                <input value={String(draft.brand_name || "")} onChange={(e) => setDraft((d: any) => ({ ...d, brand_name: e.target.value }))} />
-                <div className="hint">显示在侧边栏与浏览器标题</div>
-              </div>
-              <div className="field">
-                <label>Brand Tagline</label>
-                <input
-                  value={String(draft.brand_tagline || "")}
-                  onChange={(e) => setDraft((d: any) => ({ ...d, brand_tagline: e.target.value }))}
-                />
-                <div className="hint">可留空</div>
-              </div>
-              <div className="field" style={{ gridColumn: "1 / -1" }}>
-                <label>Logo URL</label>
-                <input value={String(draft.logo_url || "")} onChange={(e) => setDraft((d: any) => ({ ...d, logo_url: e.target.value }))} />
-                <div className="hint">默认：/logo.svg（可填自定义 URL）</div>
-              </div>
-
-              <div className="field" style={{ gridColumn: "1 / -1" }}>
-                <label>CurseForge API Key (optional)</label>
-                <input
-                  type="password"
-                  value={String(draft.curseforge_api_key || "")}
-                  onChange={(e) => setDraft((d: any) => ({ ...d, curseforge_api_key: e.target.value }))}
-                  placeholder="cf_..."
-                  autoComplete="off"
-                />
-                <div className="hint">配置后可直接使用 CurseForge 搜索/下载安装（不需要再改环境变量）</div>
-              </div>
-
-              <div className="field">
-                <label>Default Version</label>
-                <input
-                  value={String(draft.defaults?.version || "")}
-                  onChange={(e) => setDraft((d: any) => ({ ...d, defaults: { ...(d.defaults || {}), version: e.target.value } }))}
-                  placeholder="1.20.1"
-                />
-              </div>
-              <div className="field">
-                <label>Default Game Port</label>
-                <input
-                  type="number"
-                  value={Number.isFinite(Number(draft.defaults?.game_port)) ? Number(draft.defaults.game_port) : 25565}
-                  onChange={(e) => setDraft((d: any) => ({ ...d, defaults: { ...(d.defaults || {}), game_port: Number(e.target.value) } }))}
-                  min={1}
-                  max={65535}
-                />
-              </div>
-              <div className="field">
-                <label>Default Memory</label>
-                <div className="row">
+              {show("brand name", "brand", "title", "sidebar") ? (
+                <div className="field">
+                  <label>Brand Name</label>
+                  <input value={String(draft.brand_name || "")} onChange={(e) => setDraft((d: any) => ({ ...d, brand_name: e.target.value }))} />
+                  <div className="hint">显示在侧边栏与浏览器标题</div>
+                </div>
+              ) : null}
+              {show("brand tagline", "tagline") ? (
+                <div className="field">
+                  <label>Brand Tagline</label>
                   <input
-                    value={String(draft.defaults?.xms || "")}
-                    onChange={(e) => setDraft((d: any) => ({ ...d, defaults: { ...(d.defaults || {}), xms: e.target.value } }))}
-                    placeholder="Xms (e.g. 1G)"
+                    value={String(draft.brand_tagline || "")}
+                    onChange={(e) => setDraft((d: any) => ({ ...d, brand_tagline: e.target.value }))}
                   />
+                  <div className="hint">可留空</div>
+                </div>
+              ) : null}
+              {show("logo", "logo url", "icon") ? (
+                <div className="field" style={{ gridColumn: "1 / -1" }}>
+                  <label>Logo URL</label>
+                  <input value={String(draft.logo_url || "")} onChange={(e) => setDraft((d: any) => ({ ...d, logo_url: e.target.value }))} />
+                  <div className="hint">默认：/logo.svg（可填自定义 URL）</div>
+                </div>
+              ) : null}
+
+              {show("curseforge", "api key", "cf_") ? (
+                <div className="field" style={{ gridColumn: "1 / -1" }}>
+                  <label>CurseForge API Key (optional)</label>
                   <input
-                    value={String(draft.defaults?.xmx || "")}
-                    onChange={(e) => setDraft((d: any) => ({ ...d, defaults: { ...(d.defaults || {}), xmx: e.target.value } }))}
-                    placeholder="Xmx (e.g. 2G)"
+                    type="password"
+                    value={String(draft.curseforge_api_key || "")}
+                    onChange={(e) => setDraft((d: any) => ({ ...d, curseforge_api_key: e.target.value }))}
+                    placeholder="cf_..."
+                    autoComplete="off"
+                  />
+                  <div className="hint">配置后可直接使用 CurseForge 搜索/下载安装（不需要再改环境变量）</div>
+                </div>
+              ) : null}
+
+              {show("default version", "version") ? (
+                <div className="field">
+                  <label>Default Version</label>
+                  <input
+                    value={String(draft.defaults?.version || "")}
+                    onChange={(e) => setDraft((d: any) => ({ ...d, defaults: { ...(d.defaults || {}), version: e.target.value } }))}
+                    placeholder="1.20.1"
                   />
                 </div>
-              </div>
-              <div className="field">
-                <label>Default EULA</label>
-                <label className="checkRow">
+              ) : null}
+              {show("default game port", "port", "25565") ? (
+                <div className="field">
+                  <label>Default Game Port</label>
                   <input
-                    type="checkbox"
-                    checked={draft.defaults?.accept_eula == null ? true : !!draft.defaults.accept_eula}
-                    onChange={(e) =>
-                      setDraft((d: any) => ({ ...d, defaults: { ...(d.defaults || {}), accept_eula: e.target.checked } }))
-                    }
+                    type="number"
+                    value={Number.isFinite(Number(draft.defaults?.game_port)) ? Number(draft.defaults.game_port) : 25565}
+                    onChange={(e) => setDraft((d: any) => ({ ...d, defaults: { ...(d.defaults || {}), game_port: Number(e.target.value) } }))}
+                    min={1}
+                    max={65535}
                   />
-                  auto write eula.txt
-                </label>
-              </div>
-              <div className="field">
-                <label>Default FRP</label>
-                <label className="checkRow">
+                </div>
+              ) : null}
+              {show("default memory", "memory", "xms", "xmx") ? (
+                <div className="field">
+                  <label>Default Memory</label>
+                  <div className="row">
+                    <input
+                      value={String(draft.defaults?.xms || "")}
+                      onChange={(e) => setDraft((d: any) => ({ ...d, defaults: { ...(d.defaults || {}), xms: e.target.value } }))}
+                      placeholder="Xms (e.g. 1G)"
+                    />
+                    <input
+                      value={String(draft.defaults?.xmx || "")}
+                      onChange={(e) => setDraft((d: any) => ({ ...d, defaults: { ...(d.defaults || {}), xmx: e.target.value } }))}
+                      placeholder="Xmx (e.g. 2G)"
+                    />
+                  </div>
+                </div>
+              ) : null}
+              {show("eula", "accept eula") ? (
+                <div className="field">
+                  <label>Default EULA</label>
+                  <label className="checkRow">
+                    <input
+                      type="checkbox"
+                      checked={draft.defaults?.accept_eula == null ? true : !!draft.defaults.accept_eula}
+                      onChange={(e) =>
+                        setDraft((d: any) => ({ ...d, defaults: { ...(d.defaults || {}), accept_eula: e.target.checked } }))
+                      }
+                    />
+                    auto write eula.txt
+                  </label>
+                </div>
+              ) : null}
+              {show("frp", "default frp") ? (
+                <div className="field">
+                  <label>Default FRP</label>
+                  <label className="checkRow">
+                    <input
+                      type="checkbox"
+                      checked={draft.defaults?.enable_frp == null ? true : !!draft.defaults.enable_frp}
+                      onChange={(e) =>
+                        setDraft((d: any) => ({ ...d, defaults: { ...(d.defaults || {}), enable_frp: e.target.checked } }))
+                      }
+                    />
+                    enable by default
+                  </label>
+                </div>
+              ) : null}
+              {show("frp remote port", "remote port", "25566") ? (
+                <div className="field">
+                  <label>Default FRP Remote Port</label>
                   <input
-                    type="checkbox"
-                    checked={draft.defaults?.enable_frp == null ? true : !!draft.defaults.enable_frp}
-                    onChange={(e) => setDraft((d: any) => ({ ...d, defaults: { ...(d.defaults || {}), enable_frp: e.target.checked } }))}
+                    type="number"
+                    value={Number.isFinite(Number(draft.defaults?.frp_remote_port)) ? Number(draft.defaults.frp_remote_port) : 25566}
+                    onChange={(e) => setDraft((d: any) => ({ ...d, defaults: { ...(d.defaults || {}), frp_remote_port: Number(e.target.value) } }))}
+                    min={0}
+                    max={65535}
                   />
-                  enable by default
-                </label>
-              </div>
-              <div className="field">
-                <label>Default FRP Remote Port</label>
-                <input
-                  type="number"
-                  value={Number.isFinite(Number(draft.defaults?.frp_remote_port)) ? Number(draft.defaults.frp_remote_port) : 25566}
-                  onChange={(e) => setDraft((d: any) => ({ ...d, defaults: { ...(d.defaults || {}), frp_remote_port: Number(e.target.value) } }))}
-                  min={0}
-                  max={65535}
-                />
-                <div className="hint">0 表示由服务端分配</div>
-              </div>
+                  <div className="hint">0 表示由服务端分配</div>
+                </div>
+              ) : null}
             </div>
 
             <div className="btnGroup" style={{ marginTop: 12, justifyContent: "flex-end" }}>
