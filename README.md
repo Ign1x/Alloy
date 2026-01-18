@@ -175,6 +175,13 @@ Panel 会优先用这个地址来展示 “Socket”（不影响实际监听端�
 - CurseForge 搜索/拉取需要 API Key：在 **Panel → CurseForge API Key** 填入即可（不需要再设置环境变量）。
 - 没有 API Key 时：用上面的 **URL + Resolve** 方案安装 server pack zip。
 
+## 备份与恢复（Backups / Restore）
+
+- 备份目录：`servers/_backups/<instance_id>/`（zip 文件）
+- 在 Panel 的 **Games → More → Backup / Restore…** 一键备份/恢复
+  - Backup 默认会先 Stop 再打包（更安全）
+  - Restore 会覆盖目标实例目录（会先停止实例），请谨慎操作
+
 ## Java 自动选择（重要）
 
 Minecraft 新版本会要求更高的 Java（例如 class file 65 对应 Java 21）。Daemon 在 `mc_start` 时会：
