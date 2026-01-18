@@ -35,6 +35,7 @@ export default function FilesView() {
     mkdirFsHere,
     createFileHere,
     renameFsEntry,
+    moveFsEntry,
     downloadFsEntry,
     deleteFsEntry,
   } = useAppCtx();
@@ -175,6 +176,9 @@ export default function FilesView() {
                     <div className="btnGroup" style={{ justifyContent: "flex-end" }}>
                       <button type="button" onClick={() => renameFsEntry(e)}>
                         Rename
+                      </button>
+                      <button type="button" onClick={() => moveFsEntry(e)}>
+                        Move
                       </button>
                       {!e.isDir ? (
                         <button type="button" className="iconBtn" onClick={() => downloadFsEntry(e)}>

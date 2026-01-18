@@ -1908,6 +1908,54 @@ export default function HomePage() {
     }
   }
 
+  async function moveFsEntry(entry: any) {
+    const name = String(entry?.name || "").trim();
+    if (!name) return;
+    const from = joinRelPath(fsPath, name);
+
+    const next = await promptDialog({
+      title: "Move",
+      message: `Move ${entry?.isDir ? "folder" : "file"}:\n${from}\n\nTarget path is relative to servers/ (use /).`,
+      defaultValue: from,
+      placeholder: "target/path",
+      okLabel: "Move",
+      cancelLabel: "Cancel",
+    });
+    if (next == null) return;
+    const toRaw = normalizeRelFilePath(next);
+    if (!toRaw) {
+      setFsStatus("invalid target path");
+      return;
+    }
+    const to = toRaw;
+    if (to === from) {
+      setFsStatus("No changes");
+      setTimeout(() => setFsStatus(""), 700);
+      return;
+    }
+
+    setFsStatus(`Moving ${from} -> ${to} ...`);
+    try {
+      try {
+        await callOkCommand("fs_stat", { path: to }, 10_000);
+        setFsStatus("destination exists");
+        return;
+      } catch {
+        // ok: target not found
+      }
+      await callOkCommand("fs_move", { from, to }, 60_000);
+      if (fsSelectedFile === from || fsSelectedFile.startsWith(`${from}/`)) {
+        const suffix = fsSelectedFile.slice(from.length);
+        setFsSelectedFile(`${to}${suffix}`);
+      }
+      await refreshFsNow();
+      setFsStatus("Moved");
+      setTimeout(() => setFsStatus(""), 900);
+    } catch (e: any) {
+      setFsStatus(String(e?.message || e));
+    }
+  }
+
   async function downloadFsEntry(entry: any) {
     const name = String(entry?.name || "").trim();
     if (!name || entry?.isDir) return;
@@ -3849,6 +3897,7 @@ export default function HomePage() {
     mkdirFsHere,
     createFileHere,
     renameFsEntry,
+    moveFsEntry,
     downloadFsEntry,
     deleteFsEntry,
 
