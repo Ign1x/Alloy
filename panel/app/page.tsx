@@ -2365,6 +2365,45 @@ export default function HomePage() {
     await uploadFilesNow([uploadFile]);
   }
 
+  async function uploadZipAndExtractHere() {
+    if (!uploadFile) {
+      setUploadStatus("请选择 zip 文件");
+      return;
+    }
+    if (!selected) {
+      setUploadStatus("请选择 Daemon");
+      return;
+    }
+    if (!fsPath) {
+      setUploadStatus("请选择一个目标文件夹（不能解压到 servers/ 根目录）");
+      return;
+    }
+
+    const file = uploadFile;
+    const name = String(file.name || "").toLowerCase();
+    if (!name.endsWith(".zip")) {
+      setUploadStatus("只支持 .zip 文件");
+      return;
+    }
+
+    const destPath = joinRelPath(fsPath, file.name);
+    try {
+      await uploadFilesNow([file]);
+      setUploadStatus(`Extracting ${destPath} ...`);
+      await callOkCommand("fs_unzip", { zip_path: destPath, dest_dir: fsPath, instance_id: fsPath, strip_top_level: false }, 10 * 60_000);
+      try {
+        await callOkCommand("fs_delete", { path: destPath }, 60_000);
+      } catch {
+        // ignore
+      }
+      await refreshFsNow();
+      setUploadStatus("Extracted");
+      setTimeout(() => setUploadStatus(""), 1200);
+    } catch (e: any) {
+      setUploadStatus(String(e?.message || e));
+    }
+  }
+
   function suggestInstanceId(existing: string[]) {
     const set = new Set((existing || []).map((v) => String(v || "").trim()).filter(Boolean));
     for (let i = 1; i <= 999; i++) {
@@ -4091,6 +4130,7 @@ export default function HomePage() {
     setUploadFile,
     uploadSelectedFile,
     uploadFilesNow,
+    uploadZipAndExtractHere,
     uploadStatus,
     refreshFsNow,
     mkdirFsHere,

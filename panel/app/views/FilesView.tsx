@@ -27,6 +27,7 @@ export default function FilesView() {
     setUploadFile,
     uploadSelectedFile,
     uploadFilesNow,
+    uploadZipAndExtractHere,
     uploadStatus,
     joinRelPath,
     parentRelPath,
@@ -173,6 +174,14 @@ export default function FilesView() {
           />
           <button type="button" onClick={uploadSelectedFile} disabled={!uploadFile}>
             Upload
+          </button>
+          <button
+            type="button"
+            onClick={uploadZipAndExtractHere}
+            disabled={!uploadFile || !String(uploadFile?.name || "").toLowerCase().endsWith(".zip") || !fsPath}
+            title={fsPath ? "" : "Cannot extract to servers/ root; select a folder first"}
+          >
+            Upload & Extract (.zip)
           </button>
           {uploadFile ? (
             <span className="muted">
