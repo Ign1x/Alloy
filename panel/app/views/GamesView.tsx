@@ -69,6 +69,7 @@ export default function GamesView() {
   const [logQuery, setLogQuery] = useState<string>("");
   const [logRegex, setLogRegex] = useState<boolean>(false);
   const [logLevelFilter, setLogLevelFilter] = useState<"all" | "warn" | "error">("all");
+  const [logTimeMode, setLogTimeMode] = useState<"local" | "relative">("local");
   const [autoScroll, setAutoScroll] = useState<boolean>(true);
   const [wrapLogs, setWrapLogs] = useState<boolean>(true);
   const [highlightLogs, setHighlightLogs] = useState<boolean>(true);
@@ -252,8 +253,23 @@ export default function GamesView() {
   const logLines = useMemo<RenderLogLine[]>(() => {
     const list = filteredLogs.length ? filteredLogs.slice(-2000) : [];
     if (!list.length) return [{ text: "<no logs>", level: "" }];
+    const baseTs =
+      logTimeMode === "relative"
+        ? (() => {
+            for (const l of list) {
+              const ts = Number((l as any)?.ts_unix || 0);
+              if (Number.isFinite(ts) && ts > 0) return ts;
+            }
+            return 0;
+          })()
+        : 0;
     const mapped = list.map((l: any) => {
-      const ts = l.ts_unix ? new Date(l.ts_unix * 1000).toLocaleTimeString() : "--:--:--";
+      const tsUnix = Number(l.ts_unix || 0);
+      let ts = "--:--:--";
+      if (Number.isFinite(tsUnix) && tsUnix > 0) {
+        if (logTimeMode === "relative" && baseTs > 0) ts = `+${Math.max(0, Math.floor(tsUnix - baseTs))}s`;
+        else ts = new Date(tsUnix * 1000).toLocaleTimeString();
+      }
       const src = l.source || "daemon";
       const stream = l.stream || "";
       const inst = l.instance ? `(${l.instance})` : "";
@@ -272,7 +288,7 @@ export default function GamesView() {
       return out.length ? out : [{ text: "<no logs>", level: "" }];
     }
     return mapped;
-  }, [filteredLogs, logLevelFilter]);
+  }, [filteredLogs, logLevelFilter, logTimeMode]);
 
   useEffect(() => {
     if (!autoScroll) return;
@@ -833,6 +849,17 @@ export default function GamesView() {
                   { value: "all", label: "All" },
                   { value: "warn", label: "Warn" },
                   { value: "error", label: "Error" },
+                ]}
+              />
+            </div>
+            <div className="field" style={{ minWidth: 160 }}>
+              <label>Time</label>
+              <Select
+                value={logTimeMode}
+                onChange={(v) => setLogTimeMode(v as any)}
+                options={[
+                  { value: "local", label: "Local" },
+                  { value: "relative", label: "Relative" },
                 ]}
               />
             </div>
