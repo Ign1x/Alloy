@@ -880,6 +880,24 @@ button.linkBtn:hover {
   box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.14);
 }
 
+.busySpinner {
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  border: 2px solid rgba(148, 163, 184, 0.35);
+  border-top-color: rgba(139, 92, 246, 0.95);
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .kv {
   display: flex;
   flex-direction: column;

@@ -652,6 +652,8 @@ export default function HomePage() {
   const [frpRemotePort, setFrpRemotePort] = useState<number>(25566);
   const [frpOpStatus, setFrpOpStatus] = useState<string>("");
 
+  const globalBusy = gameActionBusy || instanceUsageBusy || installRunning || serverPropsSaving || cfResolveBusy;
+
   // Node management
   const [nodes, setNodes] = useState<any[]>([]);
   const [nodesStatus, setNodesStatus] = useState<string>("");
@@ -4597,6 +4599,7 @@ export default function HomePage() {
 	                className={`statusDot ${selectedDaemon?.connected ? "ok" : ""}`}
 	                title={selectedDaemon?.connected ? "online" : "offline"}
 	              />
+                {globalBusy ? <span className="busySpinner" title="Working…" aria-hidden="true" /> : null}
 	            </div>
 	          </div>
 	        </div>
