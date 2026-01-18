@@ -70,6 +70,7 @@ export default function GamesView() {
   const [pausedLogs, setPausedLogs] = useState<any[] | null>(null);
   const logScrollRef = useRef<HTMLDivElement | null>(null);
   const [logScrollTop, setLogScrollTop] = useState<number>(0);
+  const [logNearBottom, setLogNearBottom] = useState<boolean>(true);
 
   const socketText = useMemo(() => {
     if (frpStatus?.running && frpStatus.remote_port) {
@@ -156,7 +157,14 @@ export default function GamesView() {
     const el = logScrollRef.current;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
-  }, [logLines.length, autoScroll]);
+  }, [autoScroll]);
+
+  useEffect(() => {
+    if (!autoScroll || !logNearBottom) return;
+    const el = logScrollRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [logLines.length, autoScroll, logNearBottom]);
 
   const logVirtual = useMemo<{
     start: number;
@@ -619,7 +627,12 @@ export default function GamesView() {
         <div
           ref={logScrollRef}
           style={{ maxHeight: 640, overflow: "auto" }}
-          onScroll={(e) => setLogScrollTop(e.currentTarget.scrollTop)}
+          onScroll={(e) => {
+            const el = e.currentTarget;
+            setLogScrollTop(el.scrollTop);
+            const remaining = el.scrollHeight - (el.scrollTop + el.clientHeight);
+            setLogNearBottom(remaining <= 64);
+          }}
         >
           <div style={{ height: logVirtual.topPad }} />
           <pre style={{ margin: 0 }}>
