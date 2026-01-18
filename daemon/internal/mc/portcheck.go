@@ -64,13 +64,26 @@ func checkTCPPortAvailable(host string, port int) error {
 	if port < 1 || port > 65535 {
 		return errors.New("invalid port")
 	}
-	addr := net.JoinHostPort(strings.TrimSpace(host), strconv.Itoa(port))
+	host = strings.TrimSpace(host)
+	addr := net.JoinHostPort(host, strconv.Itoa(port))
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
-		if errors.Is(err, syscall.EADDRINUSE) {
-			return fmt.Errorf("port %d is already in use", port)
+		hints := []string{
+			"check other running servers using this port",
+			"if running in Docker, confirm published port range (default 25565-25600)",
+			"edit servers/<instance>/server.properties server-port to a free port",
 		}
-		return fmt.Errorf("cannot listen on %s: %v", addr, err)
+		if host != "" {
+			hints = append(hints, "server-ip is set; usually leave it empty (especially in Docker)")
+		}
+
+		if errors.Is(err, syscall.EADDRINUSE) {
+			return fmt.Errorf("port check failed: %s is already in use (hints: %s)", addr, strings.Join(hints, "; "))
+		}
+		if errors.Is(err, syscall.EACCES) {
+			return fmt.Errorf("port check failed: permission denied for %s (hints: %s)", addr, strings.Join(hints, "; "))
+		}
+		return fmt.Errorf("port check failed: cannot listen on %s: %v (hints: %s)", addr, err, strings.Join(hints, "; "))
 	}
 	_ = ln.Close()
 	return nil
