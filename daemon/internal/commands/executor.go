@@ -179,6 +179,18 @@ func (e *Executor) mcBackup(ctx context.Context, cmd protocol.Command) protocol.
 		return fail(err.Error())
 	}
 	e.emitInstall(instanceID, fmt.Sprintf("backup done: %d files -> %s", files, destRel))
+
+	if keepLast, err := asInt(cmd.Args["keep_last"]); err == nil && keepLast > 0 {
+		if keepLast > 1000 {
+			keepLast = 1000
+		}
+		dirAbs := filepath.Dir(destAbs)
+		if removed, kept, total, err := pruneBackupZips(dirAbs, keepLast); err == nil {
+			if removed > 0 {
+				e.emitInstall(instanceID, fmt.Sprintf("backup prune: kept=%d total=%d removed=%d", kept, total, removed))
+			}
+		}
+	}
 	return ok(map[string]any{"instance_id": instanceID, "path": destRel, "files": files})
 }
 
@@ -341,6 +353,8 @@ func (e *Executor) Execute(ctx context.Context, cmd protocol.Command) protocol.C
 		return e.mcJavaCacheRemove(cmd)
 	case "mc_backup":
 		return e.mcBackup(ctx, cmd)
+	case "mc_backup_prune":
+		return e.mcBackupPrune(cmd)
 	case "mc_restore":
 		return e.mcRestore(ctx, cmd)
 	case "schedule_get":
