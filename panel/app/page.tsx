@@ -93,7 +93,7 @@ type FrpProfile = {
 
 type Tab = "nodes" | "games" | "frp" | "files" | "panel" | "advanced";
 
-type ThemeMode = "auto" | "dark" | "light";
+type ThemeMode = "auto" | "dark" | "light" | "contrast";
 
 type GameSettingsSnapshot = {
   jarPath: string;
@@ -842,11 +842,11 @@ export default function HomePage() {
     return fsFileText !== fsFileTextSaved;
   }, [fsSelectedFile, fsSelectedFileMode, fsFileText, fsFileTextSaved]);
 
-  // Theme (auto/light/dark)
+  // Theme (auto/light/dark/contrast)
   useEffect(() => {
     try {
       const saved = localStorage.getItem("elegantmc_theme_mode") || "auto";
-      if (saved === "dark" || saved === "light" || saved === "auto") setThemeMode(saved);
+      if (saved === "dark" || saved === "light" || saved === "contrast" || saved === "auto") setThemeMode(saved);
     } catch {
       // ignore
     }
@@ -882,7 +882,7 @@ export default function HomePage() {
   }, [locale]);
 
   useEffect(() => {
-    const mode: ThemeMode = themeMode === "dark" || themeMode === "light" ? themeMode : "auto";
+    const mode: ThemeMode = themeMode === "dark" || themeMode === "light" || themeMode === "contrast" ? themeMode : "auto";
     try {
       localStorage.setItem("elegantmc_theme_mode", mode);
     } catch {
@@ -4998,6 +4998,7 @@ export default function HomePage() {
 	                      { value: "auto", label: "Auto (System)" },
 	                      { value: "light", label: "Light" },
 	                      { value: "dark", label: "Dark" },
+	                      { value: "contrast", label: "High Contrast" },
 	                    ]}
 	                  />
 	                </div>
