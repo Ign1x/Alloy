@@ -76,6 +76,9 @@ export default function GamesView() {
 
   const [cmdHistory, setCmdHistory] = useState<string[]>([]);
   const [cmdHistoryIdx, setCmdHistoryIdx] = useState<number>(0);
+  const [gameQueryRaw, setGameQueryRaw] = useState<string>("");
+  const [gameQuery, setGameQuery] = useState<string>("");
+  const [statusFilter, setStatusFilter] = useState<"all" | "running" | "stopped">("all");
   const [tagFilter, setTagFilter] = useState<string>("");
   const [tagsDraft, setTagsDraft] = useState<string>("");
 
@@ -86,6 +89,22 @@ export default function GamesView() {
     const ip = localHost || "127.0.0.1";
     return `${ip}:${Math.round(Number(gamePort || 25565))}`;
   }, [frpStatus, localHost, gamePort]);
+
+  useEffect(() => {
+    const t = window.setTimeout(() => setGameQuery(gameQueryRaw), 150);
+    return () => window.clearTimeout(t);
+  }, [gameQueryRaw]);
+
+  const runningById = useMemo(() => {
+    const list = Array.isArray((selectedDaemon as any)?.heartbeat?.instances) ? (selectedDaemon as any).heartbeat.instances : [];
+    const out: Record<string, boolean> = {};
+    for (const it of list) {
+      const id = String((it as any)?.id || "").trim();
+      if (!id) continue;
+      out[id] = !!(it as any)?.running;
+    }
+    return out;
+  }, [selectedDaemon]);
 
   const currentTags = useMemo(() => {
     const inst = String(instanceId || "").trim();
@@ -108,14 +127,31 @@ export default function GamesView() {
   }, [serverDirs, instanceTagsById]);
 
   const filteredServerDirs = useMemo(() => {
-    const q = String(tagFilter || "").trim().toLowerCase();
-    if (!q) return serverDirs;
+    const tag = String(tagFilter || "").trim().toLowerCase();
+    const q = String(gameQuery || "").trim().toLowerCase();
+    const sf = statusFilter;
     return (serverDirs || []).filter((id: string) => {
-      const list = (instanceTagsById && (instanceTagsById as any)[id]) || [];
-      if (!Array.isArray(list)) return false;
-      return list.some((t: any) => String(t || "").trim().toLowerCase() === q);
+      const tags = (instanceTagsById && (instanceTagsById as any)[id]) || [];
+      const tagList = Array.isArray(tags) ? tags.map((s: any) => String(s || "").trim()).filter(Boolean) : [];
+
+      if (tag) {
+        if (!tagList.some((t: string) => t.toLowerCase() === tag)) return false;
+      }
+
+      if (sf !== "all") {
+        const running = !!runningById[id];
+        if (sf === "running" && !running) return false;
+        if (sf === "stopped" && running) return false;
+      }
+
+      if (q) {
+        const hay = [id, ...tagList].join(" ").toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+
+      return true;
     });
-  }, [serverDirs, instanceTagsById, tagFilter]);
+  }, [serverDirs, instanceTagsById, tagFilter, gameQuery, statusFilter, runningById]);
 
   useEffect(() => {
     setTagsDraft(currentTags.join(", "));
@@ -307,10 +343,30 @@ export default function GamesView() {
                 options={filteredServerDirs.map((id: string) => {
                   const tags = (instanceTagsById && (instanceTagsById as any)[id]) || [];
                   const list = Array.isArray(tags) ? tags.map((s: any) => String(s || "").trim()).filter(Boolean) : [];
-                  const label = list.length ? `${id} · ${list.join(", ")}` : id;
+                  const running = !!runningById[id];
+                  const label = list.length ? `${id}${running ? " (running)" : ""} · ${list.join(", ")}` : `${id}${running ? " (running)" : ""}`;
                   return { value: id, label };
                 })}
               />
+              <div className="row" style={{ marginTop: 8, gap: 10, alignItems: "center" }}>
+                <input
+                  value={gameQueryRaw}
+                  onChange={(e: any) => setGameQueryRaw(e.target.value)}
+                  placeholder="Search games…"
+                  style={{ flex: 1, minWidth: 140 }}
+                />
+                <div style={{ width: 170 }}>
+                  <Select
+                    value={statusFilter}
+                    onChange={(v) => setStatusFilter(v as any)}
+                    options={[
+                      { value: "all", label: "All statuses" },
+                      { value: "running", label: "Running" },
+                      { value: "stopped", label: "Stopped" },
+                    ]}
+                  />
+                </div>
+              </div>
               <div className="row" style={{ marginTop: 8, justifyContent: "space-between", alignItems: "center", gap: 10 }}>
                 <span className="hint">Tag filter</span>
                 <div style={{ width: 220 }}>
@@ -324,7 +380,7 @@ export default function GamesView() {
               </div>
               <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
                 <div className="hint">
-                  installed: {serverDirs.length}
+                  installed: {serverDirs.length} · shown: {filteredServerDirs.length}
                   {serverDirsStatus ? ` · ${serverDirsStatus}` : ""}
                 </div>
                 <button
