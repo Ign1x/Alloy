@@ -569,6 +569,14 @@ export default function HomePage() {
   const [restoreStatus, setRestoreStatus] = useState<string>("");
   const [restoreCandidates, setRestoreCandidates] = useState<string[]>([]);
   const [restoreZipPath, setRestoreZipPath] = useState<string>("");
+  const [serverPropsOpen, setServerPropsOpen] = useState<boolean>(false);
+  const [serverPropsStatus, setServerPropsStatus] = useState<string>("");
+  const [serverPropsRaw, setServerPropsRaw] = useState<string>("");
+  const [serverPropsMotd, setServerPropsMotd] = useState<string>("");
+  const [serverPropsMaxPlayers, setServerPropsMaxPlayers] = useState<number>(20);
+  const [serverPropsOnlineMode, setServerPropsOnlineMode] = useState<boolean>(true);
+  const [serverPropsWhitelist, setServerPropsWhitelist] = useState<boolean>(false);
+  const [serverPropsSaving, setServerPropsSaving] = useState<boolean>(false);
   const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
   const [settingsSnapshot, setSettingsSnapshot] = useState<GameSettingsSnapshot | null>(null);
   const [installOpen, setInstallOpen] = useState<boolean>(false);
@@ -2945,6 +2953,65 @@ export default function HomePage() {
     }
   }
 
+  async function openServerPropertiesEditor() {
+    if (!selectedDaemon?.connected) {
+      setServerOpStatus("daemon offline");
+      return;
+    }
+    const inst = instanceId.trim();
+    if (!inst) {
+      setServerOpStatus("instance_id 不能为空");
+      return;
+    }
+    const path = joinRelPath(inst, "server.properties");
+    setServerPropsOpen(true);
+    setServerPropsSaving(false);
+    setServerPropsStatus("Loading...");
+    try {
+      const out = await callOkCommand("fs_read", { path }, 10_000);
+      const text = b64DecodeUtf8(String(out?.b64 || ""));
+      setServerPropsRaw(text);
+      setServerPropsMotd(getPropValue(text, "motd") ?? "");
+      setServerPropsMaxPlayers(Math.max(1, Math.min(1000, Math.round(Number(getPropValue(text, "max-players") ?? "20")) || 20)));
+      setServerPropsOnlineMode(String(getPropValue(text, "online-mode") ?? "true").toLowerCase() !== "false");
+      setServerPropsWhitelist(String(getPropValue(text, "white-list") ?? "false").toLowerCase() === "true");
+      setServerPropsStatus("");
+    } catch (e: any) {
+      setServerPropsStatus(String(e?.message || e));
+    }
+  }
+
+  async function saveServerPropertiesEditor() {
+    if (serverPropsSaving) return;
+    const inst = instanceId.trim();
+    if (!inst) {
+      setServerPropsStatus("instance_id 不能为空");
+      return;
+    }
+    const path = joinRelPath(inst, "server.properties");
+
+    const maxPlayers = Math.max(1, Math.min(1000, Math.round(Number(serverPropsMaxPlayers) || 0)));
+    const motd = String(serverPropsMotd || "");
+
+    setServerPropsSaving(true);
+    setServerPropsStatus("Saving...");
+    try {
+      let next = String(serverPropsRaw || "");
+      next = upsertProp(next, "motd", motd);
+      next = upsertProp(next, "max-players", String(maxPlayers));
+      next = upsertProp(next, "online-mode", serverPropsOnlineMode ? "true" : "false");
+      next = upsertProp(next, "white-list", serverPropsWhitelist ? "true" : "false");
+      await callOkCommand("fs_write", { path, b64: b64EncodeUtf8(next) }, 10_000);
+      setServerPropsRaw(next);
+      setServerPropsStatus("Saved");
+      setTimeout(() => setServerPropsStatus(""), 900);
+    } catch (e: any) {
+      setServerPropsStatus(String(e?.message || e));
+    } finally {
+      setServerPropsSaving(false);
+    }
+  }
+
   async function sendConsoleLine() {
     if (!consoleLine.trim()) return;
     try {
@@ -3184,6 +3251,7 @@ export default function HomePage() {
     deleteServer,
     backupServer,
     openRestoreModal,
+    openServerPropertiesEditor,
     backupZips: restoreCandidates,
     backupZipsStatus: restoreStatus,
     refreshBackupZips,
@@ -4309,6 +4377,98 @@ export default function HomePage() {
                   <button type="button" className="dangerBtn" onClick={restoreFromBackup} disabled={!restoreZipPath || gameActionBusy}>
                     Restore
                   </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
+
+          {serverPropsOpen ? (
+            <div className="modalOverlay" onClick={() => (!serverPropsSaving ? setServerPropsOpen(false) : null)}>
+              <div className="modal" style={{ width: "min(760px, 100%)" }} onClick={(e) => e.stopPropagation()}>
+                <div className="modalHeader">
+                  <div>
+                    <div style={{ fontWeight: 800 }}>server.properties</div>
+                    <div className="hint">
+                      game: <code>{instanceId.trim() || "-"}</code> · path: <code>{joinRelPath(instanceId.trim() || ".", "server.properties")}</code>
+                    </div>
+                    <div className="hint">只提供安全/常用字段编辑（其余内容保持原样）。</div>
+                  </div>
+                  <button type="button" onClick={() => setServerPropsOpen(false)} disabled={serverPropsSaving}>
+                    Close
+                  </button>
+                </div>
+
+                <div className="grid2" style={{ alignItems: "start" }}>
+                  <div className="field" style={{ gridColumn: "1 / -1" }}>
+                    <label>MOTD</label>
+                    <input value={serverPropsMotd} onChange={(e) => setServerPropsMotd(e.target.value)} placeholder="A Minecraft Server" />
+                  </div>
+                  <div className="field">
+                    <label>Max players</label>
+                    <input
+                      type="number"
+                      value={Number.isFinite(serverPropsMaxPlayers) ? serverPropsMaxPlayers : 20}
+                      onChange={(e) => setServerPropsMaxPlayers(Number(e.target.value))}
+                      min={1}
+                      max={1000}
+                    />
+                  </div>
+                  <div className="field">
+                    <label>Online mode</label>
+                    <label className="checkRow">
+                      <input
+                        type="checkbox"
+                        checked={serverPropsOnlineMode}
+                        onChange={(e) => setServerPropsOnlineMode(e.target.checked)}
+                      />
+                      online-mode
+                    </label>
+                    <div className="hint">关闭后为离线模式（不安全，不建议公网使用）。</div>
+                  </div>
+                  <div className="field">
+                    <label>Whitelist</label>
+                    <label className="checkRow">
+                      <input
+                        type="checkbox"
+                        checked={serverPropsWhitelist}
+                        onChange={(e) => setServerPropsWhitelist(e.target.checked)}
+                      />
+                      white-list
+                    </label>
+                    <div className="hint">开启后需要在服务器内添加白名单玩家。</div>
+                  </div>
+                </div>
+
+                <div className="row" style={{ marginTop: 12, justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+                  <div className="btnGroup" style={{ justifyContent: "flex-start" }}>
+                    <button
+                      type="button"
+                      className="iconBtn"
+                      onClick={async () => {
+                        const inst = instanceId.trim();
+                        if (!inst) return;
+                        await openFileByPath(joinRelPath(inst, "server.properties"));
+                        setTab("files");
+                        setServerPropsOpen(false);
+                      }}
+                      disabled={!selectedDaemon?.connected || !instanceId.trim() || serverPropsSaving}
+                    >
+                      <Icon name="search" />
+                      Open in Files
+                    </button>
+                    {serverPropsStatus ? <span className="muted">{serverPropsStatus}</span> : null}
+                  </div>
+                  <div className="btnGroup" style={{ justifyContent: "flex-end" }}>
+                    <button
+                      type="button"
+                      className="primary"
+                      onClick={saveServerPropertiesEditor}
+                      disabled={!selectedDaemon?.connected || !instanceId.trim() || serverPropsSaving}
+                    >
+                      Save
+                    </button>
+                    {serverPropsSaving ? <span className="badge">saving…</span> : null}
+                  </div>
                 </div>
               </div>
             </div>
