@@ -23,6 +23,7 @@ export default function GamesView() {
     openRestoreModal,
     openServerPropertiesEditor,
     renameInstance,
+    cloneInstance,
     backupZips,
     backupZipsStatus,
     refreshBackupZips,
@@ -188,6 +189,7 @@ export default function GamesView() {
                   else if (v === "restore") openRestoreModal();
                   else if (v === "properties") openServerPropertiesEditor();
                   else if (v === "rename") renameInstance();
+                  else if (v === "clone") cloneInstance();
                   else if (v === "settings") openSettingsModal();
                   else if (v === "files") {
                     setFsPath(instanceId.trim());
@@ -201,6 +203,7 @@ export default function GamesView() {
                   { value: "restore", label: "Restore…", disabled: !canControl },
                   { value: "properties", label: "server.properties…", disabled: !canControl },
                   { value: "rename", label: "Rename…", disabled: !canControl },
+                  { value: "clone", label: "Clone…", disabled: !canControl },
                   { value: "settings", label: "Settings", disabled: !canControl },
                   { value: "files", label: "Files", disabled: !canControl },
                   { value: "delete", label: "Delete", disabled: !canControl },

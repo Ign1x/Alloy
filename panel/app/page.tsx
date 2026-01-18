@@ -2908,6 +2908,64 @@ export default function HomePage() {
     }
   }
 
+  async function cloneInstance() {
+    if (gameActionBusy) return;
+    if (!selectedDaemon?.connected) {
+      setServerOpStatus("daemon offline");
+      return;
+    }
+    const from = instanceId.trim();
+    if (!from) {
+      setServerOpStatus("instance_id 不能为空");
+      return;
+    }
+
+    const next = await promptDialog({
+      title: "Clone Instance",
+      message: `Clone ${from} → ?\n\nThis will create a backup then restore it into a new instance folder.`,
+      placeholder: "new-instance-id",
+      okLabel: "Continue",
+      cancelLabel: "Cancel",
+    });
+    if (next == null) return;
+    const to = String(next || "").trim();
+    const err = validateInstanceIDUI(to);
+    if (err) {
+      setServerOpStatus(err);
+      return;
+    }
+    if (to === from) {
+      setServerOpStatus("Clone target must be different");
+      return;
+    }
+
+    const ok = await confirmDialog(`Clone instance ${from} → ${to}?`, {
+      title: "Clone Instance",
+      confirmLabel: "Clone",
+      cancelLabel: "Cancel",
+      danger: true,
+    });
+    if (!ok) return;
+
+    setGameActionBusy(true);
+    setServerOpStatus("Cloning...");
+    try {
+      const backupName = `${from}-clone-${Date.now()}.zip`;
+      const backup = await callOkCommand("mc_backup", { instance_id: from, stop: true, backup_name: backupName }, 10 * 60_000);
+      const zip = String(backup?.path || "").trim();
+      if (!zip) throw new Error("backup path missing");
+      await callOkCommand("mc_restore", { instance_id: to, zip_path: zip }, 10 * 60_000);
+      await refreshServerDirs();
+      setInstanceId(to);
+      setServerOpStatus(`Cloned: ${to}`);
+      setTimeout(() => setServerOpStatus(""), 900);
+    } catch (e: any) {
+      setServerOpStatus(String(e?.message || e));
+    } finally {
+      setGameActionBusy(false);
+    }
+  }
+
   async function backupServer(instanceOverride?: string) {
     if (gameActionBusy) return;
     setGameActionBusy(true);
@@ -3333,6 +3391,7 @@ export default function HomePage() {
     openRestoreModal,
     openServerPropertiesEditor,
     renameInstance,
+    cloneInstance,
     backupZips: restoreCandidates,
     backupZipsStatus: restoreStatus,
     refreshBackupZips,
