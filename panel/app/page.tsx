@@ -1881,6 +1881,92 @@ export default function HomePage() {
     }
   }
 
+  async function openFileByPath(path: string) {
+    const p = String(path || "")
+      .replace(/\\+/g, "/")
+      .replace(/\/+/g, "/")
+      .replace(/^\/+/, "")
+      .replace(/\/+$/, "");
+    if (!p) return;
+    if (!selected) {
+      setFsStatus("请选择 Daemon");
+      return;
+    }
+
+    const dir = parentRelPath(p);
+    const name = p.split("/").filter(Boolean).pop() || "";
+    if (!name) return;
+
+    setFsPath(dir);
+    setFsSelectedFile("");
+    setFsFileText("");
+    setFsSelectedFileMode("none");
+    setFsStatus(`Opening ${p} ...`);
+
+    try {
+      const payload = await callOkCommand("fs_list", { path: dir }, 30_000);
+      setFsEntries(payload.entries || []);
+
+      const entry = (payload.entries || []).find((e: any) => String(e?.name || "") === name) || null;
+      if (!entry) throw new Error("file not found");
+      if (entry?.isDir) {
+        setFsPath(p);
+        setFsStatus("");
+        return;
+      }
+
+      const size = Number(entry?.size || 0);
+      const lower = String(name).toLowerCase();
+      const filePath = joinRelPath(dir, name);
+      const likelyBinaryExt =
+        lower.endsWith(".jar") ||
+        lower.endsWith(".zip") ||
+        lower.endsWith(".png") ||
+        lower.endsWith(".jpg") ||
+        lower.endsWith(".jpeg") ||
+        lower.endsWith(".gif") ||
+        lower.endsWith(".webp") ||
+        lower.endsWith(".ico") ||
+        lower.endsWith(".pdf") ||
+        lower.endsWith(".mp3") ||
+        lower.endsWith(".mp4") ||
+        lower.endsWith(".mkv") ||
+        lower.endsWith(".wav") ||
+        lower.endsWith(".ogg") ||
+        lower.endsWith(".class") ||
+        lower.endsWith(".dll") ||
+        lower.endsWith(".exe") ||
+        lower.endsWith(".so") ||
+        lower.endsWith(".dat") ||
+        lower.endsWith(".nbt");
+
+      if (size > 512 * 1024 || likelyBinaryExt) {
+        setFsSelectedFile(filePath);
+        setFsFileText("");
+        setFsSelectedFileMode("binary");
+        setFsStatus("Binary/large file: download-only");
+        return;
+      }
+
+      const file = await callOkCommand("fs_read", { path: filePath }, 30_000);
+      const bytes = b64DecodeBytes(String(file?.b64 || ""));
+      if (isProbablyBinary(bytes)) {
+        setFsSelectedFile(filePath);
+        setFsFileText("");
+        setFsSelectedFileMode("binary");
+        setFsStatus("Binary file: download-only");
+        return;
+      }
+      const text = new TextDecoder().decode(bytes);
+      setFsSelectedFile(filePath);
+      setFsSelectedFileMode("text");
+      setFsFileText(text);
+      setFsStatus("");
+    } catch (e: any) {
+      setFsStatus(String(e?.message || e));
+    }
+  }
+
   async function saveFile() {
     if (!fsSelectedFile) {
       setFsStatus("No file selected");
@@ -3110,6 +3196,7 @@ export default function HomePage() {
     fsFileText,
     setFsFileText,
     openEntry,
+    openFileByPath,
     saveFile,
     uploadInputKey,
     uploadFile,

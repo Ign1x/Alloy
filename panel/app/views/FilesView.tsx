@@ -3,10 +3,12 @@
 import { useMemo, useState } from "react";
 import { useAppCtx } from "../appCtx";
 import Icon from "../ui/Icon";
+import Select from "../ui/Select";
 
 export default function FilesView() {
   const {
     selected,
+    instanceId,
     fsPath,
     fsBreadcrumbs,
     fsStatus,
@@ -18,6 +20,7 @@ export default function FilesView() {
     setFsSelectedFile,
     setFsPath,
     openEntry,
+    openFileByPath,
     saveFile,
     uploadInputKey,
     uploadFile,
@@ -43,6 +46,8 @@ export default function FilesView() {
     if (!q) return list;
     return list.filter((e: any) => String(e?.name || "").toLowerCase().includes(q));
   }, [fsEntries, query]);
+
+  const inst = String(instanceId || "").trim();
 
   return (
     <div className="card">
@@ -75,6 +80,20 @@ export default function FilesView() {
           </div>
         </div>
         <div className="toolbarRight">
+          <div style={{ width: 220 }}>
+            <Select
+              value=""
+              onChange={(v) => (v ? openFileByPath(v) : null)}
+              disabled={!selected || !inst}
+              placeholder={inst ? "Quick open…" : "Select a game first"}
+              options={[
+                { value: joinRelPath(inst, "server.properties"), label: "server.properties" },
+                { value: joinRelPath(inst, "eula.txt"), label: "eula.txt" },
+                { value: joinRelPath(inst, "logs/latest.log"), label: "logs/latest.log" },
+                { value: joinRelPath(inst, ".elegantmc.json"), label: ".elegantmc.json" },
+              ]}
+            />
+          </div>
           <input value={query} onChange={(e: any) => setQuery(e.target.value)} placeholder="Search entries…" style={{ width: 220 }} />
           <button type="button" onClick={() => refreshFsNow()} disabled={!selected}>
             Refresh
