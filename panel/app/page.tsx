@@ -521,6 +521,12 @@ export default function HomePage() {
   const [toasts, setToasts] = useState<{ id: string; kind: "info" | "ok" | "error"; message: string; detail?: string }[]>([]);
   const toastSeq = useRef<number>(0);
 
+  // Command palette (Ctrl+K / /)
+  const [cmdPaletteOpen, setCmdPaletteOpen] = useState<boolean>(false);
+  const [cmdPaletteQuery, setCmdPaletteQuery] = useState<string>("");
+  const [cmdPaletteIdx, setCmdPaletteIdx] = useState<number>(0);
+  const cmdPaletteInputRef = useRef<HTMLInputElement | null>(null);
+
   // Logs
   const [logs, setLogs] = useState<any[]>([]);
 
@@ -844,6 +850,31 @@ export default function HomePage() {
   // Modal keyboard shortcuts
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      const tag = String((e.target as any)?.tagName || "").toUpperCase();
+      const typing = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || !!(e.target as any)?.isContentEditable;
+      const key = String(e.key || "");
+
+      if (!typing) {
+        if ((e.ctrlKey || e.metaKey) && key.toLowerCase() === "k") {
+          e.preventDefault();
+          if (cmdPaletteOpen) {
+            setCmdPaletteOpen(false);
+          } else {
+            setCmdPaletteQuery("");
+            setCmdPaletteIdx(0);
+            setCmdPaletteOpen(true);
+          }
+          return;
+        }
+        if (key === "/" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+          e.preventDefault();
+          setCmdPaletteQuery("");
+          setCmdPaletteIdx(0);
+          setCmdPaletteOpen(true);
+          return;
+        }
+      }
+
       if (e.key === "Escape") {
         if (confirmOpen) {
           e.preventDefault();
@@ -858,6 +889,11 @@ export default function HomePage() {
         if (copyOpen) {
           e.preventDefault();
           setCopyOpen(false);
+          return;
+        }
+        if (cmdPaletteOpen) {
+          e.preventDefault();
+          setCmdPaletteOpen(false);
           return;
         }
         if (installOpen && !installRunning) {
@@ -892,7 +928,6 @@ export default function HomePage() {
         }
       }
       if (e.key === "Enter" && confirmOpen && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) {
-        const tag = String((e.target as any)?.tagName || "").toUpperCase();
         if (tag !== "INPUT" && tag !== "TEXTAREA" && tag !== "SELECT") {
           e.preventDefault();
           closeConfirm(true);
@@ -901,7 +936,25 @@ export default function HomePage() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [confirmOpen, promptOpen, copyOpen, installOpen, installRunning, settingsOpen, nodeDetailsOpen, addNodeOpen, addFrpOpen, sidebarOpen]);
+  }, [
+    confirmOpen,
+    promptOpen,
+    copyOpen,
+    cmdPaletteOpen,
+    installOpen,
+    installRunning,
+    settingsOpen,
+    nodeDetailsOpen,
+    addNodeOpen,
+    addFrpOpen,
+    sidebarOpen,
+  ]);
+
+  useEffect(() => {
+    if (!cmdPaletteOpen) return;
+    const t = window.setTimeout(() => cmdPaletteInputRef.current?.focus(), 0);
+    return () => window.clearTimeout(t);
+  }, [cmdPaletteOpen]);
 
   // Panel auth (cookie-based)
   useEffect(() => {
@@ -2762,6 +2815,124 @@ export default function HomePage() {
 
   const activeTab = useMemo(() => tabs.find((t) => t.id === tab) || tabs[0], [tab]);
 
+  const cmdPaletteCommands = useMemo(() => {
+    type CmdItem = { id: string; title: string; hint?: string; disabled?: boolean; run: () => void | Promise<void> };
+    const out: CmdItem[] = [];
+
+    const close = () => setCmdPaletteOpen(false);
+    const goTab = (t: Tab) => {
+      setTab(t);
+      setSidebarOpen(false);
+      close();
+    };
+
+    out.push(
+      { id: "tab:nodes", title: "Go: Nodes", run: () => goTab("nodes") },
+      { id: "tab:games", title: "Go: Games", run: () => goTab("games") },
+      { id: "tab:frp", title: "Go: FRP", run: () => goTab("frp") },
+      { id: "tab:files", title: "Go: Files", run: () => goTab("files") },
+      { id: "tab:panel", title: "Go: Panel", run: () => goTab("panel") }
+    );
+    if (enableAdvanced) out.push({ id: "tab:advanced", title: "Go: Advanced", run: () => goTab("advanced") });
+
+    const inst = instanceId.trim();
+    const daemonOk = !!selectedDaemon?.connected;
+    const canGame = daemonOk && !!inst && !gameActionBusy;
+    const running = !!instanceStatus?.running;
+
+    if (inst) {
+      out.push(
+        { id: "game:install", title: "Game: Install…", disabled: !daemonOk, run: () => (openInstallModal(), close()) },
+        { id: "game:settings", title: "Game: Settings…", disabled: !canGame, run: () => (openSettingsModal(), close()) },
+        {
+          id: "game:files",
+          title: "Game: Open instance files",
+          disabled: !daemonOk,
+          run: () => {
+            setFsPath(inst);
+            setTab("files");
+            close();
+          },
+        },
+        {
+          id: "game:backups",
+          title: "Game: Open backups folder",
+          disabled: !daemonOk,
+          run: () => {
+            setFsPath(`_backups/${inst}`);
+            setTab("files");
+            close();
+          },
+        },
+        {
+          id: "game:startStop",
+          title: running ? "Game: Stop" : "Game: Start",
+          disabled: !canGame,
+          run: async () => {
+            close();
+            if (running) await stopServer(inst);
+            else await startServer(inst);
+          },
+        },
+        {
+          id: "game:restart",
+          title: "Game: Restart",
+          disabled: !canGame,
+          run: async () => {
+            close();
+            await restartServer(inst);
+          },
+        },
+        {
+          id: "game:backup",
+          title: "Game: Backup",
+          disabled: !canGame,
+          run: async () => {
+            close();
+            await backupServer(inst);
+          },
+        },
+        {
+          id: "game:restore",
+          title: "Game: Restore…",
+          disabled: !canGame,
+          run: async () => {
+            close();
+            await openRestoreModal();
+          },
+        }
+      );
+    }
+
+    return out;
+  }, [
+    enableAdvanced,
+    gameActionBusy,
+    instanceId,
+    instanceStatus?.running,
+    selectedDaemon?.connected,
+    openInstallModal,
+    openSettingsModal,
+    openRestoreModal,
+    setFsPath,
+    setTab,
+    setSidebarOpen,
+    startServer,
+    stopServer,
+    restartServer,
+    backupServer,
+  ]);
+
+  const cmdPaletteFiltered = useMemo(() => {
+    const q = cmdPaletteQuery.trim().toLowerCase();
+    if (!q) return cmdPaletteCommands;
+    return cmdPaletteCommands.filter((c) => {
+      const title = String(c.title || "").toLowerCase();
+      const hint = String((c as any).hint || "").toLowerCase();
+      return title.includes(q) || hint.includes(q);
+    });
+  }, [cmdPaletteCommands, cmdPaletteQuery]);
+
   const appCtxValue = {
     tab,
     setTab,
@@ -3018,6 +3189,78 @@ export default function HomePage() {
 	              >
 	                Try Copy
 	              </button>
+	            </div>
+	          </div>
+	        </div>
+	      ) : null}
+
+	      {cmdPaletteOpen ? (
+	        <div className="modalOverlay" onClick={() => setCmdPaletteOpen(false)}>
+	          <div className="modal" style={{ width: "min(720px, 100%)" }} onClick={(e) => e.stopPropagation()}>
+	            <div className="modalHeader">
+	              <div>
+	                <div style={{ fontWeight: 800 }}>Command Palette</div>
+	                <div className="hint">
+	                  <code>Ctrl+K</code> (or <code>⌘K</code>) · <code>/</code> focuses search
+	                </div>
+	              </div>
+	              <button type="button" onClick={() => setCmdPaletteOpen(false)}>
+	                Close
+	              </button>
+	            </div>
+
+	            <input
+	              ref={cmdPaletteInputRef}
+	              value={cmdPaletteQuery}
+	              onChange={(e) => {
+	                setCmdPaletteQuery(e.target.value);
+	                setCmdPaletteIdx(0);
+	              }}
+	              placeholder="Type a command…"
+	              autoFocus
+	              onKeyDown={(e) => {
+	                if (e.key === "ArrowDown") {
+	                  e.preventDefault();
+	                  setCmdPaletteIdx((i) => Math.min(Math.max(0, cmdPaletteFiltered.length - 1), i + 1));
+	                  return;
+	                }
+	                if (e.key === "ArrowUp") {
+	                  e.preventDefault();
+	                  setCmdPaletteIdx((i) => Math.max(0, i - 1));
+	                  return;
+	                }
+	                if (e.key === "Enter") {
+	                  const cmd = cmdPaletteFiltered[cmdPaletteIdx] as any;
+	                  if (!cmd || cmd.disabled) return;
+	                  e.preventDefault();
+	                  const p = cmd.run?.();
+	                  if (p && typeof p.then === "function") p.catch(() => null);
+	                }
+	              }}
+	            />
+
+	            <div className="cmdPaletteList">
+	              {cmdPaletteFiltered.length ? (
+	                cmdPaletteFiltered.map((c: any, idx: number) => (
+	                  <button
+	                    key={c.id}
+	                    type="button"
+	                    className={`cmdPaletteItem ${idx === cmdPaletteIdx ? "active" : ""}`}
+	                    disabled={!!c.disabled}
+	                    onMouseEnter={() => setCmdPaletteIdx(idx)}
+	                    onClick={() => {
+	                      if (c.disabled) return;
+	                      const p = c.run?.();
+	                      if (p && typeof p.then === "function") p.catch(() => null);
+	                    }}
+	                  >
+	                    <div className="cmdPaletteTitle">{c.title}</div>
+	                    {c.hint ? <div className="hint">{c.hint}</div> : null}
+	                  </button>
+	                ))
+	              ) : (
+	                <div className="hint">No matching commands</div>
+	              )}
 	            </div>
 	          </div>
 	        </div>

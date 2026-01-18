@@ -945,6 +945,40 @@ pre {
   margin-bottom: 12px;
 }
 
+.cmdPaletteList {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 360px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+button.cmdPaletteItem {
+  width: 100%;
+  text-align: left;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+}
+
+button.cmdPaletteItem.active {
+  border-color: var(--primary-border);
+  background: rgba(139, 92, 246, 0.14);
+}
+
+button.cmdPaletteItem:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.cmdPaletteTitle {
+  font-weight: 700;
+}
+
 .toastWrap {
   position: fixed;
   right: 16px;
