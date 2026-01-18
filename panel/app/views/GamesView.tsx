@@ -104,6 +104,7 @@ export default function GamesView() {
   const [pausedLogs, setPausedLogs] = useState<any[] | null>(null);
   const logScrollRef = useRef<HTMLDivElement | null>(null);
   const [logScrollTop, setLogScrollTop] = useState<number>(0);
+  const [logViewportHeight, setLogViewportHeight] = useState<number>(640);
   const [logNearBottom, setLogNearBottom] = useState<boolean>(true);
   const [newLogsCount, setNewLogsCount] = useState<number>(0);
   const prevLogLinesLenRef = useRef<number>(0);
@@ -324,6 +325,32 @@ export default function GamesView() {
   }, [autoScroll]);
 
   useEffect(() => {
+    const el = logScrollRef.current;
+    if (!el) return;
+    const update = () => setLogViewportHeight(Math.max(160, Math.round(el.clientHeight || 640)));
+    update();
+    const onWin = () => update();
+    window.addEventListener("resize", onWin);
+    let ro: any = null;
+    try {
+      if (typeof (window as any).ResizeObserver === "function") {
+        ro = new (window as any).ResizeObserver(() => update());
+        ro.observe(el);
+      }
+    } catch {
+      ro = null;
+    }
+    return () => {
+      window.removeEventListener("resize", onWin);
+      try {
+        if (ro && typeof ro.disconnect === "function") ro.disconnect();
+      } catch {
+        // ignore
+      }
+    };
+  }, [wrapLogs]);
+
+  useEffect(() => {
     if (!autoScroll || !logNearBottom) return;
     const el = logScrollRef.current;
     if (!el) return;
@@ -363,7 +390,7 @@ export default function GamesView() {
       return { start: 0, end: total, topPad: 0, bottomPad: 0, visible: logLines };
     }
     const lineHeight = 18;
-    const viewHeight = 640;
+    const viewHeight = logViewportHeight;
     const overscan = 12;
     const start = Math.max(0, Math.floor(logScrollTop / lineHeight) - overscan);
     const visibleCount = Math.ceil(viewHeight / lineHeight) + overscan * 2;
@@ -375,7 +402,7 @@ export default function GamesView() {
       bottomPad: (total - end) * lineHeight,
       visible: logLines.slice(start, end),
     };
-  }, [logLines, logScrollTop, wrapLogs]);
+  }, [logLines, logScrollTop, wrapLogs, logViewportHeight]);
 
   useEffect(() => {
     if (!selectedDaemon?.connected) return;
