@@ -69,6 +69,7 @@ export default function GamesView() {
   const [logQuery, setLogQuery] = useState<string>("");
   const [logRegex, setLogRegex] = useState<boolean>(false);
   const [autoScroll, setAutoScroll] = useState<boolean>(true);
+  const [wrapLogs, setWrapLogs] = useState<boolean>(true);
   const [highlightLogs, setHighlightLogs] = useState<boolean>(true);
   const [logPaused, setLogPaused] = useState<boolean>(false);
   const [logClearAtUnix, setLogClearAtUnix] = useState<number>(0);
@@ -306,6 +307,9 @@ export default function GamesView() {
     visible: RenderLogLine[];
   }>(() => {
     const total = logLines.length;
+    if (wrapLogs) {
+      return { start: 0, end: total, topPad: 0, bottomPad: 0, visible: logLines };
+    }
     const lineHeight = 18;
     const viewHeight = 640;
     const overscan = 12;
@@ -319,7 +323,7 @@ export default function GamesView() {
       bottomPad: (total - end) * lineHeight,
       visible: logLines.slice(start, end),
     };
-  }, [logLines, logScrollTop]);
+  }, [logLines, logScrollTop, wrapLogs]);
 
   useEffect(() => {
     if (!selectedDaemon?.connected) return;
@@ -830,6 +834,9 @@ export default function GamesView() {
               <input type="checkbox" checked={autoScroll} onChange={(e) => setAutoScroll(e.target.checked)} /> Auto-scroll
             </label>
             <label className="checkRow" style={{ userSelect: "none" }}>
+              <input type="checkbox" checked={wrapLogs} onChange={(e) => setWrapLogs(e.target.checked)} /> Wrap
+            </label>
+            <label className="checkRow" style={{ userSelect: "none" }}>
               <input type="checkbox" checked={highlightLogs} onChange={(e) => setHighlightLogs(e.target.checked)} /> Highlight
             </label>
             <button type="button" className="iconBtn" onClick={() => setLogPaused((v) => !v)}>
@@ -903,20 +910,22 @@ export default function GamesView() {
           >
             <div style={{ height: logVirtual.topPad }} />
             <pre style={{ margin: 0 }}>
-                  {logVirtual.visible.map((l, idx) => (
-                    <span key={`${logVirtual.start + idx}`} className={`logLine ${highlightLogs ? l.level : ""}`}>
-                      <button
-                        type="button"
-                        className="logLineCopyBtn"
-                        title="Copy line"
-                        aria-label="Copy line"
-                        onClick={() => copyText(l.text)}
-                      >
-                        <Icon name="copy" />
-                      </button>
-                      <span className="logLineText">{l.text}</span>
-                    </span>
-                  ))}
+              {logVirtual.visible.map((l, idx) => (
+                <span key={`${logVirtual.start + idx}`} className={`logLine ${highlightLogs ? l.level : ""}`}>
+                  <button
+                    type="button"
+                    className="logLineCopyBtn"
+                    title="Copy line"
+                    aria-label="Copy line"
+                    onClick={() => copyText(l.text)}
+                  >
+                    <Icon name="copy" />
+                  </button>
+                  <span className="logLineText" style={{ whiteSpace: wrapLogs ? "pre-wrap" : "pre", wordBreak: wrapLogs ? "break-word" : "normal" }}>
+                    {l.text}
+                  </span>
+                </span>
+              ))}
             </pre>
             <div style={{ height: logVirtual.bottomPad }} />
           </div>
