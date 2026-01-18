@@ -373,6 +373,8 @@ func (e *Executor) Execute(ctx context.Context, cmd protocol.Command) protocol.C
 		return e.fsMove(cmd)
 	case "fs_copy":
 		return e.fsCopy(cmd)
+	case "fs_zip":
+		return e.fsZip(ctx, cmd)
 	case "fs_unzip":
 		return e.fsUnzip(ctx, cmd)
 	case "fs_upload_begin":

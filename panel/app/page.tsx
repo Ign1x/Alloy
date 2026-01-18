@@ -2051,6 +2051,52 @@ export default function HomePage() {
     }
   }
 
+  async function downloadFsFolderAsZip(entry: any) {
+    const name = String(entry?.name || "").trim();
+    if (!name || !entry?.isDir) return;
+    const dirPath = joinRelPath(fsPath, name);
+
+    setFsStatus(`Zipping ${dirPath} ...`);
+    let zipPath = "";
+    try {
+      const out = await callOkCommand("fs_zip", { path: dirPath }, 10 * 60_000);
+      zipPath = String(out?.zip_path || "").trim();
+      if (!zipPath) throw new Error("zip_path missing");
+
+      const st = await callOkCommand("fs_stat", { path: zipPath }, 10_000);
+      const size = Math.max(0, Number(st?.size || 0));
+      const max = 50 * 1024 * 1024;
+      if (size > max) {
+        throw new Error(`Zip too large to download in browser (${fmtBytes(size)} > ${fmtBytes(max)}). File: ${zipPath}`);
+      }
+
+      setFsStatus(`Downloading ${zipPath} ...`);
+      const payload = await callOkCommand("fs_read", { path: zipPath }, 5 * 60_000);
+      const bytes = b64DecodeBytes(String(payload?.b64 || ""));
+      const blob = new Blob([bytes], { type: "application/zip" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = zipPath.split("/").pop() || `${name}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      setFsStatus("");
+      pushToast(`Downloaded: ${a.download}`, "ok");
+    } catch (e: any) {
+      setFsStatus(String(e?.message || e));
+    } finally {
+      if (zipPath) {
+        try {
+          await callOkCommand("fs_delete", { path: zipPath }, 60_000);
+        } catch {
+          // ignore
+        }
+      }
+    }
+  }
+
 	  async function deleteFsEntry(entry: any) {
 	    const name = String(entry?.name || "");
 	    if (!name) return;
@@ -3995,6 +4041,7 @@ export default function HomePage() {
     renameFsEntry,
     moveFsEntry,
     downloadFsEntry,
+    downloadFsFolderAsZip,
     deleteFsEntry,
 
     // Advanced

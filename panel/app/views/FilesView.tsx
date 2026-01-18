@@ -38,6 +38,7 @@ export default function FilesView() {
     renameFsEntry,
     moveFsEntry,
     downloadFsEntry,
+    downloadFsFolderAsZip,
     deleteFsEntry,
     openTrashModal,
   } = useAppCtx();
@@ -222,7 +223,12 @@ export default function FilesView() {
                           <Icon name="download" />
                           Download
                         </button>
-                      ) : null}
+                      ) : (
+                        <button type="button" className="iconBtn" onClick={() => downloadFsFolderAsZip(e)}>
+                          <Icon name="download" />
+                          Zip
+                        </button>
+                      )}
                       <button type="button" className="dangerBtn" onClick={() => deleteFsEntry(e)}>
                         Delete
                       </button>
