@@ -142,6 +142,43 @@ async function readChangelogText() {
   throw err;
 }
 
+const DOCS = {
+  readme: {
+    title: "README",
+    candidates: [path.join(process.cwd(), "docs", "README.md"), path.join(process.cwd(), "..", "README.md")],
+  },
+  security: {
+    title: "SECURITY",
+    candidates: [path.join(process.cwd(), "docs", "SECURITY.md"), path.join(process.cwd(), "..", "SECURITY.md")],
+  },
+  panel_readme: {
+    title: "Panel README",
+    candidates: [path.join(process.cwd(), "README.md")],
+  },
+  changelog: {
+    title: "CHANGELOG",
+    candidates: [path.join(process.cwd(), "CHANGELOG.md"), path.join(process.cwd(), "..", "CHANGELOG.md")],
+  },
+};
+
+async function readDocText(name) {
+  const key = String(name || "").trim().toLowerCase();
+  const cfg = DOCS[key];
+  if (!cfg) throw new Error("unknown doc");
+  let lastErr = null;
+  for (const fp of cfg.candidates) {
+    try {
+      const text = await fs.readFile(fp, "utf8");
+      return { name: key, title: cfg.title, fp, text };
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  const err = new Error(`${cfg.title} not found`);
+  err.cause = lastErr;
+  throw err;
+}
+
 const host = process.env.ELEGANTMC_PANEL_HOST || "0.0.0.0";
 const port = Number(process.env.ELEGANTMC_PANEL_PORT || "3000");
 
@@ -869,6 +906,7 @@ const server = http.createServer(async (req, res) => {
         url.pathname === "/api/mc/versions" ||
         url.pathname === "/api/config" ||
         url.pathname === "/api/changelog" ||
+        url.pathname === "/api/docs" ||
         url.pathname.startsWith("/api/auth/");
       if (!open && !requireAdmin(req, res)) return;
     }
@@ -881,6 +919,21 @@ const server = http.createServer(async (req, res) => {
           path: path.relative(process.cwd(), out.fp),
           latest,
           full: String(out.text || "").trim(),
+        });
+      } catch (e) {
+        return json(res, 404, { error: String(e?.message || e) });
+      }
+    }
+
+    if (url.pathname === "/api/docs" && req.method === "GET") {
+      const name = String(url.searchParams.get("name") || "").trim().toLowerCase();
+      try {
+        const out = await readDocText(name);
+        return json(res, 200, {
+          name: out.name,
+          title: out.title,
+          path: path.relative(process.cwd(), out.fp),
+          text: String(out.text || "").trim(),
         });
       } catch (e) {
         return json(res, 404, { error: String(e?.message || e) });

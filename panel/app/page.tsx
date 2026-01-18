@@ -549,6 +549,11 @@ export default function HomePage() {
   const [changelogOpen, setChangelogOpen] = useState<boolean>(false);
   const [changelogStatus, setChangelogStatus] = useState<string>("");
   const [changelogText, setChangelogText] = useState<string>("");
+  const [helpOpen, setHelpOpen] = useState<boolean>(false);
+  const [helpDoc, setHelpDoc] = useState<string>("");
+  const [helpDocTitle, setHelpDocTitle] = useState<string>("");
+  const [helpDocText, setHelpDocText] = useState<string>("");
+  const [helpDocStatus, setHelpDocStatus] = useState<string>("");
 
   // Logs
   const [logs, setLogs] = useState<any[]>([]);
@@ -1119,6 +1124,11 @@ export default function HomePage() {
           setChangelogOpen(false);
           return;
         }
+        if (helpOpen) {
+          e.preventDefault();
+          setHelpOpen(false);
+          return;
+        }
         if (cmdPaletteOpen) {
           e.preventDefault();
           setCmdPaletteOpen(false);
@@ -1170,6 +1180,7 @@ export default function HomePage() {
     copyOpen,
     shortcutsOpen,
     changelogOpen,
+    helpOpen,
     cmdPaletteOpen,
     installOpen,
     installRunning,
@@ -1623,6 +1634,38 @@ export default function HomePage() {
     } catch (e: any) {
       setChangelogStatus(String(e?.message || e));
     }
+  }
+
+  function defaultHelpDocForTab(t: Tab) {
+    if (t === "advanced") return "security";
+    if (t === "panel") return "panel_readme";
+    return "readme";
+  }
+
+  async function loadHelpDoc(name: string) {
+    const key = String(name || "").trim().toLowerCase();
+    if (!key) return;
+    setHelpDoc(key);
+    setHelpDocStatus("Loading...");
+    try {
+      const res = await apiFetch(`/api/docs?name=${encodeURIComponent(key)}`, { cache: "no-store" });
+      const json = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(json?.error || "failed");
+      setHelpDocTitle(String(json?.title || key));
+      setHelpDocText(String(json?.text || ""));
+      setHelpDocStatus("");
+    } catch (e: any) {
+      setHelpDocTitle("");
+      setHelpDocText("");
+      setHelpDocStatus(String(e?.message || e));
+    }
+  }
+
+  async function openHelpModal() {
+    setHelpOpen(true);
+    const doc = defaultHelpDocForTab(tab);
+    if (helpDocText && helpDoc === doc) return;
+    await loadHelpDoc(doc);
   }
 
   async function copyText(text: string) {
@@ -4202,6 +4245,43 @@ export default function HomePage() {
 
   const activeTab = useMemo(() => tabs.find((t) => t.id === tab) || tabs[0], [tab]);
 
+  const helpForTab = useMemo(() => {
+    switch (tab) {
+      case "nodes":
+        return {
+          title: "Nodes",
+          lines: ["Nodes are daemons connected to this panel.", "Create a node (daemon_id + token) and start the daemon with those values.", "Use Node Details for CPU/Mem history and running instances."],
+        };
+      case "games":
+        return {
+          title: "Games",
+          lines: ["Instances live under servers/<instance_id>.", "Settings are saved to servers/<instance_id>/.elegantmc.json.", "Use Install for Vanilla/Paper/Modpacks; check Install logs when troubleshooting."],
+        };
+      case "frp":
+        return {
+          title: "FRP",
+          lines: ["Save FRP server profiles here (addr/port/token).", "Enable FRP in Game Settings to expose a public Socket address."],
+        };
+      case "files":
+        return {
+          title: "Files",
+          lines: ["File access is sandboxed to servers/.", "Use Trash to restore accidental deletes; backups live under servers/_backups/."],
+        };
+      case "panel":
+        return {
+          title: "Panel",
+          lines: ["Global defaults + CurseForge API key live here.", "Scheduler edits daemon schedule.json (restart/backup tasks)."],
+        };
+      case "advanced":
+        return {
+          title: "Advanced",
+          lines: ["Runs raw daemon commands (dangerous).", "Keep allowlists tight; prefer normal UI flows when possible."],
+        };
+      default:
+        return { title: "Help", lines: [] as string[] };
+    }
+  }, [tab]);
+
   const cmdPaletteCommands = useMemo(() => {
     type CmdItem = { id: string; title: string; hint?: string; disabled?: boolean; run: () => void | Promise<void> };
     const out: CmdItem[] = [];
@@ -4756,6 +4836,65 @@ export default function HomePage() {
 	        </div>
 	      ) : null}
 
+	      {helpOpen ? (
+	        <div className="modalOverlay" onClick={() => setHelpOpen(false)}>
+	          <div className="modal" style={{ width: "min(980px, 100%)" }} onClick={(e) => e.stopPropagation()}>
+	            <div className="modalHeader">
+	              <div>
+	                <div style={{ fontWeight: 800 }}>Help</div>
+	                <div className="hint">
+	                  context: <code>{helpForTab.title}</code>
+	                </div>
+	              </div>
+	              <button type="button" onClick={() => setHelpOpen(false)}>
+	                Close
+	              </button>
+	            </div>
+
+	            <div className="grid2" style={{ alignItems: "start" }}>
+	              <div style={{ minWidth: 0 }}>
+	                <h3>This page</h3>
+	                {helpForTab.lines.length ? (
+	                  <div className="hint">
+	                    {helpForTab.lines.map((l, idx) => (
+	                      <div key={idx}>{l}</div>
+	                    ))}
+	                  </div>
+	                ) : (
+	                  <div className="hint">No help for this page yet.</div>
+	                )}
+
+	                <h3 style={{ marginTop: 12 }}>Docs</h3>
+	                <div className="btnGroup" style={{ justifyContent: "flex-start" }}>
+	                  <button type="button" className={helpDoc === "readme" ? "primary" : ""} onClick={() => loadHelpDoc("readme")}>
+	                    README
+	                  </button>
+	                  <button type="button" className={helpDoc === "security" ? "primary" : ""} onClick={() => loadHelpDoc("security")}>
+	                    Security
+	                  </button>
+	                  <button
+	                    type="button"
+	                    className={helpDoc === "panel_readme" ? "primary" : ""}
+	                    onClick={() => loadHelpDoc("panel_readme")}
+	                  >
+	                    Panel
+	                  </button>
+	                  <button type="button" className={helpDoc === "changelog" ? "primary" : ""} onClick={() => loadHelpDoc("changelog")}>
+	                    Changelog
+	                  </button>
+	                </div>
+	              </div>
+
+	              <div style={{ minWidth: 0 }}>
+	                <h3>{helpDocTitle || "Doc"}</h3>
+	                {helpDocStatus ? <div className="hint">{helpDocStatus}</div> : null}
+	                {helpDocText ? <pre style={{ maxHeight: 520, overflow: "auto" }}>{helpDocText}</pre> : <div className="hint">Select a doc to view.</div>}
+	              </div>
+	            </div>
+	          </div>
+	        </div>
+	      ) : null}
+
 	      {toasts.length ? (
 	        <div className="toastWrap" aria-live="polite" aria-relevant="additions" onMouseEnter={pauseToasts} onMouseLeave={resumeToasts}>
 	          {toasts.map((t) => (
@@ -4825,6 +4964,9 @@ export default function HomePage() {
 	              </button>
 	              <button type="button" className="linkBtn" onClick={openChangelogModal}>
 	                What's new
+	              </button>
+	              <button type="button" className="linkBtn" onClick={openHelpModal}>
+	                Help
 	              </button>
 	              <button type="button" className="linkBtn" onClick={() => setSidebarFooterCollapsed((v) => !v)}>
 	                {sidebarFooterCollapsed ? "Show" : "Hide"}
