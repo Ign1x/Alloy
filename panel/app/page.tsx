@@ -2187,9 +2187,14 @@ export default function HomePage() {
         const base = p.split("/").pop() || p;
         const lower = base.toLowerCase();
         let s = 0;
+        if (lower.includes("installer")) s -= 120;
+        if (lower.includes("client")) s -= 40;
+        if (lower.includes("shim")) s += 70;
         if (lower === "server.jar") s += 100;
         if (lower === "fabric-server-launch.jar") s += 90;
         if (lower === "quilt-server-launch.jar") s += 80;
+        if (lower.includes("neoforge") || lower.includes("neo-forge")) s += 24;
+        if (lower.includes("forge")) s += 20;
         if (/\bserver\b/i.test(lower)) s += 40;
         if (/\blaunch\b/i.test(lower)) s += 30;
         // Prefer jars closer to root.
@@ -4036,8 +4041,8 @@ export default function HomePage() {
 			                        { value: "paper", label: "Paper" },
 			                        { value: "modrinth", label: "Modrinth (Search)" },
 			                        { value: "curseforge", label: "CurseForge (Search)", disabled: !curseforgeEnabled },
-			                        { value: "zip", label: "Modpack ZIP (Upload)" },
-			                        { value: "zip_url", label: "Modpack ZIP (URL)" },
+			                        { value: "zip", label: "Server Pack ZIP (Upload)" },
+			                        { value: "zip_url", label: "Server Pack ZIP/MRPACK (URL)" },
 			                      ]}
 			                    />
 			                    {installValidation.kindErr ? (
@@ -4046,7 +4051,7 @@ export default function HomePage() {
 			                      </div>
 			                    ) : (
 			                      <div className="hint">
-			                        Vanilla/Paper：自动下载服务端；Modrinth：支持 Fabric mrpack；CurseForge：需要 API Key；ZIP：上传或 URL 下载并解压
+			                        Vanilla/Paper：自动下载服务端；Modrinth：支持 Fabric/Quilt mrpack；CurseForge：需要 API Key；ZIP：用于服务器包（Forge/NeoForge 建议用 server pack zip）
 			                      </div>
 			                    )}
 			                  </div>
