@@ -555,6 +555,7 @@ export default function HomePage() {
   const [fsSelectedFile, setFsSelectedFile] = useState<string>("");
   const [fsSelectedFileMode, setFsSelectedFileMode] = useState<"none" | "text" | "binary">("none");
   const [fsFileText, setFsFileText] = useState<string>("");
+  const [fsFileTextSaved, setFsFileTextSaved] = useState<string>("");
   const [fsStatus, setFsStatus] = useState<string>("");
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploadInputKey, setUploadInputKey] = useState<number>(0);
@@ -820,6 +821,12 @@ export default function HomePage() {
     }
     return out;
   }, [fsPath]);
+
+  const fsDirty = useMemo(() => {
+    if (!fsSelectedFile) return false;
+    if (fsSelectedFileMode !== "text") return false;
+    return fsFileText !== fsFileTextSaved;
+  }, [fsSelectedFile, fsSelectedFileMode, fsFileText, fsFileTextSaved]);
 
   // Theme (auto/light/dark)
   useEffect(() => {
@@ -2259,9 +2266,19 @@ export default function HomePage() {
   async function openEntry(entry: any) {
     const name = entry?.name || "";
     if (!name) return;
+    if (fsDirty) {
+      const ok = await confirmDialog(`Discard unsaved changes in ${fsSelectedFile}?`, {
+        title: "Unsaved Changes",
+        confirmLabel: "Discard",
+        cancelLabel: "Cancel",
+        danger: true,
+      });
+      if (!ok) return;
+    }
     if (entry?.isDir) {
       setFsSelectedFile("");
       setFsFileText("");
+      setFsFileTextSaved("");
       setFsSelectedFileMode("none");
       setFsPath(joinRelPath(fsPath, name));
       return;
@@ -2294,6 +2311,7 @@ export default function HomePage() {
     if (size > 512 * 1024 || likelyBinaryExt) {
       setFsSelectedFile(filePath);
       setFsFileText("");
+      setFsFileTextSaved("");
       setFsSelectedFileMode("binary");
       setFsStatus("Binary/large file: download-only");
       return;
@@ -2305,6 +2323,7 @@ export default function HomePage() {
       if (isProbablyBinary(bytes)) {
         setFsSelectedFile(filePath);
         setFsFileText("");
+        setFsFileTextSaved("");
         setFsSelectedFileMode("binary");
         setFsStatus("Binary file: download-only");
         return;
@@ -2313,6 +2332,7 @@ export default function HomePage() {
       setFsSelectedFile(filePath);
       setFsSelectedFileMode("text");
       setFsFileText(text);
+      setFsFileTextSaved(text);
       setFsStatus("");
     } catch (e: any) {
       setFsStatus(String(e?.message || e));
@@ -2330,6 +2350,15 @@ export default function HomePage() {
       setFsStatus("请选择 Daemon");
       return;
     }
+    if (fsDirty) {
+      const ok = await confirmDialog(`Discard unsaved changes in ${fsSelectedFile}?`, {
+        title: "Unsaved Changes",
+        confirmLabel: "Discard",
+        cancelLabel: "Cancel",
+        danger: true,
+      });
+      if (!ok) return;
+    }
 
     const dir = parentRelPath(p);
     const name = p.split("/").filter(Boolean).pop() || "";
@@ -2338,6 +2367,7 @@ export default function HomePage() {
     setFsPath(dir);
     setFsSelectedFile("");
     setFsFileText("");
+    setFsFileTextSaved("");
     setFsSelectedFileMode("none");
     setFsStatus(`Opening ${p} ...`);
 
@@ -2381,6 +2411,7 @@ export default function HomePage() {
       if (size > 512 * 1024 || likelyBinaryExt) {
         setFsSelectedFile(filePath);
         setFsFileText("");
+        setFsFileTextSaved("");
         setFsSelectedFileMode("binary");
         setFsStatus("Binary/large file: download-only");
         return;
@@ -2391,6 +2422,7 @@ export default function HomePage() {
       if (isProbablyBinary(bytes)) {
         setFsSelectedFile(filePath);
         setFsFileText("");
+        setFsFileTextSaved("");
         setFsSelectedFileMode("binary");
         setFsStatus("Binary file: download-only");
         return;
@@ -2399,6 +2431,7 @@ export default function HomePage() {
       setFsSelectedFile(filePath);
       setFsSelectedFileMode("text");
       setFsFileText(text);
+      setFsFileTextSaved(text);
       setFsStatus("");
     } catch (e: any) {
       setFsStatus(String(e?.message || e));
@@ -2453,6 +2486,7 @@ export default function HomePage() {
     setFsStatus(`Saving ${fsSelectedFile} ...`);
     try {
       await callOkCommand("fs_write", { path: fsSelectedFile, b64: b64EncodeUtf8(fsFileText) });
+      setFsFileTextSaved(fsFileText);
       setFsStatus("Saved");
       setTimeout(() => setFsStatus(""), 800);
     } catch (e: any) {
@@ -4291,6 +4325,7 @@ export default function HomePage() {
     fsStatus,
     fsEntries,
     fsSelectedFile,
+    fsDirty,
     setFsSelectedFile,
     fsSelectedFileMode,
     fsFileText,
@@ -4598,7 +4633,16 @@ export default function HomePage() {
               key={t.id}
               type="button"
               className={`navItem ${tab === t.id ? "active" : ""}`}
-              onClick={() => {
+              onClick={async () => {
+                if (tab === "files" && t.id !== "files" && fsDirty) {
+                  const ok = await confirmDialog(`Discard unsaved changes in ${fsSelectedFile}?`, {
+                    title: "Unsaved Changes",
+                    confirmLabel: "Discard",
+                    cancelLabel: "Cancel",
+                    danger: true,
+                  });
+                  if (!ok) return;
+                }
                 setTab(t.id);
                 setSidebarOpen(false);
               }}

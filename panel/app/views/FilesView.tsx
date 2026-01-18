@@ -14,6 +14,7 @@ export default function FilesView() {
     fsStatus,
     fsEntries,
     fsSelectedFile,
+    fsDirty,
     fsSelectedFileMode,
     fsFileText,
     setFsFileText,
@@ -44,6 +45,7 @@ export default function FilesView() {
     deleteFsEntry,
     openTrashModal,
     copyText,
+    confirmDialog,
   } = useAppCtx();
 
   const [queryRaw, setQueryRaw] = useState<string>("");
@@ -97,7 +99,16 @@ export default function FilesView() {
                   <button
                     type="button"
                     className="linkBtn"
-                    onClick={() => {
+                    onClick={async () => {
+                      if (fsDirty) {
+                        const ok = await confirmDialog(`Discard unsaved changes in ${fsSelectedFile}?`, {
+                          title: "Unsaved Changes",
+                          confirmLabel: "Discard",
+                          cancelLabel: "Cancel",
+                          danger: true,
+                        });
+                        if (!ok) return;
+                      }
                       setFsSelectedFile("");
                       setFsFileText("");
                       setFsPath(c.path);
@@ -156,7 +167,16 @@ export default function FilesView() {
           </button>
           <button
             type="button"
-            onClick={() => {
+            onClick={async () => {
+              if (fsDirty) {
+                const ok = await confirmDialog(`Discard unsaved changes in ${fsSelectedFile}?`, {
+                  title: "Unsaved Changes",
+                  confirmLabel: "Discard",
+                  cancelLabel: "Cancel",
+                  danger: true,
+                });
+                if (!ok) return;
+              }
               setFsSelectedFile("");
               setFsFileText("");
               setFsPath(parentRelPath(fsPath));
@@ -295,6 +315,7 @@ export default function FilesView() {
             <span className="muted">
               file: <code>{fsSelectedFile || "-"}</code>
             </span>
+            {fsDirty ? <span className="badge">unsaved</span> : null}
             {fsSelectedFile && fsSelectedFileMode !== "text" ? <span className="badge">download-only</span> : null}
             {fsSelectedFile &&
             fsSelectedFile.toLowerCase().endsWith(".jar") &&
