@@ -21,6 +21,7 @@ export default function NodesView() {
     setTab,
     openAddNodeModal,
     openDeployDaemonModal,
+    makeDeployComposeYml,
     confirmDialog,
   } = useAppCtx();
 
@@ -196,6 +197,34 @@ export default function NodesView() {
                     <div className="btnGroup" style={{ justifyContent: "flex-start" }}>
                       <button type="button" onClick={() => openNodeDetails(n.id)}>
                         Details
+                      </button>
+                      <button
+                        type="button"
+                        className="iconBtn"
+                        onClick={async () => {
+                          const ok = await confirmDialog(`Copy docker-compose snippet for node ${n.id}? (includes token)`, {
+                            title: "Copy Deploy Snippet",
+                            confirmLabel: "Copy",
+                            cancelLabel: "Cancel",
+                          });
+                          if (!ok) return;
+                          setNodesStatus("");
+                          try {
+                            const res = await apiFetch(`/api/nodes/${encodeURIComponent(n.id)}/token`, { cache: "no-store" });
+                            const json = await res.json();
+                            if (!res.ok) throw new Error(json?.error || "failed");
+                            const token = String(json?.token || "");
+                            const yml = makeDeployComposeYml(n.id, token);
+                            await copyText(yml);
+                            setNodesStatus("Copied");
+                            setTimeout(() => setNodesStatus(""), 800);
+                          } catch (e: any) {
+                            setNodesStatus(String(e?.message || e));
+                          }
+                        }}
+                      >
+                        <Icon name="copy" />
+                        Copy Compose
                       </button>
                       <button
                         type="button"

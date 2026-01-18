@@ -742,6 +742,10 @@ export default function HomePage() {
     () => makeDaemonComposeYml({ daemonId: deployNodeId, token: deployToken, panelWsUrl: deployPanelWsUrl }),
     [deployNodeId, deployToken, deployPanelWsUrl]
   );
+
+  function makeDeployComposeYml(daemonId: string, token: string) {
+    return makeDaemonComposeYml({ daemonId, token, panelWsUrl: deployPanelWsUrl });
+  }
   const fsBreadcrumbs = useMemo(() => {
     const norm = String(fsPath || "")
       .replace(/\\+/g, "/")
@@ -3036,6 +3040,7 @@ export default function HomePage() {
 	    apiFetch,
 	    copyText,
 	    confirmDialog,
+	    makeDeployComposeYml,
 	    maskToken,
 	    pct,
 	    fmtUnix,
