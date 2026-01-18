@@ -43,6 +43,7 @@ type ExecutorDeps struct {
 	Daemon string
 	FRPC   string
 	PreferredConnectAddrs []string
+	ScheduleFile string
 
 	Mojang MojangConfig
 	Paper  PaperConfig
@@ -342,6 +343,12 @@ func (e *Executor) Execute(ctx context.Context, cmd protocol.Command) protocol.C
 		return e.mcBackup(ctx, cmd)
 	case "mc_restore":
 		return e.mcRestore(ctx, cmd)
+	case "schedule_get":
+		return e.scheduleGet(cmd)
+	case "schedule_set":
+		return e.scheduleSet(cmd)
+	case "schedule_run_task":
+		return e.scheduleRunTask(ctx, cmd)
 	case "fs_read":
 		return e.fsRead(cmd)
 	case "fs_write":

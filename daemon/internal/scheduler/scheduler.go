@@ -70,6 +70,10 @@ func New(cfg Config, deps Deps) *Manager {
 	return &Manager{cfg: cfg, deps: deps}
 }
 
+func (m *Manager) RunTaskNow(ctx context.Context, t Task) error {
+	return m.runTask(ctx, t)
+}
+
 func (m *Manager) Run(ctx context.Context) {
 	if !m.cfg.Enabled {
 		return
@@ -339,4 +343,3 @@ func (m *Manager) logf(format string, args ...any) {
 		m.deps.Log.Printf(format, args...)
 	}
 }
-

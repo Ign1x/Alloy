@@ -1069,6 +1069,25 @@ export default function HomePage() {
     }
   }
 
+  async function loadSchedule() {
+    if (!selectedDaemon?.connected) throw new Error("daemon offline");
+    return await callOkCommand("schedule_get", {}, 30_000);
+  }
+
+  async function saveScheduleJson(jsonText: string) {
+    if (!selectedDaemon?.connected) throw new Error("daemon offline");
+    const text = String(jsonText || "").trim();
+    if (!text) throw new Error("json is required");
+    return await callOkCommand("schedule_set", { json: text }, 30_000);
+  }
+
+  async function runScheduleTask(taskId: string) {
+    if (!selectedDaemon?.connected) throw new Error("daemon offline");
+    const id = String(taskId || "").trim();
+    if (!id) throw new Error("task_id is required");
+    return await callOkCommand("schedule_run_task", { task_id: id }, 60 * 60_000);
+  }
+
   async function login() {
     setLoginStatus("Logging in...");
     try {
@@ -3484,6 +3503,9 @@ export default function HomePage() {
     panelSettingsStatus,
     refreshPanelSettings,
     savePanelSettings,
+    loadSchedule,
+    saveScheduleJson,
+    runScheduleTask,
 
     // Nodes
     nodes,

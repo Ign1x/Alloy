@@ -1,16 +1,79 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useAppCtx } from "../appCtx";
 
 export default function PanelView() {
-  const { panelSettings, panelSettingsStatus, refreshPanelSettings, savePanelSettings } = useAppCtx();
+  const { panelSettings, panelSettingsStatus, refreshPanelSettings, savePanelSettings, selectedDaemon, loadSchedule, saveScheduleJson, runScheduleTask, confirmDialog, fmtUnix } =
+    useAppCtx();
 
   const [draft, setDraft] = useState<any>(panelSettings || null);
+  const [scheduleText, setScheduleText] = useState<string>("");
+  const [scheduleStatus, setScheduleStatus] = useState<string>("");
+  const [schedulePath, setSchedulePath] = useState<string>("");
+  const [scheduleBusy, setScheduleBusy] = useState<boolean>(false);
 
   useEffect(() => {
     setDraft(panelSettings || null);
   }, [panelSettings]);
+
+  const parsedSchedule = useMemo(() => {
+    const raw = String(scheduleText || "").trim();
+    if (!raw) return { ok: true, schedule: { tasks: [] as any[] } };
+    try {
+      const schedule = JSON.parse(raw);
+      return { ok: true, schedule };
+    } catch (e: any) {
+      return { ok: false, error: String(e?.message || e), schedule: null };
+    }
+  }, [scheduleText]);
+
+  async function fetchSchedule() {
+    const out = await loadSchedule();
+    const p = String(out?.path || "");
+    setSchedulePath(p);
+    const s = out?.schedule ?? { tasks: [] };
+    setScheduleText(JSON.stringify(s, null, 2) + "\n");
+  }
+
+  async function reloadSchedule() {
+    if (scheduleBusy) return;
+    setScheduleBusy(true);
+    setScheduleStatus("Loading...");
+    try {
+      await fetchSchedule();
+      setScheduleStatus("Loaded");
+      window.setTimeout(() => setScheduleStatus(""), 900);
+    } catch (e: any) {
+      setScheduleStatus(String(e?.message || e));
+    } finally {
+      setScheduleBusy(false);
+    }
+  }
+
+  async function saveSchedule() {
+    if (scheduleBusy) return;
+    const ok = await confirmDialog(`Save schedule.json to daemon ${selectedDaemon?.id || "-"}?`, {
+      title: "Save Scheduler",
+      confirmLabel: "Save",
+      cancelLabel: "Cancel",
+      danger: true,
+    });
+    if (!ok) return;
+
+    setScheduleBusy(true);
+    setScheduleStatus("Saving...");
+    try {
+      const out = await saveScheduleJson(scheduleText);
+      setSchedulePath(String(out?.path || schedulePath));
+      setScheduleStatus("Saved");
+      window.setTimeout(() => setScheduleStatus(""), 900);
+    } catch (e: any) {
+      setScheduleStatus(String(e?.message || e));
+    } finally {
+      setScheduleBusy(false);
+    }
+  }
 
   return (
     <div className="stack">
@@ -142,6 +205,116 @@ export default function PanelView() {
             </div>
           </>
         )}
+      </div>
+
+      <div className="card">
+        <div className="toolbar">
+          <div className="toolbarLeft" style={{ alignItems: "center" }}>
+            <div>
+              <h2>Scheduler</h2>
+              {scheduleStatus ? <div className="hint">{scheduleStatus}</div> : <div className="hint">Edit daemon schedule.json (restart/backup tasks)</div>}
+              <div className="hint" style={{ marginTop: 6 }}>
+                daemon: <code>{selectedDaemon?.id || "-"}</code> · file: <code>{schedulePath || "(unknown)"}</code>
+              </div>
+            </div>
+          </div>
+          <div className="toolbarRight">
+            <button type="button" className="iconBtn" onClick={reloadSchedule} disabled={!selectedDaemon?.connected || scheduleBusy}>
+              Load
+            </button>
+            <button type="button" className="primary iconBtn" onClick={saveSchedule} disabled={!selectedDaemon?.connected || scheduleBusy || !parsedSchedule.ok}>
+              Save
+            </button>
+          </div>
+        </div>
+
+        {!parsedSchedule.ok ? (
+          <div className="hint" style={{ color: "var(--danger)" }}>
+            JSON parse error: {parsedSchedule.error}
+          </div>
+        ) : null}
+
+        <textarea
+          value={scheduleText}
+          onChange={(e) => setScheduleText(e.target.value)}
+          rows={14}
+          placeholder='{"tasks":[{"id":"daily-backup","type":"backup","instance_id":"server1","every_sec":86400,"keep_last":7}]}'
+          style={{ width: "100%", marginTop: 10 }}
+          disabled={!selectedDaemon?.connected}
+        />
+
+        {parsedSchedule.ok && Array.isArray((parsedSchedule as any).schedule?.tasks) ? (
+          <div style={{ marginTop: 12 }}>
+            <h3>Tasks</h3>
+            <table>
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Type</th>
+                  <th>Instance</th>
+                  <th>Every</th>
+                  <th>At</th>
+                  <th>Last run</th>
+                  <th>Error</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {((parsedSchedule as any).schedule?.tasks || []).map((t: any) => (
+                  <tr key={String(t.id || t.instance_id || t.type || "")}>
+                    <td>
+                      <code>{String(t.id || "-")}</code>
+                    </td>
+                    <td>{String(t.type || "-")}</td>
+                    <td>
+                      <code>{String(t.instance_id || "-")}</code>
+                    </td>
+                    <td>{t.every_sec ? `${Number(t.every_sec)}s` : "-"}</td>
+                    <td>{t.at_unix ? fmtUnix(Number(t.at_unix)) : "-"}</td>
+                    <td>{t.last_run_unix ? fmtUnix(Number(t.last_run_unix)) : "-"}</td>
+                    <td style={{ maxWidth: 260, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {String(t.last_error || "")}
+                    </td>
+                    <td style={{ textAlign: "right" }}>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          const id = String(t.id || "").trim();
+                          if (!id) return;
+                          const ok = await confirmDialog(`Run task "${id}" now?`, {
+                            title: "Run Task",
+                            confirmLabel: "Run",
+                            cancelLabel: "Cancel",
+                            danger: String(t.type || "").toLowerCase() === "restart",
+                          });
+                          if (!ok) return;
+                          setScheduleBusy(true);
+                          setScheduleStatus(`Running ${id} ...`);
+                          try {
+                            await runScheduleTask(id);
+                            await fetchSchedule();
+                            setScheduleStatus("Done");
+                            window.setTimeout(() => setScheduleStatus(""), 900);
+                          } catch (e: any) {
+                            setScheduleStatus(String(e?.message || e));
+                          } finally {
+                            setScheduleBusy(false);
+                          }
+                        }}
+                        disabled={!selectedDaemon?.connected || scheduleBusy}
+                      >
+                        Run now
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div className="hint" style={{ marginTop: 8 }}>
+              Note: Scheduler runs on the daemon (polls schedule.json). Save updates the file; Run now triggers a single task immediately.
+            </div>
+          </div>
+        ) : null}
       </div>
     </div>
   );

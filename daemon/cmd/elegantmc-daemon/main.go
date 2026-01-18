@@ -59,6 +59,7 @@ func main() {
 		Daemon: cfg.DaemonID,
 		FRPC:   cfg.FRPCPath,
 		PreferredConnectAddrs: cfg.PreferredConnectAddrs,
+		ScheduleFile: cfg.ScheduleFile,
 		Mojang: commands.MojangConfig{
 			MetaBaseURL: cfg.MojangMetaBaseURL,
 			DataBaseURL: cfg.MojangDataBaseURL,
