@@ -525,6 +525,10 @@ export default function HomePage() {
   const [consoleLine, setConsoleLine] = useState<string>("");
   const [serverOpStatus, setServerOpStatus] = useState<string>("");
   const [gameActionBusy, setGameActionBusy] = useState<boolean>(false);
+  const [restoreOpen, setRestoreOpen] = useState<boolean>(false);
+  const [restoreStatus, setRestoreStatus] = useState<string>("");
+  const [restoreCandidates, setRestoreCandidates] = useState<string[]>([]);
+  const [restoreZipPath, setRestoreZipPath] = useState<string>("");
   const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
   const [settingsSnapshot, setSettingsSnapshot] = useState<GameSettingsSnapshot | null>(null);
   const [installOpen, setInstallOpen] = useState<boolean>(false);
@@ -2472,6 +2476,105 @@ export default function HomePage() {
     }
   }
 
+  async function refreshRestoreCandidates(inst: string) {
+    const id = String(inst || "").trim();
+    if (!id) return;
+    setRestoreStatus("Loading backups...");
+    try {
+      const base = joinRelPath("_backups", id);
+      const out = await callOkCommand("fs_list", { path: base }, 30_000);
+      const list = (out.entries || [])
+        .filter((e: any) => !e?.isDir && e?.name && String(e.name).toLowerCase().endsWith(".zip"))
+        .map((e: any) => joinRelPath(base, String(e.name)));
+      list.sort((a: string, b: string) => b.localeCompare(a));
+      setRestoreCandidates(list);
+      setRestoreZipPath(list[0] || "");
+      setRestoreStatus(list.length ? "" : "No backups found");
+    } catch {
+      setRestoreCandidates([]);
+      setRestoreZipPath("");
+      setRestoreStatus("No backups found");
+    }
+  }
+
+  async function openRestoreModal() {
+    if (!selectedDaemon?.connected) {
+      setServerOpStatus("daemon offline");
+      return;
+    }
+    const inst = instanceId.trim();
+    if (!inst) {
+      setServerOpStatus("instance_id 不能为空");
+      return;
+    }
+    setRestoreCandidates([]);
+    setRestoreZipPath("");
+    setRestoreStatus("");
+    setRestoreOpen(true);
+    await refreshRestoreCandidates(inst);
+  }
+
+  async function restoreFromBackup() {
+    if (gameActionBusy) return;
+    const inst = instanceId.trim();
+    const zip = String(restoreZipPath || "").trim();
+    if (!inst) {
+      setRestoreStatus("instance_id 不能为空");
+      return;
+    }
+    if (!zip) {
+      setRestoreStatus("Select a backup first");
+      return;
+    }
+
+    const ok = await confirmDialog(`Restore ${inst} from ${zip}?\n\nThis will OVERWRITE servers/${inst}/`, {
+      title: "Restore Backup",
+      confirmLabel: "Continue",
+      cancelLabel: "Cancel",
+      danger: true,
+    });
+    if (!ok) return;
+
+    const typed = await promptDialog({
+      title: "Confirm Restore",
+      message: `Type "${inst}" to confirm restoring from backup.`,
+      placeholder: inst,
+      defaultValue: "",
+      okLabel: "Restore",
+      cancelLabel: "Cancel",
+    });
+    if (typed !== inst) {
+      setRestoreStatus("Cancelled");
+      return;
+    }
+
+    setGameActionBusy(true);
+    setRestoreStatus("Stopping server...");
+    setServerOpStatus("");
+    try {
+      try {
+        await callOkCommand("frp_stop", { instance_id: inst }, 30_000);
+      } catch {
+        // ignore
+      }
+      try {
+        await callOkCommand("mc_stop", { instance_id: inst }, 30_000);
+      } catch {
+        // ignore
+      }
+
+      setRestoreStatus("Restoring...");
+      await callOkCommand("mc_restore", { instance_id: inst, zip_path: zip }, 10 * 60_000);
+      setRestoreStatus(`Restored: ${zip}`);
+      setServerOpStatus("Restored");
+      setRestoreOpen(false);
+    } catch (e: any) {
+      setRestoreStatus(String(e?.message || e));
+    } finally {
+      setGameActionBusy(false);
+    }
+  }
+
   async function sendConsoleLine() {
     if (!consoleLine.trim()) return;
     try {
@@ -2592,6 +2695,7 @@ export default function HomePage() {
     restartServer,
     deleteServer,
     backupServer,
+    openRestoreModal,
     frpOpStatus,
     serverOpStatus,
     gameActionBusy,
@@ -3553,6 +3657,51 @@ export default function HomePage() {
               </div>
             </div>
 	          ) : null}
+
+          {restoreOpen ? (
+            <div className="modalOverlay" onClick={() => (!gameActionBusy ? setRestoreOpen(false) : null)}>
+              <div className="modal" style={{ width: "min(680px, 100%)" }} onClick={(e) => e.stopPropagation()}>
+                <div className="modalHeader">
+                  <div>
+                    <div style={{ fontWeight: 800 }}>Restore Backup</div>
+                    <div className="hint">
+                      game: <code>{instanceId.trim() || "-"}</code> · from: <code>{restoreZipPath || "-"}</code>
+                    </div>
+                  </div>
+                  <button type="button" onClick={() => setRestoreOpen(false)} disabled={gameActionBusy}>
+                    Close
+                  </button>
+                </div>
+
+                <div className="field">
+                  <label>Backup zip</label>
+                  <Select
+                    value={restoreZipPath}
+                    onChange={(v) => setRestoreZipPath(v)}
+                    disabled={!restoreCandidates.length || gameActionBusy}
+                    placeholder={restoreCandidates.length ? "Select backup…" : "No backups found"}
+                    options={restoreCandidates.map((p) => ({ value: p, label: p }))}
+                  />
+                  <div className="hint">
+                    backups: <code>servers/_backups/{instanceId.trim() || "instance"}/</code>
+                  </div>
+                  {restoreStatus ? <div className="hint">{restoreStatus}</div> : null}
+                </div>
+
+                <div className="row" style={{ marginTop: 12, justifyContent: "space-between", alignItems: "center" }}>
+                  <div className="btnGroup" style={{ justifyContent: "flex-start" }}>
+                    <button type="button" onClick={() => refreshRestoreCandidates(instanceId.trim())} disabled={gameActionBusy}>
+                      Refresh
+                    </button>
+                    {gameActionBusy ? <span className="badge">working…</span> : null}
+                  </div>
+                  <button type="button" className="dangerBtn" onClick={restoreFromBackup} disabled={!restoreZipPath || gameActionBusy}>
+                    Restore
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
 
 	      {nodeDetailsOpen ? (
 	        <div className="modalOverlay" onClick={() => setNodeDetailsOpen(false)}>

@@ -20,6 +20,7 @@ export default function GamesView() {
     restartServer,
     deleteServer,
     backupServer,
+    openRestoreModal,
     frpOpStatus,
     serverOpStatus,
     gameActionBusy,
@@ -148,6 +149,7 @@ export default function GamesView() {
                 onChange={(v) => {
                   if (v === "restart") restartServer();
                   else if (v === "backup") backupServer();
+                  else if (v === "restore") openRestoreModal();
                   else if (v === "settings") openSettingsModal();
                   else if (v === "files") {
                     setFsPath(instanceId.trim());
@@ -158,6 +160,7 @@ export default function GamesView() {
                 options={[
                   { value: "restart", label: "Restart", disabled: !canControl },
                   { value: "backup", label: "Backup", disabled: !canControl },
+                  { value: "restore", label: "Restore…", disabled: !canControl },
                   { value: "settings", label: "Settings", disabled: !canControl },
                   { value: "files", label: "Files", disabled: !canControl },
                   { value: "delete", label: "Delete", disabled: !canControl },
