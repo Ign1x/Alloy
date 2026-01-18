@@ -884,6 +884,26 @@ export default function HomePage() {
     }
   }, [themeMode]);
 
+  // Hash deep links: #tab=games&daemon=...&instance=...
+  useEffect(() => {
+    try {
+      const raw = String(window.location.hash || "").replace(/^#/, "");
+      if (!raw) return;
+      const p = new URLSearchParams(raw);
+      const tab0 = String(p.get("tab") || "");
+      if (tab0 === "nodes" || tab0 === "games" || tab0 === "frp" || tab0 === "files" || tab0 === "panel") {
+        setTab(tab0 as any);
+      }
+      const daemon0 = String(p.get("daemon") || "").trim();
+      if (daemon0) setSelected(daemon0);
+      const inst0 = String(p.get("instance") || "").trim();
+      if (inst0) setInstanceId(inst0);
+    } catch {
+      // ignore
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Persist selected tab/daemon/game across refresh.
   useEffect(() => {
     try {
@@ -913,6 +933,22 @@ export default function HomePage() {
         "elegantmc_ui_state_v1",
         JSON.stringify({ tab, daemon: String(selected || ""), instance: String(instanceId || "").trim() })
       );
+    } catch {
+      // ignore
+    }
+  }, [tab, selected, instanceId]);
+
+  useEffect(() => {
+    try {
+      const p = new URLSearchParams();
+      if (tab) p.set("tab", tab);
+      if (String(selected || "").trim()) p.set("daemon", String(selected || "").trim());
+      if (String(instanceId || "").trim()) p.set("instance", String(instanceId || "").trim());
+      const next = p.toString();
+      const cur = String(window.location.hash || "").replace(/^#/, "");
+      if (cur === next) return;
+      const base = `${window.location.pathname}${window.location.search}`;
+      window.history.replaceState(null, "", next ? `${base}#${next}` : base);
     } catch {
       // ignore
     }
