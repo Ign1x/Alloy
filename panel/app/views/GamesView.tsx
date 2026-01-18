@@ -291,6 +291,16 @@ export default function GamesView() {
           </div>
 
           <div className="kv">
+            <div className="k">Java</div>
+            <div className="v">{instanceStatus?.java ? <code>{String(instanceStatus.java)}</code> : <span className="muted">-</span>}</div>
+            <div className="hint">
+              major: <code>{Number(instanceStatus?.java_major || 0) || "-"}</code>
+              {" · "}
+              required: <code>{Number(instanceStatus?.required_java_major || 0) ? `>=${Number(instanceStatus.required_java_major)}` : "-"}</code>
+            </div>
+          </div>
+
+          <div className="kv">
             <div className="k">Last heartbeat</div>
             <div className="v">{fmtUnix(selectedDaemon?.heartbeat?.server_time_unix)}</div>
           </div>

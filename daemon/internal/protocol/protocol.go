@@ -77,6 +77,9 @@ type MCInstance struct {
 	ID      string `json:"id"`
 	Running bool   `json:"running"`
 	PID     int    `json:"pid,omitempty"`
+	Java    string `json:"java,omitempty"`
+	JavaMajor int  `json:"java_major,omitempty"`
+	RequiredJavaMajor int `json:"required_java_major,omitempty"`
 }
 
 // Command is sent by the panel to ask the daemon to do something.

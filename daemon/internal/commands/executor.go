@@ -312,6 +312,9 @@ func (e *Executor) HeartbeatSnapshot() protocol.Heartbeat {
 			ID:      id,
 			Running: st.Running,
 			PID:     st.PID,
+			Java:    st.Java,
+			JavaMajor: st.JavaMajor,
+			RequiredJavaMajor: st.RequiredJavaMajor,
 		})
 	}
 

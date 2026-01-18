@@ -42,7 +42,7 @@ WF-20260118-40,P2,daemon,done,fs_copy command,"UI cannot implement rename/clone 
 WF-20260118-41,P2,daemon,done,fs_stat command,"File UI lacks mtime and type details","Add fs_stat returning size, mtime, mode, isDir",feat(daemon): fs_stat
 WF-20260118-42,P2,daemon,done,fs_list include mtime,"File list cannot show last modified","Extend fs_list entries with mtime_unix",feat(daemon): fs_list mtime
 WF-20260118-43,P1,daemon,done,MC jar detection command,"Panel needs reliable jar selection for zip installs","Add mc_detect_jar to scan instance dir and return best jar path",feat(daemon): mc_detect_jar
-WF-20260118-44,P2,daemon,todo,Heartbeat java details,"Users cannot see what Java is actually used per instance","Include selected java path/major and required major in heartbeat instances",feat(daemon): java in heartbeat
+WF-20260118-44,P2,daemon,done,Heartbeat java details,"Users cannot see what Java is actually used per instance","Include selected java path/major and required major in heartbeat instances",feat(daemon): java in heartbeat
 WF-20260118-45,P2,daemon,todo,Java cache management,"Auto-downloaded JREs can accumulate with no cleanup","Add command to list/remove cached Java runtimes",feat(daemon): java cache
 WF-20260118-46,P2,daemon,todo,Improved port check diagnostics,"Port check failure message is too generic","Return host/port and helpful hints (docker mapping, server-ip)",fix(daemon): port diagnostics
 WF-20260118-47,P2,panel-server,todo,Persist sessions,"Admin session is memory-only and lost on restart","Persist sessions to disk with TTL and cleanup",feat(panel-server): persist sessions

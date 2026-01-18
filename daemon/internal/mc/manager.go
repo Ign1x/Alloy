@@ -63,6 +63,10 @@ type StartOptions struct {
 type Status struct {
 	Running bool
 	PID     int
+	JarRel string
+	Java string
+	JavaMajor int
+	RequiredJavaMajor int
 }
 
 func NewManager(cfg ManagerConfig) *Manager {
@@ -161,9 +165,22 @@ func (inst *Instance) Status() Status {
 	defer inst.mu.Unlock()
 
 	if inst.cmd == nil || inst.cmd.Process == nil {
-		return Status{Running: false}
+		return Status{
+			Running: false,
+			JarRel: inst.jarRel,
+			Java: inst.java,
+			JavaMajor: inst.javaMajor,
+			RequiredJavaMajor: inst.requiredJavaMajor,
+		}
 	}
-	return Status{Running: true, PID: inst.cmd.Process.Pid}
+	return Status{
+		Running: true,
+		PID:     inst.cmd.Process.Pid,
+		JarRel: inst.jarRel,
+		Java: inst.java,
+		JavaMajor: inst.javaMajor,
+		RequiredJavaMajor: inst.requiredJavaMajor,
+	}
 }
 
 func (inst *Instance) start(ctx context.Context, fs *sandbox.FS, opt StartOptions, logSink func(instanceID, stream, line string), logger *log.Logger, javaSel *javaSelector, javaRuntime *JavaRuntimeManager) error {
