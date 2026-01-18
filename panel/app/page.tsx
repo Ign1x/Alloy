@@ -884,6 +884,25 @@ export default function HomePage() {
     }
   }, [themeMode]);
 
+  // Persist mobile sidebar open state (per session).
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem("elegantmc_sidebar_open") || "0";
+      if (raw === "1" && (window.innerWidth || 0) < 900) setSidebarOpen(true);
+    } catch {
+      // ignore
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    try {
+      sessionStorage.setItem("elegantmc_sidebar_open", sidebarOpen ? "1" : "0");
+    } catch {
+      // ignore
+    }
+  }, [sidebarOpen]);
+
   // Hash deep links: #tab=games&daemon=...&instance=...
   useEffect(() => {
     try {
