@@ -545,6 +545,7 @@ export default function HomePage() {
   const [cmdPaletteQuery, setCmdPaletteQuery] = useState<string>("");
   const [cmdPaletteIdx, setCmdPaletteIdx] = useState<number>(0);
   const cmdPaletteInputRef = useRef<HTMLInputElement | null>(null);
+  const [shortcutsOpen, setShortcutsOpen] = useState<boolean>(false);
 
   // Logs
   const [logs, setLogs] = useState<any[]>([]);
@@ -1070,6 +1071,11 @@ export default function HomePage() {
           }
           return;
         }
+        if (key === "?" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+          e.preventDefault();
+          setShortcutsOpen((v) => !v);
+          return;
+        }
         if (key === "/" && !e.ctrlKey && !e.metaKey && !e.altKey) {
           e.preventDefault();
           setCmdPaletteQuery("");
@@ -1093,6 +1099,11 @@ export default function HomePage() {
         if (copyOpen) {
           e.preventDefault();
           setCopyOpen(false);
+          return;
+        }
+        if (shortcutsOpen) {
+          e.preventDefault();
+          setShortcutsOpen(false);
           return;
         }
         if (cmdPaletteOpen) {
@@ -1144,6 +1155,7 @@ export default function HomePage() {
     confirmOpen,
     promptOpen,
     copyOpen,
+    shortcutsOpen,
     cmdPaletteOpen,
     installOpen,
     installRunning,
@@ -4637,6 +4649,65 @@ export default function HomePage() {
 	        </div>
 	      ) : null}
 
+	      {shortcutsOpen ? (
+	        <div className="modalOverlay" onClick={() => setShortcutsOpen(false)}>
+	          <div className="modal" style={{ width: "min(720px, 100%)" }} onClick={(e) => e.stopPropagation()}>
+	            <div className="modalHeader">
+	              <div>
+	                <div style={{ fontWeight: 800 }}>Keyboard Shortcuts</div>
+	                <div className="hint">
+	                  Press <code>?</code> to toggle this dialog
+	                </div>
+	              </div>
+	              <button type="button" onClick={() => setShortcutsOpen(false)}>
+	                Close
+	              </button>
+	            </div>
+
+	            <table>
+	              <thead>
+	                <tr>
+	                  <th style={{ width: 170 }}>Keys</th>
+	                  <th>Action</th>
+	                </tr>
+	              </thead>
+	              <tbody>
+	                <tr>
+	                  <td>
+	                    <code>Ctrl+K</code> / <code>⌘K</code>
+	                  </td>
+	                  <td>Toggle Command Palette</td>
+	                </tr>
+	                <tr>
+	                  <td>
+	                    <code>/</code>
+	                  </td>
+	                  <td>Open Command Palette</td>
+	                </tr>
+	                <tr>
+	                  <td>
+	                    <code>Esc</code>
+	                  </td>
+	                  <td>Close dialogs / sidebar</td>
+	                </tr>
+	                <tr>
+	                  <td>
+	                    <code>Enter</code>
+	                  </td>
+	                  <td>Confirm dialog (when focused outside inputs)</td>
+	                </tr>
+	                <tr>
+	                  <td>
+	                    <code>↑</code> / <code>↓</code>
+	                  </td>
+	                  <td>Navigate menus (Select / Command Palette)</td>
+	                </tr>
+	              </tbody>
+	            </table>
+	          </div>
+	        </div>
+	      ) : null}
+
 	      {toasts.length ? (
 	        <div className="toastWrap" aria-live="polite" aria-relevant="additions" onMouseEnter={pauseToasts} onMouseLeave={resumeToasts}>
 	          {toasts.map((t) => (
@@ -4698,11 +4769,16 @@ export default function HomePage() {
         </nav>
 
 	        <div className="sidebarFooter">
-	          <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+	          <div className="row" style={{ justifyContent: "space-between", alignItems: "center", flexWrap: "nowrap" }}>
 	            <span className="muted">Preferences</span>
-	            <button type="button" className="linkBtn" onClick={() => setSidebarFooterCollapsed((v) => !v)}>
-	              {sidebarFooterCollapsed ? "Show" : "Hide"}
-	            </button>
+	            <div className="row" style={{ gap: 10, flexWrap: "nowrap" }}>
+	              <button type="button" className="linkBtn" onClick={() => setShortcutsOpen(true)}>
+	                Shortcuts
+	              </button>
+	              <button type="button" className="linkBtn" onClick={() => setSidebarFooterCollapsed((v) => !v)}>
+	                {sidebarFooterCollapsed ? "Show" : "Hide"}
+	              </button>
+	            </div>
 	          </div>
 	          {!sidebarFooterCollapsed ? (
 	            <>
