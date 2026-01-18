@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "NODE_ENV=development node server/index.mjs",
     "start": "NODE_ENV=production node server/index.mjs",
+    "typecheck": "tsc --noEmit",
     "build": "next build"
   },
   "dependencies": {
