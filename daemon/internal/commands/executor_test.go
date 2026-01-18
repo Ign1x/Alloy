@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"elegantmc/daemon/internal/frp"
@@ -134,6 +135,45 @@ func TestExecutor_FSCopy_File_NoOverwrite(t *testing.T) {
 	})
 	if copyAgain.OK {
 		t.Fatalf("expected no-overwrite behavior")
+	}
+}
+
+func TestExecutor_FSStat_File(t *testing.T) {
+	ex, _, _ := newTestExecutor(t)
+	ctx := context.Background()
+
+	want := []byte("hello world\n")
+	writeRes := ex.Execute(ctx, protocol.Command{
+		Name: "fs_write",
+		Args: map[string]any{
+			"path": "server1/a.txt",
+			"b64":  base64.StdEncoding.EncodeToString(want),
+		},
+	})
+	if !writeRes.OK {
+		t.Fatalf("fs_write failed: %s", writeRes.Error)
+	}
+
+	statRes := ex.Execute(ctx, protocol.Command{
+		Name: "fs_stat",
+		Args: map[string]any{"path": "server1/a.txt"},
+	})
+	if !statRes.OK {
+		t.Fatalf("fs_stat failed: %s", statRes.Error)
+	}
+	if statRes.Output == nil {
+		t.Fatalf("expected output")
+	}
+	if isDir, _ := statRes.Output["isDir"].(bool); isDir {
+		t.Fatalf("expected file")
+	}
+	if size, _ := statRes.Output["size"].(int64); size <= 0 {
+		if sizef, ok := statRes.Output["size"].(float64); !ok || sizef <= 0 {
+			t.Fatalf("expected size")
+		}
+	}
+	if mode, _ := statRes.Output["mode"].(string); strings.TrimSpace(mode) == "" {
+		t.Fatalf("expected mode string")
 	}
 }
 

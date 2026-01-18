@@ -339,6 +339,8 @@ func (e *Executor) Execute(ctx context.Context, cmd protocol.Command) protocol.C
 		return e.fsWrite(cmd)
 	case "fs_list":
 		return e.fsList(cmd)
+	case "fs_stat":
+		return e.fsStat(cmd)
 	case "fs_delete":
 		return e.fsDelete(cmd)
 	case "fs_mkdir":
