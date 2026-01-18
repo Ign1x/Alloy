@@ -267,6 +267,69 @@ async function fetchJsonWithTimeout(url, opts = {}, timeoutMs = 12_000) {
   }
 }
 
+async function fetchWithTimeout(url, opts = {}, timeoutMs = 12_000) {
+  const ctrl = new AbortController();
+  const timeout = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...opts, signal: ctrl.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function resolveRedirectUrl(startUrl, maxHops = 6) {
+  let cur = String(startUrl || "").trim();
+  if (!cur) throw new Error("url is required");
+  for (let hop = 0; hop < maxHops; hop++) {
+    const res = await fetchWithTimeout(cur, { redirect: "manual", headers: { "User-Agent": "ElegantMC Panel" } }, 12_000);
+    try {
+      res.body?.cancel?.();
+    } catch {
+      // ignore
+    }
+    const loc = res.headers.get("location");
+    if (res.status >= 300 && res.status < 400 && loc) {
+      cur = new URL(loc, cur).toString();
+      continue;
+    }
+    return cur;
+  }
+  return cur;
+}
+
+function buildCurseForgeCandidates(inputUrl) {
+  const u = new URL(String(inputUrl || "").trim());
+  const origin = u.origin;
+  const path = u.pathname.replace(/\/+$/, "");
+  const out = [u.toString()];
+
+  const m = path.match(/^(.*)\/files\/(\d+)$/);
+  if (m) {
+    out.push(`${origin}${m[1]}/download/${m[2]}`);
+    out.push(`${origin}${m[1]}/files/${m[2]}/download`);
+  }
+
+  return Array.from(new Set(out));
+}
+
+function isAllowedCurseForgeHost(hostname) {
+  const h = String(hostname || "").toLowerCase().trim();
+  return h === "www.curseforge.com" || h === "curseforge.com" || h === "legacy.curseforge.com";
+}
+
+function isLikelyDirectDownloadUrl(urlText) {
+  try {
+    const u = new URL(String(urlText || "").trim());
+    const host = String(u.hostname || "").toLowerCase();
+    const p = String(u.pathname || "").toLowerCase();
+    if (p.endsWith(".zip") || p.endsWith(".mrpack")) return true;
+    if (host.endsWith("forgecdn.net") && p.includes("/files/")) return true;
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 const MODRINTH_BASE_URL = String(process.env.ELEGANTMC_MODRINTH_BASE_URL || "https://api.modrinth.com").replace(/\/+$/, "");
 const CURSEFORGE_BASE_URL = String(process.env.ELEGANTMC_CURSEFORGE_BASE_URL || "https://api.curseforge.com").replace(/\/+$/, "");
 const FABRIC_META_BASE_URL = String(process.env.ELEGANTMC_FABRIC_META_BASE_URL || "https://meta.fabricmc.net").replace(/\/+$/, "");
@@ -729,6 +792,38 @@ const server = http.createServer(async (req, res) => {
       try {
         const urlText = await curseforgeFileDownloadUrl(id);
         return json(res, 200, { provider: "curseforge", file_id: id, url: urlText });
+      } catch (e) {
+        return json(res, 400, { error: String(e?.message || e) });
+      }
+    }
+
+    if (url.pathname === "/api/modpacks/curseforge/resolve-url" && req.method === "GET") {
+      const inputUrl = String(url.searchParams.get("url") || "").trim();
+      try {
+        if (!inputUrl) throw new Error("url is required");
+        const u = new URL(inputUrl);
+        if (u.protocol !== "http:" && u.protocol !== "https:") throw new Error("invalid protocol");
+        if (!isAllowedCurseForgeHost(u.hostname)) throw new Error("only curseforge.com urls are allowed");
+
+        const candidates = buildCurseForgeCandidates(u.toString());
+        for (const cand of candidates) {
+          const resolved = await resolveRedirectUrl(cand, 8);
+          if (isLikelyDirectDownloadUrl(resolved)) {
+            const fileName = decodeURIComponent(new URL(resolved).pathname.split("/").pop() || "");
+            return json(res, 200, {
+              input: u.toString(),
+              resolved,
+              file_name: fileName || "",
+              candidates,
+            });
+          }
+        }
+
+        return json(res, 404, {
+          error: "could not resolve a direct download url (try copying the /files/<id> link)",
+          input: u.toString(),
+          candidates,
+        });
       } catch (e) {
         return json(res, 400, { error: String(e?.message || e) });
       }

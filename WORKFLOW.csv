@@ -33,7 +33,7 @@ WF-20260118-31,P2,modpacks,done,Parallel mrpack downloads,"Mrpack files download
 WF-20260118-32,P2,modpacks,done,Show mrpack metadata,"User cannot see loader/minecraft version before install","Display minecraft version + loader + file count before install",ux(modpacks): show metadata
 WF-20260118-33,P1,modpacks,done,Quilt mrpack support,"Quilt-based mrpacks cannot be installed","Support quilt-loader dependency and install quilt server jar",feat(modpacks): quilt mrpack
 WF-20260118-34,P1,modpacks,done,Forge/NeoForge server packs,"Many modpacks require Forge/NeoForge and currently fail","Support server pack zip workflow and clear guidance",feat(modpacks): forge server packs
-WF-20260118-35,P2,modpacks,todo,CurseForge direct URL helper,"CurseForge links are not straightforward for users","Add helper UI to accept CurseForge page URL and guide to direct download",ux(modpacks): curseforge url helper
+WF-20260118-35,P2,modpacks,done,CurseForge direct URL helper,"CurseForge links are not straightforward for users","Add helper UI to accept CurseForge page URL and guide to direct download",ux(modpacks): curseforge url helper
 WF-20260118-36,P2,frp,todo,FRP status clarity,"FRP state is confusing when disabled/misconfigured","Show explicit FRP desired vs actual status and next steps",ux(frp): status clarity
 WF-20260118-37,P2,frp,todo,FRP test button,"Users cannot test FRP profile before using","Add Test connection button and show latency/errors",feat(frp): test profile
 WF-20260118-38,P2,frp,todo,FRP proxy list,"Multiple proxies per instance are hard to view","Show per-instance proxy details (name, remote addr, port)",ux(frp): proxy list

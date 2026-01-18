@@ -612,6 +612,8 @@ export default function HomePage() {
   const [marketSelected, setMarketSelected] = useState<any>(null);
   const [marketVersions, setMarketVersions] = useState<any[]>([]);
   const [marketSelectedVersionId, setMarketSelectedVersionId] = useState<string>("");
+  const [cfResolveStatus, setCfResolveStatus] = useState<string>("");
+  const [cfResolveBusy, setCfResolveBusy] = useState<boolean>(false);
   const [modpackProviders, setModpackProviders] = useState<any[]>([]);
   const [modpackProvidersStatus, setModpackProvidersStatus] = useState<string>("");
   const [logView, setLogView] = useState<"all" | "mc" | "install" | "frp">("all");
@@ -2115,6 +2117,7 @@ export default function HomePage() {
     setMarketSelected(null);
     setMarketVersions([]);
     setMarketSelectedVersionId("");
+    setCfResolveStatus("");
     setInstallForm((f) => ({ ...f, remoteUrl: "", remoteFileName: "" }));
 
     try {
@@ -2131,6 +2134,37 @@ export default function HomePage() {
       setMarketStatus(results.length ? `Found ${results.length} result(s)` : "No results");
     } catch (e: any) {
       setMarketStatus(String(e?.message || e));
+    }
+  }
+
+  async function resolveCurseForgeUrl() {
+    if (installRunning) return;
+    const inputUrl = String(installForm.remoteUrl || "").trim();
+    if (!inputUrl) return;
+
+    setCfResolveBusy(true);
+    setCfResolveStatus("Resolving...");
+    try {
+      const params = new URLSearchParams();
+      params.set("url", inputUrl);
+      const res = await apiFetch(`/api/modpacks/curseforge/resolve-url?${params.toString()}`);
+      const json = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(json?.error || "resolve failed");
+
+      const resolved = String(json?.resolved || "").trim();
+      const fileName = String(json?.file_name || "").trim();
+      if (!resolved) throw new Error("no resolved url");
+      setInstallForm((f) => ({
+        ...f,
+        remoteUrl: resolved,
+        remoteFileName: f.remoteFileName || fileName,
+      }));
+      setCfResolveStatus("Resolved");
+      window.setTimeout(() => setCfResolveStatus(""), 1200);
+    } catch (e: any) {
+      setCfResolveStatus(String(e?.message || e));
+    } finally {
+      setCfResolveBusy(false);
     }
   }
 
@@ -4078,14 +4112,33 @@ export default function HomePage() {
 			                  ) : installForm.kind === "zip_url" ? (
 			                    <div className="field" style={{ gridColumn: "1 / -1" }}>
 			                      <label>Modpack URL</label>
-			                      <input
-			                        value={installForm.remoteUrl}
-			                        onChange={(e) => setInstallForm((f) => ({ ...f, remoteUrl: e.target.value }))}
-			                        placeholder="https://..."
-			                      />
-			                      <div className="hint">
-			                        直接粘贴下载链接（支持 <code>.zip</code> / <code>.mrpack</code>）。CurseForge 无 API Key 时可以用此方式粘贴直链。
+			                      <div className="row" style={{ justifyContent: "space-between", gap: 10 }}>
+			                        <input
+			                          value={installForm.remoteUrl}
+			                          onChange={(e) => {
+			                            setCfResolveStatus("");
+			                            setInstallForm((f) => ({ ...f, remoteUrl: e.target.value }));
+			                          }}
+			                          placeholder="https://..."
+			                          style={{ flex: 1, minWidth: 220 }}
+			                        />
+			                        {/^https?:\/\/(www\.)?curseforge\.com\//i.test(String(installForm.remoteUrl || "").trim()) ? (
+			                          <button
+			                            type="button"
+			                            className="iconBtn"
+			                            onClick={resolveCurseForgeUrl}
+			                            disabled={installRunning || cfResolveBusy}
+			                            title="Resolve CurseForge file page URL to a direct download URL"
+			                          >
+			                            <Icon name="download" />
+			                            Resolve
+			                          </button>
+			                        ) : null}
 			                      </div>
+			                      <div className="hint">
+			                        直接粘贴下载链接（支持 <code>.zip</code> / <code>.mrpack</code>）。如果你只有 CurseForge 文件页面链接（<code>/files/&lt;id&gt;</code>），点 Resolve 自动转换为直链。
+			                      </div>
+			                      {cfResolveStatus ? <div className="hint">{cfResolveStatus}</div> : null}
 			                      <div className="field" style={{ marginTop: 10 }}>
 			                        <label>Filename (optional)</label>
 			                        <input
