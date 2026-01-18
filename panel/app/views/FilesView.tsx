@@ -43,6 +43,7 @@ export default function FilesView() {
     downloadFsFolderAsZip,
     deleteFsEntry,
     openTrashModal,
+    copyText,
   } = useAppCtx();
 
   const [queryRaw, setQueryRaw] = useState<string>("");
@@ -106,6 +107,19 @@ export default function FilesView() {
                   </button>
                 </span>
               ))}
+              <button
+                type="button"
+                className="iconBtn iconOnly"
+                title="Copy path"
+                aria-label="Copy path"
+                style={{ marginLeft: 8 }}
+                onClick={() => {
+                  const p = fsPath ? `servers/${fsPath}` : "servers/";
+                  copyText(p);
+                }}
+              >
+                <Icon name="copy" />
+              </button>
             </div>
             {fsStatus ? <div className="hint">{fsStatus}</div> : null}
           </div>
