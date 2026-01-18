@@ -88,6 +88,55 @@ func TestExecutor_FSReadWrite(t *testing.T) {
 	}
 }
 
+func TestExecutor_FSCopy_File_NoOverwrite(t *testing.T) {
+	ex, _, _ := newTestExecutor(t)
+	ctx := context.Background()
+
+	want := []byte("hello world\n")
+	writeRes := ex.Execute(ctx, protocol.Command{
+		Name: "fs_write",
+		Args: map[string]any{
+			"path": "server1/a.txt",
+			"b64":  base64.StdEncoding.EncodeToString(want),
+		},
+	})
+	if !writeRes.OK {
+		t.Fatalf("fs_write failed: %s", writeRes.Error)
+	}
+
+	copyRes := ex.Execute(ctx, protocol.Command{
+		Name: "fs_copy",
+		Args: map[string]any{"from": "server1/a.txt", "to": "server1/b.txt"},
+	})
+	if !copyRes.OK {
+		t.Fatalf("fs_copy failed: %s", copyRes.Error)
+	}
+
+	readRes := ex.Execute(ctx, protocol.Command{
+		Name: "fs_read",
+		Args: map[string]any{"path": "server1/b.txt"},
+	})
+	if !readRes.OK {
+		t.Fatalf("fs_read failed: %s", readRes.Error)
+	}
+	gotB64, _ := readRes.Output["b64"].(string)
+	got, err := base64.StdEncoding.DecodeString(gotB64)
+	if err != nil {
+		t.Fatalf("decode b64: %v", err)
+	}
+	if string(got) != string(want) {
+		t.Fatalf("unexpected contents: %q", string(got))
+	}
+
+	copyAgain := ex.Execute(ctx, protocol.Command{
+		Name: "fs_copy",
+		Args: map[string]any{"from": "server1/a.txt", "to": "server1/b.txt"},
+	})
+	if copyAgain.OK {
+		t.Fatalf("expected no-overwrite behavior")
+	}
+}
+
 func TestExecutor_FSRead_RejectsEscape(t *testing.T) {
 	ex, _, _ := newTestExecutor(t)
 	ctx := context.Background()
@@ -221,4 +270,3 @@ func TestExecutor_MCTemplates(t *testing.T) {
 		t.Fatalf("expected templates key")
 	}
 }
-

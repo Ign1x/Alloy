@@ -38,7 +38,7 @@ WF-20260118-36,P2,frp,done,FRP status clarity,"FRP state is confusing when disab
 WF-20260118-37,P2,frp,done,FRP test button,"Users cannot test FRP profile before using","Add Test connection button and show latency/errors",feat(frp): test profile
 WF-20260118-38,P2,frp,done,FRP proxy list,"Multiple proxies per instance are hard to view","Show per-instance proxy details (name, remote addr, port)",ux(frp): proxy list
 WF-20260118-39,P2,scheduler,todo,Scheduler UI,"Daemon supports schedule.json but Panel has no UI","Add simple scheduler view to edit schedule.json and trigger tasks",feat(panel): scheduler ui
-WF-20260118-40,P2,daemon,todo,fs_copy command,"UI cannot implement rename/clone without file copy support","Add fs_copy for files/dirs inside sandbox (safe, no overwrite)",feat(daemon): fs_copy
+WF-20260118-40,P2,daemon,done,fs_copy command,"UI cannot implement rename/clone without file copy support","Add fs_copy for files/dirs inside sandbox (safe, no overwrite)",feat(daemon): fs_copy
 WF-20260118-41,P2,daemon,todo,fs_stat command,"File UI lacks mtime and type details","Add fs_stat returning size, mtime, mode, isDir",feat(daemon): fs_stat
 WF-20260118-42,P2,daemon,todo,fs_list include mtime,"File list cannot show last modified","Extend fs_list entries with mtime_unix",feat(daemon): fs_list mtime
 WF-20260118-43,P1,daemon,todo,MC jar detection command,"Panel needs reliable jar selection for zip installs","Add mc_detect_jar to scan instance dir and return best jar path",feat(daemon): mc_detect_jar
