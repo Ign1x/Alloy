@@ -2839,6 +2839,36 @@ export default function HomePage() {
         frp_remote_port: Number.isFinite(remotePort) ? remotePort : 0,
       });
 
+      const eulaPath = joinRelPath(inst, "eula.txt");
+      try {
+        const out = await callOkCommand("fs_read", { path: eulaPath }, 10_000);
+        const text = b64DecodeUtf8(String(out?.b64 || ""));
+        const v = String(getPropValue(text, "eula") || "").trim().toLowerCase();
+        if (v !== "true") {
+          const ok = await confirmDialog(
+            `Minecraft requires accepting the Mojang EULA.\n\nWrite servers/${inst}/eula.txt with eula=true?`,
+            { title: "Accept EULA", confirmLabel: "Accept", cancelLabel: "Cancel" }
+          );
+          if (!ok) {
+            setServerOpStatus("Cancelled");
+            return;
+          }
+          setServerOpStatus("Writing eula.txt ...");
+          await callOkCommand("fs_write", { path: eulaPath, b64: b64EncodeUtf8("eula=true\n") }, 10_000);
+        }
+      } catch (e: any) {
+        const ok = await confirmDialog(
+          `Minecraft requires accepting the Mojang EULA.\n\nWrite servers/${inst}/eula.txt with eula=true?`,
+          { title: "Accept EULA", confirmLabel: "Accept", cancelLabel: "Cancel" }
+        );
+        if (!ok) {
+          setServerOpStatus("Cancelled");
+          return;
+        }
+        setServerOpStatus("Writing eula.txt ...");
+        await callOkCommand("fs_write", { path: eulaPath, b64: b64EncodeUtf8("eula=true\n") }, 10_000);
+      }
+
       await callOkCommand(
         "mc_start",
         { instance_id: inst, jar_path: jar, ...(java ? { java_path: java } : {}), xms: xmsVal, xmx: xmxVal },
