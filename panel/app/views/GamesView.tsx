@@ -255,6 +255,27 @@ export default function GamesView() {
             <div className="k">FRP process</div>
             <div className="v">
               {frpStatus?.running ? <span className="badge ok">running</span> : <span className="badge">stopped</span>}
+              {frpStatus?.running && frpStatus.remote_port ? (
+                <span className="badge">
+                  {frpStatus.remote_addr}:{frpStatus.remote_port}
+                </span>
+              ) : null}
+            </div>
+            <div className="hint">
+              desired:{" "}
+              {enableFrp ? (
+                selectedProfile ? (
+                  <>
+                    on (<code>{selectedProfile.name}</code>)
+                  </>
+                ) : (
+                  <span style={{ color: "var(--danger)" }}>on (no profile)</span>
+                )
+              ) : (
+                "off"
+              )}
+              {" · "}
+              remote port: <code>{Math.round(Number(frpRemotePort || 0))}</code>
             </div>
           </div>
 
@@ -291,6 +312,24 @@ export default function GamesView() {
           </button>
         </div>
         <div className="hint" style={{ marginTop: 8 }}>
+          <span>
+            desired:{" "}
+            {enableFrp ? (
+              selectedProfile ? (
+                <>
+                  FRP on (<code>{selectedProfile.name}</code>)
+                </>
+              ) : (
+                <span style={{ color: "var(--danger)" }}>FRP on (no profile)</span>
+              )
+            ) : (
+              "FRP off"
+            )}
+            {" · "}
+            actual: {frpStatus?.running ? "running" : "stopped"}
+          </span>
+        </div>
+        <div className="hint">
           {frpStatus?.running && frpStatus.remote_port ? (
             <span>FRP：公网连接地址（可直接复制给朋友）。</span>
           ) : enableFrp ? (
@@ -302,8 +341,16 @@ export default function GamesView() {
                 </button>{" "}
                 保存一个 profile）。
               </span>
+            ) : selectedProfile.status?.online === false ? (
+              <span style={{ color: "var(--danger)" }}>
+                FRP server unreachable: {selectedProfile.status.error || "offline"}（去 FRP tab 点 Test/Probe）
+              </span>
             ) : frpRemotePort <= 0 ? (
               <span>FRP 已开启但 Remote Port=0（由服务端分配端口；建议手动指定一个固定端口）。</span>
+            ) : frpStatus && frpStatus.running === false ? (
+              <span style={{ color: "var(--danger)" }}>
+                FRP desired on, but not running on daemon（看 Logs → FRP / 检查 token、server_addr、server_port）
+              </span>
             ) : (
               <span>FRP：启动后会显示公网地址。</span>
             )
