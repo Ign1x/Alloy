@@ -270,6 +270,7 @@ async function fetchJsonWithTimeout(url, opts = {}, timeoutMs = 12_000) {
 const MODRINTH_BASE_URL = String(process.env.ELEGANTMC_MODRINTH_BASE_URL || "https://api.modrinth.com").replace(/\/+$/, "");
 const CURSEFORGE_BASE_URL = String(process.env.ELEGANTMC_CURSEFORGE_BASE_URL || "https://api.curseforge.com").replace(/\/+$/, "");
 const FABRIC_META_BASE_URL = String(process.env.ELEGANTMC_FABRIC_META_BASE_URL || "https://meta.fabricmc.net").replace(/\/+$/, "");
+const QUILT_META_BASE_URL = String(process.env.ELEGANTMC_QUILT_META_BASE_URL || "https://meta.quiltmc.org").replace(/\/+$/, "");
 
 function getCurseForgeApiKey() {
   const fromSettings = String(state?.panelSettings?.curseforge_api_key || "").trim();
@@ -293,6 +294,25 @@ async function fabricResolveServerJar(minecraftVersion, loaderVersion) {
   if (!installer) throw new Error("no fabric installer versions");
 
   const jarUrl = `${FABRIC_META_BASE_URL}/v2/versions/loader/${encodeURIComponent(mc)}/${encodeURIComponent(loader)}/${encodeURIComponent(installer)}/server/jar`;
+  return { mc, loader, installer, url: jarUrl };
+}
+
+async function quiltResolveServerJar(minecraftVersion, loaderVersion) {
+  const mc = String(minecraftVersion || "").trim();
+  const loader = String(loaderVersion || "").trim();
+  if (!mc) throw new Error("mc is required");
+  if (!loader) throw new Error("loader is required");
+  if (mc.length > 64) throw new Error("mc too long");
+  if (loader.length > 64) throw new Error("loader too long");
+
+  const installerUrl = `${QUILT_META_BASE_URL}/v3/versions/installer`;
+  const { res, json } = await fetchJsonWithTimeout(installerUrl, { headers: { "User-Agent": "ElegantMC Panel" } }, 12_000);
+  if (!res.ok) throw new Error(json?.error || `fetch failed: ${res.status}`);
+  const list = Array.isArray(json) ? json : [];
+  const installer = String(list?.[0]?.version || "").trim();
+  if (!installer) throw new Error("no quilt installer versions");
+
+  const jarUrl = `${QUILT_META_BASE_URL}/v3/versions/loader/${encodeURIComponent(mc)}/${encodeURIComponent(loader)}/${encodeURIComponent(installer)}/server/jar`;
   return { mc, loader, installer, url: jarUrl };
 }
 
@@ -633,6 +653,17 @@ const server = http.createServer(async (req, res) => {
       const loader = String(url.searchParams.get("loader") || "").trim();
       try {
         const resolved = await fabricResolveServerJar(mc, loader);
+        return json(res, 200, resolved);
+      } catch (e) {
+        return json(res, 400, { error: String(e?.message || e) });
+      }
+    }
+
+    if (url.pathname === "/api/mc/quilt/server-jar" && req.method === "GET") {
+      const mc = String(url.searchParams.get("mc") || "").trim();
+      const loader = String(url.searchParams.get("loader") || "").trim();
+      try {
+        const resolved = await quiltResolveServerJar(mc, loader);
         return json(res, 200, resolved);
       } catch (e) {
         return json(res, 400, { error: String(e?.message || e) });

@@ -2242,9 +2242,8 @@ export default function HomePage() {
       if (forge || neoForge) throw new Error("Forge/NeoForge mrpack is not supported yet (please use a server pack zip)");
       throw new Error("mrpack missing supported loader dependency (fabric-loader/quilt-loader)");
     }
-    if (quiltLoader) {
-      throw new Error("Quilt mrpack is not supported yet (please use a server pack zip)");
-    }
+    const loaderKind = fabricLoader ? "fabric" : quiltLoader ? "quilt" : "";
+    const loaderVer = loaderKind === "fabric" ? fabricLoader : quiltLoader;
 
     // Apply overrides -> instance root (if present).
     const overridesDir = joinRelPath(tmpDir, "overrides");
@@ -2307,18 +2306,32 @@ export default function HomePage() {
     });
     await Promise.all(workers);
 
-    // Install Fabric server launcher jar.
-    setServerOpStatus(`Installing Fabric server (${mc} / loader ${fabricLoader}) ...`);
-    const res = await apiFetch(
-      `/api/mc/fabric/server-jar?mc=${encodeURIComponent(mc)}&loader=${encodeURIComponent(fabricLoader)}`,
-      { cache: "no-store" }
-    );
-    const resolved = await res.json().catch(() => null);
-    if (!res.ok) throw new Error(resolved?.error || "failed to resolve Fabric server jar");
+    // Install loader server launcher jar.
+    if (loaderKind === "quilt") {
+      setServerOpStatus(`Installing Quilt server (${mc} / loader ${loaderVer}) ...`);
+      const res = await apiFetch(
+        `/api/mc/quilt/server-jar?mc=${encodeURIComponent(mc)}&loader=${encodeURIComponent(loaderVer)}`,
+        { cache: "no-store" }
+      );
+      const resolved = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(resolved?.error || "failed to resolve Quilt server jar");
 
-    const serverJarUrl = String(resolved?.url || "").trim();
-    if (!serverJarUrl) throw new Error("fabric server jar url missing");
-    await callOkCommand("fs_download", { path: joinRelPath(inst, jarRel), url: serverJarUrl, instance_id: inst }, 10 * 60_000);
+      const serverJarUrl = String(resolved?.url || "").trim();
+      if (!serverJarUrl) throw new Error("quilt server jar url missing");
+      await callOkCommand("fs_download", { path: joinRelPath(inst, jarRel), url: serverJarUrl, instance_id: inst }, 10 * 60_000);
+    } else {
+      setServerOpStatus(`Installing Fabric server (${mc} / loader ${loaderVer}) ...`);
+      const res = await apiFetch(
+        `/api/mc/fabric/server-jar?mc=${encodeURIComponent(mc)}&loader=${encodeURIComponent(loaderVer)}`,
+        { cache: "no-store" }
+      );
+      const resolved = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(resolved?.error || "failed to resolve Fabric server jar");
+
+      const serverJarUrl = String(resolved?.url || "").trim();
+      if (!serverJarUrl) throw new Error("fabric server jar url missing");
+      await callOkCommand("fs_download", { path: joinRelPath(inst, jarRel), url: serverJarUrl, instance_id: inst }, 10 * 60_000);
+    }
 
     // Best-effort cleanup (keep tmpRoot for debugging if deletion fails).
     try {
