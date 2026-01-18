@@ -15,6 +15,7 @@ import (
 	"path"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -49,6 +50,14 @@ type javaCacheInfo struct {
 	InstalledAtUnix int64  `json:"installed_at_unix"`
 }
 
+type JavaCacheEntry struct {
+	Key            string `json:"key"`
+	Major          int    `json:"major"`
+	JavaPath       string `json:"java_path"`
+	SHA256         string `json:"sha256"`
+	InstalledAtUnix int64 `json:"installed_at_unix"`
+}
+
 func NewJavaRuntimeManager(cfg JavaRuntimeManagerConfig) *JavaRuntimeManager {
 	if strings.TrimSpace(cfg.AdoptiumAPIBaseURL) == "" {
 		cfg.AdoptiumAPIBaseURL = "https://api.adoptium.net"
@@ -57,6 +66,69 @@ func NewJavaRuntimeManager(cfg JavaRuntimeManagerConfig) *JavaRuntimeManager {
 		cfg:      cfg,
 		inflight: make(map[string]*javaEnsureState),
 	}
+}
+
+func (m *JavaRuntimeManager) CacheDir() string { return m.cfg.CacheDir }
+
+func (m *JavaRuntimeManager) ListCached() ([]JavaCacheEntry, error) {
+	if m == nil {
+		return nil, errors.New("java runtime manager is nil")
+	}
+	root := strings.TrimSpace(m.cfg.CacheDir)
+	if root == "" {
+		return nil, errors.New("java cache dir not configured")
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []JavaCacheEntry{}, nil
+		}
+		return nil, err
+	}
+
+	var out []JavaCacheEntry
+	for _, ent := range entries {
+		if ent == nil || !ent.IsDir() {
+			continue
+		}
+		key := ent.Name()
+		if !strings.HasPrefix(key, "temurin-jre-") {
+			continue
+		}
+		infoPath := filepath.Join(root, key, "elegantmc-java.json")
+		b, err := os.ReadFile(infoPath)
+		if err != nil {
+			continue
+		}
+		var info javaCacheInfo
+		if err := json.Unmarshal(b, &info); err != nil {
+			continue
+		}
+		if info.Major <= 0 || strings.TrimSpace(info.JavaRel) == "" {
+			continue
+		}
+		javaAbs := filepath.Join(root, key, filepath.FromSlash(info.JavaRel))
+		st, err := os.Stat(javaAbs)
+		if err != nil || st.IsDir() {
+			continue
+		}
+		out = append(out, JavaCacheEntry{
+			Key:            key,
+			Major:          info.Major,
+			JavaPath:       javaAbs,
+			SHA256:         info.SHA256,
+			InstalledAtUnix: info.InstalledAtUnix,
+		})
+	}
+
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Major != out[j].Major {
+			return out[i].Major < out[j].Major
+		}
+		return out[i].Key < out[j].Key
+	})
+
+	return out, nil
 }
 
 func (m *JavaRuntimeManager) EnsureTemurinJRE(ctx context.Context, major int) (string, int, error) {
@@ -515,4 +587,3 @@ func isWithinDir(rootAbs string, childAbs string) bool {
 	}
 	return strings.HasPrefix(childAbs, rootAbs)
 }
-

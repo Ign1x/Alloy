@@ -334,6 +334,10 @@ func (e *Executor) Execute(ctx context.Context, cmd protocol.Command) protocol.C
 		return e.mcTemplates()
 	case "mc_detect_jar":
 		return e.mcDetectJar(cmd)
+	case "mc_java_cache_list":
+		return e.mcJavaCacheList(cmd)
+	case "mc_java_cache_remove":
+		return e.mcJavaCacheRemove(cmd)
 	case "mc_backup":
 		return e.mcBackup(ctx, cmd)
 	case "mc_restore":

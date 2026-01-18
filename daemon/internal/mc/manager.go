@@ -86,6 +86,10 @@ func NewManager(cfg ManagerConfig) *Manager {
 	}
 }
 
+func (m *Manager) JavaRuntimeManager() *JavaRuntimeManager {
+	return m.javaRuntime
+}
+
 func (m *Manager) List() map[string]Status {
 	m.mu.Lock()
 	defer m.mu.Unlock()
