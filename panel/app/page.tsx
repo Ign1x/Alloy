@@ -1159,6 +1159,48 @@ export default function HomePage() {
     return json.result;
   }
 
+  async function callAdvancedCommand(name: string, args: any, timeoutMs = 60_000) {
+    if (!enableAdvanced) throw new Error("advanced is disabled");
+    const daemonId = String(selected || "").trim();
+    if (!daemonId) {
+      pushToast("No daemon selected", "error", 7000, `command=${name}`);
+      throw new Error("no daemon selected");
+    }
+
+    let res: Response;
+    let json: any = null;
+    try {
+      res = await apiFetch(`/api/daemons/${encodeURIComponent(daemonId)}/advanced-command`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, args, timeoutMs }),
+      });
+      json = await res.json().catch(() => null);
+    } catch (e: any) {
+      const msg = String(e?.message || e);
+      pushToast(
+        `Advanced command ${name} failed`,
+        "error",
+        9000,
+        JSON.stringify({ daemon: daemonId, name, args: sanitizeForToast(args), timeoutMs, error: msg }, null, 2)
+      );
+      throw e;
+    }
+
+    if (!res.ok) {
+      const msg = String(json?.error || "request failed");
+      pushToast(
+        `Advanced command ${name} failed: ${msg}`,
+        "error",
+        9000,
+        JSON.stringify({ daemon: daemonId, name, args: sanitizeForToast(args), timeoutMs, status: res.status, error: msg }, null, 2)
+      );
+      throw new Error(msg);
+    }
+
+    return json.result;
+  }
+
   async function callOkCommand(name: string, args: any, timeoutMs = 60_000) {
     const result = await callCommand(name, args, timeoutMs);
     if (!result?.ok) {
@@ -3353,7 +3395,7 @@ export default function HomePage() {
       return;
     }
     try {
-      const result = await callCommand(cmdName, argsObj, 30_000);
+      const result = await callAdvancedCommand(cmdName, argsObj, 30_000);
       setCmdResult(result);
     } catch (e: any) {
       setError(String(e?.message || e));

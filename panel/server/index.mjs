@@ -113,6 +113,40 @@ const secureCookie = String(process.env.ELEGANTMC_PANEL_SECURE_COOKIE || "").tri
 const enableAdvanced = truthy(process.env.ELEGANTMC_ENABLE_ADVANCED);
 const enableHSTS = truthy(process.env.ELEGANTMC_PANEL_HSTS);
 
+function parseCmdList(v) {
+  return String(v || "")
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+const advancedAllow = new Set(parseCmdList(process.env.ELEGANTMC_ADVANCED_CMD_ALLOWLIST || ""));
+const advancedDeny = new Set([
+  // Default deny: keep Advanced read-mostly.
+  "fs_delete",
+  "fs_write",
+  "fs_move",
+  "fs_copy",
+  "fs_unzip",
+  "fs_upload_begin",
+  "fs_upload_chunk",
+  "fs_upload_commit",
+  "fs_upload_abort",
+  "fs_download",
+  "mc_delete",
+  "frpc_install",
+  "mc_java_cache_remove",
+  ...parseCmdList(process.env.ELEGANTMC_ADVANCED_CMD_DENYLIST || ""),
+]);
+
+function isAllowedAdvancedCommand(name) {
+  const n = String(name || "").trim().toLowerCase();
+  if (!n) return false;
+  if (advancedDeny.has(n)) return false;
+  if (process.env.ELEGANTMC_ADVANCED_CMD_ALLOWLIST) return advancedAllow.has(n);
+  return true;
+}
+
 const SESSION_COOKIE = "elegantmc_session";
 const SESSION_TTL_SEC = 60 * 60 * 24 * 7;
 const sessions = new Map(); // token -> { expiresAtUnix }
@@ -1086,7 +1120,7 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { deleted: true });
     }
 
-    const mDaemon = url.pathname.match(/^\/api\/daemons\/([^/]+)(?:\/(logs|command))?$/);
+    const mDaemon = url.pathname.match(/^\/api\/daemons\/([^/]+)(?:\/(logs|command|advanced-command))?$/);
     if (mDaemon) {
       const daemonId = decodeURIComponent(mDaemon[1]);
       const suffix = mDaemon[2] || "";
@@ -1125,6 +1159,41 @@ const server = http.createServer(async (req, res) => {
           return json(res, 200, { result });
         } catch (e) {
           appendAudit(req, "daemon.command_failed", {
+            daemon_id: daemonId,
+            name,
+            args,
+            timeout_ms: timeoutMs,
+            error: String(e?.message || e),
+          });
+          throw e;
+        }
+      }
+
+      if (suffix === "advanced-command" && req.method === "POST") {
+        if (!enableAdvanced) return json(res, 404, { error: "not found" });
+        const body = await readJsonBody(req);
+        const name = body?.name;
+        const args = body?.args ?? {};
+        if (!name || typeof name !== "string") {
+          return json(res, 400, { error: "name is required" });
+        }
+        if (!isAllowedAdvancedCommand(name)) {
+          return json(res, 403, { error: "command not allowed by server policy" });
+        }
+        const timeoutMs = Number(body?.timeoutMs || 30_000);
+        try {
+          const result = await sendCommand(daemonId, { name, args }, { timeoutMs });
+          appendAudit(req, "daemon.advanced_command", {
+            daemon_id: daemonId,
+            name,
+            args,
+            timeout_ms: timeoutMs,
+            ok: !!result?.ok,
+            error: String(result?.error || ""),
+          });
+          return json(res, 200, { result });
+        } catch (e) {
+          appendAudit(req, "daemon.advanced_command_failed", {
             daemon_id: daemonId,
             name,
             args,
