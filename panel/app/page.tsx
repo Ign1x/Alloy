@@ -534,8 +534,10 @@ export default function HomePage() {
   const [copyValue, setCopyValue] = useState<string>("");
 
   // Toasts
-  const [toasts, setToasts] = useState<{ id: string; kind: "info" | "ok" | "error"; message: string; detail?: string }[]>([]);
+  const [toasts, setToasts] = useState<{ id: string; kind: "info" | "ok" | "error"; message: string; detail?: string; expiresAtMs: number }[]>([]);
   const toastSeq = useRef<number>(0);
+  const [toastsPaused, setToastsPaused] = useState<boolean>(false);
+  const toastPauseStartRef = useRef<number | null>(null);
 
   // Command palette (Ctrl+K / /)
   const [cmdPaletteOpen, setCmdPaletteOpen] = useState<boolean>(false);
@@ -1491,15 +1493,46 @@ export default function HomePage() {
     openCopyModal(t);
   }
 
-  function pushToast(message: string, kind: "info" | "ok" | "error" = "info", ttlMs = 2200, detail?: string) {
+  function pushToast(message: string, kind: "info" | "ok" | "error" = "info", ttlMs?: number, detail?: string) {
     const msg = String(message || "").trim();
     if (!msg) return;
-    const id = `${Date.now()}-${toastSeq.current++}`;
+    const now = Date.now();
+    const id = `${now}-${toastSeq.current++}`;
     const d = String(detail || "").trim();
-    setToasts((prev) => [...prev, { id, kind, message: msg, ...(d ? { detail: d } : {}) }].slice(-6));
-    window.setTimeout(() => {
-      setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, Math.max(800, Math.min(20_000, ttlMs)));
+
+    const defaultTtl = kind === "error" ? 9000 : 2200;
+    const ttlNum = typeof ttlMs === "number" && Number.isFinite(ttlMs) ? ttlMs : defaultTtl;
+    const ttl = Math.max(800, Math.min(20_000, Math.round(ttlNum)));
+
+    setToasts((prev) =>
+      [...prev, { id, kind, message: msg, expiresAtMs: now + ttl, ...(d ? { detail: d } : {}) }].slice(-6)
+    );
+  }
+
+  useEffect(() => {
+    if (!toasts.length) return;
+    const t = window.setInterval(() => {
+      if (toastsPaused) return;
+      const now = Date.now();
+      setToasts((prev) => prev.filter((x) => x.expiresAtMs > now));
+    }, 250);
+    return () => window.clearInterval(t);
+  }, [toasts.length, toastsPaused]);
+
+  function pauseToasts() {
+    if (toastPauseStartRef.current != null) return;
+    toastPauseStartRef.current = Date.now();
+    setToastsPaused(true);
+  }
+
+  function resumeToasts() {
+    const started = toastPauseStartRef.current;
+    if (started == null) return;
+    toastPauseStartRef.current = null;
+    setToastsPaused(false);
+    const delta = Date.now() - started;
+    if (delta <= 0) return;
+    setToasts((prev) => prev.map((t) => ({ ...t, expiresAtMs: t.expiresAtMs + delta })));
   }
 
   // Daemon polling
@@ -4423,7 +4456,7 @@ export default function HomePage() {
 	      ) : null}
 
 	      {toasts.length ? (
-	        <div className="toastWrap" aria-live="polite" aria-relevant="additions">
+	        <div className="toastWrap" aria-live="polite" aria-relevant="additions" onMouseEnter={pauseToasts} onMouseLeave={resumeToasts}>
 	          {toasts.map((t) => (
 	            <button
 	              key={t.id}
