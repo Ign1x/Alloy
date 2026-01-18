@@ -72,6 +72,7 @@ export default function GamesView() {
     frpRemotePort,
     setTab,
     fmtUnix,
+    fmtTime,
     fmtBytes,
     logView,
     setLogView,
@@ -295,7 +296,7 @@ export default function GamesView() {
       let ts = "--:--:--";
       if (Number.isFinite(tsUnix) && tsUnix > 0) {
         if (logTimeMode === "relative" && baseTs > 0) ts = `+${Math.max(0, Math.floor(tsUnix - baseTs))}s`;
-        else ts = new Date(tsUnix * 1000).toLocaleTimeString();
+        else ts = fmtTime(tsUnix);
       }
       const src = l.source || "daemon";
       const stream = l.stream || "";

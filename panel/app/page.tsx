@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppCtxProvider } from "./appCtx";
 import { createT, normalizeLocale, type Locale } from "./i18n";
 import Icon from "./ui/Icon";
@@ -513,6 +513,44 @@ export default function HomePage() {
   const [loginStatus, setLoginStatus] = useState<string>("");
   const [locale, setLocale] = useState<Locale>("en");
   const t = useMemo(() => createT(locale), [locale]);
+  const localeTag = useMemo(() => (locale === "zh" ? "zh-CN" : "en-US"), [locale]);
+  const dateTimeFmt = useMemo(() => new Intl.DateTimeFormat(localeTag, { dateStyle: "medium", timeStyle: "medium" }), [localeTag]);
+  const timeFmt = useMemo(() => new Intl.DateTimeFormat(localeTag, { timeStyle: "medium" }), [localeTag]);
+  const num0 = useMemo(() => new Intl.NumberFormat(localeTag, { maximumFractionDigits: 0 }), [localeTag]);
+  const num1 = useMemo(() => new Intl.NumberFormat(localeTag, { maximumFractionDigits: 1 }), [localeTag]);
+
+  const fmtUnix = useCallback(
+    (ts?: number | null) => {
+      if (!ts) return "-";
+      return dateTimeFmt.format(new Date(ts * 1000));
+    },
+    [dateTimeFmt]
+  );
+
+  const fmtTime = useCallback(
+    (ts?: number | null) => {
+      if (!ts) return "--:--:--";
+      return timeFmt.format(new Date(ts * 1000));
+    },
+    [timeFmt]
+  );
+
+  const fmtBytes = useCallback(
+    (n?: number) => {
+      const v = Number(n || 0);
+      if (!Number.isFinite(v) || v <= 0) return "0 B";
+      const units = ["B", "KB", "MB", "GB", "TB"];
+      let x = v;
+      let i = 0;
+      while (x >= 1024 && i < units.length - 1) {
+        x /= 1024;
+        i++;
+      }
+      const formatted = i === 0 ? num0.format(x) : num1.format(x);
+      return `${formatted} ${units[i]}`;
+    },
+    [num0, num1]
+  );
 
   // UI dialogs (avoid browser confirm/prompt)
   const [confirmOpen, setConfirmOpen] = useState<boolean>(false);
@@ -4564,6 +4602,7 @@ export default function HomePage() {
 	    maskToken,
 	    pct,
 	    fmtUnix,
+	    fmtTime,
 	    fmtBytes,
 	    joinRelPath,
 	    parentRelPath,
@@ -5646,7 +5685,7 @@ export default function HomePage() {
                     })
                     .slice(-500)
                     .map((l) => {
-                      const ts = l.ts_unix ? new Date(l.ts_unix * 1000).toLocaleTimeString() : "--:--:--";
+                      const ts = fmtTime(Number(l.ts_unix || 0));
                       return `[${ts}] ${l.line || ""}`;
                     })
                     .join("\n") || "<no install logs>"}
