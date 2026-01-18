@@ -62,6 +62,7 @@ export default function FilesView() {
   }, [fsEntries, query]);
 
   const inst = String(instanceId || "").trim();
+  const entriesLoading = fsStatus === "Loading..." && !fsEntries.length;
 
   return (
     <div className="card">
@@ -210,42 +211,50 @@ export default function FilesView() {
               </tr>
             </thead>
             <tbody>
-              {viewEntries.map((e: any) => (
-                <tr key={`${e.name}-${e.isDir ? "d" : "f"}`}>
-                  <td>
-                    <button type="button" onClick={() => openEntry(e)} className="linkBtn">
-                      {e.name}
-                    </button>
-                  </td>
-                  <td>{e.isDir ? "dir" : "file"}</td>
-                  <td>{e.isDir ? "-" : fmtBytes(Number(e.size || 0))}</td>
-                  <td>{fmtUnix(Number(e.mtime_unix || 0))}</td>
-                  <td style={{ textAlign: "right" }}>
-                    <div className="btnGroup" style={{ justifyContent: "flex-end" }}>
-                      <button type="button" onClick={() => renameFsEntry(e)}>
-                        Rename
-                      </button>
-                      <button type="button" onClick={() => moveFsEntry(e)}>
-                        Move
-                      </button>
-                      {!e.isDir ? (
-                        <button type="button" className="iconBtn" onClick={() => downloadFsEntry(e)}>
-                          <Icon name="download" />
-                          Download
+              {entriesLoading
+                ? Array.from({ length: 10 }).map((_, i) => (
+                    <tr key={i}>
+                      <td colSpan={5}>
+                        <div className="skeleton" style={{ minHeight: 34, borderRadius: 12 }} />
+                      </td>
+                    </tr>
+                  ))
+                : viewEntries.map((e: any) => (
+                    <tr key={`${e.name}-${e.isDir ? "d" : "f"}`}>
+                      <td>
+                        <button type="button" onClick={() => openEntry(e)} className="linkBtn">
+                          {e.name}
                         </button>
-                      ) : (
-                        <button type="button" className="iconBtn" onClick={() => downloadFsFolderAsZip(e)}>
-                          <Icon name="download" />
-                          Zip
-                        </button>
-                      )}
-                      <button type="button" className="dangerBtn" onClick={() => deleteFsEntry(e)}>
-                        Delete
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+                      </td>
+                      <td>{e.isDir ? "dir" : "file"}</td>
+                      <td>{e.isDir ? "-" : fmtBytes(Number(e.size || 0))}</td>
+                      <td>{fmtUnix(Number(e.mtime_unix || 0))}</td>
+                      <td style={{ textAlign: "right" }}>
+                        <div className="btnGroup" style={{ justifyContent: "flex-end" }}>
+                          <button type="button" onClick={() => renameFsEntry(e)}>
+                            Rename
+                          </button>
+                          <button type="button" onClick={() => moveFsEntry(e)}>
+                            Move
+                          </button>
+                          {!e.isDir ? (
+                            <button type="button" className="iconBtn" onClick={() => downloadFsEntry(e)}>
+                              <Icon name="download" />
+                              Download
+                            </button>
+                          ) : (
+                            <button type="button" className="iconBtn" onClick={() => downloadFsFolderAsZip(e)}>
+                              <Icon name="download" />
+                              Zip
+                            </button>
+                          )}
+                          <button type="button" className="dangerBtn" onClick={() => deleteFsEntry(e)}>
+                            Delete
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
             </tbody>
           </table>
         </div>

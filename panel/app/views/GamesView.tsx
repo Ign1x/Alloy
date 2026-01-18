@@ -63,6 +63,7 @@ export default function GamesView() {
 
   const running = !!instanceStatus?.running;
   const canControl = !!selectedDaemon?.connected && !!instanceId.trim() && !gameActionBusy;
+  const gamesLoading = serverDirsStatus === "Loading..." && !serverDirs.length;
 
   const [logQueryRaw, setLogQueryRaw] = useState<string>("");
   const [logQuery, setLogQuery] = useState<string>("");
@@ -379,49 +380,59 @@ export default function GamesView() {
           <div className="toolbarLeft">
             <div className="field" style={{ flex: 1, minWidth: 260 }}>
               <label>Game</label>
-              <Select
-                value={instanceId}
-                onChange={(v) => setInstanceId(v)}
-                disabled={!serverDirs.length}
-                placeholder="No games installed"
-                options={filteredServerDirs.map((id: string) => {
-                  const tags = (instanceTagsById && (instanceTagsById as any)[id]) || [];
-                  const list = Array.isArray(tags) ? tags.map((s: any) => String(s || "").trim()).filter(Boolean) : [];
-                  const running = !!runningById[id];
-                  const label = list.length ? `${id}${running ? " (running)" : ""} · ${list.join(", ")}` : `${id}${running ? " (running)" : ""}`;
-                  return { value: id, label };
-                })}
-              />
-              <div className="row" style={{ marginTop: 8, gap: 10, alignItems: "center" }}>
-                <input
-                  value={gameQueryRaw}
-                  onChange={(e: any) => setGameQueryRaw(e.target.value)}
-                  placeholder="Search games…"
-                  style={{ flex: 1, minWidth: 140 }}
-                />
-                <div style={{ width: 170 }}>
-                  <Select
-                    value={statusFilter}
-                    onChange={(v) => setStatusFilter(v as any)}
-                    options={[
-                      { value: "all", label: "All statuses" },
-                      { value: "running", label: "Running" },
-                      { value: "stopped", label: "Stopped" },
-                    ]}
-                  />
+              {gamesLoading ? (
+                <div className="stack" style={{ gap: 10 }}>
+                  <div className="skeleton" style={{ minHeight: 44, borderRadius: 12 }} />
+                  <div className="skeleton" style={{ minHeight: 36, borderRadius: 12 }} />
+                  <div className="skeleton" style={{ minHeight: 36, borderRadius: 12 }} />
                 </div>
-              </div>
-              <div className="row" style={{ marginTop: 8, justifyContent: "space-between", alignItems: "center", gap: 10 }}>
-                <span className="hint">Tag filter</span>
-                <div style={{ width: 220 }}>
+              ) : (
+                <>
                   <Select
-                    value={tagFilter}
-                    onChange={(v) => setTagFilter(v)}
-                    placeholder="All tags"
-                    options={[{ value: "", label: "All tags" }, ...availableTags.map((t) => ({ value: t, label: t }))]}
+                    value={instanceId}
+                    onChange={(v) => setInstanceId(v)}
+                    disabled={!serverDirs.length}
+                    placeholder="No games installed"
+                    options={filteredServerDirs.map((id: string) => {
+                      const tags = (instanceTagsById && (instanceTagsById as any)[id]) || [];
+                      const list = Array.isArray(tags) ? tags.map((s: any) => String(s || "").trim()).filter(Boolean) : [];
+                      const running = !!runningById[id];
+                      const label = list.length ? `${id}${running ? " (running)" : ""} · ${list.join(", ")}` : `${id}${running ? " (running)" : ""}`;
+                      return { value: id, label };
+                    })}
                   />
-                </div>
-              </div>
+                  <div className="row" style={{ marginTop: 8, gap: 10, alignItems: "center" }}>
+                    <input
+                      value={gameQueryRaw}
+                      onChange={(e: any) => setGameQueryRaw(e.target.value)}
+                      placeholder="Search games…"
+                      style={{ flex: 1, minWidth: 140 }}
+                    />
+                    <div style={{ width: 170 }}>
+                      <Select
+                        value={statusFilter}
+                        onChange={(v) => setStatusFilter(v as any)}
+                        options={[
+                          { value: "all", label: "All statuses" },
+                          { value: "running", label: "Running" },
+                          { value: "stopped", label: "Stopped" },
+                        ]}
+                      />
+                    </div>
+                  </div>
+                  <div className="row" style={{ marginTop: 8, justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+                    <span className="hint">Tag filter</span>
+                    <div style={{ width: 220 }}>
+                      <Select
+                        value={tagFilter}
+                        onChange={(v) => setTagFilter(v)}
+                        placeholder="All tags"
+                        options={[{ value: "", label: "All tags" }, ...availableTags.map((t) => ({ value: t, label: t }))]}
+                      />
+                    </div>
+                  </div>
+                </>
+              )}
               <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
                 <div className="hint">
                   installed: {serverDirs.length} · shown: {filteredServerDirs.length}
