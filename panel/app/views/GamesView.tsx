@@ -66,6 +66,7 @@ export default function GamesView() {
 
   const [logQueryRaw, setLogQueryRaw] = useState<string>("");
   const [logQuery, setLogQuery] = useState<string>("");
+  const [logRegex, setLogRegex] = useState<boolean>(false);
   const [autoScroll, setAutoScroll] = useState<boolean>(true);
   const [highlightLogs, setHighlightLogs] = useState<boolean>(true);
   const [logPaused, setLogPaused] = useState<boolean>(false);
@@ -205,13 +206,27 @@ export default function GamesView() {
     return () => window.clearTimeout(t);
   }, [logQueryRaw]);
 
+  const logFilter = useMemo(() => {
+    const q = String(logQuery || "").trim();
+    if (!q) return { mode: "none" as const, q: "", re: null as RegExp | null, error: "" };
+    if (!logRegex) return { mode: "text" as const, q: q.toLowerCase(), re: null as RegExp | null, error: "" };
+
+    const limit = 160;
+    if (q.length > limit) return { mode: "regex" as const, q, re: null as RegExp | null, error: `Pattern too long (>${limit})` };
+    try {
+      return { mode: "regex" as const, q, re: new RegExp(q, "i"), error: "" };
+    } catch (e: any) {
+      return { mode: "regex" as const, q, re: null as RegExp | null, error: String(e?.message || e) };
+    }
+  }, [logQuery, logRegex]);
+
   useEffect(() => {
     setLogClearAtUnix(0);
   }, [instanceId, logView]);
 
   const filteredLogs = useMemo(() => {
     const inst = instanceId.trim();
-    const q = logQuery.trim().toLowerCase();
+    const q = logFilter.q;
     const source = logPaused && pausedLogs ? pausedLogs : logs;
     const list = (source || []).filter((l: any) => {
       if (logView === "frp") return l.source === "frp" && (!l.instance || l.instance === inst);
@@ -222,9 +237,14 @@ export default function GamesView() {
     });
     const since = Math.max(0, Math.floor(Number(logClearAtUnix || 0)));
     const next = since ? list.filter((l: any) => Math.floor(Number(l?.ts_unix || 0)) >= since) : list;
-    if (!q) return next;
-    return next.filter((l: any) => String(l?.line || "").toLowerCase().includes(q));
-  }, [logs, logView, instanceId, logQuery, logPaused, pausedLogs, logClearAtUnix]);
+    if (logFilter.mode === "none") return next;
+    if (logFilter.mode === "text") return next.filter((l: any) => String(l?.line || "").toLowerCase().includes(q));
+
+    // Regex: if invalid, keep logs visible and surface error in UI.
+    const re = logFilter.re;
+    if (!re) return next;
+    return next.filter((l: any) => re.test(String(l?.line || "")));
+  }, [logs, logView, instanceId, logPaused, pausedLogs, logClearAtUnix, logFilter]);
 
   const logLines = useMemo<RenderLogLine[]>(() => {
     const list = filteredLogs.length ? filteredLogs.slice(-2000) : [];
@@ -786,6 +806,14 @@ export default function GamesView() {
               placeholder="Search logs…"
               style={{ width: 220 }}
             />
+            <label className="checkRow" style={{ userSelect: "none" }}>
+              <input type="checkbox" checked={logRegex} onChange={(e) => setLogRegex(e.target.checked)} /> Regex
+            </label>
+            {logFilter.mode === "regex" && logFilter.error ? (
+              <span className="badge" title={logFilter.error}>
+                regex error
+              </span>
+            ) : null}
             <label className="checkRow" style={{ userSelect: "none" }}>
               <input type="checkbox" checked={autoScroll} onChange={(e) => setAutoScroll(e.target.checked)} /> Auto-scroll
             </label>
