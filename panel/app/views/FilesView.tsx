@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo, useState } from "react";
 import { useAppCtx } from "../appCtx";
 import Icon from "../ui/Icon";
 
@@ -34,6 +35,15 @@ export default function FilesView() {
     deleteFsEntry,
   } = useAppCtx();
 
+  const [query, setQuery] = useState<string>("");
+
+  const viewEntries = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const list = Array.isArray(fsEntries) ? fsEntries : [];
+    if (!q) return list;
+    return list.filter((e: any) => String(e?.name || "").toLowerCase().includes(q));
+  }, [fsEntries, query]);
+
   return (
     <div className="card">
       <div className="toolbar">
@@ -65,6 +75,7 @@ export default function FilesView() {
           </div>
         </div>
         <div className="toolbarRight">
+          <input value={query} onChange={(e: any) => setQuery(e.target.value)} placeholder="Search entries…" style={{ width: 220 }} />
           <button type="button" onClick={() => refreshFsNow()} disabled={!selected}>
             Refresh
           </button>
@@ -87,6 +98,9 @@ export default function FilesView() {
           >
             Up
           </button>
+          <span className="badge">
+            {viewEntries.length}/{fsEntries.length}
+          </span>
         </div>
       </div>
 
@@ -120,7 +134,7 @@ export default function FilesView() {
               </tr>
             </thead>
             <tbody>
-              {fsEntries.map((e: any) => (
+              {viewEntries.map((e: any) => (
                 <tr key={`${e.name}-${e.isDir ? "d" : "f"}`}>
                   <td>
                     <button type="button" onClick={() => openEntry(e)} className="linkBtn">

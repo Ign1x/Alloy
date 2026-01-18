@@ -18,7 +18,7 @@ WF-20260118-16,P2,nodes,done,Nodes overview improvements,"Nodes list lacks quick
 WF-20260118-17,P2,nodes,done,Copy deploy snippet,"Deploying daemon requires manual compose editing","Provide one-click copy docker-compose snippet per node",ux(nodes): deploy copy
 WF-20260118-18,P2,files,done,Binary file handling,"Editing binary files as text is confusing and can corrupt data","Detect binary and show download-only view",fix(files): binary detect
 WF-20260118-19,P2,files,done,Create new file,"Cannot create new file from Files UI","Add Create file action with safe path validation",feat(files): create file
-WF-20260118-20,P2,files,todo,File search,"Finding a file in large directories is painful","Add client-side filter/search for current directory listing",ux(files): search filter
+WF-20260118-20,P2,files,done,File search,"Finding a file in large directories is painful","Add client-side filter/search for current directory listing",ux(files): search filter
 WF-20260118-21,P2,files,todo,Quick open common files,"Common server files require manual navigation","Add shortcuts: server.properties, eula.txt, logs/latest.log, .elegantmc.json",ux(files): quick open
 WF-20260118-22,P2,logs,todo,Log highlighting,"Logs are hard to scan for errors/warnings","Highlight ERROR/WARN/Exception lines and allow toggle",ux(logs): highlight
 WF-20260118-23,P2,logs,todo,Log pause,"Live logs auto-scroll makes reading hard","Add pause/resume streaming view per tab",ux(logs): pause
