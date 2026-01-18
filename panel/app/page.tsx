@@ -2453,6 +2453,25 @@ export default function HomePage() {
     }
   }
 
+  async function backupServer(instanceOverride?: string) {
+    if (gameActionBusy) return;
+    setGameActionBusy(true);
+    setServerOpStatus("");
+    try {
+      if (!selectedDaemon?.connected) throw new Error("daemon offline");
+      const inst = String(instanceOverride ?? instanceId).trim();
+      if (!inst) throw new Error("instance_id 不能为空");
+      setServerOpStatus("Creating backup...");
+      const out = await callOkCommand("mc_backup", { instance_id: inst, stop: true }, 10 * 60_000);
+      const path = String(out?.path || "").trim();
+      setServerOpStatus(path ? `Backup created: ${path}` : "Backup created");
+    } catch (e: any) {
+      setServerOpStatus(String(e?.message || e));
+    } finally {
+      setGameActionBusy(false);
+    }
+  }
+
   async function sendConsoleLine() {
     if (!consoleLine.trim()) return;
     try {
@@ -2572,6 +2591,7 @@ export default function HomePage() {
 	    stopServer,
     restartServer,
     deleteServer,
+    backupServer,
     frpOpStatus,
     serverOpStatus,
     gameActionBusy,

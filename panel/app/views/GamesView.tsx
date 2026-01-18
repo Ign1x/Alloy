@@ -19,6 +19,7 @@ export default function GamesView() {
     stopServer,
     restartServer,
     deleteServer,
+    backupServer,
     frpOpStatus,
     serverOpStatus,
     gameActionBusy,
@@ -146,16 +147,17 @@ export default function GamesView() {
                 value=""
                 onChange={(v) => {
                   if (v === "restart") restartServer();
+                  else if (v === "backup") backupServer();
                   else if (v === "settings") openSettingsModal();
                   else if (v === "files") {
                     setFsPath(instanceId.trim());
                     setTab("files");
                   } else if (v === "delete") deleteServer();
                 }}
-                disabled={!selectedDaemon?.connected}
                 placeholder="More"
                 options={[
                   { value: "restart", label: "Restart", disabled: !canControl },
+                  { value: "backup", label: "Backup", disabled: !canControl },
                   { value: "settings", label: "Settings", disabled: !canControl },
                   { value: "files", label: "Files", disabled: !canControl },
                   { value: "delete", label: "Delete", disabled: !canControl },
