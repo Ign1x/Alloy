@@ -35,6 +35,7 @@ function highlightText(text: string, qLower: string) {
 
 export default function GamesView() {
   const {
+    t,
     serverDirs,
     serverDirsStatus,
     refreshServerDirs,
@@ -458,12 +459,12 @@ export default function GamesView() {
   return (
     <div className="stack">
       <div className="card">
-        <h2>Game</h2>
+        <h2>{t.tr("Game", "游戏")}</h2>
 
         <div className="toolbar">
           <div className="toolbarLeft">
             <div className="field" style={{ flex: 1, minWidth: 260 }}>
-              <label>Game</label>
+              <label>{t.tr("Game", "游戏")}</label>
               {gamesLoading ? (
                 <div className="stack" style={{ gap: 10 }}>
                   <div className="skeleton" style={{ minHeight: 44, borderRadius: 12 }} />
@@ -476,12 +477,13 @@ export default function GamesView() {
                     value={instanceId}
                     onChange={(v) => setInstanceId(v)}
                     disabled={!serverDirs.length}
-                    placeholder="No games installed"
+                    placeholder={t.tr("No games installed", "暂无游戏实例")}
                     options={filteredServerDirs.map((id: string) => {
                       const tags = (instanceTagsById && (instanceTagsById as any)[id]) || [];
                       const list = Array.isArray(tags) ? tags.map((s: any) => String(s || "").trim()).filter(Boolean) : [];
                       const running = !!runningById[id];
-                      const label = list.length ? `${id}${running ? " (running)" : ""} · ${list.join(", ")}` : `${id}${running ? " (running)" : ""}`;
+                      const runLabel = running ? t.tr(" (running)", " (运行中)") : "";
+                      const label = list.length ? `${id}${runLabel} · ${list.join(", ")}` : `${id}${runLabel}`;
                       return { value: id, label };
                     })}
                   />
@@ -489,7 +491,7 @@ export default function GamesView() {
                     <input
                       value={gameQueryRaw}
                       onChange={(e: any) => setGameQueryRaw(e.target.value)}
-                      placeholder="Search games…"
+                      placeholder={t.tr("Search games…", "搜索游戏…")}
                       style={{ flex: 1, minWidth: 140 }}
                     />
                     <div style={{ width: 170 }}>
@@ -497,21 +499,24 @@ export default function GamesView() {
                         value={statusFilter}
                         onChange={(v) => setStatusFilter(v as any)}
                         options={[
-                          { value: "all", label: "All statuses" },
-                          { value: "running", label: "Running" },
-                          { value: "stopped", label: "Stopped" },
+                          { value: "all", label: t.tr("All statuses", "全部状态") },
+                          { value: "running", label: t.tr("Running", "运行中") },
+                          { value: "stopped", label: t.tr("Stopped", "已停止") },
                         ]}
                       />
                     </div>
                   </div>
                   <div className="row" style={{ marginTop: 8, justifyContent: "space-between", alignItems: "center", gap: 10 }}>
-                    <span className="hint">Tag filter</span>
+                    <span className="hint">{t.tr("Tag filter", "标签筛选")}</span>
                     <div style={{ width: 220 }}>
                       <Select
                         value={tagFilter}
                         onChange={(v) => setTagFilter(v)}
-                        placeholder="All tags"
-                        options={[{ value: "", label: "All tags" }, ...availableTags.map((t) => ({ value: t, label: t }))]}
+                        placeholder={t.tr("All tags", "全部标签")}
+                        options={[
+                          { value: "", label: t.tr("All tags", "全部标签") },
+                          ...availableTags.map((tag) => ({ value: tag, label: tag })),
+                        ]}
                       />
                     </div>
                   </div>
@@ -519,14 +524,14 @@ export default function GamesView() {
               )}
               <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
                 <div className="hint">
-                  installed: {serverDirs.length} · shown: {filteredServerDirs.length}
+                  {t.tr("installed", "已安装")}: {serverDirs.length} · {t.tr("shown", "显示")}: {filteredServerDirs.length}
                   {serverDirsStatus ? ` · ${serverDirsStatus}` : ""}
                 </div>
                 <button
                   type="button"
                   className="iconBtn iconOnly"
-                  title="Refresh games list"
-                  aria-label="Refresh games list"
+                  title={t.tr("Refresh games list", "刷新游戏列表")}
+                  aria-label={t.tr("Refresh games list", "刷新游戏列表")}
                   onClick={refreshServerDirs}
                   disabled={!selectedDaemon?.connected}
                 >
@@ -540,7 +545,7 @@ export default function GamesView() {
             <div className="btnGroup">
               <button type="button" className="iconBtn" onClick={openInstallModal} disabled={!selectedDaemon?.connected || gameActionBusy}>
                 <Icon name="plus" />
-                Install
+                {t.tr("Install", "安装")}
               </button>
             </div>
 
@@ -550,7 +555,7 @@ export default function GamesView() {
                 onClick={() => (running ? stopServer() : startServer())}
                 disabled={!canControl}
               >
-                {gameActionBusy ? "Working..." : running ? "Stop" : "Start"}
+                {gameActionBusy ? t.tr("Working...", "处理中...") : running ? t.tr("Stop", "停止") : t.tr("Start", "启动")}
               </button>
               <Select
                 value=""
@@ -569,38 +574,38 @@ export default function GamesView() {
                     setTab("files");
                   } else if (v === "delete") deleteServer();
                 }}
-                placeholder="More"
+                placeholder={t.tr("More", "更多")}
                 options={[
-                  { value: "restart", label: "Restart", disabled: !canControl },
-                  { value: "backup", label: "Backup", disabled: !canControl },
-                  { value: "restore", label: "Restore…", disabled: !canControl },
-                  { value: "trash", label: "Trash…", disabled: !selectedDaemon?.connected },
-                  { value: "export", label: "Export zip", disabled: !selectedDaemon?.connected || !instanceId.trim() },
+                  { value: "restart", label: t.tr("Restart", "重启"), disabled: !canControl },
+                  { value: "backup", label: t.tr("Backup", "备份"), disabled: !canControl },
+                  { value: "restore", label: t.tr("Restore…", "恢复…"), disabled: !canControl },
+                  { value: "trash", label: t.tr("Trash…", "回收站…"), disabled: !selectedDaemon?.connected },
+                  { value: "export", label: t.tr("Export zip", "导出 zip"), disabled: !selectedDaemon?.connected || !instanceId.trim() },
                   { value: "properties", label: "server.properties…", disabled: !canControl },
-                  { value: "rename", label: "Rename…", disabled: !canControl },
-                  { value: "clone", label: "Clone…", disabled: !canControl },
-                  { value: "settings", label: "Settings", disabled: !canControl },
-                  { value: "files", label: "Files", disabled: !canControl },
-                  { value: "delete", label: "Delete", disabled: !canControl },
+                  { value: "rename", label: t.tr("Rename…", "重命名…"), disabled: !canControl },
+                  { value: "clone", label: t.tr("Clone…", "克隆…"), disabled: !canControl },
+                  { value: "settings", label: t.tr("Settings", "设置"), disabled: !canControl },
+                  { value: "files", label: t.tr("Files", "文件"), disabled: !canControl },
+                  { value: "delete", label: t.tr("Delete", "删除"), disabled: !canControl },
                 ]}
                 style={{ width: 150 }}
                 disabled={!selectedDaemon?.connected || gameActionBusy}
               />
-              {gameActionBusy ? <span className="badge">busy</span> : null}
+              {gameActionBusy ? <span className="badge">{t.tr("busy", "忙碌")}</span> : null}
             </div>
           </div>
         </div>
 
         {!gamesLoading && !serverDirs.length ? (
           <div className="emptyState" style={{ marginTop: 12 }}>
-            <div style={{ fontWeight: 800 }}>No games installed yet.</div>
+            <div style={{ fontWeight: 800 }}>{t.tr("No games installed yet.", "暂无已安装游戏。")}</div>
             <div className="hint" style={{ marginTop: 6 }}>
-              Install a Vanilla/Paper server or a modpack to get started.
+              {t.tr("Install a Vanilla/Paper server or a modpack to get started.", "安装 Vanilla/Paper 或整合包以开始使用。")}
             </div>
             <div className="btnGroup" style={{ marginTop: 10, justifyContent: "center" }}>
               <button type="button" className="primary iconBtn" onClick={openInstallModal} disabled={!selectedDaemon?.connected || gameActionBusy}>
                 <Icon name="plus" />
-                Install
+                {t.tr("Install", "安装")}
               </button>
             </div>
           </div>
@@ -615,21 +620,25 @@ export default function GamesView() {
 
         <div className="grid2">
           <div className="kv">
-            <div className="k">Status</div>
+            <div className="k">{t.tr("Status", "状态")}</div>
             <div className="v">
               {instanceStatus?.running ? (
-                <span className="badge ok">running (pid {instanceStatus.pid || "-"})</span>
+                <span className="badge ok">
+                  {t.tr("running", "运行中")} (pid {instanceStatus.pid || "-"})
+                </span>
               ) : (
-                <span className="badge">stopped</span>
+                <span className="badge">{t.tr("stopped", "已停止")}</span>
               )}
             </div>
-            <div className="hint">node: {selectedDaemon?.id || "-"}</div>
+            <div className="hint">
+              {t.tr("node", "节点")}: {selectedDaemon?.id || "-"}
+            </div>
           </div>
 
           <div className="kv">
-            <div className="k">FRP process</div>
+            <div className="k">{t.tr("FRP process", "FRP 进程")}</div>
             <div className="v">
-              {frpStatus?.running ? <span className="badge ok">running</span> : <span className="badge">stopped</span>}
+              {frpStatus?.running ? <span className="badge ok">{t.tr("running", "运行中")}</span> : <span className="badge">{t.tr("stopped", "已停止")}</span>}
               {frpStatus?.running && frpStatus.remote_port ? (
                 <span className="badge">
                   {frpStatus.remote_addr}:{frpStatus.remote_port}
@@ -637,56 +646,56 @@ export default function GamesView() {
               ) : null}
             </div>
             <div className="hint">
-              desired:{" "}
+              {t.tr("desired", "期望")}:{" "}
               {enableFrp ? (
                 selectedProfile ? (
                   <>
-                    on (<code>{selectedProfile.name}</code>)
+                    {t.tr("on", "开启")} (<code>{selectedProfile.name}</code>)
                   </>
                 ) : (
-                  <span style={{ color: "var(--danger)" }}>on (no profile)</span>
+                  <span style={{ color: "var(--danger)" }}>{t.tr("on (no profile)", "开启（无配置）")}</span>
                 )
               ) : (
-                "off"
+                t.tr("off", "关闭")
               )}
               {" · "}
-              remote port: <code>{Math.round(Number(frpRemotePort || 0))}</code>
+              {t.tr("remote port", "remote port")}: <code>{Math.round(Number(frpRemotePort || 0))}</code>
             </div>
           </div>
 
           <div className="kv">
-            <div className="k">Java</div>
+            <div className="k">{t.tr("Java", "Java")}</div>
             <div className="v">{instanceStatus?.java ? <code>{String(instanceStatus.java)}</code> : <span className="muted">-</span>}</div>
             <div className="hint">
-              major: <code>{Number(instanceStatus?.java_major || 0) || "-"}</code>
+              {t.tr("major", "major")}: <code>{Number(instanceStatus?.java_major || 0) || "-"}</code>
               {" · "}
-              required: <code>{Number(instanceStatus?.required_java_major || 0) ? `>=${Number(instanceStatus.required_java_major)}` : "-"}</code>
+              {t.tr("required", "required")}: <code>{Number(instanceStatus?.required_java_major || 0) ? `>=${Number(instanceStatus.required_java_major)}` : "-"}</code>
             </div>
           </div>
 
           <div className="kv">
-            <div className="k">Tags</div>
+            <div className="k">{t.tr("Tags", "标签")}</div>
             <div className="v">
-              {currentTags.length ? currentTags.map((t) => <span key={t} className="badge">{t}</span>) : <span className="muted">-</span>}
+              {currentTags.length ? currentTags.map((tag) => <span key={tag} className="badge">{tag}</span>) : <span className="muted">-</span>}
             </div>
             <div className="hint">
               <div className="row" style={{ gap: 8 }}>
                 <input
                   value={tagsDraft}
                   onChange={(e: any) => setTagsDraft(e.target.value)}
-                  placeholder="e.g. survival, modpack"
+                  placeholder={t.tr("e.g. survival, modpack", "例如 survival, modpack")}
                   style={{ flex: 1, minWidth: 180 }}
                   disabled={!instanceId.trim()}
                 />
                 <button type="button" onClick={saveTags} disabled={!selectedDaemon?.connected || !instanceId.trim()}>
-                  Save
+                  {t.tr("Save", "保存")}
                 </button>
               </div>
             </div>
           </div>
 
           <div className="kv">
-            <div className="k">Network</div>
+            <div className="k">{t.tr("Network", "网络")}</div>
             <div className="v">
               {instanceId.trim() ? (
                 <span className="badge">{`${localHost || "127.0.0.1"}:${Math.round(Number(gamePort || 25565))}`}</span>
@@ -695,25 +704,28 @@ export default function GamesView() {
               )}
             </div>
             <div className="hint">
-              Hints: leave <code>server-ip</code> empty · Docker default published range <code>25565-25600</code>
+              {t.tr(
+                "Hints: leave server-ip empty · Docker default published range 25565-25600",
+                "提示：server-ip 建议留空 · Docker 默认映射端口段 25565-25600"
+              )}
             </div>
           </div>
 
           <div className="kv">
-            <div className="k">Last heartbeat</div>
+            <div className="k">{t.tr("Last heartbeat", "最后心跳")}</div>
             <div className="v">{fmtUnix(selectedDaemon?.heartbeat?.server_time_unix)}</div>
           </div>
         </div>
       </div>
 
       <div className="card">
-        <h2>Connect</h2>
+        <h2>{t.tr("Connect", "连接")}</h2>
         <div className="row" style={{ justifyContent: "space-between", alignItems: "center", gap: 10 }}>
           <code
             className="clickCopy"
             role="button"
             tabIndex={0}
-            title="Click to copy"
+            title={t.tr("Click to copy", "点击复制")}
             style={{ fontSize: 14, padding: "6px 10px" }}
             onClick={() => (instanceId.trim() ? copyText(socketText) : null)}
             onKeyDown={(e) => {
@@ -728,63 +740,66 @@ export default function GamesView() {
           </code>
           <button type="button" className="iconBtn" onClick={() => copyText(socketText)} disabled={!instanceId.trim()}>
             <Icon name="copy" />
-            Copy
+            {t.tr("Copy", "复制")}
           </button>
         </div>
         <div className="hint" style={{ marginTop: 8 }}>
           <span>
-            desired:{" "}
+            {t.tr("desired", "期望")}:{" "}
             {enableFrp ? (
               selectedProfile ? (
                 <>
-                  FRP on (<code>{selectedProfile.name}</code>)
+                  FRP {t.tr("on", "开启")} (<code>{selectedProfile.name}</code>)
                 </>
               ) : (
-                <span style={{ color: "var(--danger)" }}>FRP on (no profile)</span>
+                <span style={{ color: "var(--danger)" }}>FRP {t.tr("on (no profile)", "开启（无配置）")}</span>
               )
             ) : (
-              "FRP off"
+              `FRP ${t.tr("off", "关闭")}`
             )}
             {" · "}
-            actual: {frpStatus?.running ? "running" : "stopped"}
+            {t.tr("actual", "实际")}: {frpStatus?.running ? t.tr("running", "运行中") : t.tr("stopped", "已停止")}
           </span>
         </div>
         <div className="hint">
           {frpStatus?.running && frpStatus.remote_port ? (
-            <span>FRP：公网连接地址（可直接复制给朋友）。</span>
+            <span>{t.tr("FRP: public address (copy to friends).", "FRP：公网连接地址（可直接复制给朋友）。")}</span>
           ) : enableFrp ? (
             !selectedProfile ? (
               <span>
-                FRP 已开启但未选择服务器（去{" "}
+                {t.tr("FRP is enabled but no server is selected (go to", "FRP 已开启但未选择服务器（去")}{" "}
                 <button className="linkBtn" onClick={() => setTab("frp")}>
                   FRP
                 </button>{" "}
-                保存一个 profile）。
+                {t.tr("to save a profile).", "保存一个 profile）。")}
               </span>
             ) : selectedProfile.status?.online === false ? (
               <span style={{ color: "var(--danger)" }}>
-                FRP server unreachable: {selectedProfile.status.error || "offline"}（去 FRP tab 点 Test/Probe）
+                {t.tr("FRP server unreachable", "FRP 服务器不可达")}: {selectedProfile.status.error || t.tr("offline", "离线")}（{t.tr("go to FRP tab and click Test/Probe", "去 FRP 页点击 Test/Probe")}）
               </span>
             ) : frpRemotePort <= 0 ? (
-              <span>FRP 已开启但 Remote Port=0（由服务端分配端口；建议手动指定一个固定端口）。</span>
+              <span>{t.tr("FRP is enabled but Remote Port=0 (server-assigned; consider a fixed port).", "FRP 已开启但 Remote Port=0（由服务端分配端口；建议手动指定一个固定端口）。")}</span>
             ) : frpStatus && frpStatus.running === false ? (
               <span style={{ color: "var(--danger)" }}>
-                FRP desired on, but not running on daemon（看 Logs → FRP / 检查 token、server_addr、server_port）
+                {t.tr(
+                  "FRP desired on, but not running on daemon (see Logs → FRP / check token, server_addr, server_port).",
+                  "FRP 期望开启，但 daemon 上未运行（看 Logs → FRP / 检查 token、server_addr、server_port）"
+                )}
               </span>
             ) : (
-              <span>FRP：启动后会显示公网地址。</span>
+              <span>{t.tr("FRP: after start, a public address will appear.", "FRP：启动后会显示公网地址。")}</span>
             )
           ) : (
-            <span>未开启 FRP：显示本机/LAN 连接地址（Docker 默认映射 25565-25600）。</span>
+            <span>{t.tr("FRP is off: showing local/LAN address (Docker defaults to 25565-25600).", "未开启 FRP：显示本机/LAN 连接地址（Docker 默认映射 25565-25600）。")}</span>
           )}
         </div>
         <div className="hint">
-          Minecraft：多人游戏 → 添加服务器 → 地址填 <code>{instanceId.trim() ? socketText : "IP:Port"}</code>
+          {t.tr("Minecraft: Multiplayer → Add Server → Address", "Minecraft：多人游戏 → 添加服务器 → 地址填")} <code>{instanceId.trim() ? socketText : "IP:Port"}</code>
         </div>
         {instanceId.trim() && (enableFrp || frpStatus?.running) ? (
           instanceProxies.length ? (
             <div style={{ marginTop: 10 }}>
-              <div className="hint">FRP proxies for this instance:</div>
+              <div className="hint">{t.tr("FRP proxies for this instance:", "该实例的 FRP proxies：")}</div>
               <div className="stack" style={{ gap: 8, marginTop: 6 }}>
                 {instanceProxies.map((p: any) => (
                   <div key={`${p.proxy_name}-${p.remote_addr}-${p.remote_port}`} className="row" style={{ gap: 10, flexWrap: "wrap" }}>
@@ -792,14 +807,16 @@ export default function GamesView() {
                     <code>
                       {p.remote_addr}:{p.remote_port}
                     </code>
-                    <span className="hint">started: {fmtUnix(p.started_unix)}</span>
+                    <span className="hint">
+                      {t.tr("started", "启动")}: {fmtUnix(p.started_unix)}
+                    </span>
                   </div>
                 ))}
               </div>
             </div>
           ) : (
             <div className="hint" style={{ marginTop: 8 }}>
-              FRP proxies: -
+              {t.tr("FRP proxies", "FRP proxies")}: -
             </div>
           )
         ) : null}
@@ -809,23 +826,23 @@ export default function GamesView() {
         <div className="toolbar">
           <div className="toolbarLeft" style={{ alignItems: "center" }}>
             <div>
-              <h2>Backups</h2>
+              <h2>{t.tr("Backups", "备份")}</h2>
               <div className="hint">
                 {instanceId.trim() ? (
                   <>
-                    folder: <code>servers/_backups/{instanceId.trim()}/</code>
+                    {t.tr("folder", "目录")}: <code>servers/_backups/{instanceId.trim()}/</code>
                     {typeof backupZipsStatus === "string" && backupZipsStatus ? ` · ${backupZipsStatus}` : ""}
                   </>
                 ) : (
-                  "Select a game to view backups"
+                  t.tr("Select a game to view backups", "选择游戏以查看备份")
                 )}
               </div>
               {instanceId.trim() ? (
                 <div className="hint" style={{ marginTop: 6 }}>
-                  size: <code>{instanceUsageBytes == null ? "-" : fmtBytes(instanceUsageBytes)}</code>
+                  {t.tr("size", "大小")}: <code>{instanceUsageBytes == null ? "-" : fmtBytes(instanceUsageBytes)}</code>
                   {instanceUsageStatus ? ` · ${instanceUsageStatus}` : ""}
                   {" · "}
-                  last backup: {lastBackup.unix ? fmtUnix(lastBackup.unix) : Array.isArray(backupZips) && backupZips.length ? lastBackup.file : "-"}
+                  {t.tr("last backup", "最近备份")}: {lastBackup.unix ? fmtUnix(lastBackup.unix) : Array.isArray(backupZips) && backupZips.length ? lastBackup.file : "-"}
                 </div>
               ) : null}
             </div>
@@ -838,16 +855,16 @@ export default function GamesView() {
               disabled={!selectedDaemon?.connected || !instanceId.trim()}
             >
               <Icon name="refresh" />
-              Refresh
+              {t.tr("Refresh", "刷新")}
             </button>
             <button
               type="button"
               className="iconBtn"
               onClick={() => computeInstanceUsage()}
               disabled={!selectedDaemon?.connected || !instanceId.trim() || instanceUsageBusy}
-              title="Compute instance folder size (may take a while)"
+              title={t.tr("Compute instance folder size (may take a while)", "计算实例目录大小（可能需要一段时间）")}
             >
-              {instanceUsageBusy ? "Scanning…" : "Compute size"}
+              {instanceUsageBusy ? t.tr("Scanning…", "扫描中…") : t.tr("Compute size", "计算大小")}
             </button>
             <button
               type="button"
@@ -860,7 +877,7 @@ export default function GamesView() {
               }}
               disabled={!selectedDaemon?.connected || !instanceId.trim()}
             >
-              Open folder
+              {t.tr("Open folder", "打开目录")}
             </button>
           </div>
         </div>
@@ -869,13 +886,13 @@ export default function GamesView() {
           Array.isArray(backupZips) && backupZips.length ? (
             <>
               <div className="hint">
-                showing {Math.min(10, backupZips.length)} / {backupZips.length}
+                {t.tr("showing", "显示")} {Math.min(10, backupZips.length)} / {backupZips.length}
               </div>
               <div className="stack" style={{ gap: 8 }}>
                 {backupZips.slice(0, 10).map((p: string) => (
                   <div key={p} className="row" style={{ justifyContent: "space-between", alignItems: "center", gap: 10 }}>
                     <code style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{p}</code>
-                    <button type="button" className="iconBtn iconOnly" title="Copy path" aria-label="Copy path" onClick={() => copyText(p)}>
+                    <button type="button" className="iconBtn iconOnly" title={t.tr("Copy path", "复制路径")} aria-label={t.tr("Copy path", "复制路径")} onClick={() => copyText(p)}>
                       <Icon name="copy" />
                     </button>
                   </div>
@@ -884,51 +901,51 @@ export default function GamesView() {
             </>
           ) : (
             <div className="hint">
-              No backups yet. Use <code>More → Backup</code> to create one.
+              {t.tr("No backups yet. Use More → Backup to create one.", "暂无备份。使用 More → Backup 创建一个备份。")}
             </div>
           )
         ) : (
-          <div className="hint">Select a game to see backups.</div>
+          <div className="hint">{t.tr("Select a game to see backups.", "选择游戏以查看备份。")}</div>
         )}
       </div>
 
       <div className="card">
-        <h2>Logs</h2>
+        <h2>{t.tr("Logs", "日志")}</h2>
         <div className="toolbar">
           <div className="toolbarLeft">
             <div className="field" style={{ minWidth: 180 }}>
-              <label>View</label>
+              <label>{t.tr("View", "视图")}</label>
               <Select
                 value={logView}
                 onChange={(v) => setLogView(v as any)}
                 options={[
-                  { value: "all", label: "All" },
+                  { value: "all", label: t.tr("All", "全部") },
                   { value: "mc", label: "MC" },
-                  { value: "install", label: "Install" },
+                  { value: "install", label: t.tr("Install", "安装") },
                   { value: "frp", label: "FRP" },
                 ]}
               />
             </div>
             <div className="field" style={{ minWidth: 160 }}>
-              <label>Level</label>
+              <label>{t.tr("Level", "级别")}</label>
               <Select
                 value={logLevelFilter}
                 onChange={(v) => setLogLevelFilter(v as any)}
                 options={[
-                  { value: "all", label: "All" },
-                  { value: "warn", label: "Warn" },
-                  { value: "error", label: "Error" },
+                  { value: "all", label: t.tr("All", "全部") },
+                  { value: "warn", label: t.tr("Warn", "警告") },
+                  { value: "error", label: t.tr("Error", "错误") },
                 ]}
               />
             </div>
             <div className="field" style={{ minWidth: 160 }}>
-              <label>Time</label>
+              <label>{t.tr("Time", "时间")}</label>
               <Select
                 value={logTimeMode}
                 onChange={(v) => setLogTimeMode(v as any)}
                 options={[
-                  { value: "local", label: "Local" },
-                  { value: "relative", label: "Relative" },
+                  { value: "local", label: t.tr("Local", "本地") },
+                  { value: "relative", label: t.tr("Relative", "相对") },
                 ]}
               />
             </div>
@@ -937,30 +954,30 @@ export default function GamesView() {
             <input
               value={logQueryRaw}
               onChange={(e: any) => setLogQueryRaw(e.target.value)}
-              placeholder="Search logs…"
+              placeholder={t.tr("Search logs…", "搜索日志…")}
               style={{ width: 220 }}
             />
             <label className="checkRow" style={{ userSelect: "none" }}>
-              <input type="checkbox" checked={logRegex} onChange={(e) => setLogRegex(e.target.checked)} /> Regex
+              <input type="checkbox" checked={logRegex} onChange={(e) => setLogRegex(e.target.checked)} /> {t.tr("Regex", "正则")}
             </label>
             {logFilter.mode === "regex" && logFilter.error ? (
               <span className="badge" title={logFilter.error}>
-                regex error
+                {t.tr("regex error", "正则错误")}
               </span>
             ) : null}
             <label className="checkRow" style={{ userSelect: "none" }}>
-              <input type="checkbox" checked={autoScroll} onChange={(e) => setAutoScroll(e.target.checked)} /> Auto-scroll
+              <input type="checkbox" checked={autoScroll} onChange={(e) => setAutoScroll(e.target.checked)} /> {t.tr("Auto-scroll", "自动滚动")}
             </label>
             <label className="checkRow" style={{ userSelect: "none" }}>
-              <input type="checkbox" checked={wrapLogs} onChange={(e) => setWrapLogs(e.target.checked)} /> Wrap
+              <input type="checkbox" checked={wrapLogs} onChange={(e) => setWrapLogs(e.target.checked)} /> {t.tr("Wrap", "换行")}
             </label>
             <label className="checkRow" style={{ userSelect: "none" }}>
-              <input type="checkbox" checked={highlightLogs} onChange={(e) => setHighlightLogs(e.target.checked)} /> Highlight
+              <input type="checkbox" checked={highlightLogs} onChange={(e) => setHighlightLogs(e.target.checked)} /> {t.tr("Highlight", "高亮")}
             </label>
             <button type="button" className="iconBtn" onClick={() => setLogPaused((v) => !v)}>
-              {logPaused ? "Resume" : "Pause"}
+              {logPaused ? t.tr("Resume", "继续") : t.tr("Pause", "暂停")}
             </button>
-            {logPaused ? <span className="badge">paused</span> : null}
+            {logPaused ? <span className="badge">{t.tr("paused", "已暂停")}</span> : null}
             <button
               type="button"
               className="iconBtn"
@@ -968,7 +985,7 @@ export default function GamesView() {
                 setLogClearAtUnix(Math.floor(Date.now() / 1000));
               }}
             >
-              Clear view
+              {t.tr("Clear view", "清空视图")}
             </button>
             <button
               type="button"
@@ -983,7 +1000,7 @@ export default function GamesView() {
               }}
             >
               <Icon name="copy" />
-              Copy
+              {t.tr("Copy", "复制")}
             </button>
             <button
               type="button"
@@ -1007,7 +1024,7 @@ export default function GamesView() {
               }}
             >
               <Icon name="download" />
-              Download view
+              {t.tr("Download view", "下载视图")}
             </button>
             <button type="button" className="iconBtn" onClick={downloadLatestLog} disabled={!selectedDaemon?.connected || !instanceId.trim()}>
               <Icon name="download" />
@@ -1033,8 +1050,8 @@ export default function GamesView() {
                   <button
                     type="button"
                     className="logLineCopyBtn"
-                    title="Copy line"
-                    aria-label="Copy line"
+                    title={t.tr("Copy line", "复制该行")}
+                    aria-label={t.tr("Copy line", "复制该行")}
                     onClick={() => copyText(l.text)}
                   >
                     <Icon name="copy" />
@@ -1058,19 +1075,19 @@ export default function GamesView() {
                 setNewLogsCount(0);
                 setAutoScroll(true);
               }}
-              title="Jump to bottom"
+              title={t.tr("Jump to bottom", "跳到底部")}
             >
-              {newLogsCount} new logs
+              {t.tr(`${newLogsCount} new logs`, `${newLogsCount} 条新日志`)}
             </button>
           ) : null}
         </div>
-        <div className="hint">提示：All 会显示当前游戏 + FRP 的日志。</div>
+        <div className="hint">{t.tr("Tip: All shows current game + FRP logs.", "提示：All 会显示当前游戏 + FRP 的日志。")}</div>
 
         <div className="row" style={{ marginTop: 12 }}>
           <input
             value={consoleLine}
             onChange={(e) => setConsoleLine(e.target.value)}
-            placeholder="Console command (e.g. say hi)"
+            placeholder={t.tr("Console command (e.g. say hi)", "控制台命令（例如 say hi）")}
             style={{ flex: 1, minWidth: 240 }}
             disabled={!selectedDaemon?.connected || !instanceId.trim()}
             onKeyDown={(e: any) => {
@@ -1097,7 +1114,7 @@ export default function GamesView() {
             }}
           />
           <button onClick={sendConsoleWithHistory} disabled={!consoleLine.trim() || !selectedDaemon?.connected || !instanceId.trim()}>
-            Send
+            {t.tr("Send", "发送")}
           </button>
         </div>
       </div>
