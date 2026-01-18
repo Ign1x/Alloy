@@ -1684,6 +1684,45 @@ export default function HomePage() {
     }
   }
 
+  async function createFileHere() {
+    if (!selected) {
+      setFsStatus("请选择 Daemon");
+      return;
+    }
+    const name = await promptDialog({
+      title: "New File",
+      message: `Create a file under servers/${fsPath || ""}`,
+      placeholder: "filename (e.g. server.properties)",
+      okLabel: "Create",
+      cancelLabel: "Cancel",
+    });
+    if (name == null) return;
+    const err = validateFsNameSegment(name);
+    if (err) {
+      setFsStatus(err);
+      return;
+    }
+    const fileName = String(name || "").trim();
+    if (fsEntries.find((e: any) => String(e?.name || "") === fileName)) {
+      setFsStatus("File already exists");
+      return;
+    }
+
+    const target = joinRelPath(fsPath, fileName);
+    setFsStatus(`Creating ${target} ...`);
+    try {
+      await callOkCommand("fs_write", { path: target, b64: b64EncodeUtf8("") }, 30_000);
+      await refreshFsNow();
+      setFsSelectedFile(target);
+      setFsFileText("");
+      setFsSelectedFileMode("text");
+      setFsStatus("Created");
+      setTimeout(() => setFsStatus(""), 900);
+    } catch (e: any) {
+      setFsStatus(String(e?.message || e));
+    }
+  }
+
   async function renameFsEntry(entry: any) {
     const name = String(entry?.name || "").trim();
     if (!name) return;
@@ -3079,6 +3118,7 @@ export default function HomePage() {
     uploadStatus,
     refreshFsNow,
     mkdirFsHere,
+    createFileHere,
     renameFsEntry,
     downloadFsEntry,
     deleteFsEntry,

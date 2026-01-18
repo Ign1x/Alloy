@@ -28,6 +28,7 @@ export default function FilesView() {
     fmtBytes,
     refreshFsNow,
     mkdirFsHere,
+    createFileHere,
     renameFsEntry,
     downloadFsEntry,
     deleteFsEntry,
@@ -70,6 +71,10 @@ export default function FilesView() {
           <button type="button" className="iconBtn" onClick={mkdirFsHere} disabled={!selected}>
             <Icon name="plus" />
             New folder
+          </button>
+          <button type="button" className="iconBtn" onClick={createFileHere} disabled={!selected}>
+            <Icon name="plus" />
+            New file
           </button>
           <button
             type="button"
