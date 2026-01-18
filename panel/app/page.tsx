@@ -2179,8 +2179,10 @@ export default function HomePage() {
     }
   }
 
-  async function uploadSelectedFile() {
-    if (!uploadFile) {
+  async function uploadFilesNow(filesLike: File[] | FileList) {
+    const files = Array.isArray(filesLike) ? filesLike : Array.from(filesLike || []);
+    const list = files.filter(Boolean);
+    if (!list.length) {
       setUploadStatus("请选择文件");
       return;
     }
@@ -2189,47 +2191,63 @@ export default function HomePage() {
       return;
     }
 
-    const file = uploadFile;
-    const destPath = joinRelPath(fsPath, file.name);
-    const chunkSize = 256 * 1024; // 256KB
-
-    let uploadID = "";
-    setUploadStatus(`Begin: ${destPath} (${file.size} bytes)`);
-
-    try {
-      const begin = await callOkCommand("fs_upload_begin", { path: destPath });
-      uploadID = String(begin.upload_id || "");
-      if (!uploadID) throw new Error("upload_id missing");
-
-      for (let off = 0; off < file.size; off += chunkSize) {
-        const end = Math.min(off + chunkSize, file.size);
-        const ab = await file.slice(off, end).arrayBuffer();
-        const b64 = b64EncodeBytes(new Uint8Array(ab));
-        await callOkCommand("fs_upload_chunk", { upload_id: uploadID, b64 });
-        setUploadStatus(`Uploading ${destPath}: ${end}/${file.size} bytes`);
+    for (const file of list) {
+      const err = validateFsNameSegment(file.name);
+      if (err) {
+        setUploadStatus(err);
+        return;
       }
 
-      const commit = await callOkCommand("fs_upload_commit", { upload_id: uploadID });
-      setUploadStatus(`Done: ${commit.path || destPath} (${commit.bytes || file.size} bytes)`);
-      setUploadFile(null);
-      setUploadInputKey((k) => k + 1);
+      const destPath = joinRelPath(fsPath, file.name);
+      const chunkSize = 256 * 1024; // 256KB
+
+      let uploadID = "";
+      setUploadStatus(`Begin: ${destPath} (${file.size} bytes)`);
 
       try {
-        const payload = await callOkCommand("fs_list", { path: fsPath });
-        setFsEntries(payload.entries || []);
-      } catch {
-        // ignore
-      }
-    } catch (e: any) {
-      if (uploadID) {
-        try {
-          await callOkCommand("fs_upload_abort", { upload_id: uploadID });
-        } catch {
-          // ignore
+        const begin = await callOkCommand("fs_upload_begin", { path: destPath });
+        uploadID = String(begin.upload_id || "");
+        if (!uploadID) throw new Error("upload_id missing");
+
+        for (let off = 0; off < file.size; off += chunkSize) {
+          const end = Math.min(off + chunkSize, file.size);
+          const ab = await file.slice(off, end).arrayBuffer();
+          const b64 = b64EncodeBytes(new Uint8Array(ab));
+          await callOkCommand("fs_upload_chunk", { upload_id: uploadID, b64 });
+          setUploadStatus(`Uploading ${destPath}: ${end}/${file.size} bytes`);
         }
+
+        const commit = await callOkCommand("fs_upload_commit", { upload_id: uploadID });
+        setUploadStatus(`Done: ${commit.path || destPath} (${commit.bytes || file.size} bytes)`);
+      } catch (e: any) {
+        if (uploadID) {
+          try {
+            await callOkCommand("fs_upload_abort", { upload_id: uploadID });
+          } catch {
+            // ignore
+          }
+        }
+        setUploadStatus(`Upload failed: ${String(e?.message || e)}`);
+        return;
       }
-      setUploadStatus(`Upload failed: ${String(e?.message || e)}`);
     }
+
+    setUploadFile(null);
+    setUploadInputKey((k) => k + 1);
+    try {
+      const payload = await callOkCommand("fs_list", { path: fsPath });
+      setFsEntries(payload.entries || []);
+    } catch {
+      // ignore
+    }
+  }
+
+  async function uploadSelectedFile() {
+    if (!uploadFile) {
+      setUploadStatus("请选择文件");
+      return;
+    }
+    await uploadFilesNow([uploadFile]);
   }
 
   function suggestInstanceId(existing: string[]) {
@@ -3892,6 +3910,7 @@ export default function HomePage() {
     uploadFile,
     setUploadFile,
     uploadSelectedFile,
+    uploadFilesNow,
     uploadStatus,
     refreshFsNow,
     mkdirFsHere,

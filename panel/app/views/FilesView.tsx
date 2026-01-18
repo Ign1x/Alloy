@@ -26,6 +26,7 @@ export default function FilesView() {
     uploadFile,
     setUploadFile,
     uploadSelectedFile,
+    uploadFilesNow,
     uploadStatus,
     joinRelPath,
     parentRelPath,
@@ -42,6 +43,7 @@ export default function FilesView() {
 
   const [queryRaw, setQueryRaw] = useState<string>("");
   const [query, setQuery] = useState<string>("");
+  const [dragOver, setDragOver] = useState<boolean>(false);
 
   useEffect(() => {
     const t = window.setTimeout(() => setQuery(queryRaw), 160);
@@ -131,21 +133,52 @@ export default function FilesView() {
         </div>
       </div>
 
-      <div className="row" style={{ marginTop: 10 }}>
-        <input
-          key={uploadInputKey}
-          type="file"
-          onChange={(e) => setUploadFile(e.target.files && e.target.files.length ? e.target.files[0] : null)}
-        />
-        <button type="button" onClick={uploadSelectedFile} disabled={!uploadFile}>
-          Upload
-        </button>
-        {uploadFile ? (
-          <span className="muted">
-            to: <code>{joinRelPath(fsPath, uploadFile.name)}</code>
-          </span>
-        ) : null}
-        {uploadStatus ? <span className="muted">{uploadStatus}</span> : null}
+      <div
+        style={{
+          marginTop: 10,
+          border: dragOver ? "2px dashed var(--ok)" : "1px dashed var(--border)",
+          borderRadius: 12,
+          padding: 10,
+          background: dragOver ? "rgba(46, 204, 113, 0.08)" : "transparent",
+        }}
+        onDragEnter={(e) => {
+          e.preventDefault();
+          setDragOver(true);
+        }}
+        onDragOver={(e) => {
+          e.preventDefault();
+          setDragOver(true);
+        }}
+        onDragLeave={(e) => {
+          e.preventDefault();
+          setDragOver(false);
+        }}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDragOver(false);
+          const files = e.dataTransfer?.files;
+          if (files && files.length) uploadFilesNow(files);
+        }}
+      >
+        <div className="row">
+          <input
+            key={uploadInputKey}
+            type="file"
+            onChange={(e) => setUploadFile(e.target.files && e.target.files.length ? e.target.files[0] : null)}
+          />
+          <button type="button" onClick={uploadSelectedFile} disabled={!uploadFile}>
+            Upload
+          </button>
+          {uploadFile ? (
+            <span className="muted">
+              to: <code>{joinRelPath(fsPath, uploadFile.name)}</code>
+            </span>
+          ) : null}
+          {uploadStatus ? <span className="muted">{uploadStatus}</span> : null}
+        </div>
+        <div className="hint" style={{ marginTop: 6 }}>
+          Drag & drop files here to upload into <code>servers/{fsPath || ""}</code>.
+        </div>
       </div>
 
       <div className="grid2" style={{ marginTop: 12, alignItems: "start" }}>
