@@ -3401,6 +3401,61 @@ export default function HomePage() {
     }
   }
 
+  async function downloadLatestLog() {
+    if (!selectedDaemon?.connected) {
+      pushToast("daemon offline", "error");
+      return;
+    }
+    const inst = instanceId.trim();
+    if (!inst) {
+      pushToast("select a game first", "error");
+      return;
+    }
+
+    const candidates = [
+      { path: joinRelPath(inst, "logs/latest.log"), ext: "log" },
+      { path: joinRelPath(inst, "logs/latest.log.gz"), ext: "log.gz" },
+    ];
+
+    let picked: { path: string; ext: string; size: number } | null = null;
+    for (const c of candidates) {
+      try {
+        const st = await callOkCommand("fs_stat", { path: c.path }, 10_000);
+        picked = { path: c.path, ext: c.ext, size: Math.max(0, Number(st?.size || 0)) };
+        break;
+      } catch {
+        // try next
+      }
+    }
+    if (!picked) {
+      pushToast("latest.log not found", "error");
+      return;
+    }
+
+    const max = 25 * 1024 * 1024;
+    if (picked.size > max) {
+      pushToast(`latest.log too large (${fmtBytes(picked.size)} > ${fmtBytes(max)})`, "error");
+      return;
+    }
+
+    try {
+      const payload = await callOkCommand("fs_read", { path: picked.path }, 60_000);
+      const bytes = b64DecodeBytes(String(payload?.b64 || ""));
+      const blob = new Blob([bytes], { type: "application/octet-stream" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `elegantmc-${inst}-latest.${picked.ext}`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      pushToast(`Downloaded: latest.${picked.ext}`, "ok");
+    } catch (e: any) {
+      pushToast(String(e?.message || e), "error");
+    }
+  }
+
   async function addFrpProfile() {
     setProfilesStatus("");
     try {
@@ -3659,6 +3714,7 @@ export default function HomePage() {
     consoleLine,
     setConsoleLine,
     sendConsoleLine,
+    downloadLatestLog,
 
     // FRP
     profiles,

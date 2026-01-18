@@ -49,6 +49,7 @@ export default function GamesView() {
     consoleLine,
     setConsoleLine,
     sendConsoleLine,
+    downloadLatestLog,
     setFsPath,
     instanceUsageBytes,
     instanceUsageStatus,
@@ -588,7 +589,11 @@ export default function GamesView() {
               }}
             >
               <Icon name="download" />
-              Download
+              Download view
+            </button>
+            <button type="button" className="iconBtn" onClick={downloadLatestLog} disabled={!selectedDaemon?.connected || !instanceId.trim()}>
+              <Icon name="download" />
+              latest.log
             </button>
           </div>
         </div>
