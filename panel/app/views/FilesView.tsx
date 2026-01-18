@@ -64,6 +64,22 @@ export default function FilesView() {
   const inst = String(instanceId || "").trim();
   const entriesLoading = fsStatus === "Loading..." && !fsEntries.length;
 
+  if (!selected) {
+    return (
+      <div className="card">
+        <div className="toolbar">
+          <div className="toolbarLeft" style={{ alignItems: "center" }}>
+            <div>
+              <h2>Files</h2>
+              <div className="hint">Select a daemon first, then pick a game to quick-open common files.</div>
+            </div>
+          </div>
+        </div>
+        <div className="emptyState">No daemon selected.</div>
+      </div>
+    );
+  }
+
   return (
     <div className="card">
       <div className="toolbar">
