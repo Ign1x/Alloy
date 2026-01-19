@@ -4240,11 +4240,12 @@ export default function HomePage() {
     }
   }
 
-  async function sendConsoleLine() {
-    if (!consoleLine.trim()) return;
+  async function sendConsoleLine(lineOverride?: string) {
+    const line = String(lineOverride ?? consoleLine).trim();
+    if (!line) return;
     try {
-      await callOkCommand("mc_console", { instance_id: instanceId.trim(), line: consoleLine.trim() }, 10_000);
-      setConsoleLine("");
+      await callOkCommand("mc_console", { instance_id: instanceId.trim(), line }, 10_000);
+      if (lineOverride == null) setConsoleLine("");
     } catch (e: any) {
       setServerOpStatus(String(e?.message || e));
     }

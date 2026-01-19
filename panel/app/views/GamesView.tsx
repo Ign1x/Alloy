@@ -72,6 +72,7 @@ export default function GamesView() {
     selectedProfile,
     frpRemotePort,
     setTab,
+    confirmDialog,
     fmtUnix,
     fmtTime,
     fmtBytes,
@@ -91,7 +92,7 @@ export default function GamesView() {
 
   const running = !!instanceStatus?.running;
   const canControl = !!selectedDaemon?.connected && !!instanceId.trim() && !gameActionBusy;
-  const gamesLoading = serverDirsStatus === "Loading..." && !serverDirs.length;
+  const gamesLoading = serverDirsStatus === t.tr("Loading...", "加载中...") && !serverDirs.length;
 
   const [logQueryRaw, setLogQueryRaw] = useState<string>("");
   const [logQuery, setLogQuery] = useState<string>("");
@@ -105,6 +106,7 @@ export default function GamesView() {
   const [logClearAtUnix, setLogClearAtUnix] = useState<number>(0);
   const [pausedLogs, setPausedLogs] = useState<any[] | null>(null);
   const logScrollRef = useRef<HTMLDivElement | null>(null);
+  const consoleInputRef = useRef<HTMLInputElement | null>(null);
   const [logScrollTop, setLogScrollTop] = useState<number>(0);
   const [logViewportHeight, setLogViewportHeight] = useState<number>(640);
   const [logNearBottom, setLogNearBottom] = useState<boolean>(true);
@@ -454,6 +456,17 @@ export default function GamesView() {
     setCmdHistoryIdx(next.length);
     persistCmdHistory(inst, next);
     await sendConsoleLine();
+  }
+
+  async function sendQuickCommand(cmd: string) {
+    const inst = instanceId.trim();
+    const line = String(cmd || "").trim();
+    if (!inst || !line) return;
+    const next = [...cmdHistory.filter((c) => c !== line), line].slice(-50);
+    setCmdHistory(next);
+    setCmdHistoryIdx(next.length);
+    persistCmdHistory(inst, next);
+    await sendConsoleLine(line);
   }
 
   return (
@@ -1083,8 +1096,62 @@ export default function GamesView() {
         </div>
         <div className="hint">{t.tr("Tip: All shows current game + FRP logs.", "提示：All 会显示当前游戏 + FRP 的日志。")}</div>
 
+        <div className="row" style={{ marginTop: 10, gap: 8, flexWrap: "wrap" }}>
+          <span className="muted">{t.tr("Quick", "快捷")}:</span>
+          <button
+            type="button"
+            className="dangerBtn"
+            disabled={!selectedDaemon?.connected || !instanceId.trim()}
+            onClick={async () => {
+              const ok = await confirmDialog(
+                t.tr("Send 'stop' to the server console? The server will shut down.", "向服务端控制台发送 'stop'？服务器将关闭。"),
+                { title: t.tr("Stop", "停止"), confirmLabel: t.tr("Stop", "停止"), cancelLabel: t.tr("Cancel", "取消"), danger: true }
+              );
+              if (!ok) return;
+              await sendQuickCommand("stop");
+            }}
+          >
+            {t.tr("Stop", "停止")}
+          </button>
+          <button type="button" disabled={!selectedDaemon?.connected || !instanceId.trim()} onClick={() => sendQuickCommand("save-all")}>
+            save-all
+          </button>
+          <button
+            type="button"
+            disabled={!selectedDaemon?.connected || !instanceId.trim()}
+            onClick={() => {
+              setConsoleLine("say ");
+              window.setTimeout(() => consoleInputRef.current?.focus(), 0);
+            }}
+          >
+            say…
+          </button>
+          <button type="button" disabled={!selectedDaemon?.connected || !instanceId.trim()} onClick={() => sendQuickCommand("whitelist reload")}>
+            whitelist reload
+          </button>
+          <button
+            type="button"
+            className="dangerBtn"
+            disabled={!selectedDaemon?.connected || !instanceId.trim()}
+            onClick={async () => {
+              const ok = await confirmDialog(
+                t.tr(
+                  "Send 'reload' to the server console? This is risky on many servers/plugins.",
+                  "向服务端控制台发送 'reload'？这在很多服务端/插件上都有风险。"
+                ),
+                { title: "reload", confirmLabel: "reload", cancelLabel: t.tr("Cancel", "取消"), danger: true }
+              );
+              if (!ok) return;
+              await sendQuickCommand("reload");
+            }}
+          >
+            reload
+          </button>
+        </div>
+
         <div className="row" style={{ marginTop: 12 }}>
           <input
+            ref={consoleInputRef}
             value={consoleLine}
             onChange={(e) => setConsoleLine(e.target.value)}
             placeholder={t.tr("Console command (e.g. say hi)", "控制台命令（例如 say hi）")}
