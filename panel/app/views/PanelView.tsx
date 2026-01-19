@@ -28,7 +28,11 @@ export default function PanelView() {
   const [scheduleBusy, setScheduleBusy] = useState<boolean>(false);
 
   const [backupPresetInstanceId, setBackupPresetInstanceId] = useState<string>("");
+  const [backupPresetScheduleKind, setBackupPresetScheduleKind] = useState<"interval" | "daily" | "weekly">("daily");
   const [backupPresetEveryHours, setBackupPresetEveryHours] = useState<number>(24);
+  const [backupPresetAtHour, setBackupPresetAtHour] = useState<number>(3);
+  const [backupPresetAtMinute, setBackupPresetAtMinute] = useState<number>(0);
+  const [backupPresetWeekday, setBackupPresetWeekday] = useState<number>(1); // Mon
   const [backupPresetKeepLast, setBackupPresetKeepLast] = useState<number>(7);
   const [backupPresetStopServer, setBackupPresetStopServer] = useState<boolean>(true);
 
@@ -70,6 +74,68 @@ export default function PanelView() {
     setScheduleText(JSON.stringify(nextSchedule ?? { tasks: [] }, null, 2) + "\n");
   }
 
+  function clampInt(v: any, min: number, max: number, fallback: number) {
+    const n = Math.round(Number(v));
+    if (!Number.isFinite(n)) return fallback;
+    return Math.max(min, Math.min(max, n));
+  }
+
+  function nextDailyAtUnix(hour: number, minute: number) {
+    const h = clampInt(hour, 0, 23, 3);
+    const m = clampInt(minute, 0, 59, 0);
+    const now = new Date();
+    const next = new Date(now);
+    next.setHours(h, m, 0, 0);
+    if (next.getTime() <= now.getTime()) next.setDate(next.getDate() + 1);
+    return Math.floor(next.getTime() / 1000);
+  }
+
+  function nextWeeklyAtUnix(weekday: number, hour: number, minute: number) {
+    const dow = clampInt(weekday, 0, 6, 1);
+    const h = clampInt(hour, 0, 23, 3);
+    const m = clampInt(minute, 0, 59, 0);
+    const now = new Date();
+    const nowDow = now.getDay();
+    let addDays = (dow - nowDow + 7) % 7;
+    const next = new Date(now);
+    next.setDate(next.getDate() + addDays);
+    next.setHours(h, m, 0, 0);
+    if (addDays === 0 && next.getTime() <= now.getTime()) {
+      addDays = 7;
+      next.setDate(next.getDate() + 7);
+    }
+    return Math.floor(next.getTime() / 1000);
+  }
+
+  function buildCronLikeSchedule() {
+    const kind = backupPresetScheduleKind;
+    if (kind === "interval") {
+      const hours = Math.max(1, clampInt(backupPresetEveryHours, 1, 24 * 365, 24));
+      const everySec = Math.max(60, Math.round(hours * 3600));
+      const nowUnix = Math.floor(Date.now() / 1000);
+      return { every_sec: everySec, last_run_unix: nowUnix, next_run_unix: nowUnix + everySec, cron: `@every ${hours}h` };
+    }
+    if (kind === "weekly") {
+      const everySec = 7 * 86400;
+      const nextAt = nextWeeklyAtUnix(backupPresetWeekday, backupPresetAtHour, backupPresetAtMinute);
+      return {
+        every_sec: everySec,
+        last_run_unix: nextAt - everySec,
+        next_run_unix: nextAt,
+        cron: `${clampInt(backupPresetAtMinute, 0, 59, 0)} ${clampInt(backupPresetAtHour, 0, 23, 3)} * * ${clampInt(backupPresetWeekday, 0, 6, 1)}`,
+      };
+    }
+    // daily
+    const everySec = 86400;
+    const nextAt = nextDailyAtUnix(backupPresetAtHour, backupPresetAtMinute);
+    return {
+      every_sec: everySec,
+      last_run_unix: nextAt - everySec,
+      next_run_unix: nextAt,
+      cron: `${clampInt(backupPresetAtMinute, 0, 59, 0)} ${clampInt(backupPresetAtHour, 0, 23, 3)} * * *`,
+    };
+  }
+
   function addBackupPreset() {
     if (!parsedSchedule.ok) return;
     if (scheduleBusy) return;
@@ -80,9 +146,7 @@ export default function PanelView() {
       return;
     }
 
-    const hoursRaw = Number(backupPresetEveryHours);
-    const hours = Number.isFinite(hoursRaw) && hoursRaw > 0 ? hoursRaw : 24;
-    const everySec = Math.max(60, Math.round(hours * 3600));
+    const scheduleSpec = buildCronLikeSchedule();
 
     const keepRaw = Math.round(Number(backupPresetKeepLast));
     const keepLast = Number.isFinite(keepRaw) && keepRaw >= 0 ? Math.min(keepRaw, 1000) : 0;
@@ -96,7 +160,8 @@ export default function PanelView() {
       id,
       type: "backup",
       instance_id: inst,
-      every_sec: everySec,
+      every_sec: scheduleSpec.every_sec,
+      last_run_unix: scheduleSpec.last_run_unix,
       ...(keepLast > 0 ? { keep_last: keepLast } : {}),
       ...(backupPresetStopServer ? {} : { stop: false }),
     };
@@ -152,6 +217,27 @@ export default function PanelView() {
     } finally {
       setScheduleBusy(false);
     }
+  }
+
+  const nowUnix = Math.floor(Date.now() / 1000);
+  const backupSchedulePreview = buildCronLikeSchedule();
+
+  function nextRunLabel(task: any) {
+    if (task?.enabled === false) return "-";
+    const everyRaw = Number(task?.every_sec || 0);
+    const atRaw = Number(task?.at_unix || 0);
+    const last = Number(task?.last_run_unix || 0);
+    if (Number.isFinite(everyRaw) && everyRaw > 0) {
+      const every = Math.max(60, Math.round(everyRaw));
+      const dueAt = last + every;
+      if (nowUnix >= dueAt) return t.tr("Due", "已到期");
+      return fmtUnix(dueAt);
+    }
+    if (Number.isFinite(atRaw) && atRaw > 0) {
+      if (last < atRaw && nowUnix >= atRaw) return t.tr("Due", "已到期");
+      if (last < atRaw) return fmtUnix(atRaw);
+    }
+    return "-";
   }
 
   return (
@@ -351,16 +437,16 @@ export default function PanelView() {
           </div>
         ) : null}
 
-        <div className="cardSub" style={{ marginTop: 10 }}>
-          <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
-            <div style={{ fontWeight: 700 }}>{t.tr("Backup Preset", "备份预设")}</div>
-            <button type="button" onClick={addBackupPreset} disabled={!selectedDaemon?.connected || scheduleBusy || !parsedSchedule.ok}>
-              {t.tr("Add backup task", "添加备份任务")}
-            </button>
-          </div>
-          <div className="grid2" style={{ marginTop: 10, alignItems: "end" }}>
-            <div className="field">
-              <label>{t.tr("Instance", "实例")}</label>
+	        <div className="cardSub" style={{ marginTop: 10 }}>
+	          <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+	            <div style={{ fontWeight: 700 }}>{t.tr("Backup Preset", "备份预设")}</div>
+	            <button type="button" onClick={addBackupPreset} disabled={!selectedDaemon?.connected || scheduleBusy || !parsedSchedule.ok}>
+	              {t.tr("Add backup task", "添加备份任务")}
+	            </button>
+	          </div>
+	          <div className="grid2" style={{ marginTop: 10, alignItems: "end" }}>
+	            <div className="field">
+	              <label>{t.tr("Instance", "实例")}</label>
               {Array.isArray(serverDirs) && serverDirs.length ? (
                 <Select
                   value={backupPresetInstanceId}
@@ -374,24 +460,100 @@ export default function PanelView() {
                   onChange={(e) => setBackupPresetInstanceId(e.target.value)}
                   placeholder={t.tr("instance_id (e.g. server1)", "instance_id（例如 server1）")}
                 />
-              )}
-            </div>
-            <div className="field">
-              <label>{t.tr("Every (hours)", "间隔（小时）")}</label>
-              <input
-                type="number"
-                min={1}
-                max={24 * 365}
-                step={1}
-                value={backupPresetEveryHours}
-                onChange={(e) => setBackupPresetEveryHours(Math.max(1, Math.round(Number(e.target.value))))}
-              />
-              <div className="hint">{t.tr("Uses every_sec internally.", "内部使用 every_sec。")}</div>
-            </div>
-            <div className="field">
-              <label>{t.tr("Keep last (0 = no prune)", "保留数量（0 = 不清理）")}</label>
-              <input
-                type="number"
+	              )}
+	            </div>
+	            <div className="field">
+	              <label>{t.tr("Schedule", "时间")}</label>
+	              <Select
+	                value={backupPresetScheduleKind}
+	                onChange={(v) => setBackupPresetScheduleKind((v as any) || "daily")}
+	                options={[
+	                  { value: "daily", label: t.tr("Daily at…", "每天在…") },
+	                  { value: "weekly", label: t.tr("Weekly at…", "每周在…") },
+	                  { value: "interval", label: t.tr("Interval", "固定间隔") },
+	                ]}
+	              />
+	              {backupPresetScheduleKind === "interval" ? (
+	                <div className="row" style={{ marginTop: 8, alignItems: "center" }}>
+	                  <input
+	                    type="number"
+	                    min={1}
+	                    max={24 * 365}
+	                    step={1}
+	                    value={backupPresetEveryHours}
+	                    onChange={(e) => setBackupPresetEveryHours(Math.max(1, Math.round(Number(e.target.value))))}
+	                  />
+	                  <span className="muted">{t.tr("hours", "小时")}</span>
+	                </div>
+	              ) : backupPresetScheduleKind === "weekly" ? (
+	                <div style={{ marginTop: 8 }}>
+	                  <div className="row" style={{ alignItems: "center" }}>
+	                    <Select
+	                      value={String(backupPresetWeekday)}
+	                      onChange={(v) => setBackupPresetWeekday(Math.max(0, Math.min(6, Math.round(Number(v)))))}
+	                      options={[
+	                        { value: "1", label: t.tr("Mon", "周一") },
+	                        { value: "2", label: t.tr("Tue", "周二") },
+	                        { value: "3", label: t.tr("Wed", "周三") },
+	                        { value: "4", label: t.tr("Thu", "周四") },
+	                        { value: "5", label: t.tr("Fri", "周五") },
+	                        { value: "6", label: t.tr("Sat", "周六") },
+	                        { value: "0", label: t.tr("Sun", "周日") },
+	                      ]}
+	                    />
+	                    <input
+	                      type="number"
+	                      min={0}
+	                      max={23}
+	                      step={1}
+	                      value={backupPresetAtHour}
+	                      onChange={(e) => setBackupPresetAtHour(Math.max(0, Math.min(23, Math.round(Number(e.target.value)))))}
+	                      style={{ width: 86 }}
+	                    />
+	                    <span className="muted">:</span>
+	                    <input
+	                      type="number"
+	                      min={0}
+	                      max={59}
+	                      step={1}
+	                      value={backupPresetAtMinute}
+	                      onChange={(e) => setBackupPresetAtMinute(Math.max(0, Math.min(59, Math.round(Number(e.target.value)))))}
+	                      style={{ width: 86 }}
+	                    />
+	                  </div>
+	                </div>
+	              ) : (
+	                <div className="row" style={{ marginTop: 8, alignItems: "center" }}>
+	                  <input
+	                    type="number"
+	                    min={0}
+	                    max={23}
+	                    step={1}
+	                    value={backupPresetAtHour}
+	                    onChange={(e) => setBackupPresetAtHour(Math.max(0, Math.min(23, Math.round(Number(e.target.value)))))}
+	                  />
+	                  <span className="muted">:</span>
+	                  <input
+	                    type="number"
+	                    min={0}
+	                    max={59}
+	                    step={1}
+	                    value={backupPresetAtMinute}
+	                    onChange={(e) => setBackupPresetAtMinute(Math.max(0, Math.min(59, Math.round(Number(e.target.value)))))}
+	                  />
+	                </div>
+	              )}
+	              <div className="hint">
+	                {t.tr("Next run", "下次运行")}: <code>{fmtUnix(Number(backupSchedulePreview.next_run_unix || nowUnix))}</code> ·{" "}
+	                <span className="muted">
+	                  {t.tr("cron (ref)", "cron（参考）")}: <code>{String(backupSchedulePreview.cron || "-")}</code>
+	                </span>
+	              </div>
+	            </div>
+	            <div className="field">
+	              <label>{t.tr("Keep last (0 = no prune)", "保留数量（0 = 不清理）")}</label>
+	              <input
+	                type="number"
                 min={0}
                 max={1000}
                 step={1}
@@ -421,20 +583,21 @@ export default function PanelView() {
 
         {parsedSchedule.ok && Array.isArray((parsedSchedule as any).schedule?.tasks) ? (
           <div style={{ marginTop: 12 }}>
-            <h3>{t.tr("Tasks", "任务")}</h3>
-            <table>
-              <thead>
-                <tr>
-                  <th>{t.tr("ID", "ID")}</th>
-                  <th>{t.tr("Type", "类型")}</th>
-                  <th>{t.tr("Instance", "实例")}</th>
-                  <th>{t.tr("Every", "间隔")}</th>
-                  <th>{t.tr("At", "时间")}</th>
-                  <th>{t.tr("Last run", "上次运行")}</th>
-                  <th>{t.tr("Error", "错误")}</th>
-                  <th />
-                </tr>
-              </thead>
+	            <h3>{t.tr("Tasks", "任务")}</h3>
+	            <table>
+	              <thead>
+	                <tr>
+	                  <th>{t.tr("ID", "ID")}</th>
+	                  <th>{t.tr("Type", "类型")}</th>
+	                  <th>{t.tr("Instance", "实例")}</th>
+	                  <th>{t.tr("Every", "间隔")}</th>
+	                  <th>{t.tr("At", "时间")}</th>
+	                  <th>{t.tr("Next run", "下次运行")}</th>
+	                  <th>{t.tr("Last run", "上次运行")}</th>
+	                  <th>{t.tr("Error", "错误")}</th>
+	                  <th />
+	                </tr>
+	              </thead>
               <tbody>
                 {((parsedSchedule as any).schedule?.tasks || []).map((t: any) => (
                   <tr key={String(t.id || t.instance_id || t.type || "")}>
@@ -444,13 +607,14 @@ export default function PanelView() {
                     <td>{String(t.type || "-")}</td>
                     <td>
                       <code>{String(t.instance_id || "-")}</code>
-                    </td>
-                    <td>{t.every_sec ? `${Number(t.every_sec)}s` : "-"}</td>
-                    <td>{t.at_unix ? fmtUnix(Number(t.at_unix)) : "-"}</td>
-                    <td>{t.last_run_unix ? fmtUnix(Number(t.last_run_unix)) : "-"}</td>
-                    <td style={{ maxWidth: 260, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                      {String(t.last_error || "")}
-                    </td>
+	                    </td>
+	                    <td>{t.every_sec ? `${Number(t.every_sec)}s` : "-"}</td>
+	                    <td>{t.at_unix ? fmtUnix(Number(t.at_unix)) : "-"}</td>
+	                    <td>{nextRunLabel(t)}</td>
+	                    <td>{t.last_run_unix ? fmtUnix(Number(t.last_run_unix)) : "-"}</td>
+	                    <td style={{ maxWidth: 260, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+	                      {String(t.last_error || "")}
+	                    </td>
                     <td style={{ textAlign: "right" }}>
                       <button
                         type="button"
