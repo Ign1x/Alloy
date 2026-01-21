@@ -111,10 +111,10 @@ WF-20260118-109,P2,files,done,Upload folder via zip,"Uploading many files is ted
 WF-20260118-110,P1,files,done,Rename and move files,"Users cannot rename/move files from the UI","Files view supports rename/move with validation and conflict checks",feat(files): rename move
 WF-20260118-111,P1,files,done,Delete files and folders,"Cleaning up files requires SSH","Files view supports delete with confirmation and uses trash when enabled",feat(files): delete
 WF-20260118-112,P2,files,done,Download folder as zip,"Downloading a directory tree is hard","Files view supports zipping and downloading a folder server-side",feat(files): download folder zip
-WF-20260118-113,P3,files,todo,Diff viewer,"Comparing config changes is hard","Add a simple diff viewer for two selected text files with syntax highlight",feat(files): diff viewer
-WF-20260118-114,P2,files,todo,Syntax highlighting,"Editing config files without highlighting causes mistakes","Editor supports highlighting for properties/json/yaml/log files",ui(files): syntax highlighting
+WF-20260118-113,P3,files,done,Diff viewer,"Comparing config changes is hard","Add a simple diff viewer for two selected text files with syntax highlight",feat(files): diff viewer
+WF-20260118-114,P2,files,done,Syntax highlighting,"Editing config files without highlighting causes mistakes","Editor supports highlighting for properties/json/yaml/log files",ui(files): syntax highlighting
 WF-20260118-115,P3,files,done,JSON formatter and validator,"JSON edits can easily break formatting","Add format/validate buttons for JSON files with error markers",feat(files): json tools
-WF-20260118-116,P3,files,todo,YAML validator,"YAML indentation errors are common","Add YAML validation with clear error messages and line numbers",feat(files): yaml validate
+WF-20260118-116,P3,files,done,YAML validator,"YAML indentation errors are common","Add YAML validation with clear error messages and line numbers",feat(files): yaml validate
 WF-20260118-117,P2,games,done,Console command history,"Console input loses previous commands and slows admin workflows","Console input supports history (Up/Down) and persists per instance",ux(games): command history
 WF-20260118-118,P3,games,done,Common command shortcuts,"Admins repeatedly type the same commands","Provide quick buttons for stop, save-all, say, whitelist reload, and reload",ux(games): command shortcuts
 WF-20260118-119,P3,games,todo,Separate command output,"Command responses can get lost in noisy logs","Show command responses in a small dedicated panel with copy",ux(games): command output panel
@@ -122,7 +122,7 @@ WF-20260118-120,P2,games,todo,Player list from usercache,"Admins want to see kno
 WF-20260118-121,P2,games,todo,Whitelist/ops editors,"Editing whitelist.json and ops.json manually is risky","Provide simple editors for whitelist/ops with validation and save",feat(games): whitelist ops editor
 WF-20260118-122,P2,games,done,Network info card,"Users often misconfigure ports and bind addresses","Show host/port, detected listen address, and docker mapping hints in UI",ux(games): network info
 WF-20260118-123,P2,frp,todo,Create FRP proxy from instance,"Creating proxies requires copying ports manually","From a running instance, user can generate a proxy config with one click",feat(frp): create proxy
-WF-20260118-124,P2,frp,todo,Per-proxy health indicator,"Proxy list does not show if a proxy is working","Show last check time, reachability, and error per proxy",ux(frp): proxy health
+WF-20260118-124,P2,frp,done,Per-proxy health indicator,"Proxy list does not show if a proxy is working","Show last check time, reachability, and error per proxy",ux(frp): proxy health
 WF-20260118-125,P3,frp,todo,FRP client logs,"FRP failures are hard to debug without logs","Expose FRP client logs in Panel with filter and download",feat(frp): client logs
 WF-20260118-126,P2,nodes,todo,Disk usage display,"Users cannot see if a node is running out of disk","Nodes view shows total/free disk and per-instance disk usage estimate",feat(nodes): disk usage
 WF-20260118-127,P2,nodes,todo,Version mismatch warnings,"Panel/daemon version mismatches can cause subtle bugs","Show warnings when daemon protocol/version differs and suggest upgrade",ux(nodes): version warnings

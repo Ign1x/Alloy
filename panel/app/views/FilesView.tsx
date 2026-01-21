@@ -5,6 +5,275 @@ import { useAppCtx } from "../appCtx";
 import Icon from "../ui/Icon";
 import Select from "../ui/Select";
 
+type DiffLine = {
+  type: "equal" | "insert" | "delete";
+  aNo: number | null;
+  bNo: number | null;
+  text: string;
+};
+
+function escapeHtml(s: string) {
+  return String(s)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function normalizeNewlines(text: string) {
+  return String(text || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+}
+
+function myersDiff(a: string[], b: string[]) {
+  const n = a.length;
+  const m = b.length;
+  const max = n + m;
+  const offset = max;
+  let v = new Array(2 * max + 1).fill(0);
+  const trace: number[][] = [];
+
+  if (max === 0) {
+    trace.push(v);
+    return { trace, offset };
+  }
+
+  for (let d = 0; d <= max; d++) {
+    const vNext = v.slice();
+    for (let k = -d; k <= d; k += 2) {
+      const kIndex = offset + k;
+      let x: number;
+      if (k === -d || (k !== d && v[kIndex - 1] < v[kIndex + 1])) {
+        x = v[kIndex + 1];
+      } else {
+        x = v[kIndex - 1] + 1;
+      }
+      let y = x - k;
+      while (x < n && y < m && a[x] === b[y]) {
+        x++;
+        y++;
+      }
+      vNext[kIndex] = x;
+      if (x >= n && y >= m) {
+        trace.push(vNext);
+        return { trace, offset };
+      }
+    }
+    trace.push(vNext);
+    v = vNext;
+  }
+  return { trace, offset };
+}
+
+function buildDiffOps(trace: number[][], offset: number, a: string[], b: string[]) {
+  let x = a.length;
+  let y = b.length;
+  const out: { type: "equal" | "insert" | "delete"; line: string }[] = [];
+
+  for (let d = trace.length - 1; d > 0; d--) {
+    const prevV = trace[d - 1];
+    const k = x - y;
+    let prevK: number;
+    if (k === -d || (k !== d && prevV[offset + k - 1] < prevV[offset + k + 1])) {
+      prevK = k + 1;
+    } else {
+      prevK = k - 1;
+    }
+    const prevX = prevV[offset + prevK];
+    const prevY = prevX - prevK;
+
+    while (x > prevX && y > prevY) {
+      out.push({ type: "equal", line: a[x - 1] ?? "" });
+      x--;
+      y--;
+    }
+
+    if (x === prevX) {
+      out.push({ type: "insert", line: b[prevY] ?? "" });
+      y = prevY;
+    } else {
+      out.push({ type: "delete", line: a[prevX] ?? "" });
+      x = prevX;
+    }
+  }
+
+  while (x > 0 && y > 0) {
+    out.push({ type: "equal", line: a[x - 1] ?? "" });
+    x--;
+    y--;
+  }
+
+  return out.reverse();
+}
+
+function computeDiffLines(aText: string, bText: string) {
+  const a = normalizeNewlines(aText).split("\n");
+  const b = normalizeNewlines(bText).split("\n");
+  const { trace, offset } = myersDiff(a, b);
+  const ops = buildDiffOps(trace, offset, a, b);
+
+  const lines: DiffLine[] = [];
+  let aNo = 1;
+  let bNo = 1;
+  for (const op of ops) {
+    if (op.type === "equal") {
+      lines.push({ type: "equal", aNo, bNo, text: op.line });
+      aNo++;
+      bNo++;
+      continue;
+    }
+    if (op.type === "delete") {
+      lines.push({ type: "delete", aNo, bNo: null, text: op.line });
+      aNo++;
+      continue;
+    }
+    lines.push({ type: "insert", aNo: null, bNo, text: op.line });
+    bNo++;
+  }
+  return lines;
+}
+
+function highlightJson(text: string) {
+  const src = normalizeNewlines(text);
+  const re = /("(?:\\.|[^"\\])*")|(-?\b\d+(?:\.\d+)?(?:[eE][+-]?\d+)?\b)|\b(true|false|null)\b|([{}[\],:])/g;
+  let out = "";
+  let last = 0;
+  for (const m of src.matchAll(re)) {
+    const idx = m.index ?? 0;
+    out += escapeHtml(src.slice(last, idx));
+    const full = m[0] ?? "";
+    if (m[1] != null) {
+      const rest = src.slice(idx + full.length);
+      const isKey = /^\s*:/.test(rest);
+      out += `<span class="tok ${isKey ? "tokKey" : "tokString"}">${escapeHtml(full)}</span>`;
+    } else if (m[2] != null) {
+      out += `<span class="tok tokNumber">${escapeHtml(full)}</span>`;
+    } else if (m[3] != null) {
+      out += `<span class="tok tokKeyword">${escapeHtml(full)}</span>`;
+    } else {
+      out += `<span class="tok tokPunc">${escapeHtml(full)}</span>`;
+    }
+    last = idx + full.length;
+  }
+  out += escapeHtml(src.slice(last));
+  return out;
+}
+
+function highlightYaml(text: string) {
+  const lines = normalizeNewlines(text).split("\n");
+  const outLines: string[] = [];
+
+  const tokRe = /("(?:\\.|[^"\\])*"|'(?:''|[^'])*')|(-?\b\d+(?:\.\d+)?(?:[eE][+-]?\d+)?\b)|\b(true|false|null|yes|no|on|off)\b|([{}\[\],])/gi;
+
+  const highlightInline = (src: string) => {
+    let out = "";
+    let last = 0;
+    for (const m of src.matchAll(tokRe)) {
+      const idx = m.index ?? 0;
+      out += escapeHtml(src.slice(last, idx));
+      const full = m[0] ?? "";
+      if (m[1] != null) out += `<span class="tok tokString">${escapeHtml(full)}</span>`;
+      else if (m[2] != null) out += `<span class="tok tokNumber">${escapeHtml(full)}</span>`;
+      else if (m[3] != null) out += `<span class="tok tokKeyword">${escapeHtml(full)}</span>`;
+      else out += `<span class="tok tokPunc">${escapeHtml(full)}</span>`;
+      last = idx + full.length;
+    }
+    out += escapeHtml(src.slice(last));
+    return out;
+  };
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      outLines.push("");
+      continue;
+    }
+    if (trimmed.startsWith("#")) {
+      outLines.push(`<span class="tok tokComment">${escapeHtml(line)}</span>`);
+      continue;
+    }
+
+    const commentIdx = line.indexOf("#");
+    const code = commentIdx >= 0 ? line.slice(0, commentIdx) : line;
+    const comment = commentIdx >= 0 ? line.slice(commentIdx) : "";
+
+    const m = code.match(/^(\s*-?\s*)([^:#\s][^:#]*?)(\s*:)(.*)$/);
+    let html = "";
+    if (m) {
+      const [, ws, key, colon, rest] = m;
+      html = `${escapeHtml(ws)}<span class="tok tokKey">${escapeHtml(key)}</span><span class="tok tokPunc">${escapeHtml(colon)}</span>${highlightInline(
+        rest || ""
+      )}`;
+    } else {
+      html = highlightInline(code);
+    }
+
+    const commentHtml = comment ? `<span class="tok tokComment">${escapeHtml(comment)}</span>` : "";
+    outLines.push(html + commentHtml);
+  }
+
+  return outLines.join("\n");
+}
+
+function highlightProperties(text: string) {
+  const lines = normalizeNewlines(text).split("\n");
+  const out: string[] = [];
+  for (const line of lines) {
+    const trimmed = line.trimStart();
+    if (!trimmed) {
+      out.push("");
+      continue;
+    }
+    if (trimmed.startsWith("#") || trimmed.startsWith("!")) {
+      out.push(`<span class="tok tokComment">${escapeHtml(line)}</span>`);
+      continue;
+    }
+    const m = line.match(/^(\s*)([^=:#\s][^=:#]*?)(\s*[=:])(\s*)(.*)$/);
+    if (!m) {
+      out.push(escapeHtml(line));
+      continue;
+    }
+    const [, ws, key, sep, ws2, rest] = m;
+    out.push(
+      `${escapeHtml(ws)}<span class="tok tokKey">${escapeHtml(key)}</span><span class="tok tokPunc">${escapeHtml(sep)}</span>${escapeHtml(ws2)}<span class="tok tokString">${escapeHtml(rest)}</span>`
+    );
+  }
+  return out.join("\n");
+}
+
+function highlightLog(text: string) {
+  const lines = normalizeNewlines(text).split("\n");
+  const out: string[] = [];
+  const tsRe = /^\s*(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:[.,]\d{3})?)/;
+  const lvlRe = /\b(INFO|WARN|WARNING|ERROR|DEBUG|TRACE)\b/g;
+  for (const line of lines) {
+    let html = escapeHtml(line);
+    const m = line.match(tsRe);
+    if (m?.[1]) {
+      const ts = escapeHtml(m[1]);
+      html = html.replace(ts, `<span class="tok tokNumber">${ts}</span>`);
+    }
+    html = html.replace(lvlRe, (mm) => `<span class="tok tokKeyword">${escapeHtml(mm)}</span>`);
+    out.push(html);
+  }
+  return out.join("\n");
+}
+
+function highlightToHtml(text: string, kind: "json" | "yaml" | "properties" | "log") {
+  const src = normalizeNewlines(text);
+  const raw =
+    kind === "json"
+      ? highlightJson(src)
+      : kind === "yaml"
+        ? highlightYaml(src)
+        : kind === "properties"
+          ? highlightProperties(src)
+          : highlightLog(src);
+
+  const lines = raw.split("\n");
+  return lines.map((l) => `<span class=\"codeLine\">${l || "&nbsp;"}</span>`).join("");
+}
+
 export default function FilesView() {
   const {
     t,
@@ -24,6 +293,7 @@ export default function FilesView() {
     setFsPath,
     openEntry,
     openFileByPath,
+    fsReadText,
     setServerJarFromFile,
     saveFile,
     uploadInputKey,
@@ -55,6 +325,14 @@ export default function FilesView() {
   const [dragOver, setDragOver] = useState<boolean>(false);
   const editorRef = useRef<HTMLTextAreaElement | null>(null);
   const [jsonCheck, setJsonCheck] = useState<{ ok: boolean; message: string; line?: number; col?: number; pos?: number } | null>(null);
+  const [yamlCheck, setYamlCheck] = useState<{ ok: boolean; message: string; line?: number; col?: number; pos?: number } | null>(null);
+  const [showHighlight, setShowHighlight] = useState<boolean>(true);
+  const [diffOpen, setDiffOpen] = useState<boolean>(false);
+  const [diffBasePath, setDiffBasePath] = useState<string>("");
+  const [diffOtherPath, setDiffOtherPath] = useState<string>("");
+  const [diffUseBufferBase, setDiffUseBufferBase] = useState<boolean>(true);
+  const [diffStatus, setDiffStatus] = useState<string>("");
+  const [diffLines, setDiffLines] = useState<DiffLine[] | null>(null);
 
   useEffect(() => {
     const t = window.setTimeout(() => setQuery(queryRaw), 160);
@@ -63,6 +341,10 @@ export default function FilesView() {
 
   useEffect(() => {
     setJsonCheck(null);
+    setYamlCheck(null);
+    setDiffStatus("");
+    setDiffLines(null);
+    setDiffOpen(false);
   }, [fsSelectedFile]);
 
   const viewEntries = useMemo(() => {
@@ -75,7 +357,23 @@ export default function FilesView() {
   const inst = String(instanceId || "").trim();
   const entriesLoading = fsStatus === "Loading..." && !fsEntries.length;
 
-  const isJson = !!fsSelectedFile && fsSelectedFileMode === "text" && fsSelectedFile.toLowerCase().endsWith(".json");
+  const fileLower = String(fsSelectedFile || "").toLowerCase();
+  const isJson = !!fsSelectedFile && fsSelectedFileMode === "text" && fileLower.endsWith(".json");
+  const isYaml = !!fsSelectedFile && fsSelectedFileMode === "text" && (fileLower.endsWith(".yaml") || fileLower.endsWith(".yml"));
+  const isProperties = !!fsSelectedFile && fsSelectedFileMode === "text" && fileLower.endsWith(".properties");
+  const isLog = !!fsSelectedFile && fsSelectedFileMode === "text" && fileLower.endsWith(".log");
+
+  const highlightKind = (isJson ? "json" : isYaml ? "yaml" : isProperties ? "properties" : isLog ? "log" : "") as
+    | ""
+    | "json"
+    | "yaml"
+    | "properties"
+    | "log";
+  const highlightEligible = !!highlightKind && String(fsFileText || "").length <= 200_000;
+  const highlightHtml = useMemo(() => {
+    if (!showHighlight || !highlightEligible || !highlightKind) return "";
+    return highlightToHtml(String(fsFileText || ""), highlightKind);
+  }, [fsFileText, highlightEligible, highlightKind, showHighlight]);
 
   function jsonErrorLocation(text: string, err: any) {
     const msg = String(err?.message || err);
@@ -123,6 +421,97 @@ export default function FilesView() {
       const loc = jsonErrorLocation(text, e);
       setJsonCheck({ ok: false, message: loc.message, line: loc.line, col: loc.col, pos: loc.pos });
       if (typeof loc.pos === "number") focusEditorAt(loc.pos);
+    }
+  }
+
+  function validateYamlNow() {
+    const text = normalizeNewlines(String(fsFileText || ""));
+    const lines = text.split("\n");
+    let pos = 0;
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i] ?? "";
+      const trimmed = line.trim();
+      const lead = (line.match(/^[ \t]*/) || [""])[0] || "";
+
+      if (!trimmed || trimmed.startsWith("#")) {
+        pos += line.length + 1;
+        continue;
+      }
+
+      if (lead.includes("\t")) {
+        setYamlCheck({
+          ok: false,
+          message: t.tr("YAML indentation cannot use tabs", "YAML 缩进不能使用 Tab"),
+          line: i + 1,
+          col: 1,
+          pos,
+        });
+        focusEditorAt(pos);
+        return;
+      }
+
+      if (lead.length % 2 !== 0) {
+        setYamlCheck({
+          ok: false,
+          message: t.tr("Indentation must be a multiple of 2 spaces", "缩进必须是 2 的倍数（空格）"),
+          line: i + 1,
+          col: 1,
+          pos,
+        });
+        focusEditorAt(pos);
+        return;
+      }
+
+      const rest = line.slice(lead.length);
+      if (rest.startsWith("-") && rest.length > 1 && rest[1] !== " " && rest[1] !== "\t") {
+        setYamlCheck({
+          ok: false,
+          message: t.tr("List item must start with '- '", "列表项必须以 '- ' 开头"),
+          line: i + 1,
+          col: lead.length + 2,
+          pos: pos + lead.length + 1,
+        });
+        focusEditorAt(pos + lead.length + 1);
+        return;
+      }
+
+      pos += line.length + 1;
+    }
+    setYamlCheck({ ok: true, message: t.tr("YAML passed basic checks", "YAML 通过基础校验") });
+  }
+
+  async function runDiffNow() {
+    const basePath = String(diffBasePath || "").trim();
+    const otherPath = String(diffOtherPath || "").trim();
+    if (!basePath || !otherPath) {
+      setDiffStatus(t.tr("Pick two files", "请选择两个文件"));
+      return;
+    }
+    if (basePath === otherPath) {
+      setDiffStatus(t.tr("Files must be different", "两个文件必须不同"));
+      return;
+    }
+
+    setDiffStatus(t.tr("Loading...", "加载中..."));
+    setDiffLines(null);
+    try {
+      const baseText =
+        diffUseBufferBase && basePath === fsSelectedFile && fsSelectedFileMode === "text" ? String(fsFileText || "") : await fsReadText(basePath);
+      const otherText = await fsReadText(otherPath);
+      const lines = computeDiffLines(baseText, otherText);
+      if (lines.length > 20_000) {
+        throw new Error(t.tr("Diff too large to render", "Diff 过大，无法渲染"));
+      }
+      setDiffLines(lines);
+      setDiffStatus(
+        t.tr(
+          `Done: ${lines.filter((l) => l.type === "insert").length} +, ${lines.filter((l) => l.type === "delete").length} -`,
+          `完成：新增 ${lines.filter((l) => l.type === "insert").length} 行，删除 ${lines.filter((l) => l.type === "delete").length} 行`
+        )
+      );
+    } catch (e: any) {
+      setDiffLines(null);
+      setDiffStatus(String(e?.message || e));
     }
   }
 
@@ -388,6 +777,25 @@ export default function FilesView() {
             <button type="button" onClick={saveFile} disabled={!fsSelectedFile || fsSelectedFileMode !== "text"}>
               {t.tr("Save", "保存")}
             </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (!fsSelectedFile || fsSelectedFileMode !== "text") return;
+                setDiffBasePath(fsSelectedFile);
+                const candidates = (Array.isArray(fsEntries) ? fsEntries : [])
+                  .filter((e: any) => e && !e.isDir)
+                  .map((e: any) => joinRelPath(fsPath, String(e.name || "")))
+                  .filter((p: string) => p && p !== fsSelectedFile);
+                setDiffOtherPath(candidates[0] || "");
+                setDiffUseBufferBase(true);
+                setDiffStatus("");
+                setDiffLines(null);
+                setDiffOpen(true);
+              }}
+              disabled={!fsSelectedFile || fsSelectedFileMode !== "text"}
+            >
+              {t.tr("Diff", "对比")}
+            </button>
             {isJson ? (
               <>
                 <button type="button" onClick={formatJsonNow} disabled={!fsSelectedFile || fsSelectedFileMode !== "text"}>
@@ -397,6 +805,22 @@ export default function FilesView() {
                   {t.tr("Validate JSON", "校验 JSON")}
                 </button>
               </>
+            ) : null}
+            {isYaml ? (
+              <button type="button" onClick={validateYamlNow} disabled={!fsSelectedFile || fsSelectedFileMode !== "text"}>
+                {t.tr("Validate YAML", "校验 YAML")}
+              </button>
+            ) : null}
+            {highlightKind ? (
+              <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                <input
+                  type="checkbox"
+                  checked={showHighlight}
+                  onChange={(e) => setShowHighlight(e.target.checked)}
+                  disabled={!highlightEligible || fsSelectedFileMode !== "text"}
+                />{" "}
+                {t.tr("Highlight", "高亮")}
+              </label>
             ) : null}
           </div>
           {fsSelectedFileMode === "image" && fsPreviewUrl ? (
@@ -442,10 +866,122 @@ export default function FilesView() {
             <div className="hint" style={{ color: "var(--ok)", marginTop: 6 }}>
               {jsonCheck.message}
             </div>
+          ) : isYaml && yamlCheck && !yamlCheck.ok ? (
+            <div className="hint" style={{ color: "var(--danger)", marginTop: 6 }}>
+              {t.tr("YAML error", "YAML 错误")}: {yamlCheck.message}
+              {typeof yamlCheck.line === "number" && typeof yamlCheck.col === "number" ? (
+                <>
+                  {" "}
+                  (<code>
+                    {t.tr("line", "行")} {yamlCheck.line}, {t.tr("col", "列")} {yamlCheck.col}
+                  </code>
+                  )
+                </>
+              ) : null}
+            </div>
+          ) : isYaml && yamlCheck && yamlCheck.ok ? (
+            <div className="hint" style={{ color: "var(--ok)", marginTop: 6 }}>
+              {yamlCheck.message}
+            </div>
+          ) : null}
+
+          {showHighlight && highlightEligible && highlightHtml ? (
+            <div style={{ marginTop: 10 }}>
+              <div className="row" style={{ justifyContent: "space-between" }}>
+                <span className="muted">
+                  {t.tr("Preview", "预览")}: <span className="badge">{highlightKind}</span>
+                </span>
+                {!highlightEligible ? <span className="hint">{t.tr("File too large to highlight", "文件过大，已禁用高亮")}</span> : null}
+              </div>
+              <div className="codeFrame" style={{ marginTop: 8 }}>
+                <pre className="codePre">
+                  <code dangerouslySetInnerHTML={{ __html: highlightHtml }} />
+                </pre>
+              </div>
+            </div>
           ) : null}
           <div className="hint">{t.tr("Tip: binary/large files are download-only.", "提示：二进制/大文件为 download-only（可用 Download 下载）。")}</div>
         </div>
       </div>
+
+      {diffOpen ? (
+        <div className="modalOverlay" onClick={() => setDiffOpen(false)}>
+          <div className="modal" style={{ width: "min(1100px, 100%)" }} onClick={(e) => e.stopPropagation()}>
+            <div className="modalHeader">
+              <div>
+                <div style={{ fontWeight: 800 }}>{t.tr("Diff Viewer", "Diff 对比")}</div>
+                <div className="hint">
+                  {t.tr("base", "基准")}: <code>{diffBasePath || "-"}</code>
+                  {" · "}
+                  {t.tr("compare", "对比")}: <code>{diffOtherPath || "-"}</code>
+                </div>
+              </div>
+              <button type="button" onClick={() => setDiffOpen(false)}>
+                {t.tr("Close", "关闭")}
+              </button>
+            </div>
+
+            <div className="grid2" style={{ marginTop: 12, alignItems: "end" }}>
+              <div className="field" style={{ gridColumn: "1 / -1" }}>
+                <label>{t.tr("Base file", "基准文件")}</label>
+                <input value={diffBasePath} onChange={(e: any) => setDiffBasePath(String(e.target.value || ""))} placeholder="server1/server.properties" />
+              </div>
+              <div className="field">
+                <label>{t.tr("Compare file", "对比文件")}</label>
+                <input value={diffOtherPath} onChange={(e: any) => setDiffOtherPath(String(e.target.value || ""))} placeholder="server1/server.properties" />
+              </div>
+              <div className="field">
+                <label>{t.tr("Pick from current folder", "从当前目录选择")}</label>
+                <Select
+                  value=""
+                  onChange={(v) => (v ? setDiffOtherPath(v) : null)}
+                  options={(viewEntries || [])
+                    .filter((e: any) => e && !e.isDir)
+                    .map((e: any) => ({ value: joinRelPath(fsPath, String(e.name || "")), label: String(e.name || "") }))}
+                  placeholder={t.tr("Select a file…", "选择文件…")}
+                />
+              </div>
+            </div>
+
+            <div className="row" style={{ marginTop: 10, justifyContent: "space-between" }}>
+              <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                <input type="checkbox" checked={diffUseBufferBase} onChange={(e) => setDiffUseBufferBase(e.target.checked)} />{" "}
+                {t.tr("Use current editor text for base (includes unsaved changes)", "基准使用当前编辑器内容（包含未保存更改）")}
+              </label>
+              <div className="btnGroup">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const a = diffBasePath;
+                    setDiffBasePath(diffOtherPath);
+                    setDiffOtherPath(a);
+                  }}
+                >
+                  {t.tr("Swap", "交换")}
+                </button>
+                <button type="button" className="primary" onClick={runDiffNow}>
+                  {t.tr("Run", "开始")}
+                </button>
+              </div>
+            </div>
+
+            {diffStatus ? <div className="hint" style={{ marginTop: 8 }}>{diffStatus}</div> : null}
+
+            {diffLines ? (
+              <div className="diffFrame" style={{ marginTop: 10 }}>
+                {diffLines.map((l, idx) => (
+                  <div key={idx} className={`diffLine ${l.type}`}>
+                    <span className="diffNo">{l.aNo ?? ""}</span>
+                    <span className="diffNo">{l.bNo ?? ""}</span>
+                    <span className="diffMark">{l.type === "insert" ? "+" : l.type === "delete" ? "-" : " "}</span>
+                    <span className="diffText">{l.text}</span>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

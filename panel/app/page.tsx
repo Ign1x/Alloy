@@ -2938,6 +2938,56 @@ export default function HomePage() {
 	    }
 	  }
 
+  async function fsReadText(pathRaw: string, timeoutMs = 30_000) {
+    const p = String(pathRaw || "")
+      .replace(/\\+/g, "/")
+      .replace(/\/+/g, "/")
+      .replace(/^\/+/, "")
+      .replace(/\/+$/, "");
+    if (!p) throw new Error(t.tr("path is required", "path 不能为空"));
+    if (!selected) throw new Error(t.tr("Select a daemon first", "请先选择 Daemon"));
+
+    const lower = p.toLowerCase();
+    const likelyBinaryExt =
+      lower.endsWith(".jar") ||
+      lower.endsWith(".zip") ||
+      lower.endsWith(".png") ||
+      lower.endsWith(".jpg") ||
+      lower.endsWith(".jpeg") ||
+      lower.endsWith(".gif") ||
+      lower.endsWith(".webp") ||
+      lower.endsWith(".ico") ||
+      lower.endsWith(".pdf") ||
+      lower.endsWith(".mp3") ||
+      lower.endsWith(".mp4") ||
+      lower.endsWith(".mkv") ||
+      lower.endsWith(".wav") ||
+      lower.endsWith(".ogg") ||
+      lower.endsWith(".class") ||
+      lower.endsWith(".dll") ||
+      lower.endsWith(".exe") ||
+      lower.endsWith(".so") ||
+      lower.endsWith(".dat") ||
+      lower.endsWith(".nbt");
+    if (likelyBinaryExt) {
+      throw new Error(t.tr("Binary file: download-only", "二进制文件：仅支持下载"));
+    }
+
+    const st = await callOkCommand("fs_stat", { path: p }, 10_000);
+    if (st?.isDir) throw new Error(t.tr("Not a file", "不是文件"));
+    const size = Number(st?.size || 0);
+    if (size > 512 * 1024) {
+      throw new Error(t.tr("File too large for preview", "文件过大，无法预览"));
+    }
+
+    const payload = await callOkCommand("fs_read", { path: p }, timeoutMs);
+    const bytes = b64DecodeBytes(String(payload?.b64 || ""));
+    if (isProbablyBinary(bytes)) {
+      throw new Error(t.tr("Binary file: download-only", "二进制文件：仅支持下载"));
+    }
+    return new TextDecoder().decode(bytes);
+  }
+
   async function setServerJarFromFile(filePath: string) {
     const inst = instanceId.trim();
     if (!inst) {
@@ -4961,6 +5011,7 @@ export default function HomePage() {
 	    fsPreviewUrl,
 	    openEntry,
 	    openFileByPath,
+	    fsReadText,
 	    setServerJarFromFile,
     saveFile,
     uploadInputKey,

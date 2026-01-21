@@ -1020,6 +1020,120 @@ pre {
   border-radius: var(--radius);
 }
 
+.codeFrame {
+  border: 1px solid var(--code-border);
+  border-radius: var(--radius);
+  background: var(--code-bg);
+  overflow: auto;
+  max-height: 520px;
+  counter-reset: codeLine;
+}
+
+pre.codePre {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  white-space: pre;
+  word-break: normal;
+  padding: 10px 0;
+}
+
+.codeLine {
+  display: block;
+  padding: 0 12px 0 56px;
+  position: relative;
+}
+
+.codeLine::before {
+  counter-increment: codeLine;
+  content: counter(codeLine);
+  position: absolute;
+  left: 12px;
+  width: 36px;
+  text-align: right;
+  color: var(--muted);
+  user-select: none;
+}
+
+.tok {
+  font: inherit;
+}
+
+.tokKey {
+  color: rgba(139, 92, 246, 0.95);
+}
+
+.tokString {
+  color: rgba(46, 204, 113, 0.95);
+}
+
+.tokNumber {
+  color: rgba(56, 189, 248, 0.95);
+}
+
+.tokKeyword {
+  color: rgba(251, 191, 36, 0.95);
+}
+
+.tokPunc {
+  color: rgba(148, 163, 184, 0.95);
+}
+
+.tokComment {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.diffFrame {
+  border: 1px solid var(--code-border);
+  border-radius: var(--radius);
+  background: var(--code-bg);
+  overflow: auto;
+  max-height: 560px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 12px;
+}
+
+.diffLine {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 2px 12px;
+  white-space: pre;
+}
+
+.diffLine.insert {
+  background: rgba(46, 204, 113, 0.10);
+}
+
+.diffLine.delete {
+  background: rgba(248, 113, 113, 0.10);
+}
+
+.diffNo {
+  width: 44px;
+  text-align: right;
+  color: var(--muted);
+  flex: 0 0 auto;
+  user-select: none;
+}
+
+.diffMark {
+  width: 12px;
+  text-align: center;
+  flex: 0 0 auto;
+  color: var(--muted);
+  user-select: none;
+}
+
+.diffText {
+  white-space: pre;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  flex: 1 1 auto;
+}
+
 .logLine {
   display: block;
   position: relative;
