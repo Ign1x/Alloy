@@ -8,6 +8,7 @@ import Icon from "./ui/Icon";
 import ErrorBoundary from "./ui/ErrorBoundary";
 import DangerZone from "./ui/DangerZone";
 import Select from "./ui/Select";
+import Tooltip from "./ui/Tooltip";
 
 const AdvancedView = dynamic(() => import("./views/AdvancedView"), { ssr: false });
 const FilesView = dynamic(() => import("./views/FilesView"), { ssr: false });
@@ -7693,20 +7694,21 @@ export default function HomePage() {
             >
               <Icon name="menu" />
             </button>
-            <button
-              type="button"
-              className="iconBtn iconOnly"
-              title={t.tr("Search (Ctrl+K)", "搜索（Ctrl+K）")}
-              aria-label={t.tr("Search", "搜索")}
-              onClick={() => {
-                setCmdPaletteQuery("");
-                setCmdPaletteIdx(0);
-                setCmdPaletteOpen(true);
-              }}
-              disabled={authed !== true}
-            >
-              <Icon name="search" />
-            </button>
+            <Tooltip content={t.tr("Search (Ctrl+K)", "搜索（Ctrl+K）")} disabled={authed !== true}>
+              <button
+                type="button"
+                className="iconBtn iconOnly"
+                aria-label={t.tr("Search", "搜索")}
+                onClick={() => {
+                  setCmdPaletteQuery("");
+                  setCmdPaletteIdx(0);
+                  setCmdPaletteOpen(true);
+                }}
+                disabled={authed !== true}
+              >
+                <Icon name="search" />
+              </button>
+            </Tooltip>
             <div className="topbarTitle">
               <div className="pageTitle">
                 <span>{activeTab.label}</span>

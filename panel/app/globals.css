@@ -1047,6 +1047,38 @@ button.iconOnly {
   opacity: 0.92;
 }
 
+.uiTooltipWrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.uiTooltip {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 10px);
+  transform: translate(-50%, 6px);
+  opacity: 0;
+  pointer-events: none;
+  z-index: 80;
+  max-width: min(360px, 70vw);
+  padding: 6px 10px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--card2);
+  color: var(--text);
+  font-size: var(--font-size-xs);
+  line-height: var(--line-height-tight);
+  box-shadow: var(--shadow2);
+  transition: opacity 0.12s ease, transform 0.12s ease;
+}
+
+.uiTooltipWrap:hover .uiTooltip,
+.uiTooltipWrap:focus-within .uiTooltip {
+  opacity: 1;
+  transform: translate(-50%, 0);
+  transition-delay: 0.35s;
+}
+
 button:active {
   transform: translateY(1px);
 }

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useAppCtx } from "../appCtx";
 import Icon from "../ui/Icon";
 import Select from "../ui/Select";
+import Tooltip from "../ui/Tooltip";
 
 type DiffLine = {
   type: "equal" | "insert" | "delete";
@@ -709,19 +710,20 @@ export default function FilesView() {
                   </button>
                 </span>
               ))}
-              <button
-                type="button"
-                className="iconBtn iconOnly"
-                title={t.tr("Copy path", "复制路径")}
-                aria-label={t.tr("Copy path", "复制路径")}
-                style={{ marginLeft: 8 }}
-                onClick={() => {
-                  const p = fsPath ? `servers/${fsPath}` : "servers/";
-                  copyText(p);
-                }}
-              >
-                <Icon name="copy" />
-              </button>
+              <Tooltip content={t.tr("Copy path", "复制路径")}>
+                <button
+                  type="button"
+                  className="iconBtn iconOnly"
+                  aria-label={t.tr("Copy path", "复制路径")}
+                  style={{ marginLeft: 8 }}
+                  onClick={() => {
+                    const p = fsPath ? `servers/${fsPath}` : "servers/";
+                    copyText(p);
+                  }}
+                >
+                  <Icon name="copy" />
+                </button>
+              </Tooltip>
             </div>
             {fsStatus ? <div className="hint">{fsStatus}</div> : null}
           </div>
