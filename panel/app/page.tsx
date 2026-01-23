@@ -6687,6 +6687,11 @@ export default function HomePage() {
   ];
 
   const activeTab = useMemo(() => tabs.find((t) => t.id === tab) || tabs[0], [tab]);
+  const pageCrumb = useMemo(() => {
+    if (tab === "games") return String(instanceId || "").trim();
+    if (tab === "files") return String(fsPath || "").trim();
+    return "";
+  }, [tab, instanceId, fsPath]);
 
   const helpForTab = useMemo(() => {
     switch (tab) {
@@ -7602,8 +7607,25 @@ export default function HomePage() {
             >
               <Icon name="menu" />
             </button>
+            <button
+              type="button"
+              className="iconBtn iconOnly"
+              title={t.tr("Search (Ctrl+K)", "搜索（Ctrl+K）")}
+              aria-label={t.tr("Search", "搜索")}
+              onClick={() => {
+                setCmdPaletteQuery("");
+                setCmdPaletteIdx(0);
+                setCmdPaletteOpen(true);
+              }}
+              disabled={authed !== true}
+            >
+              <Icon name="search" />
+            </button>
             <div className="topbarTitle">
-              <div className="pageTitle">{activeTab.label}</div>
+              <div className="pageTitle">
+                <span>{activeTab.label}</span>
+                {pageCrumb ? <span className="pageCrumb">› {pageCrumb}</span> : null}
+              </div>
               <div className="pageSubtitle">
                 {t.tr("daemon", "daemon")}: <code>{selectedDaemon?.id || "-"}</code> ·{" "}
                 {selectedDaemon?.connected ? <span>{t.tr("online", "在线")}</span> : <span>{t.tr("offline", "离线")}</span>} · {t.tr("last", "最近")}:{" "}
