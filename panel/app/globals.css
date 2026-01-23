@@ -1045,6 +1045,8 @@ button.iconOnly {
 .ico {
   flex: 0 0 auto;
   opacity: 0.92;
+  display: inline-block;
+  vertical-align: -0.12em;
 }
 
 .uiTooltipWrap {
