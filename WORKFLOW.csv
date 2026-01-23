@@ -128,7 +128,7 @@ WF-20260118-126,P2,nodes,done,Disk usage display,"Users cannot see if a node is 
 WF-20260118-127,P2,nodes,done,Version mismatch warnings,"Panel/daemon version mismatches can cause subtle bugs","Show warnings when daemon protocol/version differs and suggest upgrade",ux(nodes): version warnings
 WF-20260118-128,P3,nodes,done,Daemon self-update helper,"Updating the daemon requires manual steps","Provide UI guidance and optional command to download new daemon binary safely",feat(nodes): daemon update helper
 WF-20260118-129,P2,panel-server,done,Multiple admin accounts,"Single shared password does not scale and is insecure","Support multiple admin users with usernames and per-user sessions",feat(security): multi-user
-WF-20260118-130,P3,security,todo,Two-factor authentication,"Password-only login is weaker than desired","Add optional TOTP-based 2FA per user with recovery codes",feat(security): totp 2fa
+WF-20260118-130,P3,security,done,Two-factor authentication,"Password-only login is weaker than desired","Add optional TOTP-based 2FA per user with recovery codes",feat(security): totp 2fa
 WF-20260118-131,P2,security,done,Login rate limiting,"Brute-force attempts are not mitigated","Add IP-based rate limiting on login endpoints with safe defaults",sec(panel): rate limit
 WF-20260118-132,P2,security,todo,Session management UI,"Users cannot see or revoke active sessions","Add sessions list with revoke-all and revoke-single actions",feat(security): session management
 WF-20260118-133,P3,security,todo,Rotate panel secret,"Long-lived secrets increase risk over time","Add a command/UI to rotate the server secret and invalidate sessions safely",sec(panel): rotate secret
