@@ -615,6 +615,7 @@ export default function HomePage() {
 
   const [daemons, setDaemons] = useState<Daemon[]>([]);
   const [daemonsCacheAtUnix, setDaemonsCacheAtUnix] = useState<number>(0);
+  const [daemonsLoadedOnce, setDaemonsLoadedOnce] = useState<boolean>(false);
   const [selected, setSelected] = useState<string>("");
   const selectedDaemon = useMemo(() => daemons.find((d) => d.id === selected) || null, [daemons, selected]);
 
@@ -723,6 +724,7 @@ export default function HomePage() {
 
   // Logs
   const [logs, setLogs] = useState<any[]>([]);
+  const [logsLoadedOnce, setLogsLoadedOnce] = useState<boolean>(false);
 
   // Files
   const [fsPath, setFsPath] = useState<string>("");
@@ -2507,6 +2509,7 @@ export default function HomePage() {
         const list = Array.isArray(json.daemons) ? json.daemons : [];
         setDaemons(list);
         setDaemonsCacheAtUnix(now);
+        setDaemonsLoadedOnce(true);
         try {
           // Best-effort offline cache (avoid blank UI after refresh during disconnects).
           localStorage.setItem(DAEMONS_CACHE_KEY, JSON.stringify({ at_unix: now, daemons: list }));
@@ -2535,7 +2538,10 @@ export default function HomePage() {
       const parsed = JSON.parse(raw);
       const list = Array.isArray(parsed?.daemons) ? parsed.daemons : null;
       const at = Math.round(Number(parsed?.at_unix || 0));
-      if (list) setDaemons(list);
+      if (list) {
+        setDaemons(list);
+        setDaemonsLoadedOnce(true);
+      }
       if (Number.isFinite(at) && at > 0) setDaemonsCacheAtUnix(at);
     } catch {
       // ignore
@@ -2767,6 +2773,12 @@ export default function HomePage() {
     };
   }, [tab, authed]);
 
+  // Reset logs on daemon switch (avoid showing stale logs while new daemon loads).
+  useEffect(() => {
+    setLogs([]);
+    setLogsLoadedOnce(false);
+  }, [selected]);
+
   // Logs polling (only when useful)
   useEffect(() => {
     if (authed !== true) return;
@@ -2776,7 +2788,9 @@ export default function HomePage() {
       try {
         const res = await apiFetch(`/api/daemons/${encodeURIComponent(selected)}/logs?limit=300`, { cache: "no-store" });
         const json = await res.json();
-        if (!cancelled) setLogs(json.logs || []);
+        if (cancelled) return;
+        setLogs(json.logs || []);
+        setLogsLoadedOnce(true);
       } catch {
         // ignore
       }
@@ -6858,6 +6872,7 @@ export default function HomePage() {
     t,
     authMe,
     daemons,
+    daemonsLoadedOnce,
     selected,
     setSelected,
     selectedDaemon,
@@ -6938,6 +6953,7 @@ export default function HomePage() {
     logView,
     setLogView,
     logs,
+    logsLoadedOnce,
     consoleLine,
     setConsoleLine,
     sendConsoleLine,
@@ -7600,15 +7616,19 @@ export default function HomePage() {
 	            <label>{t.tr("Daemon", "节点")}</label>
 	            <div className="row" style={{ alignItems: "center", gap: 10, flexWrap: "nowrap" }}>
 	              <div style={{ flex: 1 }}>
-	                <Select
-	                  value={selected}
-	                  onChange={(v) => setSelected(v)}
-	                  disabled={authed !== true}
-	                  options={daemons.map((d) => ({
-	                    value: d.id,
-	                    label: `${d.id} ${d.connected ? t.tr("(online)", "（在线）") : t.tr("(offline)", "（离线）")}`,
-	                  }))}
-	                />
+	                {authed === true && !daemonsLoadedOnce ? (
+	                  <div className="skeleton" style={{ minHeight: 44, borderRadius: 12 }} />
+	                ) : (
+	                  <Select
+	                    value={selected}
+	                    onChange={(v) => setSelected(v)}
+	                    disabled={authed !== true}
+	                    options={daemons.map((d) => ({
+	                      value: d.id,
+	                      label: `${d.id} ${d.connected ? t.tr("(online)", "（在线）") : t.tr("(offline)", "（离线）")}`,
+	                    }))}
+	                  />
+	                )}
 	              </div>
 	              <span
 	                className={`statusDot ${selectedDaemon?.connected ? "ok" : ""}`}

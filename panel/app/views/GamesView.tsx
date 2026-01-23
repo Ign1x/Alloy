@@ -119,6 +119,7 @@ export default function GamesView() {
     logView,
     setLogView,
     logs,
+    logsLoadedOnce,
     consoleLine,
     setConsoleLine,
     sendConsoleLine,
@@ -142,6 +143,7 @@ export default function GamesView() {
   const running = !!instanceStatus?.running;
   const canControl = !!selectedDaemon?.connected && !!instanceId.trim() && !gameActionBusy;
   const gamesLoading = serverDirsStatus === t.tr("Loading...", "加载中...") && !serverDirs.length;
+  const logsLoading = !logsLoadedOnce && !!selectedDaemon?.connected;
 
   const [logQueryRaw, setLogQueryRaw] = useState<string>("");
   const [logQuery, setLogQuery] = useState<string>("");
@@ -2507,26 +2509,36 @@ export default function GamesView() {
               setLogNearBottom(remaining <= 64);
             }}
           >
-            <div style={{ height: logVirtual.topPad }} />
-            <pre style={{ margin: 0 }}>
-              {logVirtual.visible.map((l, idx) => (
-                <span key={`${logVirtual.start + idx}`} className={`logLine ${highlightLogs ? l.level : ""}`}>
-                  <button
-                    type="button"
-                    className="logLineCopyBtn"
-                    title={t.tr("Copy line", "复制该行")}
-                    aria-label={t.tr("Copy line", "复制该行")}
-                    onClick={() => copyText(l.text)}
-                  >
-                    <Icon name="copy" />
-                  </button>
-                  <span className="logLineText" style={{ whiteSpace: wrapLogs ? "pre-wrap" : "pre", wordBreak: wrapLogs ? "break-word" : "normal" }}>
-                    {logFilter.mode === "text" && logFilter.q ? highlightText(l.text, logFilter.q) : l.text}
-                  </span>
-                </span>
-              ))}
-            </pre>
-            <div style={{ height: logVirtual.bottomPad }} />
+            {logsLoading ? (
+              <div className="stack" style={{ padding: 12, gap: 10 }}>
+                {Array.from({ length: 14 }).map((_, i) => (
+                  <div key={i} className="skeleton" style={{ minHeight: 18, borderRadius: 10 }} />
+                ))}
+              </div>
+            ) : (
+              <>
+                <div style={{ height: logVirtual.topPad }} />
+                <pre style={{ margin: 0 }}>
+                  {logVirtual.visible.map((l, idx) => (
+                    <span key={`${logVirtual.start + idx}`} className={`logLine ${highlightLogs ? l.level : ""}`}>
+                      <button
+                        type="button"
+                        className="logLineCopyBtn"
+                        title={t.tr("Copy line", "复制该行")}
+                        aria-label={t.tr("Copy line", "复制该行")}
+                        onClick={() => copyText(l.text)}
+                      >
+                        <Icon name="copy" />
+                      </button>
+                      <span className="logLineText" style={{ whiteSpace: wrapLogs ? "pre-wrap" : "pre", wordBreak: wrapLogs ? "break-word" : "normal" }}>
+                        {logFilter.mode === "text" && logFilter.q ? highlightText(l.text, logFilter.q) : l.text}
+                      </span>
+                    </span>
+                  ))}
+                </pre>
+                <div style={{ height: logVirtual.bottomPad }} />
+              </>
+            )}
           </div>
           {newLogsCount > 0 && !logNearBottom && !logPaused ? (
             <button
