@@ -1733,6 +1733,15 @@ td {
   word-break: break-word;
 }
 
+table.compact th,
+table.compact td {
+  padding: 8px 8px;
+}
+
+tbody tr:last-child td {
+  border-bottom: none;
+}
+
 th {
   font-size: var(--font-size-xs);
   color: var(--muted2);
