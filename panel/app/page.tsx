@@ -946,6 +946,7 @@ export default function HomePage() {
   const [fsSelectedFileMode, setFsSelectedFileMode] = useState<"none" | "text" | "binary" | "image">("none");
   const [fsFileText, setFsFileText] = useState<string>("");
   const [fsFileTextSaved, setFsFileTextSaved] = useState<string>("");
+  const [fsFileEol, setFsFileEol] = useState<"\n" | "\r\n">("\n");
   const [fsPreviewUrl, setFsPreviewUrl] = useState<string>("");
   const [fsStatus, setFsStatus] = useState<string>("");
   const [uploadFile, setUploadFile] = useState<File | null>(null);
@@ -4131,6 +4132,16 @@ export default function HomePage() {
 	    return true;
 	  }
 
+	  function detectFsEol(textRaw: string): "\n" | "\r\n" {
+	    const text = String(textRaw ?? "");
+	    return text.includes("\r\n") ? "\r\n" : "\n";
+	  }
+
+	  function normalizeTextToEol(textRaw: string, eol: "\n" | "\r\n") {
+	    const normalized = String(textRaw ?? "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+	    return eol === "\r\n" ? normalized.replace(/\n/g, "\r\n") : normalized;
+	  }
+
 	  async function openEntry(entry: any) {
 	    const name = entry?.name || "";
 	    if (!name) return;
@@ -4147,6 +4158,7 @@ export default function HomePage() {
 	      setFsSelectedFile("");
 	      setFsFileText("");
 	      setFsFileTextSaved("");
+	      setFsFileEol("\n");
 	      setFsSelectedFileMode("none");
 	      setFsPreviewUrl("");
 	      setFsPath(joinRelPath(fsPath, name));
@@ -4185,6 +4197,7 @@ export default function HomePage() {
 	        setFsSelectedFile(filePath);
 	        setFsFileText("");
 	        setFsFileTextSaved("");
+	        setFsFileEol("\n");
 	        setFsSelectedFileMode("image");
 	        setFsPreviewUrl("");
 	        setFsStatus(t.tr(`Previewing ${filePath} ...`, `预览中 ${filePath} ...`));
@@ -4216,6 +4229,7 @@ export default function HomePage() {
 	      setFsSelectedFile(filePath);
 	      setFsFileText("");
 	      setFsFileTextSaved("");
+	      setFsFileEol("\n");
 	      setFsSelectedFileMode("binary");
 	      setFsPreviewUrl("");
 	      setFsStatus(t.tr("Binary/large file: download-only", "二进制/大文件：仅支持下载"));
@@ -4229,14 +4243,17 @@ export default function HomePage() {
 	        setFsSelectedFile(filePath);
 	        setFsFileText("");
 	        setFsFileTextSaved("");
+	        setFsFileEol("\n");
 	        setFsSelectedFileMode("binary");
 	        setFsPreviewUrl("");
 	        setFsStatus(t.tr("Binary file: download-only", "二进制文件：仅支持下载"));
 	        return;
 	      }
-	      const text = new TextDecoder().decode(bytes);
+	      const decoded = new TextDecoder().decode(bytes);
 	      setFsSelectedFile(filePath);
 	      setFsSelectedFileMode("text");
+	      setFsFileEol(detectFsEol(decoded));
+	      const text = normalizeTextToEol(decoded, "\n");
 	      setFsFileText(text);
 	      setFsFileTextSaved(text);
 	      setFsPreviewUrl("");
@@ -4275,6 +4292,7 @@ export default function HomePage() {
 	    setFsSelectedFile("");
 	    setFsFileText("");
 	    setFsFileTextSaved("");
+	    setFsFileEol("\n");
 	    setFsSelectedFileMode("none");
 	    setFsPreviewUrl("");
 	    setFsStatus(t.tr(`Opening ${p} ...`, `打开中 ${p} ...`));
@@ -4324,6 +4342,7 @@ export default function HomePage() {
 	          setFsSelectedFile(filePath);
 	          setFsFileText("");
 	          setFsFileTextSaved("");
+	          setFsFileEol("\n");
 	          setFsSelectedFileMode("image");
 	          setFsPreviewUrl("");
 	          setFsStatus(t.tr(`Previewing ${filePath} ...`, `预览中 ${filePath} ...`));
@@ -4355,6 +4374,7 @@ export default function HomePage() {
 	        setFsSelectedFile(filePath);
 	        setFsFileText("");
 	        setFsFileTextSaved("");
+	        setFsFileEol("\n");
 	        setFsSelectedFileMode("binary");
 	        setFsPreviewUrl("");
 	        setFsStatus(t.tr("Binary/large file: download-only", "二进制/大文件：仅支持下载"));
@@ -4367,14 +4387,17 @@ export default function HomePage() {
 	        setFsSelectedFile(filePath);
 	        setFsFileText("");
 	        setFsFileTextSaved("");
+	        setFsFileEol("\n");
 	        setFsSelectedFileMode("binary");
 	        setFsPreviewUrl("");
 	        setFsStatus(t.tr("Binary file: download-only", "二进制文件：仅支持下载"));
 	        return;
 	      }
-	      const text = new TextDecoder().decode(bytes);
+	      const decoded = new TextDecoder().decode(bytes);
 	      setFsSelectedFile(filePath);
 	      setFsSelectedFileMode("text");
+	      setFsFileEol(detectFsEol(decoded));
+	      const text = normalizeTextToEol(decoded, "\n");
 	      setFsFileText(text);
 	      setFsFileTextSaved(text);
 	      setFsPreviewUrl("");
@@ -4483,23 +4506,29 @@ export default function HomePage() {
     }
   }
 
-  async function saveFile() {
+  async function saveFile(): Promise<{ ok: boolean; error?: string }> {
     if (!fsSelectedFile) {
-      setFsStatus(t.tr("No file selected", "未选择文件"));
-      return;
+      const msg = t.tr("No file selected", "未选择文件");
+      setFsStatus(msg);
+      return { ok: false, error: msg };
     }
     if (fsSelectedFileMode !== "text") {
-      setFsStatus(t.tr("Binary file: edit disabled (download instead)", "二进制文件：已禁用编辑（请下载）"));
-      return;
+      const msg = t.tr("Binary file: edit disabled (download instead)", "二进制文件：已禁用编辑（请下载）");
+      setFsStatus(msg);
+      return { ok: false, error: msg };
     }
     setFsStatus(t.tr(`Saving ${fsSelectedFile} ...`, `保存中 ${fsSelectedFile} ...`));
     try {
-      await callOkCommand("fs_write", { path: fsSelectedFile, b64: b64EncodeUtf8(fsFileText) });
+      const textToWrite = normalizeTextToEol(fsFileText, fsFileEol);
+      await callOkCommand("fs_write", { path: fsSelectedFile, b64: b64EncodeUtf8(textToWrite) });
       setFsFileTextSaved(fsFileText);
       setFsStatus(t.tr("Saved", "已保存"));
       setTimeout(() => setFsStatus(""), 800);
+      return { ok: true };
     } catch (e: any) {
-      setFsStatus(String(e?.message || e));
+      const msg = String(e?.message || e);
+      setFsStatus(msg);
+      return { ok: false, error: msg };
     }
   }
 

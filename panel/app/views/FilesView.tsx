@@ -372,6 +372,11 @@ export default function FilesView() {
   const [diffUseBufferBase, setDiffUseBufferBase] = useState<boolean>(true);
   const [diffStatus, setDiffStatus] = useState<string>("");
   const [diffLines, setDiffLines] = useState<DiffLine[] | null>(null);
+  const saveReviewReqRef = useRef<number>(0);
+  const [saveReviewOpen, setSaveReviewOpen] = useState<boolean>(false);
+  const [saveReviewBusy, setSaveReviewBusy] = useState<boolean>(false);
+  const [saveReviewStatus, setSaveReviewStatus] = useState<string>("");
+  const [saveReviewLines, setSaveReviewLines] = useState<DiffLine[] | null>(null);
 
   useEffect(() => {
     const t = window.setTimeout(() => setQuery(queryRaw), 160);
@@ -420,6 +425,11 @@ export default function FilesView() {
     setDiffStatus("");
     setDiffLines(null);
     setDiffOpen(false);
+    saveReviewReqRef.current++;
+    setSaveReviewStatus("");
+    setSaveReviewLines(null);
+    setSaveReviewBusy(false);
+    setSaveReviewOpen(false);
     setFindOpen(false);
   }, [fsSelectedFile]);
 
@@ -754,6 +764,64 @@ export default function FilesView() {
     setDiffStatus("");
     setDiffLines(null);
     setDiffOpen(true);
+  }
+
+  async function openSaveReviewNow() {
+    if (!fsSelectedFile || fsSelectedFileMode !== "text") return;
+    if (!fsDirty) {
+      await saveFile();
+      return;
+    }
+
+    const reqId = (saveReviewReqRef.current += 1);
+    setSaveReviewOpen(true);
+    setSaveReviewBusy(true);
+    setSaveReviewStatus(t.tr("Loading...", "加载中..."));
+    setSaveReviewLines(null);
+
+    try {
+      const baseText = await fsReadText(fsSelectedFile);
+      const otherText = String(fsFileText || "");
+      const lines = computeDiffLines(baseText, otherText);
+      if (lines.length > 20_000) throw new Error(t.tr("Diff too large to render", "Diff 过大，无法渲染"));
+
+      let ins = 0;
+      let del = 0;
+      for (const l of lines) {
+        if (l.type === "insert") ins++;
+        else if (l.type === "delete") del++;
+      }
+
+      if (saveReviewReqRef.current !== reqId) return;
+      setSaveReviewLines(lines);
+      setSaveReviewStatus(t.tr(`Changes: ${ins} +, ${del} -`, `变更：新增 ${ins} 行，删除 ${del} 行`));
+    } catch (e: any) {
+      if (saveReviewReqRef.current !== reqId) return;
+      setSaveReviewLines(null);
+      setSaveReviewStatus(String(e?.message || e));
+    } finally {
+      if (saveReviewReqRef.current === reqId) setSaveReviewBusy(false);
+    }
+  }
+
+  async function saveFromReviewNow() {
+    if (saveReviewBusy) return;
+    const reqId = (saveReviewReqRef.current += 1);
+    setSaveReviewBusy(true);
+    setSaveReviewStatus(t.tr("Saving...", "保存中..."));
+    try {
+      const res = await saveFile();
+      if (saveReviewReqRef.current !== reqId) return;
+      if (res?.ok) {
+        setSaveReviewOpen(false);
+        setSaveReviewLines(null);
+        setSaveReviewStatus("");
+        return;
+      }
+      setSaveReviewStatus(String(res?.error || t.tr("Save failed", "保存失败")));
+    } finally {
+      if (saveReviewReqRef.current === reqId) setSaveReviewBusy(false);
+    }
   }
 
   function toggleSelectedName(nameRaw: string, checked: boolean) {
@@ -1449,8 +1517,8 @@ export default function FilesView() {
             </div>
 
             <div className="editorToolbarRight">
-              <button type="button" className="iconBtn" onClick={saveFile} disabled={!textEditable}>
-                {t.tr("Save", "保存")}
+              <button type="button" className="iconBtn" onClick={openSaveReviewNow} disabled={!textEditable}>
+                {fsDirty ? t.tr("Review & Save", "预览并保存") : t.tr("Save", "保存")}
               </button>
               <CopyButton text={String(fsFileText || "<empty>")} disabled={!textEditable} />
               <button type="button" className="iconBtn" onClick={() => setFindOpen((v) => !v)} disabled={!textEditable}>
@@ -1780,6 +1848,56 @@ export default function FilesView() {
           <div className="hint">{t.tr("Tip: binary/large files are download-only.", "提示：二进制/大文件为 download-only（可用 Download 下载）。")}</div>
         </div>
       </div>
+
+      <ManagedModal
+        id="files-save-review"
+        open={saveReviewOpen}
+        onOverlayClick={() => {
+          if (!saveReviewBusy) setSaveReviewOpen(false);
+        }}
+        modalStyle={{ width: "min(1100px, 100%)" }}
+        ariaLabel={t.tr("Review Changes", "保存前预览")}
+      >
+        <div className="modalHeader">
+          <div>
+            <div style={{ fontWeight: 800 }}>{t.tr("Review Changes", "保存前预览")}</div>
+            <div className="hint">
+              {t.tr("file", "文件")}: <code>{fsSelectedFile || "-"}</code>
+              {" · "}
+              {t.tr("base", "基准")}: <span className="badge">{t.tr("server", "服务器")}</span>
+              {" · "}
+              {t.tr("compare", "对比")}: <span className="badge">{t.tr("editor", "编辑器")}</span>
+            </div>
+          </div>
+          <div className="btnGroup">
+            <button type="button" onClick={() => setSaveReviewOpen(false)} disabled={saveReviewBusy}>
+              {t.tr("Cancel", "取消")}
+            </button>
+            <button type="button" className="primary" onClick={saveFromReviewNow} disabled={saveReviewBusy}>
+              {t.tr("Save", "保存")}
+            </button>
+          </div>
+        </div>
+
+        {saveReviewStatus ? (
+          <div className="hint" style={{ marginTop: 8 }}>
+            {saveReviewStatus}
+          </div>
+        ) : null}
+
+        {saveReviewLines ? (
+          <div className="diffFrame" style={{ marginTop: 10 }}>
+            {saveReviewLines.map((l, idx) => (
+              <div key={idx} className={`diffLine ${l.type}`}>
+                <span className="diffNo">{l.aNo ?? ""}</span>
+                <span className="diffNo">{l.bNo ?? ""}</span>
+                <span className="diffMark">{l.type === "insert" ? "+" : l.type === "delete" ? "-" : " "}</span>
+                <span className="diffText">{l.text}</span>
+              </div>
+            ))}
+          </div>
+        ) : null}
+      </ManagedModal>
 
       <ManagedModal
         id="files-diff"
