@@ -14,6 +14,8 @@ export default function NodesView() {
     nodes,
     nodesStatus,
     setNodesStatus,
+    pinnedDaemonIds,
+    togglePinnedDaemon,
     apiFetch,
     setNodes,
     openNodeDetails,
@@ -35,10 +37,19 @@ export default function NodesView() {
   const [statusFilter, setStatusFilter] = useState<"all" | "online" | "offline">("all");
   const [sortBy, setSortBy] = useState<"online" | "last" | "cpu" | "mem" | "id">("online");
 
+  const pinnedSet = useMemo(
+    () => new Set((Array.isArray(pinnedDaemonIds) ? pinnedDaemonIds : []).map((s: any) => String(s || "").trim()).filter(Boolean)),
+    [pinnedDaemonIds]
+  );
+
   const viewNodes = useMemo(() => {
     const q = query.trim().toLowerCase();
     const list = Array.isArray(nodes) ? nodes.slice() : [];
     list.sort((a: any, b: any) => {
+      const ap = pinnedSet.has(String(a?.id || "")) ? 1 : 0;
+      const bp = pinnedSet.has(String(b?.id || "")) ? 1 : 0;
+      if (ap !== bp) return bp - ap;
+
       const ac = a?.connected ? 1 : 0;
       const bc = b?.connected ? 1 : 0;
 
@@ -64,7 +75,7 @@ export default function NodesView() {
 
     if (!q) return filtered;
     return filtered.filter((n: any) => String(n?.id || "").toLowerCase().includes(q));
-  }, [nodes, query, pct, sortBy, statusFilter]);
+  }, [nodes, pinnedSet, query, pct, sortBy, statusFilter]);
 
   return (
     <div className="stack">
@@ -143,30 +154,41 @@ export default function NodesView() {
               const mem = hb?.mem || {};
               const disk = hb?.disk || {};
               const instances = Array.isArray(hb?.instances) ? hb.instances : [];
-              const memPct = mem?.total_bytes ? pct(mem.used_bytes, mem.total_bytes) : null;
-              const diskPct = disk?.total_bytes ? pct(disk.used_bytes, disk.total_bytes) : null;
-              const cpuKind = cpu == null ? "" : cpu >= 90 ? "bad" : cpu >= 70 ? "warn" : "ok";
-              const memKind = memPct == null ? "" : memPct >= 90 ? "bad" : memPct >= 75 ? "warn" : "ok";
-              const diskKind = diskPct == null ? "" : diskPct >= 92 ? "bad" : diskPct >= 80 ? "warn" : "ok";
-              const daemonVer = String(n?.hello?.version || "").trim();
-              const panelVer = String(panelInfo?.version || "").trim();
-              const verMismatch = !!daemonVer && !!panelVer && daemonVer !== panelVer && panelVer !== "dev";
-              return (
-                <div key={n.id} className="itemCard" style={{ opacity: n.connected ? 1 : 0.78 }}>
-                  <div className="itemCardHeader">
+	              const memPct = mem?.total_bytes ? pct(mem.used_bytes, mem.total_bytes) : null;
+	              const diskPct = disk?.total_bytes ? pct(disk.used_bytes, disk.total_bytes) : null;
+	              const cpuKind = cpu == null ? "" : cpu >= 90 ? "bad" : cpu >= 70 ? "warn" : "ok";
+	              const memKind = memPct == null ? "" : memPct >= 90 ? "bad" : memPct >= 75 ? "warn" : "ok";
+	              const diskKind = diskPct == null ? "" : diskPct >= 92 ? "bad" : diskPct >= 80 ? "warn" : "ok";
+	              const isPinned = pinnedSet.has(String(n?.id || ""));
+	              const daemonVer = String(n?.hello?.version || "").trim();
+	              const panelVer = String(panelInfo?.version || "").trim();
+	              const verMismatch = !!daemonVer && !!panelVer && daemonVer !== panelVer && panelVer !== "dev";
+	              return (
+	                <div key={n.id} className="itemCard" style={{ opacity: n.connected ? 1 : 0.78 }}>
+	                  <div className="itemCardHeader">
                     <div style={{ minWidth: 0 }}>
                       <div className="itemTitle">{n.id}</div>
                       <div className="itemMeta">
                         {t.tr("last", "最近")}: <TimeAgo unix={n.lastSeenUnix} /> · {t.tr("instances", "实例")}: {instances.length}
                         {daemonVer ? ` · v${daemonVer}` : ""}
                       </div>
-                    </div>
-                    <div className="row" style={{ gap: 8 }}>
-                      <StatusBadge tone={n.connected ? "ok" : "danger"}>{n.connected ? t.tr("online", "在线") : t.tr("offline", "离线")}</StatusBadge>
-                      {verMismatch ? (
-                        <span className="badge warn" title={t.tr("Panel/daemon version mismatch", "Panel/daemon 版本不一致")}>
-                          {t.tr("version mismatch", "版本不一致")}
-                        </span>
+	                    </div>
+	                    <div className="row" style={{ gap: 8 }}>
+	                      <button
+	                        type="button"
+	                        className="iconBtn iconOnly"
+	                        title={isPinned ? t.tr("Unpin node", "取消置顶") : t.tr("Pin node", "置顶节点")}
+	                        aria-label={isPinned ? t.tr("Unpin node", "取消置顶") : t.tr("Pin node", "置顶节点")}
+	                        aria-pressed={isPinned}
+	                        onClick={() => togglePinnedDaemon(String(n?.id || ""))}
+	                      >
+	                        <Icon name="pin" />
+	                      </button>
+	                      <StatusBadge tone={n.connected ? "ok" : "danger"}>{n.connected ? t.tr("online", "在线") : t.tr("offline", "离线")}</StatusBadge>
+	                      {verMismatch ? (
+	                        <span className="badge warn" title={t.tr("Panel/daemon version mismatch", "Panel/daemon 版本不一致")}>
+	                          {t.tr("version mismatch", "版本不一致")}
+	                        </span>
                       ) : null}
                     </div>
                   </div>

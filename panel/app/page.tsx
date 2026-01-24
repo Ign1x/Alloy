@@ -745,7 +745,17 @@ export default function HomePage() {
   const [daemonsCacheAtUnix, setDaemonsCacheAtUnix] = useState<number>(0);
   const [daemonsLoadedOnce, setDaemonsLoadedOnce] = useState<boolean>(false);
   const [selected, setSelected] = useState<string>("");
+  const [pinnedDaemonIds, setPinnedDaemonIds] = useState<string[]>([]);
   const selectedDaemon = useMemo(() => daemons.find((d) => d.id === selected) || null, [daemons, selected]);
+  const pinnedDaemonSet = useMemo(() => {
+    const out = new Set<string>();
+    for (const raw of Array.isArray(pinnedDaemonIds) ? pinnedDaemonIds : []) {
+      const id = String(raw || "").trim();
+      if (!id) continue;
+      out.add(id);
+    }
+    return out;
+  }, [pinnedDaemonIds]);
 
   const [error, setError] = useState<string>("");
   const [uiHost, setUiHost] = useState<string>("");
@@ -759,6 +769,25 @@ export default function HomePage() {
   const [csrfToken, setCsrfToken] = useState<string>("");
   const [locale, setLocale] = useState<Locale>("en");
   const t = useMemo(() => createT(locale), [locale]);
+  const daemonSelectOptions = useMemo(() => {
+    const list = (Array.isArray(daemons) ? daemons : []).slice();
+    list.sort((a, b) => {
+      const ap = pinnedDaemonSet.has(String(a?.id || "")) ? 1 : 0;
+      const bp = pinnedDaemonSet.has(String(b?.id || "")) ? 1 : 0;
+      if (ap !== bp) return bp - ap;
+      const ac = a?.connected ? 1 : 0;
+      const bc = b?.connected ? 1 : 0;
+      if (ac !== bc) return bc - ac;
+      return String(a?.id || "").localeCompare(String(b?.id || ""));
+    });
+    return list.map((d) => {
+      const id = String(d?.id || "");
+      const pinned = pinnedDaemonSet.has(id);
+      const status = d.connected ? t.tr("(online)", "（在线）") : t.tr("(offline)", "（离线）");
+      const pinLabel = pinned ? t.tr("(pinned)", "（置顶）") : "";
+      return { value: id, label: `${id} ${status}${pinLabel ? ` ${pinLabel}` : ""}`.trim() };
+    });
+  }, [daemons, pinnedDaemonSet, t]);
   const localeTag = useMemo(() => (locale === "zh" ? "zh-CN" : "en-US"), [locale]);
   const dateTimeFmt = useMemo(() => new Intl.DateTimeFormat(localeTag, { dateStyle: "medium", timeStyle: "medium" }), [localeTag]);
   const timeFmt = useMemo(() => new Intl.DateTimeFormat(localeTag, { timeStyle: "medium" }), [localeTag]);
@@ -1496,6 +1525,43 @@ export default function HomePage() {
       // ignore
     }
   }, [tab, selected, instanceId, shareMode]);
+
+  // Pinned daemons (per user, stored in localStorage)
+  useEffect(() => {
+    if (authed !== true || !authMe?.user_id) {
+      setPinnedDaemonIds([]);
+      return;
+    }
+    try {
+      const raw = localStorage.getItem(`elegantmc_pinned_daemons_v1:${String(authMe.user_id)}`) || "[]";
+      const parsed = JSON.parse(raw);
+      const list = Array.isArray(parsed) ? parsed : [];
+      const cleaned = list.map((s: any) => String(s || "").trim()).filter(Boolean).slice(0, 200);
+      setPinnedDaemonIds(cleaned);
+    } catch {
+      setPinnedDaemonIds([]);
+    }
+  }, [authed, authMe?.user_id]);
+
+  useEffect(() => {
+    if (authed !== true || !authMe?.user_id) return;
+    try {
+      localStorage.setItem(`elegantmc_pinned_daemons_v1:${String(authMe.user_id)}`, JSON.stringify(pinnedDaemonIds || []));
+    } catch {
+      // ignore
+    }
+  }, [authed, authMe?.user_id, pinnedDaemonIds]);
+
+  function togglePinnedDaemon(daemonIdRaw: string) {
+    const id = String(daemonIdRaw || "").trim();
+    if (!id) return;
+    setPinnedDaemonIds((prev) => {
+      const cur = Array.isArray(prev) ? prev : [];
+      const has = cur.includes(id);
+      const next = has ? cur.filter((x) => x !== id) : [id, ...cur];
+      return next.slice(0, 200);
+    });
+  }
 
   function markOnboardingDone() {
     try {
@@ -7549,6 +7615,8 @@ export default function HomePage() {
     setNodes,
     nodesStatus,
     setNodesStatus,
+    pinnedDaemonIds,
+    togglePinnedDaemon,
     openNodeDetails,
     openAddNodeModal,
     openAddNodeAndDeploy,
@@ -9031,17 +9099,14 @@ export default function HomePage() {
                     {authed === true && !daemonsLoadedOnce ? (
                       <div className="skeleton" style={{ minHeight: 44, borderRadius: 12 }} />
                     ) : (
-                      <Select
-                        value={selected}
-                        onChange={(v) => setSelected(v)}
-                        disabled={authed !== true}
-                        options={daemons.map((d) => ({
-                          value: d.id,
-                          label: `${d.id} ${d.connected ? t.tr("(online)", "（在线）") : t.tr("(offline)", "（离线）")}`,
-                        }))}
-                      />
-                    )}
-                  </div>
+	                      <Select
+	                        value={selected}
+	                        onChange={(v) => setSelected(v)}
+	                        disabled={authed !== true}
+	                        options={daemonSelectOptions}
+	                      />
+	                    )}
+	                  </div>
                   <span
                     className={`statusDot ${selectedDaemon?.connected ? "ok" : ""}`}
                     title={selectedDaemon?.connected ? t.tr("online", "在线") : t.tr("offline", "离线")}
