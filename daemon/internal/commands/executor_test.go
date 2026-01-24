@@ -234,6 +234,85 @@ func TestExecutor_FSUnzip_RejectsSymlink(t *testing.T) {
 	}
 }
 
+func TestExecutor_FSZipList_Basic(t *testing.T) {
+	ex, fs, serversRoot := newTestExecutor(t)
+	ctx := context.Background()
+
+	zipAbs := filepath.Join(serversRoot, "test.zip")
+	f, err := os.Create(zipAbs)
+	if err != nil {
+		t.Fatalf("create zip: %v", err)
+	}
+	zw := zip.NewWriter(f)
+	w1, err := zw.Create("pack/a.txt")
+	if err != nil {
+		t.Fatalf("zip create: %v", err)
+	}
+	_, _ = w1.Write([]byte("a"))
+	w2, err := zw.Create("pack/sub/b.txt")
+	if err != nil {
+		t.Fatalf("zip create: %v", err)
+	}
+	_, _ = w2.Write([]byte("bb"))
+	_ = zw.Close()
+	_ = f.Close()
+
+	// Ensure zip is visible under the sandbox root.
+	if _, err := fs.Resolve("test.zip"); err != nil {
+		t.Fatalf("resolve zip: %v", err)
+	}
+
+	resStrip := ex.Execute(ctx, protocol.Command{
+		Name: "fs_zip_list",
+		Args: map[string]any{"zip_path": "test.zip", "strip_top_level": true},
+	})
+	if !resStrip.OK {
+		t.Fatalf("fs_zip_list failed: %s", resStrip.Error)
+	}
+	entriesStrip, ok := resStrip.Output["entries"].([]zipListEntry)
+	if !ok {
+		t.Fatalf("expected entries slice")
+	}
+	paths := make([]string, 0, len(entriesStrip))
+	for _, e := range entriesStrip {
+		paths = append(paths, e.Path)
+	}
+	if strings.Join(paths, ",") != "a.txt,sub/b.txt" {
+		t.Fatalf("paths=%q", strings.Join(paths, ","))
+	}
+	if top, _ := resStrip.Output["top_level_dir"].(string); top != "pack" {
+		t.Fatalf("top_level_dir=%q", top)
+	}
+	if prefix, _ := resStrip.Output["strip_prefix"].(string); prefix != "pack/" {
+		t.Fatalf("strip_prefix=%q", prefix)
+	}
+	if total, _ := resStrip.Output["total_bytes"].(uint64); total != 3 {
+		t.Fatalf("total_bytes=%d", total)
+	}
+
+	resNoStrip := ex.Execute(ctx, protocol.Command{
+		Name: "fs_zip_list",
+		Args: map[string]any{"zip_path": "test.zip", "strip_top_level": false},
+	})
+	if !resNoStrip.OK {
+		t.Fatalf("fs_zip_list failed: %s", resNoStrip.Error)
+	}
+	entriesNoStrip, ok := resNoStrip.Output["entries"].([]zipListEntry)
+	if !ok {
+		t.Fatalf("expected entries slice")
+	}
+	paths = paths[:0]
+	for _, e := range entriesNoStrip {
+		paths = append(paths, e.Path)
+	}
+	if strings.Join(paths, ",") != "pack/a.txt,pack/sub/b.txt" {
+		t.Fatalf("paths=%q", strings.Join(paths, ","))
+	}
+	if prefix, _ := resNoStrip.Output["strip_prefix"].(string); prefix != "" {
+		t.Fatalf("strip_prefix=%q", prefix)
+	}
+}
+
 func TestExecutor_MCBackupRestore_Roundtrip(t *testing.T) {
 	ex, _, serversRoot := newTestExecutor(t)
 	ctx := context.Background()

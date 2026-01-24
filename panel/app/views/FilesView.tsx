@@ -307,6 +307,9 @@ export default function FilesView() {
     openEntry,
     openFileByPath,
     fsReadText,
+    fsZipList,
+    fsUnzipZip,
+    fsDeleteHard,
     setServerJarFromFile,
     saveFile,
     uploadInputKey,
@@ -316,7 +319,6 @@ export default function FilesView() {
     uploadBusy,
     uploadSelectedFile,
     uploadFilesNow,
-    uploadZipAndExtractHere,
     uploadStatus,
     retryUploadItem,
     retryFailedUploads,
@@ -381,6 +383,21 @@ export default function FilesView() {
   const [saveReviewBusy, setSaveReviewBusy] = useState<boolean>(false);
   const [saveReviewStatus, setSaveReviewStatus] = useState<string>("");
   const [saveReviewLines, setSaveReviewLines] = useState<DiffLine[] | null>(null);
+  type ZipPreviewEntry = { path: string; is_dir: boolean; bytes: number };
+  const zipPreviewReqRef = useRef<number>(0);
+  const [zipPreviewOpen, setZipPreviewOpen] = useState<boolean>(false);
+  const [zipPreviewBusy, setZipPreviewBusy] = useState<boolean>(false);
+  const [zipPreviewStatus, setZipPreviewStatus] = useState<string>("");
+  const [zipPreviewZipPath, setZipPreviewZipPath] = useState<string>("");
+  const [zipPreviewBaseDir, setZipPreviewBaseDir] = useState<string>("");
+  const [zipPreviewStripTop, setZipPreviewStripTop] = useState<boolean>(true);
+  const [zipPreviewEntries, setZipPreviewEntries] = useState<ZipPreviewEntry[] | null>(null);
+  const [zipPreviewFiles, setZipPreviewFiles] = useState<number>(0);
+  const [zipPreviewTotalBytes, setZipPreviewTotalBytes] = useState<number>(0);
+  const [zipPreviewTopLevelDir, setZipPreviewTopLevelDir] = useState<string>("");
+  const [zipPreviewExtractIntoFolder, setZipPreviewExtractIntoFolder] = useState<boolean>(true);
+  const [zipPreviewFolderName, setZipPreviewFolderName] = useState<string>("");
+  const [zipPreviewDeleteZip, setZipPreviewDeleteZip] = useState<boolean>(true);
 
   useEffect(() => {
     const t = window.setTimeout(() => setQuery(queryRaw), 160);
@@ -512,6 +529,71 @@ export default function FilesView() {
     if (!q) return list;
     return list.filter((e: any) => String(e?.name || "").toLowerCase().includes(q));
   }, [fsEntries, query]);
+
+  const zipPreviewTree = useMemo(() => {
+    if (!zipPreviewEntries) return null;
+
+    type Node = {
+      name: string;
+      path: string;
+      isDir: boolean;
+      bytes: number;
+      bytesTotal: number;
+      children: Map<string, Node>;
+    };
+
+    const root: Node = { name: "", path: "", isDir: true, bytes: 0, bytesTotal: 0, children: new Map() };
+
+    for (const e of zipPreviewEntries) {
+      const p = String(e?.path || "").trim();
+      if (!p) continue;
+      const parts = p.split("/").filter(Boolean);
+      if (!parts.length) continue;
+
+      let cur = root;
+      for (let i = 0; i < parts.length; i++) {
+        const part = parts[i] ?? "";
+        const isLast = i === parts.length - 1;
+        const nextPath = cur.path ? `${cur.path}/${part}` : part;
+        let child = cur.children.get(part);
+        if (!child) {
+          child = { name: part, path: nextPath, isDir: true, bytes: 0, bytesTotal: 0, children: new Map() };
+          cur.children.set(part, child);
+        }
+        if (isLast) {
+          child.isDir = !!e?.is_dir;
+          child.bytes = Number(e?.bytes || 0) || 0;
+        }
+        cur = child;
+      }
+    }
+
+    const computeTotals = (n: Node): number => {
+      let sum = n.isDir ? 0 : n.bytes;
+      for (const c of n.children.values()) sum += computeTotals(c);
+      n.bytesTotal = sum;
+      return sum;
+    };
+    computeTotals(root);
+
+    const lines: { depth: number; name: string; isDir: boolean; bytes: number }[] = [];
+    const walk = (n: Node, depth: number) => {
+      const kids = Array.from(n.children.values());
+      kids.sort((a, b) => {
+        if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
+        return a.name.localeCompare(b.name);
+      });
+      for (const c of kids) {
+        lines.push({ depth, name: c.name, isDir: c.isDir, bytes: c.isDir ? c.bytesTotal : c.bytes });
+        if (c.isDir) walk(c, depth + 1);
+      }
+    };
+    walk(root, 0);
+
+    const MAX = 4000;
+    if (lines.length > MAX) return { lines: lines.slice(0, MAX), truncated: lines.length - MAX };
+    return { lines, truncated: 0 };
+  }, [zipPreviewEntries]);
 
   const fileListVirtual = useMemo(() => {
     const list = Array.isArray(viewEntries) ? viewEntries : [];
@@ -825,6 +907,186 @@ export default function FilesView() {
       setSaveReviewStatus(String(res?.error || t.tr("Save failed", "保存失败")));
     } finally {
       if (saveReviewReqRef.current === reqId) setSaveReviewBusy(false);
+    }
+  }
+
+  function validateFsNameSegment(nameRaw: string) {
+    const v = String(nameRaw || "").trim();
+    if (!v) return t.tr("name is required", "名称不能为空");
+    if (v.length > 128) return t.tr("name too long", "名称过长");
+    if (v === "." || v === "..") return t.tr("invalid name", "无效名称");
+    if (v.includes("/") || v.includes("\\")) return t.tr("name must not contain '/' or '\\\\'", "名称不能包含 / 或 \\\\");
+    if (v.includes("\u0000")) return t.tr("name contains invalid characters", "名称包含非法字符");
+    return "";
+  }
+
+  function defaultZipFolderName(fileNameRaw: string) {
+    const fileName = String(fileNameRaw || "").trim();
+    const base = fileName.toLowerCase().endsWith(".zip") ? fileName.slice(0, -4) : fileName;
+    const v = base.trim();
+    return v || "unzipped";
+  }
+
+  function parseZipListOutput(out: any) {
+    const list = Array.isArray(out?.entries) ? out.entries : [];
+    const entries: ZipPreviewEntry[] = list
+      .map((e: any) => ({
+        path: String(e?.path || "").replace(/^\/+/, "").replace(/\/+$/, ""),
+        is_dir: !!e?.is_dir,
+        bytes: Math.max(0, Number(e?.bytes || 0) || 0),
+      }))
+      .filter((e: ZipPreviewEntry) => e.path);
+    const files =
+      typeof out?.files === "number" && Number.isFinite(out.files)
+        ? Math.max(0, Math.floor(out.files))
+        : entries.filter((e) => !e.is_dir).length;
+    const totalBytes =
+      typeof out?.total_bytes === "number" && Number.isFinite(out.total_bytes)
+        ? Math.max(0, Math.floor(out.total_bytes))
+        : entries.reduce((sum, e) => sum + (e.is_dir ? 0 : e.bytes), 0);
+    const topLevelDir = String(out?.top_level_dir || "").trim();
+    return { entries, files, totalBytes, topLevelDir };
+  }
+
+  function closeZipPreviewNow() {
+    zipPreviewReqRef.current += 1;
+    setZipPreviewBusy(false);
+    setZipPreviewStatus("");
+    setZipPreviewEntries(null);
+    setZipPreviewFiles(0);
+    setZipPreviewTotalBytes(0);
+    setZipPreviewTopLevelDir("");
+    setZipPreviewZipPath("");
+    setZipPreviewBaseDir("");
+    setZipPreviewFolderName("");
+    setZipPreviewOpen(false);
+  }
+
+  async function reloadZipPreviewNow(stripTopLevel: boolean) {
+    const zipPath = String(zipPreviewZipPath || "").trim();
+    if (!zipPath) return;
+
+    const reqId = (zipPreviewReqRef.current += 1);
+    setZipPreviewStripTop(!!stripTopLevel);
+    setZipPreviewBusy(true);
+    setZipPreviewStatus(t.tr("Loading...", "加载中..."));
+    setZipPreviewEntries(null);
+
+    try {
+      const out = await fsZipList(zipPath, stripTopLevel);
+      if (zipPreviewReqRef.current !== reqId) return;
+      const parsed = parseZipListOutput(out);
+      setZipPreviewEntries(parsed.entries);
+      setZipPreviewFiles(parsed.files);
+      setZipPreviewTotalBytes(parsed.totalBytes);
+      setZipPreviewTopLevelDir(parsed.topLevelDir);
+      setZipPreviewStatus("");
+    } catch (e: any) {
+      if (zipPreviewReqRef.current !== reqId) return;
+      setZipPreviewStatus(String(e?.message || e));
+      setZipPreviewEntries(null);
+    } finally {
+      if (zipPreviewReqRef.current === reqId) setZipPreviewBusy(false);
+    }
+  }
+
+  async function startZipPreviewNow() {
+    const file = uploadFile;
+    if (!file) return;
+    if (uploadBusy) return;
+    if (!fsPath) return;
+
+    const fileName = String(file.name || "").trim();
+    if (!fileName.toLowerCase().endsWith(".zip")) return;
+
+    const baseDir = String(fsPath || "");
+    const zipPath = joinRelPath(baseDir, fileName);
+    const folderName = defaultZipFolderName(fileName);
+    const folderErr = validateFsNameSegment(folderName);
+
+    const reqId = (zipPreviewReqRef.current += 1);
+    setZipPreviewOpen(true);
+    setZipPreviewBusy(true);
+    setZipPreviewStatus(t.tr("Uploading...", "上传中..."));
+    setZipPreviewZipPath(zipPath);
+    setZipPreviewBaseDir(baseDir);
+    setZipPreviewStripTop(true);
+    setZipPreviewEntries(null);
+    setZipPreviewFiles(0);
+    setZipPreviewTotalBytes(0);
+    setZipPreviewTopLevelDir("");
+    setZipPreviewExtractIntoFolder(true);
+    setZipPreviewFolderName(folderErr ? "unzipped" : folderName);
+    setZipPreviewDeleteZip(true);
+
+    try {
+      const res = await uploadFilesNow([file]);
+      if (zipPreviewReqRef.current !== reqId) return;
+      if (Number(res?.ok || 0) !== 1 || Number(res?.failed || 0) !== 0) {
+        setZipPreviewStatus(t.tr("Upload failed", "上传失败"));
+        return;
+      }
+
+      setZipPreviewStatus(t.tr("Reading zip...", "读取 zip 内容..."));
+      const out = await fsZipList(zipPath, true);
+      if (zipPreviewReqRef.current !== reqId) return;
+      const parsed = parseZipListOutput(out);
+      setZipPreviewEntries(parsed.entries);
+      setZipPreviewFiles(parsed.files);
+      setZipPreviewTotalBytes(parsed.totalBytes);
+      setZipPreviewTopLevelDir(parsed.topLevelDir);
+      setZipPreviewStatus("");
+    } catch (e: any) {
+      if (zipPreviewReqRef.current !== reqId) return;
+      setZipPreviewStatus(String(e?.message || e));
+      setZipPreviewEntries(null);
+    } finally {
+      if (zipPreviewReqRef.current === reqId) setZipPreviewBusy(false);
+    }
+  }
+
+  async function extractZipNow() {
+    if (zipPreviewBusy) return;
+    const zipPath = String(zipPreviewZipPath || "").trim();
+    const baseDir = String(zipPreviewBaseDir || "").trim();
+    if (!zipPath || !baseDir) return;
+
+    let destDir = baseDir;
+    if (zipPreviewExtractIntoFolder) {
+      const folder = String(zipPreviewFolderName || "").trim();
+      const err = validateFsNameSegment(folder);
+      if (err) {
+        setZipPreviewStatus(err);
+        return;
+      }
+      destDir = joinRelPath(baseDir, folder);
+    }
+
+    const reqId = (zipPreviewReqRef.current += 1);
+    setZipPreviewBusy(true);
+    setZipPreviewStatus(t.tr("Extracting...", "解压中..."));
+    try {
+      await fsUnzipZip(zipPath, destDir, zipPreviewStripTop);
+      if (zipPreviewDeleteZip) {
+        try {
+          await fsDeleteHard(zipPath);
+        } catch {
+          // ignore
+        }
+      }
+      await refreshFsNow();
+
+      if (zipPreviewReqRef.current !== reqId) return;
+      setZipPreviewStatus(t.tr("Extracted", "已解压"));
+      window.setTimeout(() => {
+        if (zipPreviewReqRef.current !== reqId) return;
+        closeZipPreviewNow();
+      }, 650);
+    } catch (e: any) {
+      if (zipPreviewReqRef.current !== reqId) return;
+      setZipPreviewStatus(String(e?.message || e));
+    } finally {
+      if (zipPreviewReqRef.current === reqId) setZipPreviewBusy(false);
     }
   }
 
@@ -1242,7 +1504,7 @@ export default function FilesView() {
           </button>
           <button
             type="button"
-            onClick={uploadZipAndExtractHere}
+            onClick={startZipPreviewNow}
             disabled={!uploadFile || !String(uploadFile?.name || "").toLowerCase().endsWith(".zip") || !fsPath || uploadBusy}
             title={fsPath ? "" : t.tr("Cannot extract to servers/ root; select a folder first", "不能解压到 servers/ 根目录；请先选择文件夹")}
           >
@@ -1936,6 +2198,133 @@ export default function FilesView() {
           <div className="hint">{t.tr("Tip: binary/large files are download-only.", "提示：二进制/大文件为 download-only（可用 Download 下载）。")}</div>
         </div>
       </div>
+
+      <ManagedModal
+        id="files-zip-preview"
+        open={zipPreviewOpen}
+        onOverlayClick={() => {
+          if (!zipPreviewBusy) closeZipPreviewNow();
+        }}
+        modalStyle={{ width: "min(1100px, 100%)" }}
+        ariaLabel={t.tr("Zip Preview", "Zip 预览")}
+      >
+        <div className="modalHeader">
+          <div>
+            <div style={{ fontWeight: 800 }}>{t.tr("Zip Preview", "Zip 预览")}</div>
+            <div className="hint">
+              {t.tr("zip", "zip")}: <code>{zipPreviewZipPath || "-"}</code>
+              {zipPreviewTopLevelDir ? (
+                <>
+                  {" · "}
+                  {t.tr("top-level", "顶层")}: <code>{zipPreviewTopLevelDir}</code>
+                </>
+              ) : null}
+            </div>
+          </div>
+          <div className="btnGroup">
+            <button type="button" onClick={closeZipPreviewNow} disabled={zipPreviewBusy}>
+              {t.tr("Cancel", "取消")}
+            </button>
+            <button type="button" className="primary" onClick={extractZipNow} disabled={zipPreviewBusy || !zipPreviewEntries}>
+              {t.tr("Extract", "解压")}
+            </button>
+          </div>
+        </div>
+
+        {zipPreviewStatus ? (
+          <div className="hint" style={{ marginTop: 8 }}>
+            {zipPreviewStatus}
+          </div>
+        ) : null}
+
+        <div className="row" style={{ marginTop: 12, justifyContent: "space-between", gap: 10 }}>
+          <span className="muted">
+            {t.tr("Files", "文件")}: <code>{zipPreviewFiles}</code>
+          </span>
+          <span className="muted">
+            {t.tr("Total", "总大小")}: <code>{fmtBytes(zipPreviewTotalBytes)}</code>
+          </span>
+        </div>
+
+        <div className="grid2" style={{ marginTop: 12, alignItems: "end" }}>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <input
+              type="checkbox"
+              checked={zipPreviewStripTop}
+              disabled={zipPreviewBusy || !zipPreviewZipPath}
+              onChange={(e) => reloadZipPreviewNow(e.target.checked)}
+            />{" "}
+            {t.tr("Strip single top-level folder (if present)", "剥离单一顶层文件夹（如存在）")}
+          </label>
+
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <input
+              type="checkbox"
+              checked={zipPreviewExtractIntoFolder}
+              disabled={zipPreviewBusy || !zipPreviewZipPath}
+              onChange={(e) => setZipPreviewExtractIntoFolder(e.target.checked)}
+            />{" "}
+            {t.tr("Extract into a subfolder", "解压到子文件夹")}
+          </label>
+
+          {zipPreviewExtractIntoFolder ? (
+            <div className="field" style={{ gridColumn: "1 / -1" }}>
+              <label>{t.tr("Folder name", "文件夹名")}</label>
+              <input
+                value={zipPreviewFolderName}
+                onChange={(e: any) => setZipPreviewFolderName(String(e.target.value || ""))}
+                placeholder={t.tr("unzipped", "unzipped")}
+                disabled={zipPreviewBusy}
+              />
+              {(() => {
+                const err = validateFsNameSegment(zipPreviewFolderName);
+                return err ? <div className="fieldError">{err}</div> : null;
+              })()}
+            </div>
+          ) : null}
+
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <input
+              type="checkbox"
+              checked={zipPreviewDeleteZip}
+              disabled={zipPreviewBusy || !zipPreviewZipPath}
+              onChange={(e) => setZipPreviewDeleteZip(e.target.checked)}
+            />{" "}
+            {t.tr("Delete zip after extract", "解压后删除 zip")}
+          </label>
+
+          <div className="hint" style={{ gridColumn: "1 / -1" }}>
+            {t.tr("Destination", "目标目录")}:{" "}
+            <code>
+              {zipPreviewExtractIntoFolder
+                ? joinRelPath(zipPreviewBaseDir, String(zipPreviewFolderName || "").trim())
+                : zipPreviewBaseDir}
+            </code>
+          </div>
+        </div>
+
+        {zipPreviewTree ? (
+          <div className="diffFrame" style={{ marginTop: 12 }}>
+            {zipPreviewTree.lines.map((l, idx) => (
+              <div key={idx} className="diffLine equal" style={{ paddingLeft: 12 + l.depth * 14 }}>
+                <span className="diffText">{l.isDir ? `${l.name}/` : l.name}</span>
+                <span className="muted" style={{ marginLeft: "auto" }}>
+                  {fmtBytes(l.bytes)}
+                </span>
+              </div>
+            ))}
+            {zipPreviewTree.truncated ? (
+              <div className="hint" style={{ padding: "8px 12px" }}>
+                {t.tr(`… ${zipPreviewTree.truncated} more entries`, `… 还有 ${zipPreviewTree.truncated} 条未显示`)}
+              </div>
+            ) : null}
+          </div>
+        ) : zipPreviewEntries && !zipPreviewEntries.length ? (
+          <div className="hint" style={{ marginTop: 12 }}>
+            {t.tr("Zip is empty (or contains only ignored entries).", "Zip 为空（或仅包含被忽略的条目）。")}
+          </div>
+        ) : null}
+      </ManagedModal>
 
       <ManagedModal
         id="files-save-review"

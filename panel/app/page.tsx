@@ -4481,6 +4481,49 @@ export default function HomePage() {
     await callOkCommand("fs_write", { path: p, b64: b64EncodeUtf8(text) }, timeoutMs);
   }
 
+  async function fsZipList(zipPathRaw: string, stripTopLevel = true, timeoutMs = 30_000) {
+    const zipPath = String(zipPathRaw || "")
+      .replace(/\\+/g, "/")
+      .replace(/\/+/g, "/")
+      .replace(/^\/+/, "")
+      .replace(/\/+$/, "");
+    if (!zipPath) throw new Error(t.tr("zip_path is required", "zip_path 不能为空"));
+    if (!selected) throw new Error(t.tr("Select a daemon first", "请先选择 Daemon"));
+    return await callOkCommand("fs_zip_list", { zip_path: zipPath, strip_top_level: !!stripTopLevel }, timeoutMs);
+  }
+
+  async function fsUnzipZip(zipPathRaw: string, destDirRaw: string, stripTopLevel = true, timeoutMs = 10 * 60_000) {
+    const zipPath = String(zipPathRaw || "")
+      .replace(/\\+/g, "/")
+      .replace(/\/+/g, "/")
+      .replace(/^\/+/, "")
+      .replace(/\/+$/, "");
+    const destDir = String(destDirRaw || "")
+      .replace(/\\+/g, "/")
+      .replace(/\/+/g, "/")
+      .replace(/^\/+/, "")
+      .replace(/\/+$/, "");
+    if (!zipPath) throw new Error(t.tr("zip_path is required", "zip_path 不能为空"));
+    if (!destDir) throw new Error(t.tr("dest_dir is required", "dest_dir 不能为空"));
+    if (!selected) throw new Error(t.tr("Select a daemon first", "请先选择 Daemon"));
+    return await callOkCommand(
+      "fs_unzip",
+      { zip_path: zipPath, dest_dir: destDir, instance_id: destDir, strip_top_level: !!stripTopLevel },
+      timeoutMs
+    );
+  }
+
+  async function fsDeleteHard(pathRaw: string, timeoutMs = 60_000) {
+    const p = String(pathRaw || "")
+      .replace(/\\+/g, "/")
+      .replace(/\/+/g, "/")
+      .replace(/^\/+/, "")
+      .replace(/\/+$/, "");
+    if (!p) throw new Error(t.tr("path is required", "path 不能为空"));
+    if (!selected) throw new Error(t.tr("Select a daemon first", "请先选择 Daemon"));
+    return await callOkCommand("fs_delete", { path: p }, timeoutMs);
+  }
+
   async function setServerJarFromFile(filePath: string) {
     const inst = instanceId.trim();
     if (!inst) {
@@ -7943,6 +7986,9 @@ export default function HomePage() {
     openFileByPath,
 	    fsReadText,
       fsWriteText,
+      fsZipList,
+      fsUnzipZip,
+      fsDeleteHard,
 	    setServerJarFromFile,
     saveFile,
     uploadInputKey,
