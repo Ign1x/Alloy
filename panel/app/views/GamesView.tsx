@@ -184,6 +184,8 @@ export default function GamesView() {
     startFrpProxyNow,
     repairInstance,
     updateModrinthPack,
+    shareMode,
+    openShareView,
   } = useAppCtx();
 
   const running = !!instanceStatus?.running;
@@ -1187,6 +1189,109 @@ export default function GamesView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accessTab, instanceId, selectedDaemon?.connected]);
 
+  if (shareMode) {
+    const inst = instanceId.trim();
+    const daemonId = String(selectedDaemon?.id || "").trim();
+    const localSocket = `${localHost || "127.0.0.1"}:${Math.round(Number(gamePort || 25565))}`;
+
+    return (
+      <div className="stack shareStack">
+        <div className="card">
+          <h2>{t.tr("Game Snapshot", "游戏快照")}</h2>
+          <div className="row" style={{ gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            <span className="badge">
+              {t.tr("daemon", "daemon")}: <code>{daemonId || "-"}</code>
+            </span>
+            <span className="badge">
+              {t.tr("game", "游戏")}: <code>{inst || "-"}</code>
+            </span>
+            {running ? <StatusBadge tone="ok">{t.tr("running", "运行中")}</StatusBadge> : <StatusBadge tone="neutral">{t.tr("stopped", "已停止")}</StatusBadge>}
+            {typeof selectedDaemon?.heartbeat?.server_time_unix === "number" ? (
+              <span className="badge">
+                {t.tr("updated", "更新时间")}: <TimeAgo unix={selectedDaemon.heartbeat.server_time_unix} />
+              </span>
+            ) : null}
+          </div>
+
+          <div className="grid2" style={{ marginTop: 12, alignItems: "start" }}>
+            <div className="cardSub">
+              <h3>{t.tr("Connect", "连接")}</h3>
+              <code className="shareSocket">{inst ? socketText : "-"}</code>
+              <div className="hint" style={{ marginTop: 8 }}>
+                {frpStatus?.running && frpStatus.remote_port ? (
+                  <>
+                    FRP: <code>{frpStatus.remote_addr}:{frpStatus.remote_port}</code>
+                  </>
+                ) : enableFrp ? (
+                  <span className="badge warn">{t.tr("FRP enabled (not running)", "FRP 已开启（未运行）")}</span>
+                ) : (
+                  <span className="muted">FRP: -</span>
+                )}
+              </div>
+              {enableFrp ? (
+                <div className="hint" style={{ marginTop: 8 }}>
+                  {t.tr("desired", "期望")}:{" "}
+                  {selectedProfile ? (
+                    <>
+                      {t.tr("on", "开启")} (<code>{selectedProfile.name}</code>)
+                    </>
+                  ) : (
+                    <span className="badge warn">{t.tr("on (no profile)", "开启（无配置）")}</span>
+                  )}
+                  {" · "}
+                  {t.tr("remote port", "remote port")}: <code>{Math.round(Number(frpRemotePort || 0))}</code>
+                </div>
+              ) : null}
+            </div>
+
+            <div className="cardSub">
+              <h3>{t.tr("Details", "详情")}</h3>
+
+              <div className="kv">
+                <div className="k">{t.tr("Network", "网络")}</div>
+                <div className="v">{inst ? <span className="badge">{localSocket}</span> : <span className="muted">-</span>}</div>
+              </div>
+
+              <div className="kv">
+                <div className="k">{t.tr("Java", "Java")}</div>
+                <div className="v">{instanceStatus?.java ? <code>{String(instanceStatus.java)}</code> : <span className="muted">-</span>}</div>
+                <div className="hint">
+                  {t.tr("major", "major")}: <code>{Number(instanceStatus?.java_major || 0) || "-"}</code>
+                  {" · "}
+                  {t.tr("required", "required")}: <code>{Number(instanceStatus?.required_java_major || 0) ? `>=${Number(instanceStatus.required_java_major)}` : "-"}</code>
+                </div>
+              </div>
+
+              <div className="kv">
+                <div className="k">{t.tr("Last exit", "最后退出")}</div>
+                <div className="v">
+                  {typeof instanceStatus?.last_exit_unix === "number" && instanceStatus.last_exit_unix > 0 ? (
+                    <TimeAgo unix={instanceStatus.last_exit_unix} />
+                  ) : (
+                    <span className="muted">-</span>
+                  )}
+                </div>
+                <div className="hint">
+                  {instanceStatus?.last_exit_signal ? (
+                    <>
+                      {t.tr("signal", "信号")}: <code>{String(instanceStatus.last_exit_signal)}</code>
+                    </>
+                  ) : typeof instanceStatus?.last_exit_code === "number" ? (
+                    <>
+                      {t.tr("exit code", "退出码")}: <code>{String(instanceStatus.last_exit_code)}</code>
+                    </>
+                  ) : (
+                    <span className="muted">-</span>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="stack">
       <div className="card">
@@ -1719,7 +1824,17 @@ export default function GamesView() {
       </div>
 
       <div className="card">
-        <h2>{t.tr("Connect", "连接")}</h2>
+        <div className="row" style={{ justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+          <h2 style={{ margin: 0 }}>{t.tr("Connect", "连接")}</h2>
+          <button
+            type="button"
+            className="iconBtn"
+            onClick={() => openShareView({ kind: "game", daemonId: selectedDaemon?.id, instanceId })}
+            disabled={!instanceId.trim()}
+          >
+            <Icon name="link" /> {t.tr("Share view", "分享视图")}
+          </button>
+        </div>
         <div className="row" style={{ justifyContent: "space-between", alignItems: "center", gap: 10 }}>
           <code
             className="clickCopy"

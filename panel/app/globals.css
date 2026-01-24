@@ -400,6 +400,48 @@ h3 {
   min-height: 100vh;
 }
 
+:root[data-share="1"],
+:root[data-share="1"] body {
+  background: var(--bg0);
+}
+
+:root[data-share="1"] .appShell {
+  grid-template-columns: 1fr;
+  max-width: 980px;
+}
+
+:root[data-share="1"] .sidebar,
+:root[data-share="1"] .sidebarOverlay,
+:root[data-share="1"] .sidebarToggle,
+:root[data-share="1"] .topbar,
+:root[data-share="1"] .toastWrap,
+:root[data-share="1"] .snackbarWrap,
+:root[data-share="1"] .drawerOverlay {
+  display: none !important;
+}
+
+:root[data-share="1"] .shareBar {
+  position: sticky;
+  top: 18px;
+  z-index: 20;
+}
+
+.nodeDetailsOverlay.share {
+  position: static;
+  inset: auto;
+  background: transparent;
+  padding: 0;
+  display: block;
+  z-index: auto;
+}
+
+.nodeDetailsModal.share {
+  max-height: none;
+  overflow: visible;
+  box-shadow: none;
+  margin: 0 auto;
+}
+
 .sidebar {
   height: calc(100vh - 36px);
   position: sticky;
@@ -578,6 +620,60 @@ button.navItem .badge {
 .topbar > * {
   position: relative;
   z-index: 1;
+}
+
+.shareBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.016)), var(--card2);
+  box-shadow: var(--shadow2);
+}
+
+.shareBarLeft {
+  min-width: 0;
+}
+
+.shareBarTitle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.shareBrand {
+  font-weight: var(--font-weight-bold);
+  letter-spacing: -0.02em;
+}
+
+.shareBarMeta {
+  margin-top: 4px;
+  font-size: var(--font-size-xs);
+  line-height: var(--line-height-tight);
+}
+
+.shareBarActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.shareSocket {
+  display: inline-block;
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--code-bg);
+  font-size: var(--font-size-lg);
+  line-height: var(--line-height-tight);
 }
 
 .topbarTitle {
@@ -2861,5 +2957,42 @@ tr:hover td {
   }
   select {
     padding-right: 34px;
+  }
+}
+
+@media print {
+  :root {
+    color-scheme: light;
+  }
+
+  html,
+  body {
+    background: #fff !important;
+    color: #000 !important;
+  }
+
+  :root[data-share="1"] .shareBarActions,
+  :root[data-share="1"] button {
+    display: none !important;
+  }
+
+  :root[data-share="1"] .card,
+  :root[data-share="1"] .cardSub,
+  :root[data-share="1"] .modal {
+    background: #fff !important;
+    box-shadow: none !important;
+    border-color: rgba(0, 0, 0, 0.18) !important;
+  }
+
+  :root[data-share="1"] .badge {
+    background: rgba(0, 0, 0, 0.06) !important;
+    border-color: rgba(0, 0, 0, 0.18) !important;
+    color: #000 !important;
+  }
+
+  :root[data-share="1"] code {
+    background: rgba(0, 0, 0, 0.06) !important;
+    border-color: rgba(0, 0, 0, 0.14) !important;
+    color: #000 !important;
   }
 }

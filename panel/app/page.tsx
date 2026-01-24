@@ -689,6 +689,7 @@ function upsertProp(text: string, key: string, value: string) {
 
 export default function HomePage() {
   const [tab, setTab] = useState<Tab>("games");
+  const [shareMode, setShareMode] = useState<boolean>(false);
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(false);
   const [sidebarFooterCollapsed, setSidebarFooterCollapsed] = useState<boolean>(false);
   const [themeMode, setThemeMode] = useState<ThemeMode>("auto");
@@ -1306,6 +1307,15 @@ export default function HomePage() {
   }, [uiDensity]);
 
   useEffect(() => {
+    try {
+      if (shareMode) document.documentElement.dataset.share = "1";
+      else delete (document.documentElement.dataset as any).share;
+    } catch {
+      // ignore
+    }
+  }, [shareMode]);
+
+  useEffect(() => {
     if (authed !== true) return;
     if (!themePrefsReadyRef.current) return;
     const mode: ThemeMode = themeMode === "dark" || themeMode === "light" || themeMode === "contrast" ? themeMode : "auto";
@@ -1371,15 +1381,34 @@ export default function HomePage() {
       if (daemon0) setSelected(daemon0);
       const inst0 = String(p.get("instance") || "").trim();
       if (inst0) setInstanceId(inst0);
+      const share0 = String(p.get("share") || "").trim().toLowerCase();
+      if (share0 === "1" || share0 === "true") setShareMode(true);
     } catch {
       // ignore
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Share view: open Node Details automatically.
+  useEffect(() => {
+    if (!shareMode) return;
+    if (tab !== "nodes") return;
+    const id = String(selected || "").trim();
+    if (!id) return;
+    setNodeDetailsId(id);
+    setNodeDetailsOpen(true);
+  }, [shareMode, tab, selected]);
+
   // Persist selected tab/daemon/game across refresh.
   useEffect(() => {
     try {
+      const hash = String(window.location.hash || "").replace(/^#/, "");
+      if (hash) {
+        const hp = new URLSearchParams(hash);
+        const hasDeepLink = !!(hp.get("tab") || hp.get("daemon") || hp.get("instance") || hp.get("share"));
+        if (hasDeepLink) return;
+      }
+
       const raw = localStorage.getItem("elegantmc_ui_state_v1");
       if (!raw) return;
       const st = JSON.parse(raw);
@@ -1401,6 +1430,7 @@ export default function HomePage() {
   }, []);
 
   useEffect(() => {
+    if (shareMode) return;
     try {
       localStorage.setItem(
         "elegantmc_ui_state_v1",
@@ -1409,7 +1439,7 @@ export default function HomePage() {
     } catch {
       // ignore
     }
-  }, [tab, selected, instanceId]);
+  }, [tab, selected, instanceId, shareMode]);
 
   useEffect(() => {
     try {
@@ -1417,6 +1447,7 @@ export default function HomePage() {
       if (tab) p.set("tab", tab);
       if (String(selected || "").trim()) p.set("daemon", String(selected || "").trim());
       if (String(instanceId || "").trim()) p.set("instance", String(instanceId || "").trim());
+      if (shareMode) p.set("share", "1");
       const next = p.toString();
       const cur = String(window.location.hash || "").replace(/^#/, "");
       if (cur === next) return;
@@ -1425,7 +1456,7 @@ export default function HomePage() {
     } catch {
       // ignore
     }
-  }, [tab, selected, instanceId]);
+  }, [tab, selected, instanceId, shareMode]);
 
   function markOnboardingDone() {
     try {
@@ -2712,6 +2743,40 @@ export default function HomePage() {
     setSidebarOpen(false);
     setTab("panel");
     setPanelScrollTarget(String(id || "").trim());
+  }
+
+  function openShareView(opts: { kind: "node" | "game"; daemonId?: string; instanceId?: string }) {
+    const kind = opts?.kind === "node" ? "node" : "game";
+    const daemon = String(opts?.daemonId || selected || "").trim();
+    const inst = String(opts?.instanceId || instanceId || "").trim();
+    const p = new URLSearchParams();
+    p.set("tab", kind === "node" ? "nodes" : "games");
+    if (daemon) p.set("daemon", daemon);
+    if (kind === "game" && inst) p.set("instance", inst);
+    p.set("share", "1");
+
+    const hash = `#${p.toString()}`;
+    const url = `${window.location.pathname}${window.location.search}${hash}`;
+    try {
+      const win = window.open(url, "_blank", "noopener,noreferrer");
+      if (win) return;
+    } catch {
+      // ignore
+    }
+    try {
+      window.location.hash = p.toString();
+      setTab(kind === "node" ? "nodes" : "games");
+      if (daemon) setSelected(daemon);
+      if (kind === "game" && inst) setInstanceId(inst);
+      setShareMode(true);
+    } catch {
+      // ignore
+    }
+  }
+
+  function exitShareView() {
+    setShareMode(false);
+    setNodeDetailsOpen(false);
   }
 
   async function copyText(text: string) {
@@ -7343,6 +7408,9 @@ export default function HomePage() {
   const appCtxValue = {
     tab,
     setTab,
+    shareMode,
+    setShareMode,
+    exitShareView,
     locale,
     setLocale,
     t,
@@ -7496,6 +7564,7 @@ export default function HomePage() {
 	    copyText,
 	    confirmDialog,
       promptDialog,
+      openShareView,
 	    makeDeployComposeYml,
 	    maskToken,
 	    pct,
@@ -8727,6 +8796,40 @@ export default function HomePage() {
       </aside>
 
       <main id="mainContent" className="main" tabIndex={-1}>
+        {shareMode ? (
+          <div className="shareBar">
+            <div className="shareBarLeft">
+              <div className="shareBarTitle">
+                <span className="shareBrand">{String(panelSettings?.brand_name || "ElegantMC")}</span>
+                <span className="badge">{t.tr("Share view", "分享视图")}</span>
+                <span className="muted">{activeTab.label}</span>
+              </div>
+              <div className="shareBarMeta">
+                <span className="muted">
+                  {t.tr("daemon", "daemon")}: <code>{String(selected || "-")}</code>
+                </span>
+                {tab === "games" ? (
+                  <span className="muted">
+                    {" "}
+                    · {t.tr("game", "游戏")}: <code>{String(instanceId || "-")}</code>
+                  </span>
+                ) : null}
+              </div>
+            </div>
+            <div className="shareBarActions">
+              <button type="button" className="iconBtn" onClick={() => copyText(String(window.location.href || ""))}>
+                <Icon name="copy" /> {t.tr("Copy link", "复制链接")}
+              </button>
+              <button type="button" className="iconBtn" onClick={() => window.print()}>
+                <Icon name="download" /> {t.tr("Print", "打印")}
+              </button>
+              <button type="button" onClick={exitShareView}>
+                {t.tr("Exit", "退出")}
+              </button>
+            </div>
+          </div>
+        ) : null}
+
         <div className="topbar">
           <div className="row" style={{ alignItems: "center", gap: 10, minWidth: 0 }}>
             <button
@@ -10336,8 +10439,11 @@ export default function HomePage() {
           ) : null}
 
 	      {nodeDetailsOpen ? (
-	        <div className="modalOverlay" onClick={() => setNodeDetailsOpen(false)}>
-	          <div className="modal" onClick={(e) => e.stopPropagation()}>
+	        <div
+            className={`modalOverlay nodeDetailsOverlay ${shareMode ? "share" : ""}`}
+            onClick={() => (shareMode ? null : setNodeDetailsOpen(false))}
+          >
+	          <div className={`modal nodeDetailsModal ${shareMode ? "share" : ""}`} onClick={(e) => e.stopPropagation()}>
 	            <div className="modalHeader">
 	              <div>
 	                <div style={{ fontWeight: 700 }}>{t.tr("Node Details", "节点详情")}</div>
@@ -10345,9 +10451,15 @@ export default function HomePage() {
 	                  {t.tr("node", "节点")}: <code>{nodeDetailsId || "-"}</code>
 	                </div>
 	              </div>
-	              <button type="button" onClick={() => setNodeDetailsOpen(false)}>
-	                {t.tr("Close", "关闭")}
-	              </button>
+                {shareMode ? (
+                  <button type="button" onClick={exitShareView}>
+                    {t.tr("Exit", "退出")}
+                  </button>
+                ) : (
+                  <button type="button" onClick={() => setNodeDetailsOpen(false)}>
+                    {t.tr("Close", "关闭")}
+                  </button>
+                )}
 	            </div>
 
 	            {nodeDetailsNode ? (
@@ -10375,7 +10487,7 @@ export default function HomePage() {
                         {nodeDetailsUpdate?.outdated ? <span className="badge warn">{t.tr("outdated", "可更新")}</span> : null}
                       </div>
                     ) : null}
-                    {nodeDetailsUpdate?.outdated ? (
+                    {nodeDetailsUpdate?.outdated && !shareMode ? (
                       <div className="btnGroup" style={{ marginTop: 8, justifyContent: "flex-start" }}>
                         <button
                           type="button"
@@ -10466,30 +10578,40 @@ export default function HomePage() {
                           DISK
                         </span>
                       </div>
-	                    <div className="row" style={{ justifyContent: "space-between", alignItems: "end", gap: 10, marginBottom: 8 }}>
-	                      <div className="field" style={{ minWidth: 180 }}>
-	                        <label>{t.tr("Range", "范围")}</label>
-	                        <Select
-	                          value={String(nodeDetailsRangeSec)}
-	                          onChange={(v) => setNodeDetailsRangeSec(Number(v) || 0)}
-	                          options={[
-	                            { value: String(60), label: t.tr("Last 1m", "最近 1 分钟") },
-	                            { value: String(5 * 60), label: t.tr("Last 5m", "最近 5 分钟") },
-	                            { value: String(15 * 60), label: t.tr("Last 15m", "最近 15 分钟") },
-	                            { value: String(60 * 60), label: t.tr("Last 1h", "最近 1 小时") },
-	                            { value: String(6 * 60 * 60), label: t.tr("Last 6h", "最近 6 小时") },
-	                            { value: String(0), label: t.tr("All", "全部") },
-	                          ]}
-	                        />
+	                    {!shareMode ? (
+	                      <div className="row" style={{ justifyContent: "space-between", alignItems: "end", gap: 10, marginBottom: 8 }}>
+	                        <div className="field" style={{ minWidth: 180 }}>
+	                          <label>{t.tr("Range", "范围")}</label>
+	                          <Select
+	                            value={String(nodeDetailsRangeSec)}
+	                            onChange={(v) => setNodeDetailsRangeSec(Number(v) || 0)}
+	                            options={[
+	                              { value: String(60), label: t.tr("Last 1m", "最近 1 分钟") },
+	                              { value: String(5 * 60), label: t.tr("Last 5m", "最近 5 分钟") },
+	                              { value: String(15 * 60), label: t.tr("Last 15m", "最近 15 分钟") },
+	                              { value: String(60 * 60), label: t.tr("Last 1h", "最近 1 小时") },
+	                              { value: String(6 * 60 * 60), label: t.tr("Last 6h", "最近 6 小时") },
+	                              { value: String(0), label: t.tr("All", "全部") },
+	                            ]}
+	                          />
+	                        </div>
+	                        <div className="hint" style={{ marginBottom: 4 }}>
+	                          {nodeDetailsHistoryMeta.points
+	                            ? locale === "zh"
+	                              ? `点数: ${nodeDetailsHistoryMeta.points} · ${fmtUnix(nodeDetailsHistoryMeta.fromUnix)} - ${fmtUnix(nodeDetailsHistoryMeta.toUnix)}`
+	                              : `points: ${nodeDetailsHistoryMeta.points} · ${fmtUnix(nodeDetailsHistoryMeta.fromUnix)} - ${fmtUnix(nodeDetailsHistoryMeta.toUnix)}`
+	                            : t.tr("No history yet", "暂无历史")}
+	                        </div>
 	                      </div>
-	                      <div className="hint" style={{ marginBottom: 4 }}>
+	                    ) : (
+	                      <div className="hint" style={{ marginTop: 8, marginBottom: 8 }}>
 	                        {nodeDetailsHistoryMeta.points
 	                          ? locale === "zh"
 	                            ? `点数: ${nodeDetailsHistoryMeta.points} · ${fmtUnix(nodeDetailsHistoryMeta.fromUnix)} - ${fmtUnix(nodeDetailsHistoryMeta.toUnix)}`
 	                            : `points: ${nodeDetailsHistoryMeta.points} · ${fmtUnix(nodeDetailsHistoryMeta.fromUnix)} - ${fmtUnix(nodeDetailsHistoryMeta.toUnix)}`
 	                          : t.tr("No history yet", "暂无历史")}
 	                      </div>
-	                    </div>
+	                    )}
 
 	                    <div className="hint">
 	                      CPU% · {t.tr("latest", "最新")}:{" "}
@@ -10539,7 +10661,7 @@ export default function HomePage() {
 	                        <th>ID</th>
 	                        <th>{t.tr("Status", "状态")}</th>
 	                        <th>{t.tr("Size", "大小")}</th>
-	                        <th />
+                          {!shareMode ? <th /> : null}
 	                      </tr>
 	                    </thead>
 	                    <tbody>
@@ -10574,25 +10696,27 @@ export default function HomePage() {
 	                                <span className="muted">-</span>
 	                              )}
 	                            </td>
-	                            <td style={{ textAlign: "right" }}>
-	                              <div className="btnGroup" style={{ justifyContent: "flex-end" }}>
-	                                <button
-	                                  type="button"
-	                                  className="iconBtn"
-	                                  onClick={() => computeNodeInstanceUsage(nodeDetailsId, String(i?.id || ""))}
-	                                  disabled={!nodeDetailsNode.connected || busy}
-	                                >
-	                                  <Icon name="search" />
-	                                  {t.tr("Scan", "扫描")}
-	                                </button>
-	                              </div>
-	                            </td>
+                              {!shareMode ? (
+	                              <td style={{ textAlign: "right" }}>
+	                                <div className="btnGroup" style={{ justifyContent: "flex-end" }}>
+	                                  <button
+	                                    type="button"
+	                                    className="iconBtn"
+	                                    onClick={() => computeNodeInstanceUsage(nodeDetailsId, String(i?.id || ""))}
+	                                    disabled={!nodeDetailsNode.connected || busy}
+	                                  >
+	                                    <Icon name="search" />
+	                                    {t.tr("Scan", "扫描")}
+	                                  </button>
+	                                </div>
+	                              </td>
+                              ) : null}
 	                          </tr>
 	                        );
 	                      })}
 	                      {!(nodeDetailsNode.heartbeat?.instances || []).length ? (
 	                        <tr>
-	                          <td colSpan={4} className="muted">
+	                          <td colSpan={shareMode ? 3 : 4} className="muted">
 	                            {t.tr("No instances reported yet", "暂无实例上报")}
 	                          </td>
 	                        </tr>
@@ -10601,27 +10725,29 @@ export default function HomePage() {
 	                  </table>
 	                </div>
 
-	                <div className="card">
-	                  <h3>{t.tr("Danger Zone", "危险区")}</h3>
-	                  <DangerZone
-	                    title={t.tr("Danger Zone", "危险区")}
-	                    hint={t.tr(
-	                      "Deleting a node removes its token mapping; the daemon will not be able to reconnect until re-added.",
-	                      "删除节点会移除 token 映射；daemon 将无法再次连接（除非重新添加）。"
-	                    )}
-	                  >
-	                    <div className="btnGroup" style={{ justifyContent: "flex-end" }}>
-	                      <button
-	                        type="button"
-	                        className="dangerBtn"
-	                        onClick={() => deleteNodeNow(nodeDetailsId)}
-	                        disabled={!String(nodeDetailsId || "").trim()}
-	                      >
-	                        {t.tr("Delete node…", "删除节点…")}
-	                      </button>
-	                    </div>
-	                  </DangerZone>
-	                </div>
+                  {!shareMode ? (
+	                  <div className="card">
+	                    <h3>{t.tr("Danger Zone", "危险区")}</h3>
+	                    <DangerZone
+	                      title={t.tr("Danger Zone", "危险区")}
+	                      hint={t.tr(
+	                        "Deleting a node removes its token mapping; the daemon will not be able to reconnect until re-added.",
+	                        "删除节点会移除 token 映射；daemon 将无法再次连接（除非重新添加）。"
+	                      )}
+	                    >
+	                      <div className="btnGroup" style={{ justifyContent: "flex-end" }}>
+	                        <button
+	                          type="button"
+	                          className="dangerBtn"
+	                          onClick={() => deleteNodeNow(nodeDetailsId)}
+	                          disabled={!String(nodeDetailsId || "").trim()}
+	                        >
+	                          {t.tr("Delete node…", "删除节点…")}
+	                        </button>
+	                      </div>
+	                    </DangerZone>
+	                  </div>
+                  ) : null}
 	              </>
 	            ) : (
 	              <div className="hint">{t.tr("No data", "暂无数据")}</div>
@@ -10847,7 +10973,7 @@ export default function HomePage() {
         </div>
       ) : null}
 
-      {tab === "nodes" ? <NodesView /> : null}
+      {tab === "nodes" ? (shareMode ? null : <NodesView />) : null}
 
       {tab === "games" ? <GamesView /> : null}
 

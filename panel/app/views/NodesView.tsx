@@ -28,6 +28,7 @@ export default function NodesView() {
     exportDiagnosticsBundle,
     makeDeployComposeYml,
     confirmDialog,
+    openShareView,
   } = useAppCtx();
 
   const [query, setQuery] = useState<string>("");
@@ -247,6 +248,9 @@ export default function NodesView() {
                     <div className="btnGroup" style={{ justifyContent: "flex-start" }}>
                       <button type="button" onClick={() => openNodeDetails(n.id)}>
                         {t.tr("Details", "详情")}
+                      </button>
+                      <button type="button" className="iconBtn" onClick={() => openShareView({ kind: "node", daemonId: n.id })}>
+                        <Icon name="link" /> {t.tr("Share view", "分享视图")}
                       </button>
                       <button
                         type="button"
