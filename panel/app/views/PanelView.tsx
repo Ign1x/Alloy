@@ -56,6 +56,9 @@ export default function PanelView() {
   const [usersBusy, setUsersBusy] = useState<boolean>(false);
   const [passwordPolicy, setPasswordPolicy] = useState<{ min_length: number; reject_common: boolean } | null>(null);
   const [passwordPolicyStatus, setPasswordPolicyStatus] = useState<string>("");
+  const [securityHeaders, setSecurityHeaders] = useState<any | null>(null);
+  const [securityHeadersStatus, setSecurityHeadersStatus] = useState<string>("");
+  const [securityHeadersBusy, setSecurityHeadersBusy] = useState<boolean>(false);
   const [newUsername, setNewUsername] = useState<string>("");
   const [newUserPassword, setNewUserPassword] = useState<string>("");
   const [resetPwdOpen, setResetPwdOpen] = useState<boolean>(false);
@@ -177,6 +180,27 @@ export default function PanelView() {
     return () => {
       cancelled = true;
     };
+  }, [apiFetch, t]);
+
+  async function refreshSecurityHeaders() {
+    setSecurityHeadersBusy(true);
+    setSecurityHeadersStatus("");
+    try {
+      const res = await apiFetch("/api/config", { cache: "no-store" });
+      const json = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(json?.error || t.tr("failed", "失败"));
+      setSecurityHeaders(json?.security_headers || null);
+    } catch (e: any) {
+      setSecurityHeaders(null);
+      setSecurityHeadersStatus(String(e?.message || e));
+    } finally {
+      setSecurityHeadersBusy(false);
+    }
+  }
+
+  useEffect(() => {
+    const p = refreshSecurityHeaders();
+    if (p && typeof (p as any).then === "function") (p as any).catch(() => null);
   }, [apiFetch, t]);
 
   useEffect(() => {
@@ -927,6 +951,7 @@ export default function PanelView() {
   const toc = [
     { id: "panel-updates", label: t.tr("Updates", "更新") },
     { id: "panel-settings", label: t.tr("Panel", "面板") },
+    { id: "panel-security-headers", label: t.tr("Security Headers", "安全响应头") },
     { id: "panel-users", label: t.tr("Users", "用户") },
     { id: "panel-tokens", label: t.tr("API Tokens", "API Tokens") },
     { id: "panel-tasks", label: t.tr("Tasks", "任务") },
@@ -1187,13 +1212,103 @@ export default function PanelView() {
               </button>
             </div>
           </>
-        )}
-      </div>
+	        )}
+	      </div>
 
-      <div className="card" id="panel-users">
-        <div className="toolbar">
-          <div className="toolbarLeft" style={{ alignItems: "center" }}>
-            <div>
+        <div className="card" id="panel-security-headers">
+          <div className="toolbar">
+            <div className="toolbarLeft" style={{ alignItems: "center" }}>
+              <div>
+                <h2>{t.tr("Security Headers", "安全响应头")}</h2>
+                {securityHeadersBusy ? (
+                  <div className="hint">{t.tr("Loading...", "加载中...")}</div>
+                ) : securityHeadersStatus ? (
+                  <div className="hint">{securityHeadersStatus}</div>
+                ) : (
+                  <div className="hint">{t.tr("Current HTTP response headers computed from env.", "当前根据环境变量计算出的响应头配置。")}</div>
+                )}
+              </div>
+            </div>
+            <div className="toolbarRight">
+              <button type="button" className="iconBtn" onClick={refreshSecurityHeaders} disabled={securityHeadersBusy}>
+                {t.tr("Refresh", "刷新")}
+              </button>
+            </div>
+          </div>
+
+          {securityHeaders ? (
+            <div className="grid2" style={{ alignItems: "start" }}>
+              <div className="itemCard">
+                <div className="hint">{t.tr("Referrer-Policy", "Referrer-Policy")}</div>
+                <div className="row" style={{ justifyContent: "space-between", gap: 10, marginTop: 6 }}>
+                  <code style={{ wordBreak: "break-all" }}>{String(securityHeaders?.referrer_policy?.value || "-")}</code>
+                  <CopyButton
+                    text={String(securityHeaders?.referrer_policy?.value || "")}
+                    iconOnly
+                    tooltip={t.tr("Copy value", "复制值")}
+                    ariaLabel={t.tr("Copy value", "复制值")}
+                  />
+                </div>
+                <div className="hint" style={{ marginTop: 6 }}>
+                  {t.tr("preset", "预设")}: <code>{String(securityHeaders?.referrer_policy?.preset || "-")}</code>
+                </div>
+              </div>
+
+              <div className="itemCard">
+                <div className="hint">{t.tr("HSTS", "HSTS")}</div>
+                <div className="hint" style={{ marginTop: 6 }}>
+                  {t.tr("preset", "预设")}: <code>{String(securityHeaders?.hsts?.preset || "off")}</code>{" "}
+                  {securityHeaders?.hsts?.enabled ? <span className="badge ok">{t.tr("on", "开启")}</span> : <span className="badge">{t.tr("off", "关闭")}</span>}
+                </div>
+                {securityHeaders?.hsts?.enabled ? (
+                  <div className="row" style={{ justifyContent: "space-between", gap: 10, marginTop: 6 }}>
+                    <code style={{ wordBreak: "break-all" }}>{String(securityHeaders?.hsts?.value || "")}</code>
+                    <CopyButton
+                      text={String(securityHeaders?.hsts?.value || "")}
+                      iconOnly
+                      tooltip={t.tr("Copy value", "复制值")}
+                      ariaLabel={t.tr("Copy value", "复制值")}
+                    />
+                  </div>
+                ) : (
+                  <div className="hint" style={{ marginTop: 6 }}>{t.tr("Disabled", "未启用")}</div>
+                )}
+              </div>
+
+              <div className="itemCard" style={{ gridColumn: "1 / -1" }}>
+                <div className="hint">{t.tr("CSP", "CSP")}</div>
+                <div className="hint" style={{ marginTop: 6 }}>
+                  {t.tr("preset", "预设")}: <code>{String(securityHeaders?.csp?.preset || "default")}</code>{" "}
+                  {securityHeaders?.csp?.enabled ? <span className="badge ok">{t.tr("on", "开启")}</span> : <span className="badge">{t.tr("off", "关闭")}</span>}
+                </div>
+                {securityHeaders?.csp?.enabled ? (
+                  <>
+                    <div className="hint" style={{ marginTop: 6 }}>
+                      {t.tr("header", "头")}: <code>{String(securityHeaders?.csp?.header_name || "Content-Security-Policy")}</code>
+                    </div>
+                    <pre className="codeBlock" style={{ marginTop: 8, whiteSpace: "pre-wrap" }}>
+                      {String(securityHeaders?.csp?.value || "")}
+                    </pre>
+                    <div className="btnGroup" style={{ marginTop: 10, justifyContent: "flex-end" }}>
+                      <CopyButton text={String(securityHeaders?.csp?.value || "")} />
+                    </div>
+                  </>
+                ) : (
+                  <div className="hint" style={{ marginTop: 6 }}>{t.tr("Disabled", "未启用")}</div>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="emptyState" style={{ marginTop: 12 }}>
+              {securityHeadersBusy ? t.tr("Loading...", "加载中...") : securityHeadersStatus ? securityHeadersStatus : t.tr("No data.", "暂无数据。")}
+            </div>
+          )}
+        </div>
+
+	      <div className="card" id="panel-users">
+	        <div className="toolbar">
+	          <div className="toolbarLeft" style={{ alignItems: "center" }}>
+	            <div>
               <h2>{t.tr("Users", "用户")}</h2>
               {usersStatus ? <div className="hint">{usersStatus}</div> : <div className="hint">{t.tr("Manage admin users.", "管理管理员用户。")}</div>}
             </div>

@@ -189,7 +189,7 @@ const port = Number(process.env.ELEGANTMC_PANEL_PORT || "3000");
 const dev = process.env.NODE_ENV !== "production";
 const secureCookie = String(process.env.ELEGANTMC_PANEL_SECURE_COOKIE || "").trim() === "1";
 const enableAdvanced = truthy(process.env.ELEGANTMC_ENABLE_ADVANCED);
-const enableHSTS = truthy(process.env.ELEGANTMC_PANEL_HSTS);
+const securityHeadersConfig = buildSecurityHeadersConfig({ dev });
 
 const updateCheckEnabled = truthy(process.env.ELEGANTMC_UPDATE_CHECK_ENABLED ?? "1");
 const updateRepo = String(process.env.ELEGANTMC_UPDATE_REPO || process.env.ELEGANTMC_UPDATE_GITHUB_REPO || "").trim();
@@ -1275,23 +1275,46 @@ function requireCSRF(req, res) {
   return false;
 }
 
-function setSecurityHeaders(req, res) {
-  res.setHeader("X-Content-Type-Options", "nosniff");
-  res.setHeader("X-Frame-Options", "DENY");
-  res.setHeader("Referrer-Policy", "no-referrer");
-  res.setHeader(
-    "Permissions-Policy",
-    "accelerometer=(), ambient-light-sensor=(), autoplay=(), battery=(), camera=(), display-capture=(), geolocation=(), gyroscope=(), microphone=(), midi=(), payment=(), usb=()"
-  );
-  res.setHeader("Cross-Origin-Resource-Policy", "same-origin");
-  res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
+function buildSecurityHeadersConfig({ dev }) {
+  const hstsPresetRaw = String(process.env.ELEGANTMC_PANEL_HSTS_PRESET || "").trim().toLowerCase();
+  const hstsPresets = new Set(["off", "6m", "1y", "2y", "preload"]);
+  let hstsPreset = hstsPresetRaw || (truthy(process.env.ELEGANTMC_PANEL_HSTS) ? "6m" : "off");
+  if (!hstsPresets.has(hstsPreset)) hstsPreset = "off";
+  const hstsValue =
+    hstsPreset === "6m"
+      ? "max-age=15552000; includeSubDomains"
+      : hstsPreset === "1y"
+        ? "max-age=31536000; includeSubDomains"
+        : hstsPreset === "2y"
+          ? "max-age=63072000; includeSubDomains"
+          : hstsPreset === "preload"
+            ? "max-age=31536000; includeSubDomains; preload"
+            : "";
 
-  if (enableHSTS) {
-    res.setHeader("Strict-Transport-Security", "max-age=15552000; includeSubDomains");
-  }
+  const referrerPresetRaw = String(process.env.ELEGANTMC_PANEL_REFERRER_POLICY_PRESET || "").trim().toLowerCase();
+  const referrerPresets = new Set([
+    "no-referrer",
+    "no-referrer-when-downgrade",
+    "origin",
+    "origin-when-cross-origin",
+    "same-origin",
+    "strict-origin",
+    "strict-origin-when-cross-origin",
+    "unsafe-url",
+  ]);
+  let referrerPreset = referrerPresetRaw || "no-referrer";
+  if (!referrerPresets.has(referrerPreset)) referrerPreset = "no-referrer";
 
+  const cspPresetRaw = String(process.env.ELEGANTMC_PANEL_CSP_PRESET || "").trim().toLowerCase();
+  const cspPresets = new Set(["default", "report-only", "off"]);
+  let cspPreset = cspPresetRaw || "default";
+  if (cspPreset === "disabled" || cspPreset === "none") cspPreset = "off";
+  if (!cspPresets.has(cspPreset)) cspPreset = "default";
+  const cspHeaderName = cspPreset === "report-only" ? "Content-Security-Policy-Report-Only" : "Content-Security-Policy";
+
+  const cspOverride = String(process.env.ELEGANTMC_PANEL_CSP || "").trim();
   // Minimal CSP for a Next.js app. Keep dev permissive to avoid breaking HMR.
-  const cspParts = [
+  const defaultCspParts = [
     "default-src 'self'",
     "base-uri 'self'",
     "frame-ancestors 'none'",
@@ -1301,7 +1324,42 @@ function setSecurityHeaders(req, res) {
     `script-src 'self' 'unsafe-inline'${dev ? " 'unsafe-eval'" : ""}`,
     "connect-src 'self' ws: wss:",
   ];
-  res.setHeader("Content-Security-Policy", cspParts.join("; "));
+  const cspValue = cspOverride || defaultCspParts.join("; ");
+
+  return {
+    hsts: {
+      preset: hstsPreset,
+      enabled: hstsPreset !== "off",
+      value: hstsPreset !== "off" ? hstsValue : "",
+    },
+    referrer_policy: { preset: referrerPreset, value: referrerPreset },
+    csp: {
+      preset: cspPreset,
+      enabled: cspPreset !== "off",
+      header_name: cspPreset !== "off" ? cspHeaderName : "",
+      value: cspPreset !== "off" ? cspValue : "",
+    },
+  };
+}
+
+function setSecurityHeaders(req, res) {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Referrer-Policy", String(securityHeadersConfig?.referrer_policy?.value || "no-referrer"));
+  res.setHeader(
+    "Permissions-Policy",
+    "accelerometer=(), ambient-light-sensor=(), autoplay=(), battery=(), camera=(), display-capture=(), geolocation=(), gyroscope=(), microphone=(), midi=(), payment=(), usb=()"
+  );
+  res.setHeader("Cross-Origin-Resource-Policy", "same-origin");
+  res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
+
+  if (securityHeadersConfig?.hsts?.enabled && securityHeadersConfig.hsts.value) {
+    res.setHeader("Strict-Transport-Security", securityHeadersConfig.hsts.value);
+  }
+
+  if (securityHeadersConfig?.csp?.enabled && securityHeadersConfig.csp.header_name && securityHeadersConfig.csp.value) {
+    res.setHeader(securityHeadersConfig.csp.header_name, securityHeadersConfig.csp.value);
+  }
 }
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -1783,6 +1841,7 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === "/api/config" && req.method === "GET") {
       return json(res, 200, {
         enable_advanced: enableAdvanced,
+        security_headers: securityHeadersConfig,
         panel_id: state.panel_id || "",
         panel_version: String(process.env.ELEGANTMC_VERSION || "dev"),
         panel_revision: String(process.env.ELEGANTMC_REVISION || ""),

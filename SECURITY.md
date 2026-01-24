@@ -22,7 +22,10 @@
 1) **公网部署必须 HTTPS**
 - 反向代理（Nginx/Caddy）启用 TLS，并正确转发 WebSocket（Upgrade）。
 - 仅在 HTTPS 下开启 `ELEGANTMC_PANEL_SECURE_COOKIE=1`。
-- 需要的话开启 `ELEGANTMC_PANEL_HSTS=1`（确认域名已稳定启用 HTTPS 后再开）。
+- 需要的话开启 HSTS：`ELEGANTMC_PANEL_HSTS_PRESET=6m|1y|2y|preload`（或兼容旧的 `ELEGANTMC_PANEL_HSTS=1`；确认域名已稳定启用 HTTPS 后再开）。
+- 其他安全响应头可通过环境变量调整：
+  - `ELEGANTMC_PANEL_CSP_PRESET=default|report-only|off`（可配合 `ELEGANTMC_PANEL_CSP` 覆盖）
+  - `ELEGANTMC_PANEL_REFERRER_POLICY_PRESET`
 
 2) **使用强密码**
 - `ELEGANTMC_PANEL_ADMIN_PASSWORD` 设置为强随机字符串，不要复用常见密码。
