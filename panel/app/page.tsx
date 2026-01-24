@@ -7,6 +7,7 @@ import { createT, normalizeLocale, type Locale } from "./i18n";
 import Icon from "./ui/Icon";
 import CopyButton from "./ui/CopyButton";
 import TimeAgo from "./ui/TimeAgo";
+import StatusBadge from "./ui/StatusBadge";
 import ErrorBoundary from "./ui/ErrorBoundary";
 import DangerZone from "./ui/DangerZone";
 import Select from "./ui/Select";
@@ -8366,7 +8367,7 @@ export default function HomePage() {
               </div>
               <div className="pageSubtitle">
                 {t.tr("daemon", "daemon")}: <code>{selectedDaemon?.id || "-"}</code> ·{" "}
-                {selectedDaemon?.connected ? <span className="badge ok">{t.tr("online", "在线")}</span> : <span className="badge">{t.tr("offline", "离线")}</span>} ·{" "}
+                {selectedDaemon?.connected ? <StatusBadge tone="ok">{t.tr("online", "在线")}</StatusBadge> : <StatusBadge tone="danger">{t.tr("offline", "离线")}</StatusBadge>} ·{" "}
                 {t.tr("last", "最近")}: <TimeAgo unix={selectedDaemon?.lastSeenUnix} />
                 {daemonsCacheAtUnix > 0 ? (
                   <>

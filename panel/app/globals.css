@@ -1390,14 +1390,43 @@ button.linkBtn:hover {
   color: var(--text);
 }
 
+.statusBadgeDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.55);
+  box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.12);
+  flex: 0 0 auto;
+}
+
 .badge.ok {
   border-color: var(--ok-border);
   background: rgba(52, 211, 153, 0.12);
 }
 
+.badge.ok .statusBadgeDot {
+  background: var(--ok);
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.14);
+}
+
 .badge.warn {
   border-color: rgba(251, 191, 36, 0.55);
   background: rgba(251, 191, 36, 0.12);
+}
+
+.badge.warn .statusBadgeDot {
+  background: var(--warn);
+  box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.14);
+}
+
+.badge.danger {
+  border-color: var(--danger-border);
+  background: rgba(248, 113, 113, 0.12);
+}
+
+.badge.danger .statusBadgeDot {
+  background: var(--danger);
+  box-shadow: 0 0 0 3px rgba(248, 113, 113, 0.16);
 }
 
 .statusDot {

@@ -5,6 +5,7 @@ import { useAppCtx } from "../appCtx";
 import Icon from "../ui/Icon";
 import DangerZone from "../ui/DangerZone";
 import TimeAgo from "../ui/TimeAgo";
+import StatusBadge from "../ui/StatusBadge";
 
 export default function FrpView() {
   const {
@@ -74,13 +75,13 @@ export default function FrpView() {
                       </div>
                     </div>
                     {online === true ? (
-                      <span className="badge ok">
+                      <StatusBadge tone="ok">
                         {t.tr("online", "在线")} {latency}ms
-                      </span>
+                      </StatusBadge>
                     ) : online === false ? (
-                      <span className="badge">{t.tr("offline", "离线")}</span>
+                      <StatusBadge tone="danger">{t.tr("offline", "离线")}</StatusBadge>
                     ) : (
-                      <span className="badge">{t.tr("unknown", "未知")}</span>
+                      <StatusBadge tone="neutral">{t.tr("unknown", "未知")}</StatusBadge>
                     )}
                   </div>
 

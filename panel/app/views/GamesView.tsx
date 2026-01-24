@@ -8,6 +8,7 @@ import Select from "../ui/Select";
 import DangerZone from "../ui/DangerZone";
 import Sparkline from "../ui/Sparkline";
 import TimeAgo from "../ui/TimeAgo";
+import StatusBadge from "../ui/StatusBadge";
 
 type RenderLogLine = { text: string; level: "" | "warn" | "error" };
 
@@ -1288,7 +1289,7 @@ export default function GamesView() {
           <div className="gamesStickyLeft">
             <span className="muted">{t.tr("Instance", "实例")}</span>
             <span className="gamesStickyTitle">{instanceId.trim() || "-"}</span>
-            <span className={`badge ${running ? "ok" : ""}`}>{running ? t.tr("running", "运行中") : t.tr("stopped", "已停止")}</span>
+            <StatusBadge tone={running ? "ok" : "neutral"}>{running ? t.tr("running", "运行中") : t.tr("stopped", "已停止")}</StatusBadge>
           </div>
 
           <div className="btnGroup gamesActionGroup">
@@ -1424,7 +1425,7 @@ export default function GamesView() {
                           {noteOneLine ? <span> · {noteOneLine}</span> : null}
                         </div>
                       </div>
-                      <span className={`badge ${running ? "ok" : ""}`}>{running ? t.tr("running", "运行中") : t.tr("stopped", "已停止")}</span>
+                      <StatusBadge tone={running ? "ok" : "neutral"}>{running ? t.tr("running", "运行中") : t.tr("stopped", "已停止")}</StatusBadge>
                     </div>
 
                     <div className="itemFooter">
@@ -1527,7 +1528,7 @@ export default function GamesView() {
           <div className="kv">
             <div className="k">{t.tr("FRP process", "FRP 进程")}</div>
             <div className="v">
-              {frpStatus?.running ? <span className="badge ok">{t.tr("running", "运行中")}</span> : <span className="badge">{t.tr("stopped", "已停止")}</span>}
+              {frpStatus?.running ? <StatusBadge tone="ok">{t.tr("running", "运行中")}</StatusBadge> : <StatusBadge tone="neutral">{t.tr("stopped", "已停止")}</StatusBadge>}
               {frpStatus?.running && frpStatus.remote_port ? (
                 <span className="badge">
                   {frpStatus.remote_addr}:{frpStatus.remote_port}

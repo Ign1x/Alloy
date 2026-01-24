@@ -5,6 +5,7 @@ import { useAppCtx } from "../appCtx";
 import Icon from "../ui/Icon";
 import Select from "../ui/Select";
 import TimeAgo from "../ui/TimeAgo";
+import StatusBadge from "../ui/StatusBadge";
 
 export default function NodesView() {
   const {
@@ -160,7 +161,7 @@ export default function NodesView() {
                       </div>
                     </div>
                     <div className="row" style={{ gap: 8 }}>
-                      <span className={`badge ${n.connected ? "ok" : ""}`}>{n.connected ? t.tr("online", "在线") : t.tr("offline", "离线")}</span>
+                      <StatusBadge tone={n.connected ? "ok" : "danger"}>{n.connected ? t.tr("online", "在线") : t.tr("offline", "离线")}</StatusBadge>
                       {verMismatch ? (
                         <span className="badge warn" title={t.tr("Panel/daemon version mismatch", "Panel/daemon 版本不一致")}>
                           {t.tr("version mismatch", "版本不一致")}
