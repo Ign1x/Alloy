@@ -879,7 +879,9 @@ async function loadApiTokensFromDisk() {
 
 const LOGIN_WINDOW_SEC = 5 * 60;
 const LOGIN_MAX_ATTEMPTS = 8;
+const LOGIN_USER_MAX_ATTEMPTS = 10;
 const loginAttempts = new Map(); // ip -> { count, resetAtUnix }
+const loginAttemptsByUser = new Map(); // username -> { count, resetAtUnix }
 
 let bootstrapAdminPassword = String(process.env.ELEGANTMC_PANEL_ADMIN_PASSWORD || "").trim();
 if (!bootstrapAdminPassword) {
@@ -971,28 +973,75 @@ function parseSessionCookieValue(raw) {
 }
 
 function getClientIP(req) {
-  const xff = req.headers["x-forwarded-for"];
-  if (typeof xff === "string" && xff.trim()) {
-    return xff.split(",")[0].trim();
-  }
   const ra = req.socket?.remoteAddress;
-  return typeof ra === "string" ? ra : "";
+  const direct = typeof ra === "string" ? ra : "";
+
+  const isLoopback =
+    direct === "127.0.0.1" ||
+    direct === "::1" ||
+    direct === "::ffff:127.0.0.1" ||
+    direct.startsWith("127.") ||
+    direct.startsWith("::ffff:127.");
+
+  const trustProxy = truthy(process.env.ELEGANTMC_TRUST_PROXY ?? "") || isLoopback;
+  const xff = req.headers["x-forwarded-for"];
+  if (trustProxy && typeof xff === "string" && xff.trim()) {
+    const first = xff.split(",")[0].trim();
+    if (first) return first;
+  }
+  return direct;
 }
 
-function checkLoginRateLimit(req, res) {
-  const ip = getClientIP(req) || "unknown";
+function normalizeRateLimitUserKey(raw) {
+  const v = String(raw || "").trim();
+  if (!v) return "";
+  return v.toLowerCase().slice(0, 64);
+}
+
+function checkLoginRateLimit(req, res, opts = {}) {
+  const touchIP = opts?.touchIP !== false;
+  const touchUser = opts?.touchUser !== false;
+  const userKey = normalizeRateLimitUserKey(opts?.userKey ?? opts?.username ?? "");
+
+  const ip = touchIP ? getClientIP(req) || "unknown" : "";
   const now = nowUnix();
-  let st = loginAttempts.get(ip);
-  if (!st || now >= (st.resetAtUnix || 0)) {
-    st = { count: 0, resetAtUnix: now + LOGIN_WINDOW_SEC };
+
+  if (touchIP) {
+    let st = loginAttempts.get(ip);
+    if (!st || now >= (st.resetAtUnix || 0)) {
+      st = { count: 0, resetAtUnix: now + LOGIN_WINDOW_SEC };
+    }
+    st.count += 1;
+    loginAttempts.set(ip, st);
+    if (st.count > LOGIN_MAX_ATTEMPTS) {
+      const retryAfter = Math.max(1, (st.resetAtUnix || now) - now);
+      res.setHeader("Retry-After", String(retryAfter));
+      json(res, 429, {
+        error: `too many login attempts (ip). try again in ${retryAfter}s`,
+        retry_after_sec: retryAfter,
+        scope: "ip",
+      });
+      return false;
+    }
   }
-  st.count += 1;
-  loginAttempts.set(ip, st);
-  if (st.count > LOGIN_MAX_ATTEMPTS) {
-    const retryAfter = Math.max(1, (st.resetAtUnix || now) - now);
-    res.setHeader("Retry-After", String(retryAfter));
-    json(res, 429, { error: "rate limited", retry_after_sec: retryAfter });
-    return false;
+
+  if (touchUser && userKey) {
+    let st = loginAttemptsByUser.get(userKey);
+    if (!st || now >= (st.resetAtUnix || 0)) {
+      st = { count: 0, resetAtUnix: now + LOGIN_WINDOW_SEC };
+    }
+    st.count += 1;
+    loginAttemptsByUser.set(userKey, st);
+    if (st.count > LOGIN_USER_MAX_ATTEMPTS) {
+      const retryAfter = Math.max(1, (st.resetAtUnix || now) - now);
+      res.setHeader("Retry-After", String(retryAfter));
+      json(res, 429, {
+        error: `too many login attempts (user). try again in ${retryAfter}s`,
+        retry_after_sec: retryAfter,
+        scope: "user",
+      });
+      return false;
+    }
   }
   return true;
 }
@@ -1124,6 +1173,9 @@ setInterval(() => {
   }
   for (const [ip, st] of loginAttempts.entries()) {
     if (!st?.resetAtUnix || now >= st.resetAtUnix) loginAttempts.delete(ip);
+  }
+  for (const [k, st] of loginAttemptsByUser.entries()) {
+    if (!st?.resetAtUnix || now >= st.resetAtUnix) loginAttemptsByUser.delete(k);
   }
   if (sessionsChanged || sessionsDirty) {
     sessionsDirty = false;
@@ -1671,14 +1723,16 @@ const server = http.createServer(async (req, res) => {
       });
     }
     if (url.pathname === "/api/auth/login" && req.method === "POST") {
-      if (!checkLoginRateLimit(req, res)) return;
       try {
         await loadUsersFromDisk();
         let admin = getUserByUsername("admin");
         if (!admin) admin = ensureDefaultAdminUser(bootstrapAdminPassword);
 
+        if (!checkLoginRateLimit(req, res, { touchUser: false })) return;
         const body = await readJsonBody(req);
         const usernameRaw = body?.username ?? body?.user ?? "";
+        const userKey = usernameRaw ? String(usernameRaw).trim() : "admin";
+        if (!checkLoginRateLimit(req, res, { touchIP: false, userKey })) return;
         const username = usernameRaw ? normalizeUsername(usernameRaw) : "admin";
         const password = String(body?.password || "");
 
@@ -1749,6 +1803,7 @@ const server = http.createServer(async (req, res) => {
         queueSessionsSave();
         appendAudit(req, "auth.login_ok", { token: maskToken(token), username: u.username });
         loginAttempts.delete(getClientIP(req) || "unknown");
+        loginAttemptsByUser.delete(String(u.username || "").trim().toLowerCase());
 
         const cookieValue = encodeSessionCookieValue(token);
         if (!cookieValue) throw new Error("failed to encode session cookie");
