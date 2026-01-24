@@ -1862,7 +1862,9 @@ export default function FilesView() {
               <div className="editorBadges">
                 {fsDirty ? <span className="badge">{t.tr("unsaved", "未保存")}</span> : null}
                 {fsSelectedFile && fsSelectedFileMode === "binary" ? <span className="badge">{t.tr("download-only", "仅下载")}</span> : null}
-                {fsSelectedFile && fsSelectedFileMode === "image" ? <span className="badge">{t.tr("preview", "预览")}</span> : null}
+                {fsSelectedFile && fsSelectedFileMode === "image" ? <span className="badge">{t.tr("image", "图片")}</span> : null}
+                {fsSelectedFile && fsSelectedFileMode === "audio" ? <span className="badge">{t.tr("audio", "音频")}</span> : null}
+                {fsSelectedFile && fsSelectedFileMode === "video" ? <span className="badge">{t.tr("video", "视频")}</span> : null}
               </div>
             </div>
 
@@ -1971,6 +1973,19 @@ export default function FilesView() {
                 alt={fsSelectedFile.split("/").pop() || "image"}
                 style={{ maxWidth: "100%", maxHeight: 520, borderRadius: 12, border: "1px solid var(--border)", cursor: "zoom-in" }}
                 onClick={() => setLightboxOpen(true)}
+              />
+            </div>
+          ) : fsSelectedFileMode === "audio" && fsPreviewUrl ? (
+            <div style={{ marginTop: 8 }}>
+              <audio controls src={fsPreviewUrl} style={{ width: "100%" }} />
+            </div>
+          ) : fsSelectedFileMode === "video" && fsPreviewUrl ? (
+            <div style={{ marginTop: 8 }}>
+              <video
+                controls
+                playsInline
+                src={fsPreviewUrl}
+                style={{ width: "100%", maxHeight: 520, borderRadius: 12, border: "1px solid var(--border)" }}
               />
             </div>
           ) : (

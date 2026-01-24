@@ -943,7 +943,7 @@ export default function HomePage() {
   const [fsPath, setFsPath] = useState<string>("");
   const [fsEntries, setFsEntries] = useState<any[]>([]);
   const [fsSelectedFile, setFsSelectedFile] = useState<string>("");
-  const [fsSelectedFileMode, setFsSelectedFileMode] = useState<"none" | "text" | "binary" | "image">("none");
+  const [fsSelectedFileMode, setFsSelectedFileMode] = useState<"none" | "text" | "binary" | "image" | "audio" | "video">("none");
   const [fsFileText, setFsFileText] = useState<string>("");
   const [fsFileTextSaved, setFsFileTextSaved] = useState<string>("");
   const [fsFileEol, setFsFileEol] = useState<"\n" | "\r\n">("\n");
@@ -4180,6 +4180,8 @@ export default function HomePage() {
 	    const filePath = joinRelPath(fsPath, name);
 	    const isImage =
 	      lower.endsWith(".png") || lower.endsWith(".jpg") || lower.endsWith(".jpeg") || lower.endsWith(".gif") || lower.endsWith(".webp");
+	    const isAudio = lower.endsWith(".mp3") || lower.endsWith(".wav") || lower.endsWith(".ogg");
+	    const isVideo = lower.endsWith(".mp4") || lower.endsWith(".webm") || lower.endsWith(".ogv");
 	    const likelyBinaryExt =
 	      lower.endsWith(".jar") ||
 	      lower.endsWith(".zip") ||
@@ -4223,6 +4225,43 @@ export default function HomePage() {
 	                : lower.endsWith(".webp")
 	                  ? "image/webp"
 	                  : "image/jpeg";
+	          const blob = new Blob([bytes], { type: mime });
+	          const url = URL.createObjectURL(blob);
+	          setFsPreviewUrl(url);
+	          setFsStatus("");
+	        } catch (e: any) {
+	          setFsSelectedFileMode("binary");
+	          setFsPreviewUrl("");
+	          setFsStatus(String(e?.message || e));
+	        }
+	        return;
+	      }
+	    }
+
+	    if (isAudio || isVideo) {
+	      const max = 20 * 1024 * 1024;
+	      if (size > 0 && size <= max) {
+	        setFsSelectedFile(filePath);
+	        setFsFileText("");
+	        setFsFileTextSaved("");
+	        setFsFileEol("\n");
+	        setFsSelectedFileMode(isAudio ? "audio" : "video");
+	        setFsPreviewUrl("");
+	        setFsStatus(t.tr(`Previewing ${filePath} ...`, `预览中 ${filePath} ...`));
+	        try {
+	          const payload = await callOkCommand("fs_read", { path: filePath }, 60_000);
+	          const bytes = b64DecodeBytes(String(payload?.b64 || ""));
+	          const mime = isAudio
+	            ? lower.endsWith(".mp3")
+	              ? "audio/mpeg"
+	              : lower.endsWith(".wav")
+	                ? "audio/wav"
+	                : "audio/ogg"
+	            : lower.endsWith(".webm")
+	              ? "video/webm"
+	              : lower.endsWith(".ogv")
+	                ? "video/ogg"
+	                : "video/mp4";
 	          const blob = new Blob([bytes], { type: mime });
 	          const url = URL.createObjectURL(blob);
 	          setFsPreviewUrl(url);
@@ -4325,6 +4364,8 @@ export default function HomePage() {
 	      const filePath = joinRelPath(dir, name);
 	      const isImage =
 	        lower.endsWith(".png") || lower.endsWith(".jpg") || lower.endsWith(".jpeg") || lower.endsWith(".gif") || lower.endsWith(".webp");
+	      const isAudio = lower.endsWith(".mp3") || lower.endsWith(".wav") || lower.endsWith(".ogg");
+	      const isVideo = lower.endsWith(".mp4") || lower.endsWith(".webm") || lower.endsWith(".ogv");
 	      const likelyBinaryExt =
 	        lower.endsWith(".jar") ||
 	        lower.endsWith(".zip") ||
@@ -4368,6 +4409,43 @@ export default function HomePage() {
 	                  : lower.endsWith(".webp")
 	                    ? "image/webp"
 	                    : "image/jpeg";
+	            const blob = new Blob([bytes], { type: mime });
+	            const url = URL.createObjectURL(blob);
+	            setFsPreviewUrl(url);
+	            setFsStatus("");
+	          } catch (e: any) {
+	            setFsSelectedFileMode("binary");
+	            setFsPreviewUrl("");
+	            setFsStatus(String(e?.message || e));
+	          }
+	          return;
+	        }
+	      }
+
+	      if (isAudio || isVideo) {
+	        const max = 20 * 1024 * 1024;
+	        if (size > 0 && size <= max) {
+	          setFsSelectedFile(filePath);
+	          setFsFileText("");
+	          setFsFileTextSaved("");
+	          setFsFileEol("\n");
+	          setFsSelectedFileMode(isAudio ? "audio" : "video");
+	          setFsPreviewUrl("");
+	          setFsStatus(t.tr(`Previewing ${filePath} ...`, `预览中 ${filePath} ...`));
+	          try {
+	            const payload = await callOkCommand("fs_read", { path: filePath }, 60_000);
+	            const bytes = b64DecodeBytes(String(payload?.b64 || ""));
+	            const mime = isAudio
+	              ? lower.endsWith(".mp3")
+	                ? "audio/mpeg"
+	                : lower.endsWith(".wav")
+	                  ? "audio/wav"
+	                  : "audio/ogg"
+	              : lower.endsWith(".webm")
+	                ? "video/webm"
+	                : lower.endsWith(".ogv")
+	                  ? "video/ogg"
+	                  : "video/mp4";
 	            const blob = new Blob([bytes], { type: mime });
 	            const url = URL.createObjectURL(blob);
 	            setFsPreviewUrl(url);
