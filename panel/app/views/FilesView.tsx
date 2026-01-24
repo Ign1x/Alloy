@@ -428,6 +428,30 @@ export default function FilesView() {
   const inst = String(instanceId || "").trim();
   const entriesLoading = fsStatus === "Loading..." && !fsEntries.length;
 
+  const breadcrumbsView = useMemo(() => {
+    const list = Array.isArray(fsBreadcrumbs) ? fsBreadcrumbs : [];
+    if (list.length <= 6) return { collapsed: false, head: list, overflow: [] as any[], tail: [] as any[] };
+    const head = list.slice(0, 1);
+    const tail = list.slice(-3);
+    const overflow = list.slice(1, -3);
+    return { collapsed: true, head, overflow, tail };
+  }, [fsBreadcrumbs]);
+
+  async function navigateToPath(path: string) {
+    if (fsDirty) {
+      const ok = await confirmDialog(`Discard unsaved changes in ${fsSelectedFile}?`, {
+        title: "Unsaved Changes",
+        confirmLabel: "Discard",
+        cancelLabel: "Cancel",
+        danger: true,
+      });
+      if (!ok) return;
+    }
+    setFsSelectedFile("");
+    setFsFileText("");
+    setFsPath(path);
+  }
+
   const listScrollKey = useMemo(() => {
     const daemonId = String(selected || "").trim();
     const p = String(fsPath || "").trim();
@@ -733,31 +757,45 @@ export default function FilesView() {
               {t.tr("sandbox", "沙箱")}: <code>servers/</code>
             </div>
             <div className="hint" style={{ marginTop: 6 }}>
-              {fsBreadcrumbs.map((c: any, idx: number) => (
-                <span key={`${c.path}-${idx}`}>
-                  {idx ? <span className="muted"> / </span> : null}
-                  <button
-                    type="button"
-                    className="linkBtn"
-                    onClick={async () => {
-                      if (fsDirty) {
-                        const ok = await confirmDialog(`Discard unsaved changes in ${fsSelectedFile}?`, {
-                          title: "Unsaved Changes",
-                          confirmLabel: "Discard",
-                          cancelLabel: "Cancel",
-                          danger: true,
-                        });
-                        if (!ok) return;
-                      }
-                      setFsSelectedFile("");
-                      setFsFileText("");
-                      setFsPath(c.path);
-                    }}
-                  >
-                    {c.label}
-                  </button>
-                </span>
-              ))}
+              {breadcrumbsView.collapsed ? (
+                <>
+                  {(breadcrumbsView.head || []).map((c: any, idx: number) => (
+                    <span key={`${c.path}-${idx}`}>
+                      {idx ? <span className="muted"> / </span> : null}
+                      <button type="button" className="linkBtn" onClick={() => navigateToPath(c.path)}>
+                        {c.label}
+                      </button>
+                    </span>
+                  ))}
+                  <span className="muted"> / </span>
+                  <span style={{ display: "inline-flex", minWidth: 76 }}>
+                    <Select
+                      value=""
+                      onChange={(v) => (v ? navigateToPath(v) : null)}
+                      placeholder="…"
+                      options={(breadcrumbsView.overflow || []).map((c: any) => ({ value: c.path, label: c.label }))}
+                      style={{ width: 76 }}
+                    />
+                  </span>
+                  {(breadcrumbsView.tail || []).map((c: any, idx: number) => (
+                    <span key={`${c.path}-tail-${idx}`}>
+                      <span className="muted"> / </span>
+                      <button type="button" className="linkBtn" onClick={() => navigateToPath(c.path)}>
+                        {c.label}
+                      </button>
+                    </span>
+                  ))}
+                </>
+              ) : (
+                (breadcrumbsView.head || []).map((c: any, idx: number) => (
+                  <span key={`${c.path}-${idx}`}>
+                    {idx ? <span className="muted"> / </span> : null}
+                    <button type="button" className="linkBtn" onClick={() => navigateToPath(c.path)}>
+                      {c.label}
+                    </button>
+                  </span>
+                ))
+              )}
               <Tooltip content={t.tr("Copy path", "复制路径")}>
                 <button
                   type="button"
