@@ -5,6 +5,7 @@ import { useAppCtx } from "../appCtx";
 import CopyButton from "../ui/CopyButton";
 import EnvHelpButton from "../ui/EnvHelpButton";
 import Field from "../ui/Field";
+import { ManagedModal } from "../ui/ModalStack";
 import Select from "../ui/Select";
 import TimeAgo from "../ui/TimeAgo";
 
@@ -2347,10 +2348,14 @@ export default function PanelView() {
         </div>
       </div>
 
-      {resetPwdOpen ? (
-        <div className="modalOverlay" onClick={() => (!usersBusy ? setResetPwdOpen(false) : null)}>
-          <div className="modal" style={{ width: "min(560px, 100%)" }} onClick={(e) => e.stopPropagation()}>
-            <div className="modalHeader">
+      <ManagedModal
+        id="panel-reset-password"
+        open={resetPwdOpen}
+        onOverlayClick={() => (!usersBusy ? setResetPwdOpen(false) : null)}
+        modalStyle={{ width: "min(560px, 100%)" }}
+        ariaLabel={t.tr("Reset Password", "重置密码")}
+      >
+        <div className="modalHeader">
               <div>
                 <div style={{ fontWeight: 800 }}>{t.tr("Reset Password", "重置密码")}</div>
                 <div className="hint">
@@ -2379,14 +2384,16 @@ export default function PanelView() {
                 {t.tr("Save", "保存")}
               </button>
             </div>
-          </div>
-        </div>
-      ) : null}
+      </ManagedModal>
 
-      {totpOpen ? (
-        <div className="modalOverlay" onClick={() => (!totpBusy ? setTotpOpen(false) : null)}>
-          <div className="modal" style={{ width: "min(720px, 100%)" }} onClick={(e) => e.stopPropagation()}>
-            <div className="modalHeader">
+      <ManagedModal
+        id="panel-totp"
+        open={totpOpen}
+        onOverlayClick={() => (!totpBusy ? setTotpOpen(false) : null)}
+        modalStyle={{ width: "min(720px, 100%)" }}
+        ariaLabel={t.tr("Enable 2FA (TOTP)", "开启 2FA（TOTP）")}
+      >
+        <div className="modalHeader">
               <div>
                 <div style={{ fontWeight: 800 }}>{t.tr("Enable 2FA (TOTP)", "开启 2FA（TOTP）")}</div>
                 <div className="hint">{t.tr("Only for your own account. Save recovery codes somewhere safe.", "仅用于当前账号。请妥善保存恢复码。")}</div>
@@ -2457,14 +2464,16 @@ export default function PanelView() {
                 </div>
               </>
             )}
-          </div>
-        </div>
-      ) : null}
+      </ManagedModal>
 
-      {rotateSecretOpen ? (
-        <div className="modalOverlay" onClick={() => (!rotateSecretBusy ? setRotateSecretOpen(false) : null)}>
-          <div className="modal" style={{ width: "min(640px, 100%)" }} onClick={(e) => e.stopPropagation()}>
-            <div className="modalHeader">
+      <ManagedModal
+        id="panel-rotate-secret"
+        open={rotateSecretOpen}
+        onOverlayClick={() => (!rotateSecretBusy ? setRotateSecretOpen(false) : null)}
+        modalStyle={{ width: "min(640px, 100%)" }}
+        ariaLabel={t.tr("Rotate Panel Secret", "轮换 Panel Secret")}
+      >
+        <div className="modalHeader">
               <div>
                 <div style={{ fontWeight: 800 }}>{t.tr("Rotate Panel Secret", "轮换 Panel Secret")}</div>
                 <div className="hint">{t.tr("This invalidates ALL sessions immediately.", "这会立即撤销所有会话。")}</div>
@@ -2485,9 +2494,7 @@ export default function PanelView() {
                 {t.tr("Rotate", "轮换")}
               </button>
             </div>
-          </div>
-        </div>
-      ) : null}
+      </ManagedModal>
     </div>
   );
 }

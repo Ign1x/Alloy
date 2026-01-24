@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useAppCtx } from "../appCtx";
 import CopyButton from "../ui/CopyButton";
 import Icon from "../ui/Icon";
+import { ManagedModal } from "../ui/ModalStack";
 import Select from "../ui/Select";
 import DangerZone from "../ui/DangerZone";
 import Sparkline from "../ui/Sparkline";
@@ -3063,10 +3064,14 @@ export default function GamesView() {
         ) : null}
       </div>
 
-      {backupNewOpen ? (
-        <div className="modalOverlay" onClick={() => (!gameActionBusy ? setBackupNewOpen(false) : null)}>
-          <div className="modal" style={{ width: "min(720px, 100%)" }} onClick={(e) => e.stopPropagation()}>
-            <div className="modalHeader">
+      <ManagedModal
+        id="games-backup-create"
+        open={backupNewOpen}
+        onOverlayClick={() => (!gameActionBusy ? setBackupNewOpen(false) : null)}
+        modalStyle={{ width: "min(720px, 100%)" }}
+        ariaLabel={t.tr("Create Backup", "创建备份")}
+      >
+        <div className="modalHeader">
               <div>
                 <div style={{ fontWeight: 800 }}>{t.tr("Create Backup", "创建备份")}</div>
                 <div className="hint">
@@ -3144,9 +3149,7 @@ export default function GamesView() {
                 </button>
               </div>
             </div>
-          </div>
-        </div>
-      ) : null}
+      </ManagedModal>
     </div>
   );
 }

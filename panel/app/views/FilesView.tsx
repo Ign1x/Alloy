@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useAppCtx } from "../appCtx";
 import CopyButton from "../ui/CopyButton";
 import Icon from "../ui/Icon";
+import { ManagedLightbox, ManagedModal } from "../ui/ModalStack";
 import Select from "../ui/Select";
 import TimeAgo from "../ui/TimeAgo";
 import Tooltip from "../ui/Tooltip";
@@ -1598,10 +1599,13 @@ export default function FilesView() {
             </div>
           )}
 
-          {lightboxOpen && fsSelectedFileMode === "image" && fsPreviewUrl ? (
-            <div className="lightboxOverlay" onClick={() => setLightboxOpen(false)}>
-              <div className="lightbox" onClick={(e) => e.stopPropagation()}>
-                <div className="lightboxToolbar">
+          <ManagedLightbox
+            id="files-lightbox"
+            open={lightboxOpen && fsSelectedFileMode === "image" && !!fsPreviewUrl}
+            onOverlayClick={() => setLightboxOpen(false)}
+            ariaLabel={t.tr("Preview", "预览")}
+          >
+            <div className="lightboxToolbar">
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontWeight: 800 }}>{t.tr("Preview", "预览")}</div>
                     <div className="hint" style={{ marginTop: 4 }}>
@@ -1720,9 +1724,7 @@ export default function FilesView() {
                     }}
                   />
                 </div>
-              </div>
-            </div>
-          ) : null}
+          </ManagedLightbox>
 
           {isJson && jsonCheck && !jsonCheck.ok ? (
             <div className="fieldError" style={{ marginTop: 6 }}>
@@ -1779,10 +1781,14 @@ export default function FilesView() {
         </div>
       </div>
 
-      {diffOpen ? (
-        <div className="modalOverlay" onClick={() => setDiffOpen(false)}>
-          <div className="modal" style={{ width: "min(1100px, 100%)" }} onClick={(e) => e.stopPropagation()}>
-            <div className="modalHeader">
+      <ManagedModal
+        id="files-diff"
+        open={diffOpen}
+        onOverlayClick={() => setDiffOpen(false)}
+        modalStyle={{ width: "min(1100px, 100%)" }}
+        ariaLabel={t.tr("Diff Viewer", "Diff 对比")}
+      >
+        <div className="modalHeader">
               <div>
                 <div style={{ fontWeight: 800 }}>{t.tr("Diff Viewer", "Diff 对比")}</div>
                 <div className="hint">
@@ -1854,9 +1860,7 @@ export default function FilesView() {
                 ))}
               </div>
             ) : null}
-          </div>
-        </div>
-      ) : null}
+      </ManagedModal>
     </div>
   );
 }

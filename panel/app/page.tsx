@@ -11,6 +11,7 @@ import TimeAgo from "./ui/TimeAgo";
 import StatusBadge from "./ui/StatusBadge";
 import ErrorBoundary from "./ui/ErrorBoundary";
 import DangerZone from "./ui/DangerZone";
+import { ManagedDrawer, ManagedModal, ModalStackProvider } from "./ui/ModalStack";
 import Select from "./ui/Select";
 import Tooltip from "./ui/Tooltip";
 
@@ -7841,9 +7842,8 @@ export default function HomePage() {
   return (
     <ErrorBoundary>
       <AppCtxProvider value={appCtxValue}>
-      {authed !== true ? (
-        <div className="modalOverlay">
-          <div className="modal" style={{ width: "min(560px, 100%)" }} onClick={(e) => e.stopPropagation()}>
+        <ModalStackProvider>
+          <ManagedModal id="auth-login" open={authed !== true} modalStyle={{ width: "min(560px, 100%)" }} ariaLabel={t.tr("Admin Login", "管理员登录")}>
             <div className="modalHeader">
               <div>
                 <div style={{ fontWeight: 800 }}>{t.tr("Admin Login", "管理员登录")}</div>
@@ -7918,23 +7918,25 @@ export default function HomePage() {
                 </button>
               </div>
             </form>
-          </div>
-        </div>
-	      ) : null}
+          </ManagedModal>
 
-		      {confirmOpen ? (
-		        <div className="modalOverlay" onClick={() => closeConfirm(false)}>
-		          <div className="modal" style={{ width: "min(520px, 100%)" }} onClick={(e) => e.stopPropagation()}>
-		            <div className="modalHeader">
-		              <div style={{ fontWeight: 800 }}>{confirmTitle}</div>
-		              <button type="button" onClick={() => closeConfirm(false)}>
-		                {t.tr("Close", "关闭")}
-		              </button>
-		            </div>
-		            <div className="modalBody">
-		              <div className="hint" style={{ whiteSpace: "pre-wrap" }}>
-		                {confirmMessage}
-		              </div>
+          <ManagedModal
+            id="confirm-dialog"
+            open={confirmOpen}
+            onOverlayClick={() => closeConfirm(false)}
+            modalStyle={{ width: "min(520px, 100%)" }}
+            ariaLabel={confirmTitle}
+          >
+            <div className="modalHeader">
+              <div style={{ fontWeight: 800 }}>{confirmTitle}</div>
+              <button type="button" onClick={() => closeConfirm(false)}>
+                {t.tr("Close", "关闭")}
+              </button>
+            </div>
+            <div className="modalBody">
+              <div className="hint" style={{ whiteSpace: "pre-wrap" }}>
+                {confirmMessage}
+              </div>
                   {confirmTextRequired ? (
                     <div className="field" style={{ marginTop: 12 }}>
                       <label>{t.tr("Type to confirm", "输入以确认")}</label>
@@ -7955,101 +7957,107 @@ export default function HomePage() {
                       <div className="hint">{t.tr(`Type "${confirmTextRequired}" to enable.`, `输入 “${confirmTextRequired}” 以启用操作。`)}</div>
                     </div>
                   ) : null}
-		            </div>
-		            <div className="modalFooter">
-		              <button type="button" onClick={() => closeConfirm(false)}>
-		                {confirmCancelLabel}
-		              </button>
-		              <button
+            </div>
+            <div className="modalFooter">
+              <button type="button" onClick={() => closeConfirm(false)}>
+                {confirmCancelLabel}
+              </button>
+              <button
                     type="button"
                     className={confirmDanger ? "dangerBtn" : "primary"}
                     onClick={() => closeConfirm(true)}
                     disabled={!!confirmTextRequired && confirmTextValue.trim() !== confirmTextRequired}
                   >
-		                {confirmConfirmLabel}
-		              </button>
-		            </div>
-		          </div>
-		        </div>
-		      ) : null}
+                {confirmConfirmLabel}
+              </button>
+            </div>
+          </ManagedModal>
 
-		      {promptOpen ? (
-		        <div className="modalOverlay" onClick={() => closePrompt(null)}>
-		          <div className="modal" style={{ width: "min(520px, 100%)" }} onClick={(e) => e.stopPropagation()}>
-		            <div className="modalHeader">
-		              <div style={{ fontWeight: 800 }}>{promptTitle}</div>
-		              <button type="button" onClick={() => closePrompt(null)}>
-		                {t.tr("Close", "关闭")}
-		              </button>
-		            </div>
-		            <form
-		              onSubmit={(e) => {
-		                e.preventDefault();
-		                closePrompt(promptValue);
-		              }}
-		            >
-		              <div className="modalBody">
-		                {promptMessage ? (
-		                  <div className="hint" style={{ whiteSpace: "pre-wrap" }}>
-		                    {promptMessage}
-		                  </div>
-		                ) : null}
-		                <div className="field">
-		                  <label>{t.tr("Value", "值")}</label>
-		                  <input value={promptValue} onChange={(e) => setPromptValue(e.target.value)} placeholder={promptPlaceholder} autoFocus />
-		                </div>
-		              </div>
-		              <div className="modalFooter">
-		                <button type="button" onClick={() => closePrompt(null)}>
-		                  {promptCancelLabel}
-		                </button>
-		                <button type="submit" className="primary" disabled={!promptValue.trim()}>
-		                  {promptOkLabel}
-		                </button>
-		              </div>
-		            </form>
-		          </div>
-		        </div>
-		      ) : null}
+          <ManagedModal
+            id="prompt-dialog"
+            open={promptOpen}
+            onOverlayClick={() => closePrompt(null)}
+            modalStyle={{ width: "min(520px, 100%)" }}
+            ariaLabel={promptTitle}
+          >
+            <div className="modalHeader">
+              <div style={{ fontWeight: 800 }}>{promptTitle}</div>
+              <button type="button" onClick={() => closePrompt(null)}>
+                {t.tr("Close", "关闭")}
+              </button>
+            </div>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                closePrompt(promptValue);
+              }}
+            >
+              <div className="modalBody">
+                {promptMessage ? (
+                  <div className="hint" style={{ whiteSpace: "pre-wrap" }}>
+                    {promptMessage}
+                  </div>
+                ) : null}
+                <div className="field">
+                  <label>{t.tr("Value", "值")}</label>
+                  <input value={promptValue} onChange={(e) => setPromptValue(e.target.value)} placeholder={promptPlaceholder} autoFocus />
+                </div>
+              </div>
+              <div className="modalFooter">
+                <button type="button" onClick={() => closePrompt(null)}>
+                  {promptCancelLabel}
+                </button>
+                <button type="submit" className="primary" disabled={!promptValue.trim()}>
+                  {promptOkLabel}
+                </button>
+              </div>
+            </form>
+          </ManagedModal>
 
-		      {copyOpen ? (
-		        <div className="modalOverlay" onClick={() => setCopyOpen(false)}>
-		          <div className="modal" style={{ width: "min(720px, 100%)" }} onClick={(e) => e.stopPropagation()}>
-		            <div className="modalHeader">
-		              <div style={{ fontWeight: 800 }}>{t.tr("Copy", "复制")}</div>
-		              <button type="button" onClick={() => setCopyOpen(false)}>
-		                {t.tr("Close", "关闭")}
-		              </button>
-		            </div>
-		            <div className="modalBody">
-		              <div className="hint">{t.tr("Clipboard API is unavailable. Copy the content below manually.", "Clipboard API 不可用，请手动复制下面内容。")}</div>
-		              <textarea readOnly value={copyValue} rows={6} style={{ width: "100%" }} onFocus={(e) => e.currentTarget.select()} />
-		            </div>
-		            <div className="modalFooter">
-		              <button
-		                type="button"
-		                className="primary"
-		                onClick={async () => {
-	                  try {
-	                    await navigator.clipboard.writeText(copyValue);
-	                    setServerOpStatus(t.tr("Copied", "已复制"));
-	                    setCopyOpen(false);
-	                  } catch {
-	                    // ignore
-	                  }
-		                }}
-		              >
-		                {t.tr("Try Copy", "尝试复制")}
-		              </button>
-		            </div>
-		          </div>
-		        </div>
-		      ) : null}
+          <ManagedModal
+            id="copy-dialog"
+            open={copyOpen}
+            onOverlayClick={() => setCopyOpen(false)}
+            modalStyle={{ width: "min(720px, 100%)" }}
+            ariaLabel={t.tr("Copy", "复制")}
+          >
+            <div className="modalHeader">
+              <div style={{ fontWeight: 800 }}>{t.tr("Copy", "复制")}</div>
+              <button type="button" onClick={() => setCopyOpen(false)}>
+                {t.tr("Close", "关闭")}
+              </button>
+            </div>
+            <div className="modalBody">
+              <div className="hint">{t.tr("Clipboard API is unavailable. Copy the content below manually.", "Clipboard API 不可用，请手动复制下面内容。")}</div>
+              <textarea readOnly value={copyValue} rows={6} style={{ width: "100%" }} onFocus={(e) => e.currentTarget.select()} />
+            </div>
+            <div className="modalFooter">
+              <button
+                type="button"
+                className="primary"
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(copyValue);
+                    setServerOpStatus(t.tr("Copied", "已复制"));
+                    setCopyOpen(false);
+                  } catch {
+                    // ignore
+                  }
+                }}
+              >
+                {t.tr("Try Copy", "尝试复制")}
+              </button>
+            </div>
+          </ManagedModal>
 
-	      {cmdPaletteOpen ? (
-	        <div className="modalOverlay" onClick={() => setCmdPaletteOpen(false)}>
-	          <div className="modal" style={{ width: "min(720px, 100%)" }} onClick={(e) => e.stopPropagation()}>
-	            <div className="modalHeader">
+          <ManagedModal
+            id="cmd-palette"
+            open={cmdPaletteOpen}
+            onOverlayClick={() => setCmdPaletteOpen(false)}
+            modalStyle={{ width: "min(720px, 100%)" }}
+            ariaLabel={t.tr("Command Palette", "命令面板")}
+          >
+            <div className="modalHeader">
 	              <div>
 	                <div style={{ fontWeight: 800 }}>{t.tr("Command Palette", "命令面板")}</div>
 	                <div className="hint">
@@ -8138,15 +8146,17 @@ export default function HomePage() {
                     </div>
                   </div>
 	              )}
-	            </div>
-	          </div>
-	        </div>
-	      ) : null}
+            </div>
+          </ManagedModal>
 
-	      {shortcutsOpen ? (
-	        <div className="modalOverlay" onClick={() => setShortcutsOpen(false)}>
-	          <div className="modal" style={{ width: "min(720px, 100%)" }} onClick={(e) => e.stopPropagation()}>
-	            <div className="modalHeader">
+          <ManagedModal
+            id="shortcuts"
+            open={shortcutsOpen}
+            onOverlayClick={() => setShortcutsOpen(false)}
+            modalStyle={{ width: "min(720px, 100%)" }}
+            ariaLabel={t.tr("Keyboard Shortcuts", "键盘快捷键")}
+          >
+            <div className="modalHeader">
 	              <div>
 	                <div style={{ fontWeight: 800 }}>{t.tr("Keyboard Shortcuts", "键盘快捷键")}</div>
 	                <div className="hint">
@@ -8200,14 +8210,16 @@ export default function HomePage() {
 	                </tr>
 	              </tbody>
 	            </table>
-	          </div>
-	        </div>
-	      ) : null}
+          </ManagedModal>
 
-	      {changelogOpen ? (
-	        <div className="modalOverlay" onClick={() => setChangelogOpen(false)}>
-	          <div className="modal" style={{ width: "min(820px, 100%)" }} onClick={(e) => e.stopPropagation()}>
-	            <div className="modalHeader">
+          <ManagedModal
+            id="changelog"
+            open={changelogOpen}
+            onOverlayClick={() => setChangelogOpen(false)}
+            modalStyle={{ width: "min(820px, 100%)" }}
+            ariaLabel={t.tr("What's new", "更新日志")}
+          >
+            <div className="modalHeader">
 	              <div>
 	                <div style={{ fontWeight: 800 }}>{t.tr("What's new", "更新日志")}</div>
 	                {changelogStatus ? <div className="hint">{changelogStatus}</div> : <div className="hint">{t.tr("Latest changes", "最新变更")}</div>}
@@ -8217,14 +8229,16 @@ export default function HomePage() {
 	              </button>
 	            </div>
 	            {changelogText ? <pre>{changelogText}</pre> : <div className="hint">{changelogStatus || t.tr("No changelog loaded.", "未加载到更新日志。")}</div>}
-	          </div>
-	        </div>
-	      ) : null}
+          </ManagedModal>
 
-	      {helpOpen ? (
-	        <div className="modalOverlay" onClick={() => setHelpOpen(false)}>
-	          <div className="modal" style={{ width: "min(980px, 100%)" }} onClick={(e) => e.stopPropagation()}>
-	            <div className="modalHeader">
+          <ManagedModal
+            id="help"
+            open={helpOpen}
+            onOverlayClick={() => setHelpOpen(false)}
+            modalStyle={{ width: "min(980px, 100%)" }}
+            ariaLabel={t.tr("Help", "帮助")}
+          >
+            <div className="modalHeader">
 	              <div>
 	                <div style={{ fontWeight: 800 }}>{t.tr("Help", "帮助")}</div>
 	                <div className="hint">
@@ -8366,14 +8380,16 @@ export default function HomePage() {
 		                )}
 		              </div>
 	            </div>
-	          </div>
-	        </div>
-	      ) : null}
+          </ManagedModal>
 
-        {themePickerOpen ? (
-          <div className="modalOverlay" onClick={() => setThemePickerOpen(false)}>
-            <div className="modal" style={{ width: "min(980px, 100%)" }} onClick={(e) => e.stopPropagation()}>
-              <div className="modalHeader">
+        <ManagedModal
+          id="theme-picker"
+          open={themePickerOpen}
+          onOverlayClick={() => setThemePickerOpen(false)}
+          modalStyle={{ width: "min(980px, 100%)" }}
+          ariaLabel={t.tr("Theme", "主题")}
+        >
+          <div className="modalHeader">
                 <div>
                   <div style={{ fontWeight: 800 }}>{t.tr("Theme", "主题")}</div>
                   <div className="hint">{t.tr("Pick a theme preset. You can switch anytime.", "选择主题预设。你可以随时切换。")}</div>
@@ -8524,14 +8540,16 @@ export default function HomePage() {
                   </button>
                 </div>
               </div>
-            </div>
-          </div>
-        ) : null}
+        </ManagedModal>
 
-	      {onboardingOpen ? (
-	        <div className="modalOverlay" onClick={() => closeOnboarding(true)}>
-	          <div className="modal" style={{ width: "min(920px, 100%)" }} onClick={(e) => e.stopPropagation()}>
-	            <div className="modalHeader">
+          <ManagedModal
+            id="onboarding"
+            open={onboardingOpen}
+            onOverlayClick={() => closeOnboarding(true)}
+            modalStyle={{ width: "min(920px, 100%)" }}
+            ariaLabel={t.tr("Welcome to ElegantMC", "欢迎使用 ElegantMC")}
+          >
+            <div className="modalHeader">
 	              <div>
 	                <div style={{ fontWeight: 800 }}>{t.tr("Welcome to ElegantMC", "欢迎使用 ElegantMC")}</div>
 	                <div className="hint">
@@ -8706,9 +8724,7 @@ export default function HomePage() {
 	                </button>
 	              </div>
 	            </div>
-	          </div>
-	        </div>
-	      ) : null}
+          </ManagedModal>
 
 	        {userMenuOpen ? (
 	          <div className="ctxMenuOverlay" onClick={() => setUserMenuOpen(false)}>
@@ -8762,15 +8778,7 @@ export default function HomePage() {
 	          </div>
 	        ) : null}
 
-	        {daemonPickerOpen ? (
-	          <div className="drawerOverlay" onClick={() => setDaemonPickerOpen(false)}>
-	            <div
-	              className="drawer"
-	              role="dialog"
-	              aria-modal="true"
-	              aria-label={t.tr("Switch daemon", "切换节点")}
-	              onClick={(e) => e.stopPropagation()}
-	            >
+          <ManagedDrawer id="daemon-picker" open={daemonPickerOpen} onOverlayClick={() => setDaemonPickerOpen(false)} ariaLabel={t.tr("Switch daemon", "切换节点")}>
 	              <div className="drawerHeader">
 	                <div style={{ minWidth: 0 }}>
 	                  <div style={{ fontWeight: 800 }}>{t.tr("Switch daemon", "切换节点")}</div>
@@ -8828,19 +8836,9 @@ export default function HomePage() {
 	                  ) : null}
 	                </div>
 	              </div>
-	            </div>
-	          </div>
-	        ) : null}
+          </ManagedDrawer>
 
-	        {topbarMenuOpen ? (
-	          <div className="drawerOverlay" onClick={() => setTopbarMenuOpen(false)}>
-	            <div
-	              className="drawer"
-	              role="dialog"
-	              aria-modal="true"
-	              aria-label={t.tr("Menu", "菜单")}
-	              onClick={(e) => e.stopPropagation()}
-	            >
+          <ManagedDrawer id="topbar-menu" open={topbarMenuOpen} onOverlayClick={() => setTopbarMenuOpen(false)} ariaLabel={t.tr("Menu", "菜单")}>
 	              <div className="drawerHeader">
 	                <div style={{ minWidth: 0 }}>
 	                  <div style={{ fontWeight: 800 }}>{t.tr("Menu", "菜单")}</div>
@@ -8917,19 +8915,9 @@ export default function HomePage() {
 	                  </button>
 	                </div>
 	              </div>
-	            </div>
-	          </div>
-	        ) : null}
+          </ManagedDrawer>
 
-		      {notificationsOpen ? (
-		        <div className="drawerOverlay" onClick={() => setNotificationsOpen(false)}>
-		          <div
-		            className="drawer"
-	            role="dialog"
-	            aria-modal="true"
-	            aria-label={t.tr("Notifications", "通知")}
-	            onClick={(e) => e.stopPropagation()}
-	          >
+          <ManagedDrawer id="notifications" open={notificationsOpen} onOverlayClick={() => setNotificationsOpen(false)} ariaLabel={t.tr("Notifications", "通知")}>
 	            <div className="drawerHeader">
 	              <div style={{ minWidth: 0 }}>
 	                <div style={{ fontWeight: 800 }}>{t.tr("Notifications", "通知")}</div>
@@ -9035,9 +9023,7 @@ export default function HomePage() {
 	                )}
 	              </div>
 	            </div>
-	          </div>
-	        </div>
-	      ) : null}
+          </ManagedDrawer>
 
 				      {toasts.length ? (
 				        <div className="toastWrap" aria-live="polite" aria-relevant="additions" onMouseEnter={pauseToasts} onMouseLeave={resumeToasts}>
@@ -9476,10 +9462,13 @@ export default function HomePage() {
             </div>
           ) : null}
 
-          {installOpen ? (
-            <div className="modalOverlay" onClick={() => (!installRunning ? setInstallOpen(false) : null)}>
-              <div className="modal" onClick={(e) => e.stopPropagation()}>
-                <div className="modalHeader">
+          <ManagedModal
+            id="install"
+            open={installOpen}
+            onOverlayClick={() => (!installRunning ? setInstallOpen(false) : null)}
+            ariaLabel={t.tr("Install", "安装")}
+          >
+            <div className="modalHeader">
 	                  <div>
 	                    <div style={{ fontWeight: 700 }}>{t.tr("Install", "安装")}</div>
 	                    <div className="hint">
@@ -10163,14 +10152,16 @@ export default function HomePage() {
                     })
                     .join("\n") || t.tr("<no install logs>", "<无安装日志>")}
                 </pre>
-              </div>
-            </div>
-	          ) : null}
+          </ManagedModal>
 
-          {datapackOpen ? (
-            <div className="modalOverlay" onClick={() => (!datapackBusy ? setDatapackOpen(false) : null)}>
-              <div className="modal" style={{ width: "min(820px, 100%)" }} onClick={(e) => e.stopPropagation()}>
-                <div className="modalHeader">
+          <ManagedModal
+            id="datapack-installer"
+            open={datapackOpen}
+            onOverlayClick={() => (!datapackBusy ? setDatapackOpen(false) : null)}
+            modalStyle={{ width: "min(820px, 100%)" }}
+            ariaLabel={t.tr("Datapack installer", "Datapack 安装器")}
+          >
+            <div className="modalHeader">
                   <div>
                     <div style={{ fontWeight: 800 }}>{t.tr("Datapack installer", "Datapack 安装器")}</div>
                     <div className="hint">
@@ -10218,14 +10209,16 @@ export default function HomePage() {
                     {t.tr("Install", "安装")}
                   </button>
                 </div>
-              </div>
-            </div>
-          ) : null}
+          </ManagedModal>
 
-          {resPackOpen ? (
-            <div className="modalOverlay" onClick={() => (!resPackBusy ? setResPackOpen(false) : null)}>
-              <div className="modal" style={{ width: "min(920px, 100%)" }} onClick={(e) => e.stopPropagation()}>
-                <div className="modalHeader">
+          <ManagedModal
+            id="resource-pack-helper"
+            open={resPackOpen}
+            onOverlayClick={() => (!resPackBusy ? setResPackOpen(false) : null)}
+            modalStyle={{ width: "min(920px, 100%)" }}
+            ariaLabel={t.tr("Resource pack helper", "资源包助手")}
+          >
+            <div className="modalHeader">
                   <div>
                     <div style={{ fontWeight: 800 }}>{t.tr("Resource pack helper", "资源包助手")}</div>
                     <div className="hint">
@@ -10291,13 +10284,14 @@ export default function HomePage() {
                     {t.tr("Upload", "上传")}
                   </button>
                 </div>
-              </div>
-            </div>
-          ) : null}
+          </ManagedModal>
 
-	          {settingsOpen ? (
-	            <div className="modalOverlay" onClick={cancelEditSettings}>
-	              <div className="modal" onClick={(e) => e.stopPropagation()}>
+          <ManagedModal
+            id="instance-settings"
+            open={settingsOpen}
+            onOverlayClick={cancelEditSettings}
+            ariaLabel={t.tr("Settings", "设置")}
+          >
                 <div className="modalHeader">
                   <div>
                     <div style={{ fontWeight: 700 }}>{t.tr("Settings", "设置")}</div>
@@ -10549,14 +10543,16 @@ export default function HomePage() {
                   </button>
                   {serverOpStatus ? <span className="muted">{serverOpStatus}</span> : null}
                 </div>
-              </div>
-            </div>
-	          ) : null}
+          </ManagedModal>
 
-          {jarUpdateOpen ? (
-            <div className="modalOverlay" onClick={() => (!jarUpdateBusy ? setJarUpdateOpen(false) : null)}>
-              <div className="modal" style={{ width: "min(760px, 100%)" }} onClick={(e) => e.stopPropagation()}>
-                <div className="modalHeader">
+          <ManagedModal
+            id="jar-update"
+            open={jarUpdateOpen}
+            onOverlayClick={() => (!jarUpdateBusy ? setJarUpdateOpen(false) : null)}
+            modalStyle={{ width: "min(760px, 100%)" }}
+            ariaLabel={t.tr("Update server jar", "更新服务端 Jar")}
+          >
+            <div className="modalHeader">
                   <div>
                     <div style={{ fontWeight: 800 }}>{t.tr("Update server jar", "更新服务端 Jar")}</div>
                     <div className="hint">
@@ -10655,14 +10651,16 @@ export default function HomePage() {
                     "提示：更新后如果 jar 路径不对，可用“修复…”自动识别 jar，再重启。"
                   )}
                 </div>
-              </div>
-            </div>
-          ) : null}
+          </ManagedModal>
 
-          {restoreOpen ? (
-            <div className="modalOverlay" onClick={() => (!gameActionBusy ? setRestoreOpen(false) : null)}>
-              <div className="modal" style={{ width: "min(680px, 100%)" }} onClick={(e) => e.stopPropagation()}>
-                <div className="modalHeader">
+          <ManagedModal
+            id="restore-backup"
+            open={restoreOpen}
+            onOverlayClick={() => (!gameActionBusy ? setRestoreOpen(false) : null)}
+            modalStyle={{ width: "min(680px, 100%)" }}
+            ariaLabel={t.tr("Restore Backup", "恢复备份")}
+          >
+            <div className="modalHeader">
                   <div>
                     <div style={{ fontWeight: 800 }}>{t.tr("Restore Backup", "恢复备份")}</div>
                     <div className="hint">
@@ -10700,14 +10698,16 @@ export default function HomePage() {
                     {t.tr("Restore", "恢复")}
                   </button>
                 </div>
-              </div>
-            </div>
-          ) : null}
+          </ManagedModal>
 
-          {trashOpen ? (
-            <div className="modalOverlay" onClick={() => setTrashOpen(false)}>
-              <div className="modal" style={{ width: "min(860px, 100%)" }} onClick={(e) => e.stopPropagation()}>
-                <div className="modalHeader">
+          <ManagedModal
+            id="trash"
+            open={trashOpen}
+            onOverlayClick={() => setTrashOpen(false)}
+            modalStyle={{ width: "min(860px, 100%)" }}
+            ariaLabel={t.tr("Trash", "回收站")}
+          >
+            <div className="modalHeader">
                   <div>
                     <div style={{ fontWeight: 800 }}>{t.tr("Trash", "回收站")}</div>
                     <div className="hint">
@@ -10783,14 +10783,16 @@ export default function HomePage() {
                 ) : (
                   <div className="hint">{t.tr("Trash is empty.", "回收站为空。")}</div>
                 )}
-              </div>
-            </div>
-          ) : null}
+          </ManagedModal>
 
-          {serverPropsOpen ? (
-            <div className="modalOverlay" onClick={() => (!serverPropsSaving ? setServerPropsOpen(false) : null)}>
-              <div className="modal" style={{ width: "min(760px, 100%)" }} onClick={(e) => e.stopPropagation()}>
-                <div className="modalHeader">
+          <ManagedModal
+            id="server-properties"
+            open={serverPropsOpen}
+            onOverlayClick={() => (!serverPropsSaving ? setServerPropsOpen(false) : null)}
+            modalStyle={{ width: "min(760px, 100%)" }}
+            ariaLabel="server.properties"
+          >
+            <div className="modalHeader">
                   <div>
                     <div style={{ fontWeight: 800 }}>server.properties</div>
                     <div className="hint">
@@ -10886,17 +10888,17 @@ export default function HomePage() {
                     {serverPropsSaving ? <span className="badge">{t.tr("saving…", "保存中…")}</span> : null}
                   </div>
                 </div>
-              </div>
-            </div>
-          ) : null}
+          </ManagedModal>
 
-	      {nodeDetailsOpen ? (
-	        <div
-            className={`modalOverlay nodeDetailsOverlay ${shareMode ? "share" : ""}`}
-            onClick={() => (shareMode ? null : setNodeDetailsOpen(false))}
-          >
-	          <div className={`modal nodeDetailsModal ${shareMode ? "share" : ""}`} onClick={(e) => e.stopPropagation()}>
-	            <div className="modalHeader">
+      <ManagedModal
+        id="node-details"
+        open={nodeDetailsOpen}
+        overlayClassName={`modalOverlay nodeDetailsOverlay ${shareMode ? "share" : ""}`}
+        onOverlayClick={() => (shareMode ? null : setNodeDetailsOpen(false))}
+        modalClassName={`modal nodeDetailsModal ${shareMode ? "share" : ""}`}
+        ariaLabel={t.tr("Node Details", "节点详情")}
+      >
+        <div className="modalHeader">
 	              <div>
 	                <div style={{ fontWeight: 700 }}>{t.tr("Node Details", "节点详情")}</div>
 	                <div className="hint">
@@ -11204,14 +11206,16 @@ export default function HomePage() {
 	            ) : (
 	              <div className="hint">{t.tr("No data", "暂无数据")}</div>
 	            )}
-	          </div>
-        </div>
-      ) : null}
+      </ManagedModal>
 
-      {deployOpen ? (
-        <div className="modalOverlay" onClick={() => setDeployOpen(false)}>
-          <div className="modal" style={{ width: "min(860px, 100%)" }} onClick={(e) => e.stopPropagation()}>
-            <div className="modalHeader">
+      <ManagedModal
+        id="deploy-daemon"
+        open={deployOpen}
+        onOverlayClick={() => setDeployOpen(false)}
+        modalStyle={{ width: "min(860px, 100%)" }}
+        ariaLabel={t.tr("Deploy Daemon (docker compose)", "部署 Daemon（docker compose）")}
+      >
+        <div className="modalHeader">
               <div>
                 <div style={{ fontWeight: 800 }}>{t.tr("Deploy Daemon (docker compose)", "部署 Daemon（docker compose）")}</div>
                 <div className="hint">
@@ -11287,14 +11291,16 @@ export default function HomePage() {
                 </div>
               </div>
             </div>
-          </div>
-        </div>
-      ) : null}
+      </ManagedModal>
 
-      {addNodeOpen ? (
-        <div className="modalOverlay" onClick={() => setAddNodeOpen(false)}>
-          <div className="modal" style={{ width: "min(640px, 100%)" }} onClick={(e) => e.stopPropagation()}>
-            <div className="modalHeader">
+      <ManagedModal
+        id="add-node"
+        open={addNodeOpen}
+        onOverlayClick={() => setAddNodeOpen(false)}
+        modalStyle={{ width: "min(640px, 100%)" }}
+        ariaLabel={t.tr("Add Node", "添加节点")}
+      >
+        <div className="modalHeader">
               <div>
                 <div style={{ fontWeight: 800 }}>{t.tr("Add Node", "添加节点")}</div>
                 <div className="hint">
@@ -11397,14 +11403,16 @@ export default function HomePage() {
 	                </div>
 	              </div>
 	            ) : null}
-          </div>
-        </div>
-      ) : null}
+      </ManagedModal>
 
-      {addFrpOpen ? (
-        <div className="modalOverlay" onClick={() => setAddFrpOpen(false)}>
-          <div className="modal" style={{ width: "min(720px, 100%)" }} onClick={(e) => e.stopPropagation()}>
-            <div className="modalHeader">
+      <ManagedModal
+        id="add-frp-server"
+        open={addFrpOpen}
+        onOverlayClick={() => setAddFrpOpen(false)}
+        modalStyle={{ width: "min(720px, 100%)" }}
+        ariaLabel={t.tr("Add FRP Server", "添加 FRP 服务器")}
+      >
+        <div className="modalHeader">
               <div>
                 <div style={{ fontWeight: 800 }}>{t.tr("Add FRP Server", "添加 FRP 服务器")}</div>
                 <div className="hint">{t.tr("After saving, you can reuse it in Games with one click.", "保存后可在 Games 一键复用。")}</div>
@@ -11446,9 +11454,7 @@ export default function HomePage() {
                 {t.tr("Save", "保存")}
               </button>
             </div>
-          </div>
-        </div>
-      ) : null}
+      </ManagedModal>
 
       {tab === "nodes" ? (shareMode ? null : <NodesView />) : null}
 
@@ -11464,6 +11470,7 @@ export default function HomePage() {
         </div>
       </main>
       </div>
+      </ModalStackProvider>
     </AppCtxProvider>
     </ErrorBoundary>
   );
