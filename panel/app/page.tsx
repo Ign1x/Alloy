@@ -872,6 +872,29 @@ export default function HomePage() {
     { id: string; kind: "info" | "ok" | "error"; message: string; detail?: string; atMs: number; seen: boolean }[]
   >([]);
 
+  // Topbar (compact menus)
+  const [topbarMenuOpen, setTopbarMenuOpen] = useState<boolean>(false);
+  const [daemonPickerOpen, setDaemonPickerOpen] = useState<boolean>(false);
+  const [daemonPickerQuery, setDaemonPickerQuery] = useState<string>("");
+  const daemonConnectedById = useMemo(() => {
+    const out = new Map<string, boolean>();
+    for (const d of Array.isArray(daemons) ? daemons : []) {
+      const id = String(d?.id || "").trim();
+      if (!id) continue;
+      out.set(id, !!d?.connected);
+    }
+    return out;
+  }, [daemons]);
+  const daemonPickerOptions = useMemo(() => {
+    const q = daemonPickerQuery.trim().toLowerCase();
+    if (!q) return daemonSelectOptions;
+    return daemonSelectOptions.filter((o: any) => {
+      const v = String(o?.value || "").toLowerCase();
+      const l = String(o?.label || "").toLowerCase();
+      return v.includes(q) || l.includes(q);
+    });
+  }, [daemonSelectOptions, daemonPickerQuery]);
+
   // User menu + deep links
   const [userMenuOpen, setUserMenuOpen] = useState<boolean>(false);
   const [userMenuPos, setUserMenuPos] = useState<{ left: number; top: number } | null>(null);
@@ -1768,6 +1791,16 @@ export default function HomePage() {
           setUserMenuOpen(false);
           return;
         }
+        if (daemonPickerOpen) {
+          e.preventDefault();
+          setDaemonPickerOpen(false);
+          return;
+        }
+        if (topbarMenuOpen) {
+          e.preventDefault();
+          setTopbarMenuOpen(false);
+          return;
+        }
         if (onboardingOpen) {
           e.preventDefault();
           closeOnboarding(true);
@@ -1835,6 +1868,8 @@ export default function HomePage() {
     helpOpen,
     themePickerOpen,
     userMenuOpen,
+    daemonPickerOpen,
+    topbarMenuOpen,
     notificationsOpen,
     cmdPaletteOpen,
     installOpen,
@@ -1934,8 +1969,11 @@ export default function HomePage() {
   }
 
   useEffect(() => {
-    if (authed !== true && userMenuOpen) setUserMenuOpen(false);
-  }, [authed, userMenuOpen]);
+    if (authed === true) return;
+    if (userMenuOpen) setUserMenuOpen(false);
+    if (daemonPickerOpen) setDaemonPickerOpen(false);
+    if (topbarMenuOpen) setTopbarMenuOpen(false);
+  }, [authed, daemonPickerOpen, topbarMenuOpen, userMenuOpen]);
 
   const updateUserMenuPos = useCallback(() => {
     const btn = userMenuBtnRef.current;
@@ -8672,10 +8710,10 @@ export default function HomePage() {
 	        </div>
 	      ) : null}
 
-        {userMenuOpen ? (
-          <div className="ctxMenuOverlay" onClick={() => setUserMenuOpen(false)}>
-            <div
-              className="ctxMenu userMenu"
+	        {userMenuOpen ? (
+	          <div className="ctxMenuOverlay" onClick={() => setUserMenuOpen(false)}>
+	            <div
+	              className="ctxMenu userMenu"
               role="menu"
               style={{ left: userMenuPos?.left ?? 12, top: userMenuPos?.top ?? 12 }}
               onClick={(e) => e.stopPropagation()}
@@ -8721,13 +8759,172 @@ export default function HomePage() {
                 {t.tr("Logout", "退出")}
               </button>
             </div>
-          </div>
-        ) : null}
+	          </div>
+	        ) : null}
 
-	      {notificationsOpen ? (
-	        <div className="drawerOverlay" onClick={() => setNotificationsOpen(false)}>
-	          <div
-	            className="drawer"
+	        {daemonPickerOpen ? (
+	          <div className="drawerOverlay" onClick={() => setDaemonPickerOpen(false)}>
+	            <div
+	              className="drawer"
+	              role="dialog"
+	              aria-modal="true"
+	              aria-label={t.tr("Switch daemon", "切换节点")}
+	              onClick={(e) => e.stopPropagation()}
+	            >
+	              <div className="drawerHeader">
+	                <div style={{ minWidth: 0 }}>
+	                  <div style={{ fontWeight: 800 }}>{t.tr("Switch daemon", "切换节点")}</div>
+	                  <div className="hint" style={{ marginTop: 4 }}>
+	                    {t.tr("Select a node to control.", "选择要控制的节点。")}
+	                  </div>
+	                </div>
+	                <button type="button" onClick={() => setDaemonPickerOpen(false)}>
+	                  {t.tr("Close", "关闭")}
+	                </button>
+	              </div>
+	              <div className="drawerBody">
+	                <div className="field">
+	                  <label>{t.tr("Search", "搜索")}</label>
+	                  <input
+	                    value={daemonPickerQuery}
+	                    onChange={(e: any) => setDaemonPickerQuery(e.target.value)}
+	                    placeholder={t.tr("Search nodes…", "搜索节点…")}
+	                    autoCapitalize="none"
+	                    autoCorrect="off"
+	                  />
+	                </div>
+	                <div className="drawerList">
+	                  {daemonPickerOptions.map((o: any) => {
+	                    const id = String(o?.value || "").trim();
+	                    if (!id) return null;
+	                    const connected = !!daemonConnectedById.get(id);
+	                    const isCurrent = id === selected;
+	                    return (
+	                      <button
+	                        key={id}
+	                        type="button"
+	                        className="iconBtn"
+	                        style={{ width: "100%", justifyContent: "flex-start" }}
+	                        onClick={() => {
+	                          setSelected(id);
+	                          setDaemonPickerOpen(false);
+	                        }}
+	                      >
+	                        <span className="row" style={{ width: "100%", justifyContent: "space-between", gap: 10, flexWrap: "nowrap" }}>
+	                          <span className="row" style={{ gap: 10, minWidth: 0, flexWrap: "nowrap" }}>
+	                            <span className={`statusDot ${connected ? "ok" : ""}`} aria-hidden="true" />
+	                            <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{id}</span>
+	                            {connected ? <span className="badge ok">{t.tr("online", "在线")}</span> : <span className="badge">{t.tr("offline", "离线")}</span>}
+	                          </span>
+	                          {isCurrent ? <span className="badge ok">{t.tr("Current", "当前")}</span> : null}
+	                        </span>
+	                      </button>
+	                    );
+	                  })}
+	                  {!daemonPickerOptions.length ? (
+	                    <div className="emptyState" role="note">
+	                      {t.tr("No matching nodes.", "没有匹配的节点。")}
+	                    </div>
+	                  ) : null}
+	                </div>
+	              </div>
+	            </div>
+	          </div>
+	        ) : null}
+
+	        {topbarMenuOpen ? (
+	          <div className="drawerOverlay" onClick={() => setTopbarMenuOpen(false)}>
+	            <div
+	              className="drawer"
+	              role="dialog"
+	              aria-modal="true"
+	              aria-label={t.tr("Menu", "菜单")}
+	              onClick={(e) => e.stopPropagation()}
+	            >
+	              <div className="drawerHeader">
+	                <div style={{ minWidth: 0 }}>
+	                  <div style={{ fontWeight: 800 }}>{t.tr("Menu", "菜单")}</div>
+	                  <div className="hint" style={{ marginTop: 4 }}>
+	                    {t.tr("Quick actions for small screens.", "小屏快捷操作。")}
+	                  </div>
+	                </div>
+	                <button type="button" onClick={() => setTopbarMenuOpen(false)}>
+	                  {t.tr("Close", "关闭")}
+	                </button>
+	              </div>
+	              <div className="drawerBody">
+	                <div className="drawerList">
+	                  <button
+	                    type="button"
+	                    className="iconBtn"
+	                    style={{ width: "100%", justifyContent: "flex-start" }}
+	                    onClick={() => {
+	                      setTopbarMenuOpen(false);
+	                      setCmdPaletteQuery("");
+	                      setCmdPaletteIdx(0);
+	                      setCmdPaletteOpen(true);
+	                    }}
+	                  >
+	                    <Icon name="search" />
+	                    {t.tr("Search", "搜索")}
+	                  </button>
+	                  <button
+	                    type="button"
+	                    className="iconBtn"
+	                    style={{ width: "100%", justifyContent: "flex-start" }}
+	                    onClick={() => {
+	                      setTopbarMenuOpen(false);
+	                      setNotificationsOpen(true);
+	                    }}
+	                  >
+	                    <Icon name="bell" />
+	                    {t.tr("Notifications", "通知")}
+	                  </button>
+	                  <button
+	                    type="button"
+	                    className="iconBtn"
+	                    style={{ width: "100%", justifyContent: "flex-start" }}
+	                    onClick={() => {
+	                      setTopbarMenuOpen(false);
+	                      setShortcutsOpen(true);
+	                    }}
+	                  >
+	                    ? {t.tr("Shortcuts", "快捷键")}
+	                  </button>
+	                  <button
+	                    type="button"
+	                    className="iconBtn"
+	                    style={{ width: "100%", justifyContent: "flex-start" }}
+	                    onClick={() => {
+	                      setTopbarMenuOpen(false);
+	                      openHelpModal();
+	                    }}
+	                  >
+	                    <Icon name="help" />
+	                    {t.tr("Help", "帮助")}
+	                  </button>
+	                  <button
+	                    type="button"
+	                    className="iconBtn"
+	                    style={{ width: "100%", justifyContent: "flex-start" }}
+	                    onClick={() => {
+	                      setTopbarMenuOpen(false);
+	                      setThemePickerOpen(true);
+	                    }}
+	                  >
+	                    <Icon name="settings" />
+	                    {t.tr("Theme", "主题")}
+	                  </button>
+	                </div>
+	              </div>
+	            </div>
+	          </div>
+	        ) : null}
+
+		      {notificationsOpen ? (
+		        <div className="drawerOverlay" onClick={() => setNotificationsOpen(false)}>
+		          <div
+		            className="drawer"
 	            role="dialog"
 	            aria-modal="true"
 	            aria-label={t.tr("Notifications", "通知")}
@@ -9071,29 +9268,29 @@ export default function HomePage() {
             >
               <Icon name="menu" />
             </button>
-            <Tooltip content={t.tr("Search (Ctrl+K or /)", "搜索（Ctrl+K 或 /）")} disabled={authed !== true}>
-              <button
-                type="button"
-                className="iconBtn iconOnly"
-                aria-label={t.tr("Search", "搜索")}
-                onClick={() => {
-                  setCmdPaletteQuery("");
-                  setCmdPaletteIdx(0);
-                  setCmdPaletteOpen(true);
+	            <Tooltip content={t.tr("Search (Ctrl+K or /)", "搜索（Ctrl+K 或 /）")} disabled={authed !== true}>
+	              <button
+	                type="button"
+	                className="iconBtn iconOnly topbarHideOnCompact"
+	                aria-label={t.tr("Search", "搜索")}
+	                onClick={() => {
+	                  setCmdPaletteQuery("");
+	                  setCmdPaletteIdx(0);
+	                  setCmdPaletteOpen(true);
                 }}
                 disabled={authed !== true}
               >
                 <Icon name="search" />
               </button>
             </Tooltip>
-            <Tooltip content={t.tr("Notifications", "通知")} disabled={authed !== true}>
-              <button
-                type="button"
-                className="iconBtn iconOnly notifBtn"
-                aria-label={
-                  notificationsUnread
-                    ? `${t.tr("Notifications", "通知")} (${t.tr("Unread", "未读")}: ${notificationsUnread})`
-                    : t.tr("Notifications", "通知")
+	            <Tooltip content={t.tr("Notifications", "通知")} disabled={authed !== true}>
+	              <button
+	                type="button"
+	                className="iconBtn iconOnly notifBtn topbarHideOnCompact"
+	                aria-label={
+	                  notificationsUnread
+	                    ? `${t.tr("Notifications", "通知")} (${t.tr("Unread", "未读")}: ${notificationsUnread})`
+	                    : t.tr("Notifications", "通知")
                 }
                 onClick={() => setNotificationsOpen(true)}
                 disabled={authed !== true}
@@ -9106,22 +9303,22 @@ export default function HomePage() {
                 ) : null}
               </button>
             </Tooltip>
-            <Tooltip content={t.tr("Keyboard Shortcuts (?)", "键盘快捷键（?）")} disabled={authed !== true}>
-              <button
-                type="button"
-                className="iconBtn iconOnly"
-                aria-label={t.tr("Keyboard Shortcuts", "键盘快捷键")}
-                onClick={() => setShortcutsOpen(true)}
-                disabled={authed !== true}
-              >
+	            <Tooltip content={t.tr("Keyboard Shortcuts (?)", "键盘快捷键（?）")} disabled={authed !== true}>
+	              <button
+	                type="button"
+	                className="iconBtn iconOnly topbarHideOnCompact"
+	                aria-label={t.tr("Keyboard Shortcuts", "键盘快捷键")}
+	                onClick={() => setShortcutsOpen(true)}
+	                disabled={authed !== true}
+	              >
                 ?
               </button>
             </Tooltip>
-            <div className="topbarTitle">
-              <div className="pageTitle">
-                <span>{activeTab.label}</span>
-                {pageCrumb ? <span className="pageCrumb">› {pageCrumb}</span> : null}
-              </div>
+	            <div className="topbarTitle" style={{ flex: 1 }}>
+	              <div className="pageTitle">
+	                <span>{activeTab.label}</span>
+	                {pageCrumb ? <span className="pageCrumb">› {pageCrumb}</span> : null}
+	              </div>
               <div className="pageSubtitle">
                 {t.tr("daemon", "daemon")}: <code>{selectedDaemon?.id || "-"}</code> ·{" "}
                 {selectedDaemon?.connected ? <StatusBadge tone="ok">{t.tr("online", "在线")}</StatusBadge> : <StatusBadge tone="danger">{t.tr("offline", "离线")}</StatusBadge>} ·{" "}
@@ -9140,16 +9337,44 @@ export default function HomePage() {
                     · <span className="badge warn">{t.tr("offline mode", "离线模式")}</span>
                   </>
                 ) : null}
-              </div>
-            </div>
-          </div>
+	              </div>
+	            </div>
+	            <Tooltip content={t.tr("Switch daemon", "切换节点")} disabled={authed !== true}>
+	              <button
+	                type="button"
+	                className="iconBtn topbarShowOnCompact"
+	                aria-label={t.tr("Switch daemon", "切换节点")}
+	                onClick={() => {
+	                  setTopbarMenuOpen(false);
+	                  setDaemonPickerQuery("");
+	                  setDaemonPickerOpen(true);
+	                }}
+	                disabled={authed !== true}
+	              >
+	                <span className={`statusDot ${selectedDaemon?.connected ? "ok" : ""}`} aria-hidden="true" />
+	                <span className="topbarDaemonBtnText">{selectedDaemon?.id || "-"}</span>
+	                <span aria-hidden="true">▾</span>
+	              </button>
+	            </Tooltip>
+	            <Tooltip content={t.tr("More", "更多")} disabled={authed !== true} instant>
+	              <button
+	                type="button"
+	                className="iconBtn iconOnly topbarShowOnCompact"
+	                aria-label={t.tr("More", "更多")}
+	                onClick={() => setTopbarMenuOpen(true)}
+	                disabled={authed !== true}
+	              >
+	                <Icon name="more" />
+	              </button>
+	            </Tooltip>
+	          </div>
 
-	          <div className="topbarRight">
-              <div className="field" style={{ minWidth: 240 }}>
-                <label>{t.tr("Daemon", "节点")}</label>
-                <div className="row" style={{ alignItems: "center", gap: 10, flexWrap: "nowrap" }}>
-                  <div style={{ flex: 1 }}>
-                    {authed === true && !daemonsLoadedOnce ? (
+		          <div className="topbarRight">
+	              <div className="field topbarHideOnCompact" style={{ minWidth: 240 }}>
+	                <label>{t.tr("Daemon", "节点")}</label>
+	                <div className="row" style={{ alignItems: "center", gap: 10, flexWrap: "nowrap" }}>
+	                  <div style={{ flex: 1 }}>
+	                    {authed === true && !daemonsLoadedOnce ? (
                       <div className="skeleton" style={{ minHeight: 44, borderRadius: 12 }} />
                     ) : (
 	                      <Select

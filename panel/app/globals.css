@@ -607,6 +607,10 @@ button.navItem .badge {
   overflow: hidden;
 }
 
+.topbarShowOnCompact {
+  display: none !important;
+}
+
 .topbar::before {
   content: "";
   position: absolute;
@@ -2866,6 +2870,7 @@ tr:hover td {
     min-width: 0;
   }
   .topbarRight {
+    flex-direction: column;
     align-items: stretch;
   }
   .topbarRight .field {
@@ -2957,6 +2962,34 @@ tr:hover td {
   }
   select {
     padding-right: 34px;
+  }
+}
+
+@media (max-width: 520px) {
+  .topbarHideOnCompact {
+    display: none !important;
+  }
+  .topbarShowOnCompact {
+    display: inline-flex !important;
+  }
+  .topbarTitle .pageSubtitle {
+    display: none;
+  }
+  .topbarTitle .pageCrumb {
+    display: none;
+  }
+  .topbarDaemonBtnText {
+    max-width: 160px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .userMenuBtn {
+    padding: 4px;
+  }
+  .userMenuName,
+  .userMenuCaret {
+    display: none;
   }
 }
 
