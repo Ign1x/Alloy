@@ -26,6 +26,10 @@
 
 2) **使用强密码**
 - `ELEGANTMC_PANEL_ADMIN_PASSWORD` 设置为强随机字符串，不要复用常见密码。
+- Panel 会对密码做基础策略校验（最小长度、拒绝常见密码），可用环境变量调整：
+  - `ELEGANTMC_PANEL_PASSWORD_MIN_LENGTH`
+  - `ELEGANTMC_PANEL_PASSWORD_REJECT_COMMON`
+  - `ELEGANTMC_PANEL_PASSWORD_COMMON_DENYLIST`
 
 3) **保护 token**
 - 将 `daemon token` / `frp token` 当作密钥对待。
@@ -42,4 +46,3 @@
 ## 漏洞反馈
 
 请在 GitHub 仓库通过私密渠道提交安全问题（如有）。在公开修复前不要公开细节。
-

@@ -54,7 +54,7 @@ docker compose logs panel
 你也可以直接用环境变量覆盖（无需 `.env`）：
 
 ```bash
-ELEGANTMC_PANEL_ADMIN_PASSWORD='change-me' \
+ELEGANTMC_PANEL_ADMIN_PASSWORD='change-me-now-please' \
 ELEGANTMC_DAEMON_ID='home-1' \
 ELEGANTMC_TOKEN='your-strong-token' \
 docker compose up -d --build
@@ -223,4 +223,3 @@ cd daemon
 go test ./...
 go run ./cmd/daemon
 ```
-

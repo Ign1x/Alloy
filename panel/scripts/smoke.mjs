@@ -40,7 +40,7 @@ async function main() {
   const host = "127.0.0.1";
   const port = Number(process.env.ELEGANTMC_SMOKE_PORT || "3137");
   const base = `http://${host}:${port}`;
-  const adminPassword = "test-pass";
+  const adminPassword = "test-pass-1234";
 
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), "elegantmc-panel-smoke-"));
 
@@ -122,4 +122,3 @@ async function main() {
 }
 
 await main();
-

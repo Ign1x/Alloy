@@ -54,6 +54,8 @@ export default function PanelView() {
   const [users, setUsers] = useState<any[]>([]);
   const [usersStatus, setUsersStatus] = useState<string>("");
   const [usersBusy, setUsersBusy] = useState<boolean>(false);
+  const [passwordPolicy, setPasswordPolicy] = useState<{ min_length: number; reject_common: boolean } | null>(null);
+  const [passwordPolicyStatus, setPasswordPolicyStatus] = useState<string>("");
   const [newUsername, setNewUsername] = useState<string>("");
   const [newUserPassword, setNewUserPassword] = useState<string>("");
   const [resetPwdOpen, setResetPwdOpen] = useState<boolean>(false);
@@ -144,6 +146,34 @@ export default function PanelView() {
       }
     }
     loadUsers();
+    return () => {
+      cancelled = true;
+    };
+  }, [apiFetch, t]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadPasswordPolicy() {
+      setPasswordPolicyStatus(t.tr("Loading...", "加载中..."));
+      try {
+        const res = await apiFetch("/api/auth/password-policy", { cache: "no-store" });
+        const json = await res.json().catch(() => null);
+        if (cancelled) return;
+        if (!res.ok) throw new Error(json?.error || t.tr("failed", "失败"));
+        const minLen = Number(json?.policy?.min_length || 0);
+        const rejectCommon = !!json?.policy?.reject_common;
+        setPasswordPolicy({
+          min_length: Number.isFinite(minLen) && minLen > 0 ? minLen : 8,
+          reject_common: rejectCommon,
+        });
+        setPasswordPolicyStatus("");
+      } catch (e: any) {
+        if (cancelled) return;
+        setPasswordPolicy(null);
+        setPasswordPolicyStatus(String(e?.message || e));
+      }
+    }
+    loadPasswordPolicy();
     return () => {
       cancelled = true;
     };
@@ -646,6 +676,15 @@ export default function PanelView() {
   }, [sessions, sessionsQuery]);
 
   const auditExportJson = useMemo(() => JSON.stringify(Array.isArray(auditEntries) ? auditEntries : [], null, 2), [auditEntries]);
+
+  const passwordMinLen = passwordPolicy?.min_length && passwordPolicy.min_length > 0 ? passwordPolicy.min_length : 8;
+  const passwordHint = passwordPolicy
+    ? passwordPolicy.reject_common
+      ? t.tr(`min ${passwordMinLen} chars; reject common passwords`, `至少 ${passwordMinLen} 个字符；拒绝常见密码`)
+      : t.tr(`min ${passwordMinLen} chars`, `至少 ${passwordMinLen} 个字符`)
+    : passwordPolicyStatus
+      ? t.tr("Password policy unavailable (server will validate)", "密码策略不可用（以服务端校验为准）")
+      : t.tr("Password policy loading... (server will validate)", "密码策略加载中…（以服务端校验为准）");
 
   function uniqueTaskId(existingTasks: any[], base: string) {
     const used = new Set((existingTasks || []).map((t) => String(t?.id || "").trim()).filter(Boolean));
@@ -1170,12 +1209,17 @@ export default function PanelView() {
           <Field label={t.tr("username", "用户名")} hint={t.tr("A-Z a-z 0-9 . _ - (max 32)", "A-Z a-z 0-9 . _ -（最长 32）")}>
             <input value={newUsername} onChange={(e) => setNewUsername(e.target.value)} placeholder="alice" autoCapitalize="none" autoCorrect="off" />
           </Field>
-          <Field label={t.tr("password", "密码")} hint={t.tr("min 8 chars", "至少 8 个字符")}>
+          <Field label={t.tr("password", "密码")} hint={passwordHint}>
             <input type="password" value={newUserPassword} onChange={(e) => setNewUserPassword(e.target.value)} placeholder="••••••••" />
           </Field>
         </div>
         <div className="btnGroup" style={{ marginTop: 10, justifyContent: "flex-end" }}>
-          <button type="button" className="primary" onClick={createUserNow} disabled={usersBusy || !newUsername.trim() || newUserPassword.length < 8}>
+          <button
+            type="button"
+            className="primary"
+            onClick={createUserNow}
+            disabled={usersBusy || !newUsername.trim() || !newUserPassword.trim() || (passwordPolicy ? newUserPassword.length < passwordMinLen : false)}
+          >
             {t.tr("Create user", "创建用户")}
           </button>
         </div>
@@ -1951,14 +1995,19 @@ export default function PanelView() {
                 {t.tr("Close", "关闭")}
               </button>
             </div>
-            <Field label={t.tr("New password", "新密码")} hint={t.tr("min 8 chars", "至少 8 个字符")}>
+            <Field label={t.tr("New password", "新密码")} hint={passwordHint}>
               <input type="password" value={resetPwdValue} onChange={(e) => setResetPwdValue(e.target.value)} placeholder="••••••••" autoFocus />
             </Field>
             <div className="btnGroup" style={{ marginTop: 12, justifyContent: "flex-end" }}>
               <button type="button" onClick={() => setResetPwdOpen(false)} disabled={usersBusy}>
                 {t.tr("Cancel", "取消")}
               </button>
-              <button type="button" className="primary" onClick={submitResetPassword} disabled={usersBusy || resetPwdValue.length < 8 || !resetPwdUserId.trim()}>
+              <button
+                type="button"
+                className="primary"
+                onClick={submitResetPassword}
+                disabled={usersBusy || !resetPwdUserId.trim() || !resetPwdValue.trim() || (passwordPolicy ? resetPwdValue.length < passwordMinLen : false)}
+              >
                 {t.tr("Save", "保存")}
               </button>
             </div>

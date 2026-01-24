@@ -24,6 +24,10 @@ Panel 使用单管理员密码登录（Cookie 会话）：
 
 - `ELEGANTMC_PANEL_ADMIN_PASSWORD`：管理员密码（必填；为空则启动时自动生成并打印到日志）
 - `ELEGANTMC_PANEL_SECURE_COOKIE=1`：仅当你通过 HTTPS 提供 Panel 时再开启（否则浏览器不会发送 Secure Cookie）
+- 密码策略（可选，默认启用更安全的约束）：
+  - `ELEGANTMC_PANEL_PASSWORD_MIN_LENGTH`：最小长度（默认 12）
+  - `ELEGANTMC_PANEL_PASSWORD_REJECT_COMMON=1`：拒绝常见弱密码（默认 1）
+  - `ELEGANTMC_PANEL_PASSWORD_COMMON_DENYLIST`：额外拒绝列表（空白/逗号分隔）
 
 ## 数据目录（重要）
 

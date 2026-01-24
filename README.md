@@ -54,7 +54,7 @@ docker compose logs panel
 你也可以直接用环境变量覆盖（无需 `.env`）：
 
 ```bash
-ELEGANTMC_PANEL_ADMIN_PASSWORD='change-me' \
+ELEGANTMC_PANEL_ADMIN_PASSWORD='change-me-now-please' \
 ELEGANTMC_PANEL_PORT='3001' \
 ELEGANTMC_DAEMON_ID='home-1' \
 ELEGANTMC_TOKEN='your-strong-token' \
@@ -105,7 +105,7 @@ docker compose up -d --build
 ```bash
 cd panel
 npm ci
-ELEGANTMC_PANEL_ADMIN_PASSWORD='change-me' \
+ELEGANTMC_PANEL_ADMIN_PASSWORD='change-me-now-please' \
 ELEGANTMC_PANEL_HOST='127.0.0.1' \
 ELEGANTMC_PANEL_PORT='3000' \
 npm run dev

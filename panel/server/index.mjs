@@ -542,6 +542,126 @@ function verifyPassword(password, saltB64, hashB64) {
   }
 }
 
+const PASSWORD_MIN_LENGTH_DEFAULT = 12;
+const PASSWORD_MIN_LENGTH_MIN = 8;
+const PASSWORD_MIN_LENGTH_MAX = 128;
+
+const DEFAULT_COMMON_PASSWORDS = new Set([
+  // Ultra-common
+  "password",
+  "password1",
+  "passw0rd",
+  "p@ssw0rd",
+  "admin",
+  "administrator",
+  "root",
+  "qwerty",
+  "qwertyuiop",
+  "asdfghjkl",
+  "letmein",
+  "welcome",
+  "login",
+  "changeme",
+  "change-me",
+  "test",
+  "test123",
+  "default",
+  "secret",
+  // Numeric patterns
+  "123456",
+  "1234567",
+  "12345678",
+  "123456789",
+  "1234567890",
+  "111111",
+  "000000",
+  "123123",
+  "123321",
+  "654321",
+  // Common variants
+  "abc123",
+  "iloveyou",
+  "dragon",
+  "monkey",
+  "football",
+  "baseball",
+  "sunshine",
+  "princess",
+  "master",
+  "shadow",
+  "superman",
+  "pokemon",
+  "starwars",
+  "freedom",
+  "trustno1",
+  // Short/weak
+  "12345",
+  "1234",
+  "123",
+  "1q2w3e4r",
+  "1q2w3e4r5t",
+  "q1w2e3r4",
+  "qazwsx",
+  "qazwsxedc",
+  // Phrases
+  "iloveyou1",
+  "welcome1",
+  "password123",
+  "admin123",
+  "root123",
+  "minecraft",
+  "minecraft1",
+  "mojang",
+  "server",
+  "server123",
+]);
+
+function getPasswordPolicy() {
+  const rawMin = String(process.env.ELEGANTMC_PANEL_PASSWORD_MIN_LENGTH || "").trim();
+  let minLength = Number.parseInt(rawMin || "", 10);
+  if (!Number.isFinite(minLength) || minLength <= 0) minLength = PASSWORD_MIN_LENGTH_DEFAULT;
+  minLength = Math.max(PASSWORD_MIN_LENGTH_MIN, Math.min(PASSWORD_MIN_LENGTH_MAX, Math.floor(minLength)));
+
+  const rawReject = String(process.env.ELEGANTMC_PANEL_PASSWORD_REJECT_COMMON ?? "").trim();
+  const rejectCommon = rawReject ? truthy(rawReject) : true;
+
+  return { min_length: minLength, reject_common: rejectCommon };
+}
+
+function getCommonPasswordDenylist() {
+  const set = new Set(DEFAULT_COMMON_PASSWORDS);
+  const extra = String(process.env.ELEGANTMC_PANEL_PASSWORD_COMMON_DENYLIST || "").trim();
+  if (extra) {
+    for (const part of extra.split(/[\s,]+/g)) {
+      const v = String(part || "").trim().toLowerCase();
+      if (!v) continue;
+      if (v.length > 256) continue;
+      set.add(v);
+    }
+  }
+  return set;
+}
+
+function validatePasswordPolicy(passwordRaw) {
+  const policy = getPasswordPolicy();
+  const pwd = String(passwordRaw ?? "");
+  if (!pwd) return { ok: false, policy, error: "password is required" };
+  if (pwd.length < policy.min_length) return { ok: false, policy, error: `password too short (min ${policy.min_length})` };
+  if (policy.reject_common) {
+    const norm = pwd.trim().toLowerCase();
+    if (norm && getCommonPasswordDenylist().has(norm)) {
+      return { ok: false, policy, error: "password is too common" };
+    }
+  }
+  return { ok: true, policy, error: "" };
+}
+
+function generateRandomPassword(minLength) {
+  const m = Math.max(PASSWORD_MIN_LENGTH_MIN, Math.min(PASSWORD_MIN_LENGTH_MAX, Math.floor(Number(minLength) || PASSWORD_MIN_LENGTH_DEFAULT)));
+  const byteLen = Math.max(12, Math.ceil((m * 3) / 4));
+  return randomBytes(byteLen).toString("base64url");
+}
+
 const B32_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 const B32_LOOKUP = new Map(Array.from(B32_ALPHABET).map((c, i) => [c, i]));
 
@@ -780,6 +900,8 @@ function ensureDefaultAdminUser(bootstrapPassword) {
   if (existing) return existing;
   const pwd = String(bootstrapPassword || "").trim();
   if (!pwd) throw new Error("bootstrap admin password missing");
+  const chk = validatePasswordPolicy(pwd);
+  if (!chk.ok) throw new Error(`bootstrap admin password rejected: ${chk.error}`);
   const id = randomBytes(12).toString("base64url");
   const h = hashPassword(pwd);
   const u = { id, username: "admin", ...h, created_at_unix: now, updated_at_unix: now };
@@ -889,9 +1011,17 @@ const loginAttemptsByUser = new Map(); // username -> { count, resetAtUnix }
 
 let bootstrapAdminPassword = String(process.env.ELEGANTMC_PANEL_ADMIN_PASSWORD || "").trim();
 if (!bootstrapAdminPassword) {
-  bootstrapAdminPassword = randomBytes(9).toString("base64url");
+  const policy = getPasswordPolicy();
+  bootstrapAdminPassword = generateRandomPassword(policy.min_length);
   // eslint-disable-next-line no-console
   console.log(`[panel] generated admin password: ${bootstrapAdminPassword} (set ELEGANTMC_PANEL_ADMIN_PASSWORD to override)`);
+} else {
+  const chk = validatePasswordPolicy(bootstrapAdminPassword);
+  if (!chk.ok) {
+    throw new Error(
+      `[panel] ELEGANTMC_PANEL_ADMIN_PASSWORD rejected: ${chk.error} (configure policy via ELEGANTMC_PANEL_PASSWORD_MIN_LENGTH / ELEGANTMC_PANEL_PASSWORD_REJECT_COMMON)`
+    );
+  }
 }
 
 function safeEqual(a, b) {
@@ -1754,6 +1884,11 @@ const server = http.createServer(async (req, res) => {
         csrf_token: auth.kind === "session" ? String(auth?.csrf_token || "") : "",
       });
     }
+    if (url.pathname === "/api/auth/password-policy" && req.method === "GET") {
+      if (!requireSessionAdmin(req, res)) return;
+      const policy = getPasswordPolicy();
+      return json(res, 200, { policy });
+    }
     if (url.pathname === "/api/auth/login" && req.method === "POST") {
       try {
         await loadUsersFromDisk();
@@ -2085,7 +2220,8 @@ const server = http.createServer(async (req, res) => {
         const body = await readJsonBody(req);
         const username = normalizeUsername(body?.username || body?.user || "");
         const password = String(body?.password || "");
-        if (password.length < 8) return json(res, 400, { error: "password too short (min 8)" });
+        const chk = validatePasswordPolicy(password);
+        if (!chk.ok) return json(res, 400, { error: chk.error, policy: chk.policy });
         if (getUserByUsername(username)) return json(res, 400, { error: "username already exists" });
         const now = nowUnix();
         const id = randomBytes(12).toString("base64url");
@@ -2150,7 +2286,8 @@ const server = http.createServer(async (req, res) => {
         const id = String(body?.id || body?.user_id || "").trim();
         const password = String(body?.password || "");
         if (!id) return json(res, 400, { error: "id is required" });
-        if (password.length < 8) return json(res, 400, { error: "password too short (min 8)" });
+        const chk = validatePasswordPolicy(password);
+        if (!chk.ok) return json(res, 400, { error: chk.error, policy: chk.policy });
         const u = getUserByID(id);
         if (!u) return json(res, 404, { error: "user not found" });
         const now = nowUnix();
