@@ -7869,6 +7869,85 @@ export default function HomePage() {
 
 	            <div className="grid2" style={{ alignItems: "start" }}>
 	              <div style={{ minWidth: 0 }}>
+                  <h3>{t.tr("Quickstart", "快速开始")}</h3>
+                  <div className="hint">
+                    <div>1) {t.tr("Add a node (daemon) and get it online.", "添加节点（daemon）并上线。")}</div>
+                    <div>2) {t.tr("Install a server and start it.", "安装服务器并启动。")}</div>
+                    <div>3) {t.tr("Review sessions/tokens and enable 2FA.", "检查会话/token 并开启 2FA。")}</div>
+                  </div>
+                  <div className="btnGroup" style={{ justifyContent: "flex-start" }}>
+                    <button
+                      type="button"
+                      className="primary"
+                      onClick={() => {
+                        setHelpOpen(false);
+                        setOnboardingStep(0);
+                        setOnboardingOpen(true);
+                      }}
+                    >
+                      {t.tr("Open wizard", "打开向导")}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setHelpOpen(false);
+                        setTab("nodes");
+                        setSidebarOpen(false);
+                        openAddNodeModal();
+                      }}
+                    >
+                      {t.tr("Add Node…", "添加节点…")}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setHelpOpen(false);
+                        setTab("games");
+                        setSidebarOpen(false);
+                        openInstallModal();
+                      }}
+                    >
+                      {t.tr("Install…", "安装…")}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setHelpOpen(false);
+                        openPanelSection("panel-users");
+                      }}
+                    >
+                      {t.tr("Security", "安全")}
+                    </button>
+                  </div>
+
+                  <h3 style={{ marginTop: 12 }}>{t.tr("Shortcuts", "快捷键")}</h3>
+                  <div className="hint">
+                    <div>
+                      <code>Ctrl+K</code> / <code>⌘K</code> — {t.tr("Command Palette", "命令面板")}
+                    </div>
+                    <div>
+                      <code>/</code> — {t.tr("Open Command Palette", "打开命令面板")}
+                    </div>
+                    <div>
+                      <code>?</code> — {t.tr("Toggle shortcuts", "打开/关闭快捷键")}
+                    </div>
+                    <div>
+                      <code>Esc</code> — {t.tr("Close dialogs / sidebar", "关闭对话框 / 侧边栏")}
+                    </div>
+                  </div>
+                  <div className="btnGroup" style={{ justifyContent: "flex-start" }}>
+                    <button
+                      type="button"
+                      className="iconBtn"
+                      onClick={() => {
+                        setHelpOpen(false);
+                        setShortcutsOpen(true);
+                      }}
+                    >
+                      {t.tr("View all shortcuts…", "查看全部快捷键…")}
+                    </button>
+                  </div>
+
 	                <h3>{t.tr("This page", "当前页面")}</h3>
 	                {helpForTab.lines.length ? (
 	                  <div className="hint">
@@ -7897,16 +7976,6 @@ export default function HomePage() {
 	                  </button>
 	                  <button type="button" className={helpDoc === "changelog" ? "primary" : ""} onClick={() => loadHelpDoc("changelog")}>
 	                    {t.tr("Changelog", "更新日志")}
-	                  </button>
-	                  <button
-	                    type="button"
-	                    onClick={() => {
-	                      setHelpOpen(false);
-	                      setOnboardingStep(0);
-	                      setOnboardingOpen(true);
-	                    }}
-	                  >
-	                    {t.tr("Quickstart", "快速开始")}
 	                  </button>
 	                </div>
 	              </div>
