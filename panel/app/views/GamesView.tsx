@@ -35,6 +35,48 @@ function highlightText(text: string, qLower: string) {
   return parts;
 }
 
+function highlightRegex(text: string, re: RegExp) {
+  if (!re) return text;
+  const t = String(text || "");
+  if (!t) return text;
+
+  const flags = re.flags.includes("g") ? re.flags : `${re.flags}g`;
+  let rgx: RegExp;
+  try {
+    rgx = new RegExp(re.source, flags);
+  } catch {
+    return text;
+  }
+
+  const parts: any[] = [];
+  let last = 0;
+  let hits = 0;
+  const maxHits = 32;
+  while (hits < maxHits) {
+    const m = rgx.exec(t);
+    if (!m) break;
+    const at = typeof m.index === "number" ? m.index : -1;
+    const match = String(m[0] || "");
+    if (at < 0) break;
+    const end = at + match.length;
+    if (end <= at) {
+      rgx.lastIndex = at + 1;
+      continue;
+    }
+    if (at > last) parts.push(t.slice(last, at));
+    parts.push(
+      <mark key={`m-${hits}`} className="logMark">
+        {t.slice(at, end)}
+      </mark>
+    );
+    hits += 1;
+    last = end;
+  }
+  if (!parts.length) return text;
+  if (last < t.length) parts.push(t.slice(last));
+  return parts;
+}
+
 function parseTpsFromLines(lines: string[]) {
   let tps: [number, number, number] | null = null;
   let mspt: number | null = null;
@@ -149,11 +191,13 @@ export default function GamesView() {
   const [logQueryRaw, setLogQueryRaw] = useState<string>("");
   const [logQuery, setLogQuery] = useState<string>("");
   const [logRegex, setLogRegex] = useState<boolean>(false);
+  const [logMatchOnly, setLogMatchOnly] = useState<boolean>(false);
   const [logLevelFilter, setLogLevelFilter] = useState<"all" | "warn" | "error">("all");
   const [logTimeMode, setLogTimeMode] = useState<"local" | "relative">("local");
   const [autoScroll, setAutoScroll] = useState<boolean>(true);
   const [wrapLogs, setWrapLogs] = useState<boolean>(true);
   const [highlightLogs, setHighlightLogs] = useState<boolean>(true);
+  const [logFindIdx, setLogFindIdx] = useState<number>(0);
   const [logPaused, setLogPaused] = useState<boolean>(false);
   const [logClearAtUnix, setLogClearAtUnix] = useState<number>(0);
   const [pausedLogs, setPausedLogs] = useState<any[] | null>(null);
@@ -469,14 +513,14 @@ export default function GamesView() {
     });
     const since = Math.max(0, Math.floor(Number(logClearAtUnix || 0)));
     const next = since ? list.filter((l: any) => Math.floor(Number(l?.ts_unix || 0)) >= since) : list;
-    if (logFilter.mode === "none") return next;
+    if (!logMatchOnly || logFilter.mode === "none") return next;
     if (logFilter.mode === "text") return next.filter((l: any) => String(l?.line || "").toLowerCase().includes(q));
 
     // Regex: if invalid, keep logs visible and surface error in UI.
     const re = logFilter.re;
     if (!re) return next;
     return next.filter((l: any) => re.test(String(l?.line || "")));
-  }, [logs, logView, instanceId, logPaused, pausedLogs, logClearAtUnix, logFilter]);
+  }, [logs, logView, instanceId, logPaused, pausedLogs, logClearAtUnix, logFilter, logMatchOnly]);
 
   const logLines = useMemo<RenderLogLine[]>(() => {
     const list = filteredLogs.length ? filteredLogs.slice(-2000) : [];
@@ -518,6 +562,70 @@ export default function GamesView() {
     }
     return mapped;
   }, [filteredLogs, logLevelFilter, logTimeMode]);
+
+  const logMatchLineIdxs = useMemo(() => {
+    if (logFilter.mode === "none") return [] as number[];
+    if (logFilter.mode === "text") {
+      const q = logFilter.q;
+      if (!q) return [] as number[];
+      const out: number[] = [];
+      for (let i = 0; i < logLines.length; i++) {
+        if (String(logLines[i]?.text || "").toLowerCase().includes(q)) out.push(i);
+      }
+      return out;
+    }
+    const re = logFilter.re;
+    if (!re) return [] as number[];
+    const out: number[] = [];
+    for (let i = 0; i < logLines.length; i++) {
+      if (re.test(String(logLines[i]?.text || ""))) out.push(i);
+    }
+    return out;
+  }, [logLines, logFilter]);
+
+  useEffect(() => {
+    setLogFindIdx(0);
+  }, [logFilter.mode, logFilter.q, logMatchOnly, logView, instanceId]);
+
+  useEffect(() => {
+    const n = logMatchLineIdxs.length;
+    if (!n) {
+      if (logFindIdx) setLogFindIdx(0);
+      return;
+    }
+    if (logFindIdx < 0) setLogFindIdx(0);
+    else if (logFindIdx >= n) setLogFindIdx(n - 1);
+  }, [logMatchLineIdxs.length, logFindIdx]);
+
+  const activeLogMatchLineIdx = useMemo(() => {
+    const n = logMatchLineIdxs.length;
+    if (!n) return -1;
+    const idx = Math.min(n - 1, Math.max(0, Math.round(Number(logFindIdx || 0))));
+    return logMatchLineIdxs[idx] ?? -1;
+  }, [logMatchLineIdxs, logFindIdx]);
+
+  function scrollToLogLine(lineIdx: number) {
+    const el = logScrollRef.current;
+    if (!el) return;
+    setAutoScroll(false);
+    if (!wrapLogs) {
+      const lineHeight = 18;
+      el.scrollTop = Math.max(0, lineIdx * lineHeight - Math.floor(el.clientHeight / 2));
+      return;
+    }
+    const hit = el.querySelector(`[data-log-idx="${lineIdx}"]`) as HTMLElement | null;
+    if (hit) hit.scrollIntoView({ block: "center" });
+  }
+
+  function jumpLogMatch(dir: -1 | 1) {
+    const n = logMatchLineIdxs.length;
+    if (!n) return;
+    setLogFindIdx((cur) => {
+      const next = (cur + dir + n) % n;
+      window.setTimeout(() => scrollToLogLine(logMatchLineIdxs[next] ?? 0), 0);
+      return next;
+    });
+  }
 
   useEffect(() => {
     if (!autoScroll) return;
@@ -2420,15 +2528,25 @@ export default function GamesView() {
             </div>
             <div className="field" style={{ minWidth: 160 }}>
               <label>{t.tr("Level", "级别")}</label>
-              <Select
-                value={logLevelFilter}
-                onChange={(v) => setLogLevelFilter(v as any)}
-                options={[
-                  { value: "all", label: t.tr("All", "全部") },
-                  { value: "warn", label: t.tr("Warn", "警告") },
-                  { value: "error", label: t.tr("Error", "错误") },
-                ]}
-              />
+              <div className="chipRow">
+                <button type="button" className={`chip ${logLevelFilter === "all" ? "active" : ""}`} onClick={() => setLogLevelFilter("all")}>
+                  {t.tr("All", "全部")}
+                </button>
+                <button
+                  type="button"
+                  className={`chip warn ${logLevelFilter === "warn" ? "active" : ""}`}
+                  onClick={() => setLogLevelFilter("warn")}
+                >
+                  {t.tr("Warn", "警告")}
+                </button>
+                <button
+                  type="button"
+                  className={`chip danger ${logLevelFilter === "error" ? "active" : ""}`}
+                  onClick={() => setLogLevelFilter("error")}
+                >
+                  {t.tr("Error", "错误")}
+                </button>
+              </div>
             </div>
             <div className="field" style={{ minWidth: 160 }}>
               <label>{t.tr("Time", "时间")}</label>
@@ -2443,12 +2561,57 @@ export default function GamesView() {
             </div>
           </div>
           <div className="toolbarRight">
-            <input
-              value={logQueryRaw}
-              onChange={(e: any) => setLogQueryRaw(e.target.value)}
-              placeholder={t.tr("Search logs…", "搜索日志…")}
-              style={{ width: 220 }}
-            />
+            <div className="logSearchBar">
+              <Icon name="search" />
+              <input
+                value={logQueryRaw}
+                onChange={(e: any) => setLogQueryRaw(e.target.value)}
+                placeholder={t.tr("Search logs…", "搜索日志…")}
+                style={{ width: 220 }}
+                onKeyDown={(e: any) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    jumpLogMatch(e.shiftKey ? -1 : 1);
+                  }
+                }}
+              />
+              {logQueryRaw.trim() ? (
+                <button type="button" className="iconBtn iconOnly" title={t.tr("Clear", "清空")} aria-label={t.tr("Clear", "清空")} onClick={() => setLogQueryRaw("")}>
+                  ×
+                </button>
+              ) : null}
+              {logFilter.mode !== "none" && logFilter.q ? (
+                <>
+                  <button
+                    type="button"
+                    className="iconBtn iconOnly"
+                    title={t.tr("Previous match", "上一个匹配")}
+                    aria-label={t.tr("Previous match", "上一个匹配")}
+                    onClick={() => jumpLogMatch(-1)}
+                    disabled={!logMatchLineIdxs.length}
+                  >
+                    ↑
+                  </button>
+                  <button
+                    type="button"
+                    className="iconBtn iconOnly"
+                    title={t.tr("Next match", "下一个匹配")}
+                    aria-label={t.tr("Next match", "下一个匹配")}
+                    onClick={() => jumpLogMatch(1)}
+                    disabled={!logMatchLineIdxs.length}
+                  >
+                    ↓
+                  </button>
+                  <span className="badge">
+                    {logMatchLineIdxs.length ? `${Math.min(logMatchLineIdxs.length, logFindIdx + 1)}/${logMatchLineIdxs.length}` : t.tr("0 match", "0 匹配")}
+                  </span>
+                </>
+              ) : null}
+            </div>
+            <label className="checkRow" style={{ userSelect: "none" }}>
+              <input type="checkbox" checked={logMatchOnly} onChange={(e) => setLogMatchOnly(e.target.checked)} />{" "}
+              {t.tr("Only matches", "仅匹配")}
+            </label>
             <label className="checkRow" style={{ userSelect: "none" }}>
               <input type="checkbox" checked={logRegex} onChange={(e) => setLogRegex(e.target.checked)} /> {t.tr("Regex", "正则")}
             </label>
@@ -2545,22 +2708,34 @@ export default function GamesView() {
               <>
                 <div style={{ height: logVirtual.topPad }} />
                 <pre style={{ margin: 0 }}>
-                  {logVirtual.visible.map((l, idx) => (
-                    <span key={`${logVirtual.start + idx}`} className={`logLine ${highlightLogs ? l.level : ""}`}>
-                      <button
-                        type="button"
-                        className="logLineCopyBtn"
-                        title={t.tr("Copy line", "复制该行")}
-                        aria-label={t.tr("Copy line", "复制该行")}
-                        onClick={() => copyText(l.text)}
-                      >
-                        <Icon name="copy" />
-                      </button>
-                      <span className="logLineText" style={{ whiteSpace: wrapLogs ? "pre-wrap" : "pre", wordBreak: wrapLogs ? "break-word" : "normal" }}>
-                        {logFilter.mode === "text" && logFilter.q ? highlightText(l.text, logFilter.q) : l.text}
+                  {logVirtual.visible.map((l, idx) => {
+                    const lineIdx = logVirtual.start + idx;
+                    const isActive = lineIdx === activeLogMatchLineIdx;
+                    const cls = `logLine ${highlightLogs ? l.level : ""} ${isActive ? "activeMatch" : ""}`.trim();
+                    return (
+                      <span key={`${lineIdx}`} data-log-idx={lineIdx} className={cls}>
+                        <button
+                          type="button"
+                          className="logLineCopyBtn"
+                          title={t.tr("Copy line", "复制该行")}
+                          aria-label={t.tr("Copy line", "复制该行")}
+                          onClick={() => copyText(l.text)}
+                        >
+                          <Icon name="copy" />
+                        </button>
+                        <span
+                          className="logLineText"
+                          style={{ whiteSpace: wrapLogs ? "pre-wrap" : "pre", wordBreak: wrapLogs ? "break-word" : "normal" }}
+                        >
+                          {logFilter.mode === "text" && logFilter.q
+                            ? highlightText(l.text, logFilter.q)
+                            : logFilter.mode === "regex" && logFilter.re
+                              ? highlightRegex(l.text, logFilter.re)
+                              : l.text}
+                        </span>
                       </span>
-                    </span>
-                  ))}
+                    );
+                  })}
                 </pre>
                 <div style={{ height: logVirtual.bottomPad }} />
               </>

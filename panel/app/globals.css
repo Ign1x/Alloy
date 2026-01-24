@@ -887,6 +887,66 @@ button.navItem .badge {
   flex-wrap: wrap;
 }
 
+.chipRow {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.chip {
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted);
+  font-size: var(--font-size-xs);
+  line-height: var(--line-height-tight);
+  cursor: pointer;
+}
+
+.chip:hover {
+  border-color: var(--border2);
+  background: var(--surface2);
+}
+
+.chip.active {
+  border-color: var(--primary-border);
+  background: rgba(139, 92, 246, 0.16);
+  color: var(--text);
+}
+
+.chip.warn.active {
+  border-color: var(--warn-border);
+  background: rgba(251, 191, 36, 0.16);
+}
+
+.chip.danger.active {
+  border-color: var(--danger-border);
+  background: rgba(248, 113, 113, 0.14);
+}
+
+.logSearchBar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: var(--radius);
+  border: 1px solid var(--control-border);
+  background: var(--control-bg);
+}
+
+.logSearchBar input {
+  border: none;
+  background: transparent;
+  padding: 0;
+  min-width: 180px;
+}
+
+.logSearchBar input:focus {
+  outline: none;
+}
+
 .field {
   display: flex;
   flex-direction: column;
@@ -1521,6 +1581,12 @@ pre.codePre {
   display: block;
   position: relative;
   padding-left: 28px;
+}
+
+.logLine.activeMatch {
+  background: rgba(139, 92, 246, 0.12);
+  border-radius: 10px;
+  box-shadow: inset 0 0 0 1px var(--primary-border);
 }
 
 .logLineText {
