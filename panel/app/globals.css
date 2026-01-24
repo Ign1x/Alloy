@@ -1918,6 +1918,161 @@ button.logTopPill:hover {
   margin-top: 12px;
 }
 
+.drawerOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: stretch;
+  justify-content: flex-end;
+  z-index: 55;
+}
+
+.drawer {
+  width: min(520px, calc(100vw - 32px));
+  height: 100%;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.02)), var(--card2);
+  border-left: 1px solid var(--border2);
+  box-shadow: -18px 0 60px rgba(0, 0, 0, 0.58);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.drawerHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 6px 6px 12px 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.drawerBody {
+  padding: 0 6px 6px 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+}
+
+.drawerList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.notifBtn {
+  position: relative;
+}
+
+.notifBadge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  border: 2px solid var(--card2);
+  background: var(--danger);
+  color: rgba(255, 255, 255, 0.96);
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: var(--shadow2);
+  pointer-events: none;
+}
+
+.notifItem {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.notifItem::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: var(--notif-accent, rgba(148, 163, 184, 0.55));
+}
+
+.notifItem.unseen {
+  background: rgba(139, 92, 246, 0.10);
+  border-color: var(--primary-border);
+}
+
+.notifItem.ok {
+  --notif-accent: var(--ok);
+  border-color: var(--ok-border);
+}
+
+.notifItem.error {
+  --notif-accent: var(--danger);
+  border-color: var(--danger-border);
+}
+
+.notifItem.info {
+  --notif-accent: var(--primary);
+}
+
+.notifHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.notifTitle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: var(--font-weight-semibold);
+}
+
+.notifDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--danger);
+  box-shadow: 0 0 0 3px rgba(248, 113, 113, 0.18);
+}
+
+.notifTime {
+  font-size: var(--font-size-2xs);
+  line-height: var(--line-height-tight);
+  color: var(--muted2);
+  flex-shrink: 0;
+}
+
+.notifBody {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.notifActions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: var(--space-2);
+}
+
 .cmdPaletteList {
   margin-top: 10px;
   display: flex;

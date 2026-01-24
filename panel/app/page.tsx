@@ -783,6 +783,13 @@ export default function HomePage() {
   const [toastsPaused, setToastsPaused] = useState<boolean>(false);
   const toastPauseStartRef = useRef<number | null>(null);
 
+  // Notifications (toast history)
+  const [notificationsOpen, setNotificationsOpen] = useState<boolean>(false);
+  const [notificationsFilter, setNotificationsFilter] = useState<"all" | "info" | "ok" | "error">("all");
+  const [notifications, setNotifications] = useState<
+    { id: string; kind: "info" | "ok" | "error"; message: string; detail?: string; atMs: number; seen: boolean }[]
+  >([]);
+
   // Undo (trash)
   const [undoTrash, setUndoTrash] = useState<{
     daemonId: string;
@@ -1538,6 +1545,11 @@ export default function HomePage() {
           setHelpOpen(false);
           return;
         }
+        if (notificationsOpen) {
+          e.preventDefault();
+          setNotificationsOpen(false);
+          return;
+        }
         if (cmdPaletteOpen) {
           e.preventDefault();
           setCmdPaletteOpen(false);
@@ -1593,6 +1605,7 @@ export default function HomePage() {
     shortcutsOpen,
     changelogOpen,
     helpOpen,
+    notificationsOpen,
     cmdPaletteOpen,
     installOpen,
     installRunning,
@@ -2566,6 +2579,13 @@ export default function HomePage() {
     setToasts((prev) =>
       [...prev, { id, kind, message: msg, expiresAtMs: now + ttl, ...(d ? { detail: d } : {}) }].slice(-6)
     );
+
+    setNotifications((prev) =>
+      [
+        { id, kind, message: msg, atMs: now, seen: notificationsOpen, ...(d ? { detail: d } : {}) },
+        ...(prev || []),
+      ].slice(0, 200)
+    );
   }
 
   function dismissToast(id: string) {
@@ -2583,6 +2603,22 @@ export default function HomePage() {
     }, 250);
     return () => window.clearInterval(timer);
   }, [toasts.length, toastsPaused]);
+
+  const notificationsUnread = useMemo(() => {
+    return (Array.isArray(notifications) ? notifications : []).filter((n) => !n.seen).length;
+  }, [notifications]);
+
+  const notificationsView = useMemo(() => {
+    const list = Array.isArray(notifications) ? notifications : [];
+    const f = notificationsFilter;
+    if (f === "all") return list;
+    return list.filter((n) => n.kind === f);
+  }, [notifications, notificationsFilter]);
+
+  useEffect(() => {
+    if (!notificationsOpen) return;
+    setNotifications((prev) => (prev || []).map((n) => (n.seen ? n : { ...n, seen: true })));
+  }, [notificationsOpen]);
 
   useEffect(() => {
     if (!undoTrash) return;
@@ -7720,6 +7756,126 @@ export default function HomePage() {
 	        </div>
 	      ) : null}
 
+	      {notificationsOpen ? (
+	        <div className="drawerOverlay" onClick={() => setNotificationsOpen(false)}>
+	          <div
+	            className="drawer"
+	            role="dialog"
+	            aria-modal="true"
+	            aria-label={t.tr("Notifications", "通知")}
+	            onClick={(e) => e.stopPropagation()}
+	          >
+	            <div className="drawerHeader">
+	              <div style={{ minWidth: 0 }}>
+	                <div style={{ fontWeight: 800 }}>{t.tr("Notifications", "通知")}</div>
+	                <div className="hint" style={{ marginTop: 4 }}>
+	                  {t.tr("Recent actions & errors (stored locally).", "最近的操作与错误（仅保存在本地浏览器）。")}
+	                </div>
+	              </div>
+	              <div className="btnGroup" style={{ justifyContent: "flex-end" }}>
+	                <button
+	                  type="button"
+	                  className="iconBtn iconOnly"
+	                  aria-label={t.tr("Clear", "清空")}
+	                  title={t.tr("Clear", "清空")}
+	                  onClick={() => setNotifications([])}
+	                  disabled={!notifications.length}
+	                >
+	                  <Icon name="trash" />
+	                </button>
+	                <button
+	                  type="button"
+	                  className="iconBtn iconOnly"
+	                  aria-label={t.tr("Close", "关闭")}
+	                  title={t.tr("Close", "关闭")}
+	                  onClick={() => setNotificationsOpen(false)}
+	                >
+	                  ×
+	                </button>
+	              </div>
+	            </div>
+
+	            <div className="drawerBody">
+	              <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+	                <div className="chipRow" aria-label={t.tr("Filter", "筛选")}>
+	                  <button
+	                    type="button"
+	                    className={`chip ${notificationsFilter === "all" ? "active" : ""}`}
+	                    onClick={() => setNotificationsFilter("all")}
+	                  >
+	                    {t.tr("All", "全部")}
+	                  </button>
+	                  <button
+	                    type="button"
+	                    className={`chip ${notificationsFilter === "info" ? "active" : ""}`}
+	                    onClick={() => setNotificationsFilter("info")}
+	                  >
+	                    {t.tr("Notice", "提示")}
+	                  </button>
+	                  <button
+	                    type="button"
+	                    className={`chip ${notificationsFilter === "ok" ? "active" : ""}`}
+	                    onClick={() => setNotificationsFilter("ok")}
+	                  >
+	                    {t.tr("Success", "成功")}
+	                  </button>
+	                  <button
+	                    type="button"
+	                    className={`chip danger ${notificationsFilter === "error" ? "active" : ""}`}
+	                    onClick={() => setNotificationsFilter("error")}
+	                  >
+	                    {t.tr("Error", "错误")}
+	                  </button>
+	                </div>
+	                <div className="hint" style={{ marginTop: 0 }}>
+	                  {notificationsUnread ? (
+	                    <>
+	                      {t.tr("Unread", "未读")}: <code>{String(notificationsUnread)}</code>
+	                    </>
+	                  ) : (
+	                    t.tr("All read", "已读")
+	                  )}
+	                </div>
+	              </div>
+
+	              <div className="drawerList" role="list">
+	                {notificationsView.length ? (
+	                  notificationsView.map((n) => (
+	                    <div key={n.id} role="listitem" className={`notifItem ${n.kind} ${n.seen ? "" : "unseen"}`}>
+	                      <div className="notifHead">
+	                        <div className="notifTitle">
+	                          {n.kind === "ok" ? t.tr("Success", "成功") : n.kind === "error" ? t.tr("Error", "错误") : t.tr("Notice", "提示")}
+	                          {!n.seen ? <span className="notifDot" aria-hidden="true" /> : null}
+	                        </div>
+	                        <time className="notifTime" dateTime={new Date(n.atMs).toISOString()} title={fmtUnix(Math.floor(n.atMs / 1000))}>
+	                          {fmtUnix(Math.floor(n.atMs / 1000))}
+	                        </time>
+	                      </div>
+	                      <div className="notifBody">{n.message}</div>
+	                      <div className="notifActions">
+	                        <button type="button" className="linkBtn" onClick={() => copyText(n.message)}>
+	                          {t.tr("Copy", "复制")}
+	                        </button>
+	                        {n.detail ? (
+	                          <button type="button" className="linkBtn" onClick={() => openCopyModal(n.detail || "")}>
+	                            {t.tr("Copy details", "复制详情")}
+	                          </button>
+	                        ) : null}
+	                      </div>
+	                    </div>
+	                  ))
+	                ) : (
+	                  <div className="emptyState" role="note">
+	                    <div style={{ fontWeight: 800 }}>{t.tr("No notifications", "暂无通知")}</div>
+	                    <div className="hint">{t.tr("Toasts will appear here after actions.", "执行操作后的 Toast 会出现在这里。")}</div>
+	                  </div>
+	                )}
+	              </div>
+	            </div>
+	          </div>
+	        </div>
+	      ) : null}
+
 				      {toasts.length ? (
 				        <div className="toastWrap" aria-live="polite" aria-relevant="additions" onMouseEnter={pauseToasts} onMouseLeave={resumeToasts}>
 				          {toasts.map((toast) => (
@@ -7908,6 +8064,26 @@ export default function HomePage() {
                 disabled={authed !== true}
               >
                 <Icon name="search" />
+              </button>
+            </Tooltip>
+            <Tooltip content={t.tr("Notifications", "通知")} disabled={authed !== true}>
+              <button
+                type="button"
+                className="iconBtn iconOnly notifBtn"
+                aria-label={
+                  notificationsUnread
+                    ? `${t.tr("Notifications", "通知")} (${t.tr("Unread", "未读")}: ${notificationsUnread})`
+                    : t.tr("Notifications", "通知")
+                }
+                onClick={() => setNotificationsOpen(true)}
+                disabled={authed !== true}
+              >
+                <Icon name="bell" />
+                {notificationsUnread ? (
+                  <span className="notifBadge" aria-hidden="true">
+                    {notificationsUnread > 99 ? "99+" : String(notificationsUnread)}
+                  </span>
+                ) : null}
               </button>
             </Tooltip>
             <div className="topbarTitle">
