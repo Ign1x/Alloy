@@ -12,6 +12,7 @@ export default function PanelView() {
     t,
     apiFetch,
     authMe,
+    notifications,
     panelSettings,
     panelSettingsStatus,
     refreshPanelSettings,
@@ -50,6 +51,11 @@ export default function PanelView() {
   const [auditRange, setAuditRange] = useState<string>("7d");
   const [auditLimit, setAuditLimit] = useState<string>("200");
   const [auditTruncated, setAuditTruncated] = useState<boolean>(false);
+
+  const [activitySource, setActivitySource] = useState<"all" | "audit" | "notifications">("all");
+  const [activityToastKind, setActivityToastKind] = useState<"all" | "info" | "ok" | "error">("all");
+  const [activityQuery, setActivityQuery] = useState<string>("");
+  const [activityLimit, setActivityLimit] = useState<string>("200");
 
   const [users, setUsers] = useState<any[]>([]);
   const [usersStatus, setUsersStatus] = useState<string>("");
@@ -657,6 +663,20 @@ export default function PanelView() {
     }
   }
 
+  function exportActivityJson() {
+    try {
+      const blob = new Blob([activityExportJson], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `activity-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
+      a.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 800);
+    } catch {
+      // ignore
+    }
+  }
+
   useEffect(() => {
     if (backupPresetInstanceId.trim()) return;
     if (Array.isArray(serverDirs) && serverDirs.length) setBackupPresetInstanceId(String(serverDirs[0] || ""));
@@ -700,6 +720,80 @@ export default function PanelView() {
   }, [sessions, sessionsQuery]);
 
   const auditExportJson = useMemo(() => JSON.stringify(Array.isArray(auditEntries) ? auditEntries : [], null, 2), [auditEntries]);
+
+  const activityItems = useMemo(() => {
+    const now = Math.floor(Date.now() / 1000);
+    const sinceUnix = sinceUnixForAuditRange(auditRange, now);
+    const q = activityQuery.trim().toLowerCase();
+    const limitRaw = Number(activityLimit || 0);
+    const limit = Math.max(50, Math.min(1000, Math.round(Number.isFinite(limitRaw) ? limitRaw : 200)));
+
+    const items: any[] = [];
+
+    if (activitySource !== "audit") {
+      for (const n of Array.isArray(notifications) ? notifications : []) {
+        const ts = Math.floor(Number(n?.atMs || 0) / 1000);
+        if (!Number.isFinite(ts) || ts <= 0) continue;
+        if (sinceUnix > 0 && ts < sinceUnix) continue;
+        const kind = String(n?.kind || "info") as any;
+        if (activityToastKind !== "all" && kind !== activityToastKind) continue;
+        const msg = String(n?.message || "").trim();
+        const detail = String(n?.detail || "").trim();
+        if (q) {
+          const hay = `${kind} ${msg} ${detail}`.toLowerCase();
+          if (!hay.includes(q)) continue;
+        }
+        items.push({ source: "notification", kind, ts_unix: ts, message: msg, detail, raw: n });
+      }
+    }
+
+    if (activitySource !== "notifications") {
+      for (const e of Array.isArray(auditEntries) ? auditEntries : []) {
+        const ts = Number(e?.ts_unix || 0);
+        if (!Number.isFinite(ts) || ts <= 0) continue;
+        if (sinceUnix > 0 && ts < sinceUnix) continue;
+        const action = String(e?.action || "");
+        const user = String(e?.user || "");
+        const ip = String(e?.ip || "");
+        const auth = String(e?.auth || "");
+        const detailStr = e?.detail ? JSON.stringify(e.detail) : "";
+        if (q) {
+          const hay = `${action} ${user} ${ip} ${auth} ${detailStr}`.toLowerCase();
+          if (!hay.includes(q)) continue;
+        }
+        items.push({ source: "audit", kind: "audit", ts_unix: ts, action, user, auth, ip, detail: e?.detail || null, raw: e });
+      }
+    }
+
+    items.sort((a, b) => Number(b?.ts_unix || 0) - Number(a?.ts_unix || 0));
+    return items.slice(0, limit);
+  }, [activityLimit, activityQuery, activitySource, activityToastKind, auditEntries, auditRange, notifications]);
+
+  const activityExportJson = useMemo(() => {
+    const out = activityItems.map((x: any) => {
+      const ts_unix = Number(x?.ts_unix || 0) || 0;
+      const source = String(x?.source || "");
+      if (source === "audit") {
+        return {
+          ts_unix,
+          source,
+          action: String(x?.action || ""),
+          user: String(x?.user || ""),
+          auth: String(x?.auth || ""),
+          ip: String(x?.ip || ""),
+          detail: x?.detail ?? null,
+        };
+      }
+      return {
+        ts_unix,
+        source,
+        kind: String(x?.kind || "info"),
+        message: String(x?.message || ""),
+        detail: String(x?.detail || ""),
+      };
+    });
+    return JSON.stringify(out, null, 2);
+  }, [activityItems]);
 
   const passwordMinLen = passwordPolicy?.min_length && passwordPolicy.min_length > 0 ? passwordPolicy.min_length : 8;
   const passwordHint = passwordPolicy
@@ -956,6 +1050,7 @@ export default function PanelView() {
     { id: "panel-tokens", label: t.tr("API Tokens", "API Tokens") },
     { id: "panel-tasks", label: t.tr("Tasks", "任务") },
     { id: "panel-sessions", label: t.tr("Sessions", "会话") },
+    { id: "panel-activity", label: t.tr("Activity", "活动") },
     { id: "panel-audit", label: t.tr("Audit Log", "审计日志") },
   ];
 
@@ -1960,15 +2055,161 @@ export default function PanelView() {
           </div>
         ) : sessions.length ? (
           <div className="emptyState">{t.tr("No matches.", "没有匹配项。")}</div>
-        ) : (
-          <div className="emptyState">{t.tr("No sessions found.", "暂无会话。")}</div>
-        )}
-      </div>
+	        ) : (
+	          <div className="emptyState">{t.tr("No sessions found.", "暂无会话。")}</div>
+	        )}
+	      </div>
 
-      <div className="card" id="panel-audit">
-        <div className="toolbar">
-          <div className="toolbarLeft" style={{ alignItems: "center" }}>
-            <div>
+        <div className="card" id="panel-activity">
+          <div className="toolbar">
+            <div className="toolbarLeft" style={{ alignItems: "center" }}>
+              <div>
+                <h2>{t.tr("Activity", "活动")}</h2>
+                <div className="hint">{t.tr("Merged feed of toast notifications + server audit entries.", "合并显示通知（toasts）与服务端审计日志。")}</div>
+              </div>
+            </div>
+            <div className="toolbarRight">
+              <button type="button" className="iconBtn" onClick={refreshAudit} disabled={auditBusy}>
+                {t.tr("Refresh audit", "刷新审计")}
+              </button>
+              <CopyButton
+                text={activityExportJson}
+                disabled={!activityItems.length}
+                label={t.tr("Copy JSON", "复制 JSON")}
+                tooltip={t.tr("Copy JSON", "复制 JSON")}
+                ariaLabel={t.tr("Copy JSON", "复制 JSON")}
+              />
+              <button type="button" className="iconBtn" onClick={exportActivityJson} disabled={!activityItems.length}>
+                {t.tr("Export JSON", "导出 JSON")}
+              </button>
+            </div>
+          </div>
+
+          <div className="grid2" style={{ alignItems: "end", marginTop: 12 }}>
+            <Field label={t.tr("Source", "来源")}>
+              <Select
+                value={activitySource}
+                onChange={(v) => setActivitySource((String(v || "") as any) || "all")}
+                options={[
+                  { value: "all", label: t.tr("All", "全部") },
+                  { value: "notifications", label: t.tr("Notifications", "通知") },
+                  { value: "audit", label: t.tr("Audit", "审计") },
+                ]}
+              />
+            </Field>
+            <Field label={t.tr("Toast kind", "通知类型")}>
+              <Select
+                value={activityToastKind}
+                onChange={(v) => setActivityToastKind((String(v || "") as any) || "all")}
+                disabled={activitySource === "audit"}
+                options={[
+                  { value: "all", label: t.tr("All", "全部") },
+                  { value: "info", label: t.tr("Info", "信息") },
+                  { value: "ok", label: t.tr("OK", "成功") },
+                  { value: "error", label: t.tr("Error", "错误") },
+                ]}
+              />
+            </Field>
+            <Field label={t.tr("Time range", "时间范围")} hint={t.tr("Same as Audit Log.", "与审计日志一致。")}>
+              <Select
+                value={auditRange}
+                onChange={(v) => setAuditRange(String(v || ""))}
+                options={[
+                  { value: "1h", label: t.tr("Last 1h", "最近 1 小时") },
+                  { value: "24h", label: t.tr("Last 24h", "最近 24 小时") },
+                  { value: "7d", label: t.tr("Last 7d", "最近 7 天") },
+                  { value: "30d", label: t.tr("Last 30d", "最近 30 天") },
+                  { value: "all", label: t.tr("All", "全部") },
+                ]}
+              />
+            </Field>
+            <Field label={t.tr("Limit", "数量")}>
+              <Select
+                value={activityLimit}
+                onChange={(v) => setActivityLimit(String(v || ""))}
+                options={[
+                  { value: "100", label: "100" },
+                  { value: "200", label: "200" },
+                  { value: "500", label: "500" },
+                  { value: "1000", label: "1000" },
+                ]}
+              />
+            </Field>
+            <Field label={t.tr("Search", "搜索")} hint={t.tr("Matches message/action/user/detail.", "匹配消息/动作/用户/详情。")} style={{ gridColumn: "1 / -1" }}>
+              <input value={activityQuery} onChange={(e) => setActivityQuery(e.target.value)} placeholder={t.tr("Type to filter…", "输入以筛选…")} />
+            </Field>
+          </div>
+
+          {activityItems.length ? (
+            <div className="tableScroll" style={{ marginTop: 12, maxHeight: 520, overflow: "auto" }}>
+              <table className="compact">
+                <thead>
+                  <tr>
+                    <th>{t.tr("Time", "时间")}</th>
+                    <th>{t.tr("Source", "来源")}</th>
+                    <th>{t.tr("Summary", "摘要")}</th>
+                    <th>{t.tr("Detail", "详情")}</th>
+                    <th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {activityItems.map((x: any, idx: number) => {
+                    const ts = Number(x?.ts_unix || 0);
+                    const src = String(x?.source || "");
+                    const isAudit = src === "audit";
+                    const toastKind = String(x?.kind || "info");
+                    const title = isAudit ? String(x?.action || "-") : String(x?.message || "-");
+                    const user = isAudit ? String(x?.user || "-") : "";
+                    const detailStr = isAudit ? (x?.detail ? JSON.stringify(x.detail) : "") : String(x?.detail || "");
+                    const detailShort = detailStr.length > 160 ? `${detailStr.slice(0, 160)}…` : detailStr || "-";
+                    const rowJson = JSON.stringify(x?.raw || x, null, 2);
+                    const srcBadge = isAudit ? t.tr("audit", "审计") : t.tr("toast", "通知");
+                    const kindBadgeClass = toastKind === "error" ? "warn" : toastKind === "ok" ? "ok" : "";
+                    const toastBadge = isAudit ? null : (
+                      <span className={`badge ${kindBadgeClass}`.trim()}>{toastKind || "info"}</span>
+                    );
+                    return (
+                      <tr key={`${src}-${ts}-${idx}`}>
+                        <td style={{ whiteSpace: "nowrap" }}>{ts ? <TimeAgo unix={ts} /> : "-"}</td>
+                        <td>
+                          <span className={`badge ${isAudit ? "warn" : ""}`.trim()}>{srcBadge}</span>
+                        </td>
+                        <td style={{ minWidth: 260 }}>
+                          {toastBadge ? (
+                            <span className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+                              {toastBadge}
+                              <code title={title}>{title}</code>
+                            </span>
+                          ) : (
+                            <span className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+                              <code title={title}>{title}</code>
+                              {user ? <span className="muted">{user}</span> : null}
+                            </span>
+                          )}
+                        </td>
+                        <td style={{ maxWidth: 520 }}>
+                          <code title={detailStr}>{detailShort}</code>
+                        </td>
+                        <td style={{ textAlign: "right" }}>
+                          <CopyButton text={rowJson} iconOnly tooltip={t.tr("Copy entry", "复制条目")} ariaLabel={t.tr("Copy entry", "复制条目")} />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="emptyState" style={{ marginTop: 12 }}>
+              {t.tr("No activity yet.", "暂无活动。")}
+            </div>
+          )}
+        </div>
+
+	      <div className="card" id="panel-audit">
+	        <div className="toolbar">
+	          <div className="toolbarLeft" style={{ alignItems: "center" }}>
+	            <div>
               <h2>{t.tr("Audit Log", "审计日志")}</h2>
               {auditStatus ? (
                 <div className="hint">{auditStatus}</div>

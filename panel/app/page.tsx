@@ -7590,6 +7590,7 @@ export default function HomePage() {
     setLocale,
     t,
     authMe,
+    notifications,
     daemons,
     daemonsLoadedOnce,
     selected,
