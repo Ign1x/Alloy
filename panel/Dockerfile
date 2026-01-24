@@ -44,5 +44,5 @@ COPY --from=builder /app/server ./server
 
 EXPOSE 3000
 HEALTHCHECK --interval=10s --timeout=2s --start-period=10s --retries=3 \
-  CMD node -e "require('node:http').get('http://127.0.0.1:3000/healthz',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"
+  CMD node -e "const p=process.env.ELEGANTMC_PANEL_PORT||'3000';require('node:http').get('http://127.0.0.1:'+p+'/healthz',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"
 CMD ["node", "server/index.mjs"]

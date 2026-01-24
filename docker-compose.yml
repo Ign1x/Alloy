@@ -15,8 +15,8 @@ services:
         ELEGANTMC_REVISION: "${ELEGANTMC_REVISION:-local}"
         ELEGANTMC_BUILD_DATE: "${ELEGANTMC_BUILD_DATE:-}"
     environment:
-      ELEGANTMC_PANEL_HOST: "0.0.0.0"
-      ELEGANTMC_PANEL_PORT: "3000"
+      ELEGANTMC_PANEL_HOST: "${ELEGANTMC_PANEL_HOST:-0.0.0.0}"
+      ELEGANTMC_PANEL_PORT: "${ELEGANTMC_PANEL_PORT:-3000}"
       # If empty, Panel generates a random password and prints it in logs.
       ELEGANTMC_PANEL_ADMIN_PASSWORD: "${ELEGANTMC_PANEL_ADMIN_PASSWORD:-}"
       ELEGANTMC_PANEL_SECURE_COOKIE: "${ELEGANTMC_PANEL_SECURE_COOKIE:-}"
@@ -33,7 +33,7 @@ services:
       ELEGANTMC_CURSEFORGE_BASE_URL: "${ELEGANTMC_CURSEFORGE_BASE_URL:-}"
       ELEGANTMC_CURSEFORGE_API_KEY: "${ELEGANTMC_CURSEFORGE_API_KEY:-}"
     ports:
-      - "${ELEGANTMC_PANEL_PORT:-3000}:3000"
+      - "${ELEGANTMC_PANEL_PORT:-3000}:${ELEGANTMC_PANEL_PORT:-3000}"
     volumes:
       - elegantmc-panel-data:/data
     restart: unless-stopped
@@ -48,7 +48,7 @@ services:
         ELEGANTMC_REVISION: "${ELEGANTMC_REVISION:-local}"
         ELEGANTMC_BUILD_DATE: "${ELEGANTMC_BUILD_DATE:-}"
     environment:
-      ELEGANTMC_PANEL_WS_URL: "ws://panel:3000/ws/daemon"
+      ELEGANTMC_PANEL_WS_URL: "ws://panel:${ELEGANTMC_PANEL_PORT:-3000}/ws/daemon"
       ELEGANTMC_TOKEN: "${ELEGANTMC_TOKEN:-local-dev-token}"
       ELEGANTMC_DAEMON_ID: "${ELEGANTMC_DAEMON_ID:-local-node}"
       ELEGANTMC_BASE_DIR: "/data"
