@@ -356,6 +356,12 @@ h3 {
   margin-top: 10px;
 }
 
+@media (prefers-reduced-motion: no-preference) {
+  .dangerZone[open] .dangerZoneBody {
+    animation: uiRevealIn 0.14s ease both;
+  }
+}
+
 .cardSub {
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -1463,6 +1469,59 @@ button.linkBtn:hover {
   }
 }
 
+@keyframes uiOverlayIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes uiModalIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes uiDrawerIn {
+  from {
+    opacity: 0;
+    transform: translateX(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes uiToastIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes uiRevealIn {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .kv {
   display: flex;
   flex-direction: column;
@@ -1949,6 +2008,18 @@ button.logTopPill:hover {
   padding: 14px;
 }
 
+@media (prefers-reduced-motion: no-preference) {
+  .modalOverlay,
+  .lightboxOverlay {
+    animation: uiOverlayIn 0.14s ease both;
+  }
+
+  .modal,
+  .lightbox {
+    animation: uiModalIn 0.16s cubic-bezier(0.2, 0.85, 0.2, 1) both;
+  }
+}
+
 .modalHeader {
   display: flex;
   justify-content: space-between;
@@ -1995,6 +2066,16 @@ button.logTopPill:hover {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .drawerOverlay {
+    animation: uiOverlayIn 0.14s ease both;
+  }
+
+  .drawer {
+    animation: uiDrawerIn 0.18s cubic-bezier(0.2, 0.85, 0.2, 1) both;
+  }
 }
 
 .drawerHeader {
@@ -2250,6 +2331,16 @@ button.cmdPaletteItem:disabled {
   line-height: var(--line-height-normal);
   text-align: left;
   cursor: default;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .toast {
+    animation: uiToastIn 0.18s ease both;
+  }
+
+  .snackbar {
+    animation: uiToastIn 0.18s ease both;
+  }
 }
 
 :root[data-theme="light"] .toast {
