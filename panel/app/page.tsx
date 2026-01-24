@@ -5384,6 +5384,41 @@ export default function HomePage() {
       if (!selectedDaemon?.connected) throw new Error(t.tr("daemon offline", "daemon 离线"));
       const inst = instanceId.trim();
       if (!inst) throw new Error(t.tr("instance_id is required", "instance_id 不能为空"));
+
+      const snap = settingsSnapshot;
+      if (snap) {
+        const profileLabel = (id: string) => {
+          const pid = String(id || "").trim();
+          const p = profiles.find((x) => x.id === pid) || null;
+          if (p) return `${p.name} (${p.server_addr}:${p.server_port})`;
+          return pid || "-";
+        };
+        const changed: string[] = [];
+        if (String(snap.jarPath || "") !== String(jarPath || "")) changed.push(`${t.tr("Jar", "Jar")}: ${snap.jarPath || "-"} → ${jarPath || "-"}`);
+        if (String(snap.javaPath || "") !== String(javaPath || "")) changed.push(`${t.tr("Java", "Java")}: ${snap.javaPath || "-"} → ${javaPath || "-"}`);
+        if (Number(snap.gamePort) !== Number(gamePort)) changed.push(`${t.tr("Port", "端口")}: ${snap.gamePort} → ${gamePort}`);
+        if (String(snap.xms || "") !== String(xms || "")) changed.push(`Xms: ${snap.xms || "-"} → ${xms || "-"}`);
+        if (String(snap.xmx || "") !== String(xmx || "")) changed.push(`Xmx: ${snap.xmx || "-"} → ${xmx || "-"}`);
+        if (String(snap.jvmArgsPreset || "") !== String(jvmArgsPreset || "")) changed.push(`${t.tr("JVM preset", "JVM 预设")}: ${snap.jvmArgsPreset} → ${jvmArgsPreset}`);
+        if (String(snap.jvmArgsExtra || "") !== String(jvmArgsExtra || "")) changed.push(`${t.tr("JVM args", "JVM 参数")}: ${t.tr("edited", "已修改")}`);
+        if (Boolean(snap.enableFrp) !== Boolean(enableFrp)) changed.push(`FRP: ${snap.enableFrp ? t.tr("on", "开启") : t.tr("off", "关闭")} → ${enableFrp ? t.tr("on", "开启") : t.tr("off", "关闭")}`);
+        if (String(snap.frpProfileId || "") !== String(frpProfileId || "")) changed.push(`${t.tr("FRP server", "FRP 服务器")}: ${profileLabel(snap.frpProfileId)} → ${profileLabel(frpProfileId)}`);
+        if (Number(snap.frpRemotePort) !== Number(frpRemotePort)) changed.push(`${t.tr("FRP remote port", "FRP 远端端口")}: ${snap.frpRemotePort} → ${frpRemotePort}`);
+
+        if (changed.length) {
+          const msg = `${t.tr("Review changes:", "请确认以下更改：")}\n` + changed.map((s) => `- ${s}`).join("\n");
+          const ok = await confirmDialog(msg, {
+            title: t.tr("Review changes", "确认更改"),
+            confirmLabel: t.tr("Apply", "应用"),
+            cancelLabel: t.tr("Cancel", "取消"),
+          });
+          if (!ok) {
+            setServerOpStatus(t.tr("Cancelled", "已取消"));
+            return;
+          }
+        }
+      }
+
       await applyServerPort(inst, gamePort);
       await writeInstanceConfig(inst, {});
       setSettingsOpen(false);
