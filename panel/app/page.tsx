@@ -88,6 +88,44 @@ function validateJarPathUI(jarPath: string, tr?: TrFn) {
   return "";
 }
 
+function fuzzyScoreToken(hay: string, needle: string): number | null {
+  if (!needle) return 0;
+  let score = 0;
+  let hIdx = 0;
+  let lastMatch = -1;
+  for (let i = 0; i < needle.length; i++) {
+    const ch = needle[i];
+    const pos = hay.indexOf(ch, hIdx);
+    if (pos < 0) return null;
+
+    score += 1;
+    if (lastMatch === pos - 1) score += 3;
+    if (pos === 0 || " _-:/.".includes(hay[pos - 1] || "")) score += 2;
+
+    lastMatch = pos;
+    hIdx = pos + 1;
+  }
+  // Prefer shorter targets a bit.
+  score -= Math.min(40, hay.length) * 0.01;
+  return score;
+}
+
+function fuzzyScore(haystackRaw: string, queryRaw: string): number | null {
+  const q = String(queryRaw || "").trim().toLowerCase();
+  if (!q) return 0;
+  const hay = String(haystackRaw || "").toLowerCase();
+  if (!hay) return null;
+  const parts = q.split(/\s+/g).filter(Boolean);
+  let total = 0;
+  for (const p of parts) {
+    const s = fuzzyScoreToken(hay, p);
+    if (s == null) return null;
+    total += s;
+  }
+  if (hay.includes(q)) total += 4;
+  return total;
+}
+
 type FrpProfile = {
   id: string;
   name: string;
@@ -7288,6 +7326,46 @@ export default function HomePage() {
     );
     if (enableAdvanced) out.push({ id: "tab:advanced", title: t.tr("Go: Advanced", "前往：高级"), run: () => goTab("advanced") });
 
+    const daemonList = (Array.isArray(daemons) ? daemons : []).slice();
+    daemonList.sort((a, b) => String(a?.id || "").localeCompare(String(b?.id || "")));
+    for (const d of daemonList) {
+      const did = String(d?.id || "").trim();
+      if (!did) continue;
+      const isCurrent = did === selected;
+      const statusEn = d?.connected ? "online" : "offline";
+      const statusZh = d?.connected ? "在线" : "离线";
+      const hint = isCurrent ? t.tr(`current · ${statusEn}`, `当前 · ${statusZh}`) : t.tr(statusEn, statusZh);
+      out.push({
+        id: `switch:daemon:${did}`,
+        title: t.tr(`Switch daemon: ${did}`, `切换 Daemon：${did}`),
+        hint,
+        disabled: isCurrent,
+        run: () => {
+          setSelected(did);
+          setSidebarOpen(false);
+          close();
+        },
+      });
+    }
+
+    const instList = (Array.isArray(serverDirs) ? serverDirs : []).slice();
+    instList.sort((a, b) => String(a || "").localeCompare(String(b || "")));
+    for (const instIdRaw of instList) {
+      const instId = String(instIdRaw || "").trim();
+      if (!instId) continue;
+      const isCurrent = instId === instanceId.trim();
+      out.push({
+        id: `switch:instance:${instId}`,
+        title: t.tr(`Switch instance: ${instId}`, `切换实例：${instId}`),
+        hint: selected ? t.tr(`daemon: ${selected}`, `daemon：${selected}`) : "",
+        disabled: isCurrent,
+        run: () => {
+          setInstanceId(instId);
+          close();
+        },
+      });
+    }
+
     const inst = instanceId.trim();
     const daemonOk = !!selectedDaemon?.connected;
     const canGame = daemonOk && !!inst && !gameActionBusy;
@@ -7350,15 +7428,20 @@ export default function HomePage() {
 
     return out;
   }, [
+    daemons,
     enableAdvanced,
     gameActionBusy,
     instanceId,
     instanceStatus?.running,
+    selected,
     selectedDaemon?.connected,
+    serverDirs,
     t,
 	    openInstallModal,
 	    openSettingsModal,
 	    setFsPath,
+      setInstanceId,
+      setSelected,
 	    setTab,
 	    setSidebarOpen,
     startServer,
@@ -7386,15 +7469,22 @@ export default function HomePage() {
     const rawQ = cmdPaletteQuery.trim().toLowerCase();
     const filtered = !rawQ
       ? cmdPaletteCommands
-      : cmdPaletteCommands.filter((c) => {
-          const title = String(c.title || "").toLowerCase();
-          const hint = String((c as any).hint || "").toLowerCase();
-          return title.includes(rawQ) || hint.includes(rawQ);
-        });
+      : cmdPaletteCommands
+          .map((c) => {
+            const hay = `${String((c as any).title || "")} ${String((c as any).hint || "")}`.trim();
+            const score = fuzzyScore(hay, rawQ);
+            if (score == null) return null;
+            return { c, score };
+          })
+          .filter(Boolean)
+          .sort((a: any, b: any) => (b.score || 0) - (a.score || 0))
+          .map((x: any) => x.c);
 
     const cat = (id: string) => {
       const s = String(id || "");
       if (s.startsWith("tab:")) return t.tr("Navigation", "导航");
+      if (s.startsWith("switch:daemon:")) return t.tr("Daemons", "Daemon");
+      if (s.startsWith("switch:instance:")) return t.tr("Instances", "实例");
       if (s.startsWith("game:")) return t.tr("Game", "游戏");
       return t.tr("Other", "其他");
     };
