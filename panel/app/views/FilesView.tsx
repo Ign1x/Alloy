@@ -333,6 +333,7 @@ export default function FilesView() {
   const listScrollRef = useRef<HTMLDivElement | null>(null);
   const [listScrollTop, setListScrollTop] = useState<number>(0);
   const [listViewportH, setListViewportH] = useState<number>(520);
+  const listScrollSaveTimerRef = useRef<number | null>(null);
   const [selectedNames, setSelectedNames] = useState<string[]>([]);
   const selectAllRef = useRef<HTMLInputElement | null>(null);
   const [jsonCheck, setJsonCheck] = useState<{ ok: boolean; message: string; line?: number; col?: number; pos?: number } | null>(null);
@@ -426,6 +427,53 @@ export default function FilesView() {
 
   const inst = String(instanceId || "").trim();
   const entriesLoading = fsStatus === "Loading..." && !fsEntries.length;
+
+  const listScrollKey = useMemo(() => {
+    const daemonId = String(selected || "").trim();
+    const p = String(fsPath || "").trim();
+    const q = String(query || "").trim();
+    if (!daemonId) return "";
+    return `elegantmc_fs_list_scroll_v1:${daemonId}:${p}:${q}`;
+  }, [selected, fsPath, query]);
+
+  useEffect(() => {
+    const el = listScrollRef.current;
+    if (!el) return;
+    if (entriesLoading) return;
+    if (!listScrollKey) return;
+    try {
+      const raw = localStorage.getItem(listScrollKey);
+      const n = Math.max(0, Math.round(Number(raw || 0)));
+      if (!Number.isFinite(n) || n <= 0) return;
+      el.scrollTop = n;
+      setListScrollTop(n);
+    } catch {
+      // ignore
+    }
+  }, [entriesLoading, listScrollKey]);
+
+  useEffect(() => {
+    if (!listScrollKey) return;
+    if (listScrollSaveTimerRef.current != null) window.clearTimeout(listScrollSaveTimerRef.current);
+    listScrollSaveTimerRef.current = window.setTimeout(() => {
+      try {
+        localStorage.setItem(listScrollKey, String(Math.max(0, Math.round(listScrollTop))));
+      } catch {
+        // ignore
+      }
+    }, 200);
+    return () => {
+      if (listScrollSaveTimerRef.current != null) window.clearTimeout(listScrollSaveTimerRef.current);
+    };
+  }, [listScrollKey, listScrollTop]);
+
+  const fileListRangeLabel = useMemo(() => {
+    const total = Array.isArray(viewEntries) ? viewEntries.length : 0;
+    const start = Math.max(0, fileListVirtual.start);
+    const count = Array.isArray(fileListVirtual.visible) ? fileListVirtual.visible.length : 0;
+    if (!fileListVirtual.enabled || total <= 0) return "";
+    return `${Math.min(total, start + 1)}-${Math.min(total, start + count)} / ${total}`;
+  }, [fileListVirtual, viewEntries]);
 
   const fileLower = String(fsSelectedFile || "").toLowerCase();
   const isJson = !!fsSelectedFile && fsSelectedFileMode === "text" && fileLower.endsWith(".json");
@@ -843,6 +891,27 @@ export default function FilesView() {
       <div className="grid2" style={{ marginTop: 12, alignItems: "start" }}>
         <div style={{ minWidth: 0 }}>
           <h3>{t.tr("Entries", "条目")}</h3>
+          {fileListRangeLabel ? (
+            <div className="row" style={{ justifyContent: "space-between", gap: 10, marginTop: -6, marginBottom: 8 }}>
+              <span className="muted">
+                {t.tr("Range", "范围")}: <code>{fileListRangeLabel}</code>
+              </span>
+              {listScrollTop > 240 ? (
+                <button
+                  type="button"
+                  className="iconBtn"
+                  onClick={() => {
+                    const el = listScrollRef.current;
+                    if (!el) return;
+                    el.scrollTop = 0;
+                    setListScrollTop(0);
+                  }}
+                >
+                  {t.tr("Back to top", "回到顶部")}
+                </button>
+              ) : null}
+            </div>
+          ) : null}
           {selectedNames.length ? (
             <div className="row" style={{ marginBottom: 8, justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
               <span className="badge">
@@ -963,6 +1032,21 @@ export default function FilesView() {
                 ) : null}
               </tbody>
             </table>
+            {listScrollTop > 480 ? (
+              <button
+                type="button"
+                className="logNewPill"
+                onClick={() => {
+                  const el = listScrollRef.current;
+                  if (!el) return;
+                  el.scrollTop = 0;
+                  setListScrollTop(0);
+                }}
+                title={t.tr("Back to top", "回到顶部")}
+              >
+                {t.tr("Top", "顶部")}
+              </button>
+            ) : null}
           </div>
         </div>
 

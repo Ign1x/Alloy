@@ -605,6 +605,14 @@ export default function GamesView() {
     };
   }, [logLines, logScrollTop, wrapLogs, logViewportHeight]);
 
+  const logRangeLabel = useMemo(() => {
+    const total = logLines.length;
+    if (!total) return "";
+    const start = Math.max(0, logVirtual.start);
+    const end = Math.max(start, Math.min(total, logVirtual.end));
+    return `${Math.min(total, start + 1)}-${end} / ${total}`;
+  }, [logLines.length, logVirtual.end, logVirtual.start]);
+
   useEffect(() => {
     if (!selectedDaemon?.connected) return;
     const inst = instanceId.trim();
@@ -2556,8 +2564,30 @@ export default function GamesView() {
               {t.tr(`${newLogsCount} new logs`, `${newLogsCount} 条新日志`)}
             </button>
           ) : null}
+          {logScrollTop > 520 ? (
+            <button
+              type="button"
+              className="logTopPill"
+              onClick={() => {
+                const el = logScrollRef.current;
+                if (!el) return;
+                el.scrollTop = 0;
+                setLogScrollTop(0);
+              }}
+              title={t.tr("Back to top", "回到顶部")}
+            >
+              {t.tr("Top", "顶部")}
+            </button>
+          ) : null}
         </div>
-        <div className="hint">{t.tr("Tip: All shows current game + FRP logs.", "提示：All 会显示当前游戏 + FRP 的日志。")}</div>
+        <div className="row" style={{ justifyContent: "space-between", gap: 10 }}>
+          <div className="hint">{t.tr("Tip: All shows current game + FRP logs.", "提示：All 会显示当前游戏 + FRP 的日志。")}</div>
+          {logRangeLabel ? (
+            <span className="muted">
+              {t.tr("Range", "范围")}: <code>{logRangeLabel}</code>
+            </span>
+          ) : null}
+        </div>
 
         <div className="row" style={{ marginTop: 10, gap: 8, flexWrap: "wrap" }}>
           <span className="muted">{t.tr("Quick", "快捷")}:</span>
