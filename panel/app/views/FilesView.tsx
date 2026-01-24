@@ -1345,13 +1345,19 @@ export default function FilesView() {
             <div className="hint">
               {t.tr("sandbox", "沙箱")}: <code>servers/</code>
             </div>
-            <div className="hint" style={{ marginTop: 6 }}>
+            <div className="row" style={{ marginTop: 6 }}>
               {breadcrumbsView.collapsed ? (
                 <>
                   {(breadcrumbsView.head || []).map((c: any, idx: number) => (
-                    <span key={`${c.path}-${idx}`}>
+                    <span key={`${c.path}-${idx}`} style={{ minWidth: 0 }}>
                       {idx ? <span className="muted"> / </span> : null}
-                      <button type="button" className="linkBtn" onClick={() => navigateToPath(c.path)}>
+                      <button
+                        type="button"
+                        className="linkBtn"
+                        onClick={() => navigateToPath(c.path)}
+                        title={c.path ? `servers/${c.path}` : "servers/"}
+                        style={{ maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                      >
                         {c.label}
                       </button>
                     </span>
@@ -1367,9 +1373,15 @@ export default function FilesView() {
                     />
                   </span>
                   {(breadcrumbsView.tail || []).map((c: any, idx: number) => (
-                    <span key={`${c.path}-tail-${idx}`}>
+                    <span key={`${c.path}-tail-${idx}`} style={{ minWidth: 0 }}>
                       <span className="muted"> / </span>
-                      <button type="button" className="linkBtn" onClick={() => navigateToPath(c.path)}>
+                      <button
+                        type="button"
+                        className="linkBtn"
+                        onClick={() => navigateToPath(c.path)}
+                        title={c.path ? `servers/${c.path}` : "servers/"}
+                        style={{ maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                      >
                         {c.label}
                       </button>
                     </span>
@@ -1377,9 +1389,15 @@ export default function FilesView() {
                 </>
               ) : (
                 (breadcrumbsView.head || []).map((c: any, idx: number) => (
-                  <span key={`${c.path}-${idx}`}>
+                  <span key={`${c.path}-${idx}`} style={{ minWidth: 0 }}>
                     {idx ? <span className="muted"> / </span> : null}
-                    <button type="button" className="linkBtn" onClick={() => navigateToPath(c.path)}>
+                    <button
+                      type="button"
+                      className="linkBtn"
+                      onClick={() => navigateToPath(c.path)}
+                      title={c.path ? `servers/${c.path}` : "servers/"}
+                      style={{ maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                    >
                       {c.label}
                     </button>
                   </span>
@@ -1390,7 +1408,6 @@ export default function FilesView() {
                 text={fsPath ? `servers/${fsPath}` : "servers/"}
                 tooltip={t.tr("Copy path", "复制路径")}
                 ariaLabel={t.tr("Copy path", "复制路径")}
-                style={{ marginLeft: 8 }}
               />
             </div>
             {fsStatus ? <div className="hint">{fsStatus}</div> : null}
