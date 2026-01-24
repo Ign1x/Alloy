@@ -352,25 +352,35 @@ function computeJvmArgs(preset: any, extraText: any) {
 
 function Sparkline({
   values,
+  labels,
   width = 120,
   height = 28,
   stroke = "rgba(147, 197, 253, 0.95)",
+  fill,
 }: {
   values: Array<number | null | undefined>;
+  labels?: Array<string | null | undefined>;
   width?: number;
   height?: number;
   stroke?: string;
+  fill?: string;
 }) {
-  const vals = values.slice(-60).map((v) => (typeof v === "number" ? clamp(v, 0, 100) : 0));
-  const n = vals.length;
+  const points = values.slice(-120).map((v, i) => ({
+    v: typeof v === "number" ? clamp(v, 0, 100) : null,
+    label: labels && labels.length ? labels.slice(-120)[i] ?? null : null,
+  }));
+
+  const n = points.length;
   const step = n > 1 ? width / (n - 1) : width;
-  const pts = vals
-    .map((v, i) => {
+  const pts = points
+    .map((p, i) => {
       const x = i * step;
-      const y = height - (v / 100) * height;
+      const y = height - ((p.v ?? 0) / 100) * height;
       return `${x.toFixed(1)},${y.toFixed(1)}`;
     })
     .join(" ");
+
+  const hasValue = points.some((p) => typeof p.v === "number");
 
   return (
     <svg
@@ -380,8 +390,79 @@ function Sparkline({
       preserveAspectRatio="none"
       style={{ display: "block", width: "100%", height }}
     >
+      {fill && hasValue ? <polyline points={`${pts} ${width},${height} 0,${height}`} fill={fill} stroke="none" /> : null}
       <polyline points={pts} fill="none" stroke={stroke} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
     </svg>
+  );
+}
+
+function SparklineWithTooltip({
+  title,
+  values,
+  labels,
+  width,
+  height,
+  stroke,
+  fill,
+  format,
+}: {
+  title: string;
+  values: Array<number | null | undefined>;
+  labels?: Array<string | null | undefined>;
+  width: number;
+  height: number;
+  stroke: string;
+  fill?: string;
+  format?: (v: number) => string;
+}) {
+  const points = useMemo(() => {
+    const v = values.slice(-120);
+    const l = labels && labels.length ? labels.slice(-120) : [];
+    return v.map((x, i) => ({
+      v: typeof x === "number" ? clamp(x, 0, 100) : null,
+      label: l.length ? String(l[i] ?? "") : "",
+    }));
+  }, [labels, values]);
+
+  const [hoverIdx, setHoverIdx] = useState<number>(-1);
+
+  const onMove = useCallback(
+    (e: any) => {
+      const el = e.currentTarget as HTMLDivElement;
+      const rect = el.getBoundingClientRect();
+      const x = Math.max(0, Math.min(rect.width, (e.clientX || 0) - rect.left));
+      const n = points.length;
+      if (!n) return setHoverIdx(-1);
+      const idx = n <= 1 ? 0 : Math.round((x / rect.width) * (n - 1));
+      setHoverIdx(Math.max(0, Math.min(n - 1, idx)));
+    },
+    [points.length]
+  );
+
+  const hover = hoverIdx >= 0 && hoverIdx < points.length ? points[hoverIdx] : null;
+  const fmt = format || ((v: number) => `${v.toFixed(1)}%`);
+
+  return (
+    <div
+      className="sparkWrap"
+      style={{ width }}
+      onMouseMove={onMove}
+      onMouseLeave={() => setHoverIdx(-1)}
+      onFocus={onMove}
+      onBlur={() => setHoverIdx(-1)}
+      tabIndex={0}
+      aria-label={title}
+    >
+      <Sparkline values={values} labels={labels} width={width} height={height} stroke={stroke} fill={fill} />
+      {hover && (hover.v != null || hover.label) ? (
+        <div className="sparkTip" role="status" aria-live="polite">
+          <div style={{ fontWeight: 700 }}>{title}</div>
+          <div className="hint">
+            {hover.v == null ? "-" : fmt(hover.v)} {hover.label ? `· ${hover.label}` : ""}
+          </div>
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -9340,8 +9421,22 @@ export default function HomePage() {
 	                    ) : null}
 	                  </div>
 
-	                  <div className="card">
+	                    <div className="card">
 	                    <h3>{t.tr("Charts", "图表")}</h3>
+                      <div className="row" style={{ gap: 8, marginTop: 6, flexWrap: "wrap" }}>
+                        <span className="badge">
+                          <span style={{ width: 10, height: 10, borderRadius: 999, background: "rgba(147, 197, 253, 0.95)" }} />
+                          CPU
+                        </span>
+                        <span className="badge">
+                          <span style={{ width: 10, height: 10, borderRadius: 999, background: "rgba(34, 197, 94, 0.9)" }} />
+                          MEM
+                        </span>
+                        <span className="badge">
+                          <span style={{ width: 10, height: 10, borderRadius: 999, background: "rgba(251, 191, 36, 0.95)" }} />
+                          DISK
+                        </span>
+                      </div>
 	                    <div className="row" style={{ justifyContent: "space-between", alignItems: "end", gap: 10, marginBottom: 8 }}>
 	                      <div className="field" style={{ minWidth: 180 }}>
 	                        <label>{t.tr("Range", "范围")}</label>
@@ -9353,6 +9448,7 @@ export default function HomePage() {
 	                            { value: String(5 * 60), label: t.tr("Last 5m", "最近 5 分钟") },
 	                            { value: String(15 * 60), label: t.tr("Last 15m", "最近 15 分钟") },
 	                            { value: String(60 * 60), label: t.tr("Last 1h", "最近 1 小时") },
+	                            { value: String(6 * 60 * 60), label: t.tr("Last 6h", "最近 6 小时") },
 	                            { value: String(0), label: t.tr("All", "全部") },
 	                          ]}
 	                        />
@@ -9370,29 +9466,38 @@ export default function HomePage() {
 	                      CPU% · {t.tr("latest", "最新")}:{" "}
 	                      {nodeDetailsHistoryMeta.cpuLatest == null ? "-" : `${nodeDetailsHistoryMeta.cpuLatest.toFixed(1)}%`}
 	                    </div>
-	                    <Sparkline
+	                    <SparklineWithTooltip
+                        title="CPU"
 	                      values={nodeDetailsHistory.map((p: any) => p?.cpu_percent)}
+                        labels={nodeDetailsHistory.map((p: any) => fmtTime(p?.ts_unix))}
 	                      width={520}
 	                      height={80}
 	                      stroke="rgba(147, 197, 253, 0.95)"
+                        format={(v) => `${v.toFixed(1)}%`}
 	                    />
 	                    <div className="hint" style={{ marginTop: 10 }}>
 	                      MEM% · {t.tr("latest", "最新")}: {nodeDetailsHistoryMeta.memLatest == null ? "-" : `${nodeDetailsHistoryMeta.memLatest.toFixed(0)}%`}
 	                    </div>
-	                    <Sparkline
+	                    <SparklineWithTooltip
+                        title="MEM"
 	                      values={nodeDetailsHistory.map((p: any) => p?.mem_percent)}
+                        labels={nodeDetailsHistory.map((p: any) => fmtTime(p?.ts_unix))}
 	                      width={520}
 	                      height={80}
 	                      stroke="rgba(34, 197, 94, 0.9)"
+                        format={(v) => `${v.toFixed(0)}%`}
 	                    />
 	                    <div className="hint" style={{ marginTop: 10 }}>
 	                      DISK% · {t.tr("latest", "最新")}: {nodeDetailsHistoryMeta.diskLatest == null ? "-" : `${nodeDetailsHistoryMeta.diskLatest.toFixed(0)}%`}
 	                    </div>
-	                    <Sparkline
+	                    <SparklineWithTooltip
+                        title="DISK"
 	                      values={nodeDetailsHistory.map((p: any) => p?.disk_percent)}
+                        labels={nodeDetailsHistory.map((p: any) => fmtTime(p?.ts_unix))}
 	                      width={520}
 	                      height={80}
 	                      stroke="rgba(251, 191, 36, 0.95)"
+                        format={(v) => `${v.toFixed(0)}%`}
 	                    />
 	                  </div>
 	                </div>

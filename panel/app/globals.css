@@ -1135,6 +1135,30 @@ button.iconOnly {
   transition-delay: 0.35s;
 }
 
+.sparkWrap {
+  position: relative;
+  display: inline-block;
+  border-radius: 12px;
+  outline: none;
+}
+
+.sparkWrap:focus-visible {
+  box-shadow: 0 0 0 4px var(--ring);
+}
+
+.sparkTip {
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--card2);
+  box-shadow: var(--shadow2);
+  pointer-events: none;
+  max-width: min(360px, 70vw);
+}
+
 button:active {
   transform: translateY(1px);
 }
