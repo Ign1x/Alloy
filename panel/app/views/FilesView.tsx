@@ -1684,7 +1684,7 @@ export default function FilesView() {
           ) : null}
 
           {isJson && jsonCheck && !jsonCheck.ok ? (
-            <div className="hint" style={{ color: "var(--danger)", marginTop: 6 }}>
+            <div className="fieldError" style={{ marginTop: 6 }}>
               {t.tr("JSON error", "JSON 错误")}: {jsonCheck.message}
               {typeof jsonCheck.line === "number" && typeof jsonCheck.col === "number" ? (
                 <>
@@ -1701,7 +1701,7 @@ export default function FilesView() {
               {jsonCheck.message}
             </div>
           ) : isYaml && yamlCheck && !yamlCheck.ok ? (
-            <div className="hint" style={{ color: "var(--danger)", marginTop: 6 }}>
+            <div className="fieldError" style={{ marginTop: 6 }}>
               {t.tr("YAML error", "YAML 错误")}: {yamlCheck.message}
               {typeof yamlCheck.line === "number" && typeof yamlCheck.col === "number" ? (
                 <>

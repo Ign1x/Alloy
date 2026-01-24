@@ -2347,7 +2347,7 @@ export default function GamesView() {
               </button>
             </div>
             {wlErr ? (
-              <div className="hint" style={{ color: "var(--danger)", marginTop: 6 }}>
+              <div className="fieldError" style={{ marginTop: 6 }}>
                 {wlErr}
               </div>
             ) : null}
@@ -2437,7 +2437,7 @@ export default function GamesView() {
               </button>
             </div>
             {opErr ? (
-              <div className="hint" style={{ color: "var(--danger)", marginTop: 6 }}>
+              <div className="fieldError" style={{ marginTop: 6 }}>
                 {opErr}
               </div>
             ) : null}

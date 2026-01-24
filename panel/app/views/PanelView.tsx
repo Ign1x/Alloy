@@ -1222,7 +1222,7 @@ export default function PanelView() {
         </div>
 
         {!parsedSchedule.ok ? (
-          <div className="hint" style={{ color: "var(--danger)" }}>
+          <div className="fieldError">
             {t.tr("JSON parse error", "JSON 解析错误")}: {parsedSchedule.error}
           </div>
         ) : null}

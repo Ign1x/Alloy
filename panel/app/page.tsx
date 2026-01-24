@@ -8461,9 +8461,10 @@ export default function HomePage() {
 	                      value={installForm.instanceId}
 	                      onChange={(e) => setInstallForm((f) => ({ ...f, instanceId: e.target.value }))}
 	                      placeholder="my-server"
+	                      aria-invalid={!!installValidation.instErr}
 	                    />
 	                    {installValidation.instErr ? (
-	                      <div className="hint" style={{ color: "var(--danger)" }}>
+	                      <div className="fieldError">
 	                        {installValidation.instErr}
 	                      </div>
 	                    ) : (
@@ -8505,7 +8506,7 @@ export default function HomePage() {
 				                      ]}
 			                    />
 			                    {installValidation.kindErr ? (
-			                      <div className="hint" style={{ color: "var(--danger)" }}>
+			                      <div className="fieldError">
 			                        {installValidation.kindErr}
 			                      </div>
 			                    ) : (
@@ -8535,7 +8536,7 @@ export default function HomePage() {
 		                        onChange={(e) => setInstallZipFile(e.target.files?.[0] || null)}
 		                      />
 		                      {installValidation.zipErr ? (
-		                        <div className="hint" style={{ color: "var(--danger)" }}>
+		                        <div className="fieldError">
 		                          {installValidation.zipErr}
 		                        </div>
 		                      ) : (
@@ -8565,6 +8566,7 @@ export default function HomePage() {
 			                            setInstallForm((f) => ({ ...f, remoteUrl: e.target.value }));
 			                          }}
 			                          placeholder="https://..."
+			                          aria-invalid={!!installValidation.remoteErr}
 			                          style={{ flex: 1, minWidth: 220 }}
 			                        />
 			                        {/^https?:\/\/(www\.)?curseforge\.com\//i.test(String(installForm.remoteUrl || "").trim()) ? (
@@ -8785,7 +8787,7 @@ export default function HomePage() {
 			                          ) : null}
 
 			                          {installValidation.remoteErr ? (
-			                            <div className="hint" style={{ color: "var(--danger)" }}>
+			                            <div className="fieldError">
 			                              {installValidation.remoteErr}
 			                            </div>
 			                          ) : installForm.remoteUrl ? (
@@ -8863,11 +8865,12 @@ export default function HomePage() {
 	                      value={Number.isFinite(installForm.gamePort) ? installForm.gamePort : 25565}
 	                      onChange={(e) => setInstallForm((f) => ({ ...f, gamePort: Number(e.target.value) }))}
 	                      placeholder="25565"
+	                      aria-invalid={!!installValidation.portErr}
 	                      min={1}
 	                      max={65535}
 	                    />
 	                    {installValidation.portErr ? (
-	                      <div className="hint" style={{ color: "var(--danger)" }}>
+	                      <div className="fieldError">
 	                        {installValidation.portErr}
 	                      </div>
 	                    ) : (
@@ -8895,9 +8898,10 @@ export default function HomePage() {
 		                      value={installForm.jarName}
 		                      onChange={(e) => setInstallForm((f) => ({ ...f, jarName: e.target.value }))}
 		                      placeholder="server.jar"
+		                      aria-invalid={!!installValidation.jarErr}
 		                    />
 		                    {installValidation.jarErr ? (
-		                      <div className="hint" style={{ color: "var(--danger)" }}>
+		                      <div className="fieldError">
 		                        {installValidation.jarErr}
 		                      </div>
 		                    ) : (
@@ -8955,12 +8959,13 @@ export default function HomePage() {
 	                      value={Number.isFinite(installForm.frpRemotePort) ? installForm.frpRemotePort : 0}
 	                      onChange={(e) => setInstallForm((f) => ({ ...f, frpRemotePort: Number(e.target.value) }))}
 	                      placeholder="25566"
+	                      aria-invalid={!!installValidation.frpRemoteErr}
 	                      min={0}
 	                      max={65535}
 	                      disabled={!installForm.enableFrp}
 	                    />
 	                    {installValidation.frpRemoteErr ? (
-	                      <div className="hint" style={{ color: "var(--danger)" }}>
+	                      <div className="fieldError">
 	                        {installValidation.frpRemoteErr}
 	                      </div>
 	                    ) : (
@@ -8980,7 +8985,7 @@ export default function HomePage() {
 	                      }))}
 	                    />
                     {installForm.enableFrp && installValidation.frpProfileErr ? (
-                      <div className="hint" style={{ color: "var(--danger)" }}>
+                      <div className="fieldError">
                         {installValidation.frpProfileErr}{" "}
                         {locale === "zh" ? (
                           <>
@@ -9280,9 +9285,9 @@ export default function HomePage() {
                   {showSettingsField("jar path", "jar", "path", "server.jar") ? (
                     <div className="field">
                       <label>{t.tr("Jar path (relative)", "Jar 路径（相对）")}</label>
-                      <input value={jarPath} onChange={(e) => setJarPath(e.target.value)} placeholder="server.jar" />
+                      <input value={jarPath} onChange={(e) => setJarPath(e.target.value)} placeholder="server.jar" aria-invalid={!!settingsValidation.jarErr} />
                       {settingsValidation.jarErr ? (
-                        <div className="hint" style={{ color: "var(--danger)" }}>
+                        <div className="fieldError">
                           {settingsValidation.jarErr}
                         </div>
                       ) : (
@@ -9422,11 +9427,12 @@ export default function HomePage() {
                         type="number"
                         value={Number.isFinite(gamePort) ? gamePort : 25565}
                         onChange={(e) => setGamePort(Number(e.target.value))}
+                        aria-invalid={!!settingsValidation.portErr}
                         min={1}
                         max={65535}
                       />
                       {settingsValidation.portErr ? (
-                        <div className="hint" style={{ color: "var(--danger)" }}>
+                        <div className="fieldError">
                           {settingsValidation.portErr}
                         </div>
                       ) : (
@@ -9452,12 +9458,13 @@ export default function HomePage() {
                         value={Number.isFinite(frpRemotePort) ? frpRemotePort : 0}
                         onChange={(e) => setFrpRemotePort(Number(e.target.value))}
                         placeholder="25566"
+                        aria-invalid={!!settingsValidation.frpRemoteErr}
                         min={0}
                         max={65535}
                         disabled={!enableFrp}
                       />
                       {settingsValidation.frpRemoteErr ? (
-                        <div className="hint" style={{ color: "var(--danger)" }}>
+                        <div className="fieldError">
                           {settingsValidation.frpRemoteErr}
                         </div>
                       ) : (
