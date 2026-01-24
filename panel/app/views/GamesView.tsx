@@ -157,6 +157,7 @@ export default function GamesView() {
     selectedProfile,
     frpRemotePort,
     setTab,
+    openHelpModal,
     confirmDialog,
     fmtUnix,
     fmtTime,
@@ -1286,6 +1287,45 @@ export default function GamesView() {
                 </div>
               </div>
             </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (selectedDaemon && !selectedDaemon.connected) {
+    return (
+      <div className="card">
+        <div className="toolbar">
+          <div className="toolbarLeft" style={{ alignItems: "center" }}>
+            <div>
+              <h2>{t.tr("Game", "游戏")}</h2>
+              <div className="hint">
+                {t.tr("daemon", "daemon")}: <code>{String(selectedDaemon?.id || "-")}</code> · {t.tr("status", "状态")}:{" "}
+                <span className="badge">{t.tr("offline", "离线")}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className="emptyState">
+          <div style={{ fontWeight: 800 }}>{t.tr("Daemon offline", "Daemon 离线")}</div>
+          <div className="hint" style={{ marginTop: 6 }}>
+            {t.tr("This page needs an online daemon to manage game instances.", "本页需要 Daemon 在线才能管理游戏实例。")} {t.tr("last seen", "最后在线")}:{" "}
+            <code>{selectedDaemon?.lastSeenUnix ? <TimeAgo unix={selectedDaemon.lastSeenUnix} /> : "-"}</code>
+          </div>
+          <div className="hint" style={{ marginTop: 8, whiteSpace: "pre-wrap" }}>
+            {t.tr(
+              "Recommended checks:\n1) Is the daemon process/container running?\n2) Verify ELEGANTMC_PANEL_WS_URL / DNS / firewall.\n3) Verify daemon token matches the node in Panel.",
+              "建议排查：\n1) Daemon 进程/容器是否在运行？\n2) 检查 ELEGANTMC_PANEL_WS_URL / DNS / 防火墙。\n3) 检查 daemon token 是否与 Panel 中节点一致。"
+            )}
+          </div>
+          <div className="btnGroup" style={{ justifyContent: "center", marginTop: 10 }}>
+            <button type="button" className="primary" onClick={() => setTab("nodes")}>
+              {t.tr("Go to Nodes", "前往 Nodes")}
+            </button>
+            <button type="button" className="iconBtn" onClick={openHelpModal}>
+              {t.tr("Troubleshoot", "排查")}
+            </button>
           </div>
         </div>
       </div>

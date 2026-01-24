@@ -7719,8 +7719,8 @@ export default function HomePage() {
     uploadZipAndExtractHere,
     uploadStatus,
     refreshFsNow,
-    mkdirFsHere,
-    createFileHere,
+	    mkdirFsHere,
+	    createFileHere,
 	    renameFsEntry,
 	    moveFsEntry,
 	    downloadFsEntry,
@@ -7732,17 +7732,18 @@ export default function HomePage() {
 	    // Advanced
 	    cmdName,
 	    setCmdName,
-    cmdArgs,
-    setCmdArgs,
-    cmdResult,
-    runAdvancedCommand,
+	    cmdArgs,
+	    setCmdArgs,
+	    cmdResult,
+	    runAdvancedCommand,
 
 	    // Helpers
 	    apiFetch,
 	    copyText,
 	    confirmDialog,
-      promptDialog,
-      openShareView,
+	    promptDialog,
+	    openHelpModal,
+	    openShareView,
 	    makeDeployComposeYml,
 	    maskToken,
 	    pct,
@@ -7753,14 +7754,14 @@ export default function HomePage() {
 	    parentRelPath,
 
       // Game helpers
-      startFrpProxyNow,
-      repairInstance,
-      updateModrinthPack,
+	      startFrpProxyNow,
+	      repairInstance,
+	      updateModrinthPack,
 	  };
 
   return (
     <ErrorBoundary>
-    <AppCtxProvider value={appCtxValue}>
+      <AppCtxProvider value={appCtxValue}>
       {authed !== true ? (
         <div className="modalOverlay">
           <div className="modal" style={{ width: "min(560px, 100%)" }} onClick={(e) => e.stopPropagation()}>
