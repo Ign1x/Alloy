@@ -39,6 +39,7 @@ export default function PanelView() {
   const [sessions, setSessions] = useState<any[]>([]);
   const [sessionsStatus, setSessionsStatus] = useState<string>("");
   const [sessionsBusy, setSessionsBusy] = useState<boolean>(false);
+  const [sessionsQuery, setSessionsQuery] = useState<string>("");
 
   const [users, setUsers] = useState<any[]>([]);
   const [usersStatus, setUsersStatus] = useState<string>("");
@@ -558,6 +559,19 @@ export default function PanelView() {
     });
   }, [apiTokenQuery, apiTokens]);
 
+  const filteredSessions = useMemo(() => {
+    const q = sessionsQuery.trim().toLowerCase();
+    if (!q) return sessions;
+    return (Array.isArray(sessions) ? sessions : []).filter((s: any) => {
+      const masked = String(s?.token_masked || "");
+      const user = String(s?.username || s?.user_id || "");
+      const ip = String(s?.ip || "");
+      const ua = String(s?.user_agent || "");
+      const hay = `${masked} ${user} ${ip} ${ua}`.toLowerCase();
+      return hay.includes(q);
+    });
+  }, [sessions, sessionsQuery]);
+
   function uniqueTaskId(existingTasks: any[], base: string) {
     const used = new Set((existingTasks || []).map((t) => String(t?.id || "").trim()).filter(Boolean));
     const root = String(base || "task").trim() || "task";
@@ -769,6 +783,31 @@ export default function PanelView() {
       if (last < atRaw) return fmtUnix(atRaw);
     }
     return "-";
+  }
+
+  function summarizeUserAgent(uaRaw: string) {
+    const ua = String(uaRaw || "").trim();
+    if (!ua) return t.tr("Unknown device", "未知设备");
+    const u = ua.toLowerCase();
+
+    let browser = "";
+    if (u.includes("edg/")) browser = "Edge";
+    else if (u.includes("opr/") || u.includes("opera")) browser = "Opera";
+    else if (u.includes("chrome/") && !u.includes("chromium")) browser = "Chrome";
+    else if (u.includes("chromium")) browser = "Chromium";
+    else if (u.includes("firefox/")) browser = "Firefox";
+    else if (u.includes("safari/") && u.includes("applewebkit") && !u.includes("chrome/")) browser = "Safari";
+    else if (u.includes("curl/")) browser = "curl";
+
+    let os = "";
+    if (u.includes("windows nt")) os = "Windows";
+    else if (u.includes("android")) os = "Android";
+    else if (u.includes("iphone") || u.includes("ipad")) os = "iOS";
+    else if (u.includes("mac os x")) os = "macOS";
+    else if (u.includes("linux")) os = "Linux";
+
+    const out = [browser, os].filter(Boolean).join(" · ");
+    return out || t.tr("Unknown device", "未知设备");
   }
 
   const toc = [
@@ -1584,45 +1623,108 @@ export default function PanelView() {
           </div>
         </div>
 
-        {sessions.length ? (
-          <table>
-            <thead>
-              <tr>
-                <th>{t.tr("Session", "会话")}</th>
-                <th>{t.tr("User", "用户")}</th>
-                <th>{t.tr("Created", "创建")}</th>
-                <th>{t.tr("Expires", "过期")}</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {sessions.map((s: any) => {
-                const id = String(s?.id || "").trim();
-                const masked = String(s?.token_masked || "").trim() || "-";
-                const user = String(s?.username || s?.user_id || "").trim() || "-";
-                const createdUnix = s?.created_at_unix ? Number(s.created_at_unix) : 0;
-                const expiresUnix = s?.expires_at_unix ? Number(s.expires_at_unix) : 0;
-                const current = !!s?.current;
-                return (
-                  <tr key={id || masked}>
-                    <td style={{ minWidth: 220 }}>
-                      <code>{masked}</code> {current ? <span className="badge ok">{t.tr("current", "当前")}</span> : null}
-                    </td>
-                    <td>{user}</td>
-                    <td>{createdUnix ? <TimeAgo unix={createdUnix} /> : "-"}</td>
-                    <td>{expiresUnix ? <TimeAgo unix={expiresUnix} /> : "-"}</td>
-                    <td style={{ textAlign: "right" }}>
-                      <div className="btnGroup" style={{ justifyContent: "flex-end" }}>
-                        <button type="button" className="dangerBtn" onClick={() => revokeSession(id, masked)} disabled={sessionsBusy || !id}>
-                          {t.tr("Revoke", "撤销")}
-                        </button>
+        <div className="row" style={{ gap: 10, flexWrap: "wrap", marginTop: 12, alignItems: "end" }}>
+          <Field
+            label={t.tr("Search", "搜索")}
+            hint={
+              sessions.length
+                ? t.tr(`Showing ${filteredSessions.length} of ${sessions.length}`, `显示 ${filteredSessions.length}/${sessions.length}`)
+                : t.tr("No sessions yet.", "暂无会话。")
+            }
+            style={{ minWidth: 260, flex: 1 }}
+          >
+            <input
+              value={sessionsQuery}
+              onChange={(e) => setSessionsQuery(e.target.value)}
+              placeholder={t.tr("Search by user, IP, or device…", "按用户、IP 或设备搜索…")}
+            />
+          </Field>
+          <div className="hint" style={{ alignSelf: "end" }}>
+            {t.tr("Revoke sessions you don't recognize.", "撤销你不认识的会话。")}
+          </div>
+        </div>
+
+        {filteredSessions.length ? (
+          <div className="cardGrid" style={{ marginTop: 12 }}>
+            {filteredSessions.map((s: any) => {
+              const id = String(s?.id || "").trim();
+              const masked = String(s?.token_masked || "").trim() || "-";
+              const user = String(s?.username || s?.user_id || "").trim() || "-";
+              const createdUnix = s?.created_at_unix ? Number(s.created_at_unix) : 0;
+              const lastSeenUnix = s?.last_seen_at_unix ? Number(s.last_seen_at_unix) : 0;
+              const expiresUnix = s?.expires_at_unix ? Number(s.expires_at_unix) : 0;
+              const ip = String(s?.ip || "").trim();
+              const ua = String(s?.user_agent || "").trim();
+              const device = summarizeUserAgent(ua);
+              const current = !!s?.current;
+              const uaShort = ua.length > 90 ? `${ua.slice(0, 90)}…` : ua;
+
+              return (
+                <div key={id || masked} className={`itemCard sessionCard ${current ? "current" : ""}`}>
+                  <div className="itemCardHeader">
+                    <div style={{ minWidth: 0 }}>
+                      <div className="itemTitle">
+                        <code>{masked}</code>
                       </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                      <div className="itemMeta">
+                        {device}
+                        {ip ? ` · ${ip}` : ""}
+                      </div>
+                    </div>
+                    <div className="itemActions">
+                      {current ? <span className="badge ok">{t.tr("current", "当前")}</span> : null}
+                      <button type="button" className="dangerBtn" onClick={() => revokeSession(id, masked)} disabled={sessionsBusy || !id}>
+                        {t.tr("Revoke", "撤销")}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid2" style={{ alignItems: "start" }}>
+                    <div className="kv">
+                      <div className="k">{t.tr("User", "用户")}</div>
+                      <div className="v">
+                        <code>{user}</code>
+                      </div>
+                    </div>
+                    <div className="kv">
+                      <div className="k">{t.tr("IP", "IP")}</div>
+                      <div className="v">
+                        <code>{ip || "-"}</code>
+                        <CopyButton text={ip} iconOnly tooltip={t.tr("Copy IP", "复制 IP")} ariaLabel={t.tr("Copy IP", "复制 IP")} disabled={!ip} />
+                      </div>
+                    </div>
+                    <div className="kv">
+                      <div className="k">{t.tr("Created", "创建")}</div>
+                      <div className="v">{createdUnix ? <TimeAgo unix={createdUnix} /> : "-"}</div>
+                    </div>
+                    <div className="kv">
+                      <div className="k">{t.tr("Last seen", "最近访问")}</div>
+                      <div className="v">{lastSeenUnix ? <TimeAgo unix={lastSeenUnix} /> : "-"}</div>
+                    </div>
+                    <div className="kv">
+                      <div className="k">{t.tr("Expires", "过期")}</div>
+                      <div className="v">{expiresUnix ? <TimeAgo unix={expiresUnix} /> : "-"}</div>
+                    </div>
+                    <div className="kv">
+                      <div className="k">{t.tr("User agent", "User Agent")}</div>
+                      <div className="v">
+                        <code title={ua}>{uaShort || "-"}</code>
+                        <CopyButton
+                          text={ua}
+                          iconOnly
+                          tooltip={t.tr("Copy user agent", "复制 User Agent")}
+                          ariaLabel={t.tr("Copy user agent", "复制 User Agent")}
+                          disabled={!ua}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : sessions.length ? (
+          <div className="emptyState">{t.tr("No matches.", "没有匹配项。")}</div>
         ) : (
           <div className="emptyState">{t.tr("No sessions found.", "暂无会话。")}</div>
         )}

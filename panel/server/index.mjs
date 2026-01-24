@@ -236,7 +236,8 @@ function isAllowedAdvancedCommand(name) {
 
 const SESSION_COOKIE = "elegantmc_session";
 const SESSION_TTL_SEC = 60 * 60 * 24 * 7;
-const sessions = new Map(); // token -> { expiresAtUnix, createdAtUnix? }
+const sessions = new Map(); // token -> { expiresAtUnix, createdAtUnix?, lastSeenAtUnix?, ip?, ua?, user_id?, username? }
+let sessionsDirty = false;
 const SESSIONS_PATH = path.join(PANEL_DATA_DIR, "sessions.json");
 let sessionsWriteChain = Promise.resolve();
 
@@ -375,13 +376,19 @@ function serializeSessions() {
     const expiresAtUnix = Number(s?.expiresAtUnix || 0);
     if (!Number.isFinite(expiresAtUnix) || expiresAtUnix <= 0) continue;
     const createdAtUnix = Number(s?.createdAtUnix || 0);
+    const lastSeenAtUnix = Number(s?.lastSeenAtUnix || 0);
     const user_id = String(s?.user_id || "").trim();
     const username = String(s?.username || "").trim();
+    const ip = String(s?.ip || "").trim().slice(0, 64);
+    const ua = String(s?.ua || "").trim().slice(0, 256);
     out[token] = {
       expiresAtUnix,
       ...(Number.isFinite(createdAtUnix) && createdAtUnix > 0 ? { createdAtUnix } : {}),
+      ...(Number.isFinite(lastSeenAtUnix) && lastSeenAtUnix > 0 ? { lastSeenAtUnix } : {}),
       ...(user_id ? { user_id } : {}),
       ...(username ? { username } : {}),
+      ...(ip ? { ip } : {}),
+      ...(ua ? { ua } : {}),
     };
   }
   return { updated_at_unix: nowUnix(), sessions: out };
@@ -419,17 +426,29 @@ async function loadSessionsFromDisk() {
     for (const [token, s] of Object.entries(obj)) {
       const expiresAtUnix = Number(s?.expiresAtUnix || 0);
       const createdAtUnix = Number(s?.createdAtUnix || 0);
+      const lastSeenAtUnixRaw = Number(s?.lastSeenAtUnix || 0);
       const user_id = String(s?.user_id || "").trim() || (admin?.id ? String(admin.id) : "");
       const username =
         String(s?.username || "").trim() ||
         (user_id && admin?.id && user_id === admin.id ? "admin" : getUserByID(user_id)?.username || "");
+      const ip = String(s?.ip || "").trim().slice(0, 64);
+      const ua = String(s?.ua || "").replace(/[\r\n]+/g, " ").trim().slice(0, 256);
       if (!token || typeof token !== "string") continue;
       if (!Number.isFinite(expiresAtUnix) || expiresAtUnix <= now) continue;
+      const lastSeenAtUnix =
+        Number.isFinite(lastSeenAtUnixRaw) && lastSeenAtUnixRaw > 0
+          ? lastSeenAtUnixRaw
+          : Number.isFinite(createdAtUnix) && createdAtUnix > 0
+            ? createdAtUnix
+            : 0;
       sessions.set(token, {
         expiresAtUnix,
         ...(Number.isFinite(createdAtUnix) && createdAtUnix > 0 ? { createdAtUnix } : {}),
+        ...(Number.isFinite(lastSeenAtUnix) && lastSeenAtUnix > 0 ? { lastSeenAtUnix } : {}),
         ...(user_id ? { user_id } : {}),
         ...(username ? { username } : {}),
+        ...(ip ? { ip } : {}),
+        ...(ua ? { ua } : {}),
       });
     }
   } catch (e) {
@@ -978,6 +997,24 @@ function getSession(req) {
     queueSessionsSave();
     return null;
   }
+  const ip = getClientIP(req) || "";
+  const ua = typeof req.headers?.["user-agent"] === "string" ? req.headers["user-agent"] : "";
+  const uaNorm = String(ua || "").replace(/[\r\n]+/g, " ").trim().slice(0, 256);
+  const ipNorm = String(ip || "").trim().slice(0, 64);
+
+  const prevSeen = Number(session?.lastSeenAtUnix || 0);
+  const shouldTouch = !Number.isFinite(prevSeen) || prevSeen <= 0 || now-prevSeen >= 15;
+  const changed = shouldTouch || (ipNorm && ipNorm !== String(session?.ip || "")) || (uaNorm && uaNorm !== String(session?.ua || ""));
+  if (changed) {
+    const next = { ...session };
+    if (shouldTouch) next.lastSeenAtUnix = now;
+    if (ipNorm) next.ip = ipNorm;
+    if (uaNorm) next.ua = uaNorm;
+    sessions.set(token, next);
+    sessionsDirty = true;
+    return { token, ...next };
+  }
+
   return { token, ...session };
 }
 
@@ -1075,7 +1112,10 @@ setInterval(() => {
   for (const [ip, st] of loginAttempts.entries()) {
     if (!st?.resetAtUnix || now >= st.resetAtUnix) loginAttempts.delete(ip);
   }
-  if (sessionsChanged) queueSessionsSave();
+  if (sessionsChanged || sessionsDirty) {
+    sessionsDirty = false;
+    queueSessionsSave();
+  }
 }, 60_000).unref?.();
 
 let mcVersionsCache = { atUnix: 0, versions: null, error: "" };
@@ -1681,7 +1721,18 @@ const server = http.createServer(async (req, res) => {
 
         const token = randomBytes(24).toString("base64url");
         const now = nowUnix();
-        sessions.set(token, { expiresAtUnix: now + SESSION_TTL_SEC, createdAtUnix: now, user_id: u.id, username: u.username });
+        const ip = String(getClientIP(req) || "").trim().slice(0, 64);
+        const ua = typeof req.headers?.["user-agent"] === "string" ? req.headers["user-agent"] : "";
+        const uaNorm = String(ua || "").replace(/[\r\n]+/g, " ").trim().slice(0, 256);
+        sessions.set(token, {
+          expiresAtUnix: now + SESSION_TTL_SEC,
+          createdAtUnix: now,
+          lastSeenAtUnix: now,
+          ...(ip ? { ip } : {}),
+          ...(uaNorm ? { ua: uaNorm } : {}),
+          user_id: u.id,
+          username: u.username,
+        });
         queueSessionsSave();
         appendAudit(req, "auth.login_ok", { token: maskToken(token), username: u.username });
         loginAttempts.delete(getClientIP(req) || "unknown");
@@ -1739,14 +1790,25 @@ const server = http.createServer(async (req, res) => {
         const expiresAtUnix = Number(s?.expiresAtUnix || 0);
         if (!Number.isFinite(expiresAtUnix) || expiresAtUnix <= now) continue;
         const createdAtUnix = Number(s?.createdAtUnix || 0);
+        const lastSeenAtUnix = Number(s?.lastSeenAtUnix || 0);
         const user_id = String(s?.user_id || "").trim();
         const username = String(s?.username || "").trim();
+        const ip = String(s?.ip || "").trim().slice(0, 64);
+        const ua = String(s?.ua || "").trim().slice(0, 256);
         list.push({
           id: sessionID(token),
           token_masked: maskToken(token),
           user_id: user_id || null,
           username: username || null,
           created_at_unix: Number.isFinite(createdAtUnix) && createdAtUnix > 0 ? createdAtUnix : null,
+          last_seen_at_unix:
+            Number.isFinite(lastSeenAtUnix) && lastSeenAtUnix > 0
+              ? lastSeenAtUnix
+              : Number.isFinite(createdAtUnix) && createdAtUnix > 0
+                ? createdAtUnix
+                : null,
+          ip: ip || null,
+          user_agent: ua || null,
           expires_at_unix: expiresAtUnix,
           current: token === session.token,
         });
@@ -2008,7 +2070,18 @@ const server = http.createServer(async (req, res) => {
         if (curTok) sessions.delete(curTok);
 
         const newTok = randomBytes(24).toString("base64url");
-        sessions.set(newTok, { expiresAtUnix: now + SESSION_TTL_SEC, createdAtUnix: now, user_id: u.id, username: u.username });
+        const ip = String(getClientIP(req) || "").trim().slice(0, 64);
+        const ua = typeof req.headers?.["user-agent"] === "string" ? req.headers["user-agent"] : "";
+        const uaNorm = String(ua || "").replace(/[\r\n]+/g, " ").trim().slice(0, 256);
+        sessions.set(newTok, {
+          expiresAtUnix: now + SESSION_TTL_SEC,
+          createdAtUnix: now,
+          lastSeenAtUnix: now,
+          ...(ip ? { ip } : {}),
+          ...(uaNorm ? { ua: uaNorm } : {}),
+          user_id: u.id,
+          username: u.username,
+        });
         queueSessionsSave();
 
         res.setHeader(

@@ -831,6 +831,15 @@ button.navItem .badge {
   min-width: 0;
 }
 
+.sessionCard.current {
+  border-color: var(--primary-border);
+  background: rgba(139, 92, 246, 0.10);
+}
+
+:root[data-theme="light"] .sessionCard.current {
+  background: rgba(124, 58, 237, 0.08);
+}
+
 .itemCardHeader {
   display: flex;
   align-items: flex-start;
