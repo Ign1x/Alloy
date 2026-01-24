@@ -952,6 +952,17 @@ export default function HomePage() {
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploadInputKey, setUploadInputKey] = useState<number>(0);
   const [uploadStatus, setUploadStatus] = useState<string>("");
+  type UploadItem = {
+    id: string;
+    file: File;
+    destPath: string;
+    bytesTotal: number;
+    bytesUploaded: number;
+    status: "queued" | "uploading" | "done" | "failed";
+    error?: string;
+  };
+  const [uploadItems, setUploadItems] = useState<UploadItem[]>([]);
+  const [uploadBusy, setUploadBusy] = useState<boolean>(false);
 
   // Server controls
   const [instanceId, setInstanceId] = useState<string>("");
@@ -4532,62 +4543,107 @@ export default function HomePage() {
     }
   }
 
-  async function uploadFilesNow(filesLike: File[] | FileList) {
+  function updateUploadItem(id: string, patch: Partial<UploadItem>) {
+    const iid = String(id || "");
+    if (!iid) return;
+    setUploadItems((prev) => prev.map((it) => (it.id === iid ? { ...it, ...patch } : it)));
+  }
+
+  async function uploadOneFile(item: UploadItem): Promise<{ ok: boolean; error?: string }> {
+    const file = item.file;
+    const destPath = item.destPath;
+    const chunkSize = 256 * 1024; // 256KB
+
+    let uploadID = "";
+    updateUploadItem(item.id, { status: "uploading", bytesUploaded: 0, error: "" });
+    setUploadStatus(t.tr(`Begin: ${destPath} (${file.size} bytes)`, `开始：${destPath}（${file.size} bytes）`));
+
+    try {
+      const begin = await callOkCommand("fs_upload_begin", { path: destPath });
+      uploadID = String(begin.upload_id || "");
+      if (!uploadID) throw new Error(t.tr("upload_id missing", "upload_id 缺失"));
+
+      for (let off = 0; off < file.size; off += chunkSize) {
+        const end = Math.min(off + chunkSize, file.size);
+        const ab = await file.slice(off, end).arrayBuffer();
+        const b64 = b64EncodeBytes(new Uint8Array(ab));
+        await callOkCommand("fs_upload_chunk", { upload_id: uploadID, b64 });
+        updateUploadItem(item.id, { bytesUploaded: end });
+        setUploadStatus(t.tr(`Uploading ${destPath}: ${end}/${file.size} bytes`, `上传中 ${destPath}: ${end}/${file.size} bytes`));
+      }
+
+      const commit = await callOkCommand("fs_upload_commit", { upload_id: uploadID });
+      updateUploadItem(item.id, { status: "done", bytesUploaded: file.size });
+      setUploadStatus(
+        t.tr(
+          `Done: ${commit.path || destPath} (${commit.bytes || file.size} bytes)`,
+          `完成：${commit.path || destPath}（${commit.bytes || file.size} bytes）`
+        )
+      );
+      return { ok: true };
+    } catch (e: any) {
+      if (uploadID) {
+        try {
+          await callOkCommand("fs_upload_abort", { upload_id: uploadID });
+        } catch {
+          // ignore
+        }
+      }
+      const msg = String(e?.message || e);
+      updateUploadItem(item.id, { status: "failed", error: msg });
+      setUploadStatus(t.tr(`Upload failed: ${msg}`, `上传失败：${msg}`));
+      return { ok: false, error: msg };
+    }
+  }
+
+  async function uploadFilesNow(filesLike: File[] | FileList): Promise<{ ok: number; failed: number }> {
+    if (uploadBusy) {
+      setUploadStatus(t.tr("Upload in progress", "已有上传任务进行中"));
+      return { ok: 0, failed: 0 };
+    }
+
     const files = Array.isArray(filesLike) ? filesLike : Array.from(filesLike || []);
     const list = files.filter(Boolean);
     if (!list.length) {
       setUploadStatus(t.tr("Select file(s) first", "请先选择文件"));
-      return;
+      return { ok: 0, failed: 0 };
     }
     if (!selected) {
       setUploadStatus(t.tr("Select a daemon first", "请先选择 Daemon"));
-      return;
+      return { ok: 0, failed: 0 };
     }
 
-    for (const file of list) {
-      const err = validateFsNameSegment(file.name);
-      if (err) {
-        setUploadStatus(err);
-        return;
-      }
+    const batchId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const items: UploadItem[] = list.map((file, idx) => ({
+      id: `${batchId}-${idx}`,
+      file,
+      destPath: joinRelPath(fsPath, file.name),
+      bytesTotal: Number(file.size || 0),
+      bytesUploaded: 0,
+      status: "queued",
+    }));
+    setUploadItems(items);
+    setUploadBusy(true);
 
-      const destPath = joinRelPath(fsPath, file.name);
-      const chunkSize = 256 * 1024; // 256KB
+    let ok = 0;
+    let failed = 0;
 
-      let uploadID = "";
-      setUploadStatus(t.tr(`Begin: ${destPath} (${file.size} bytes)`, `开始：${destPath}（${file.size} bytes）`));
-
-      try {
-        const begin = await callOkCommand("fs_upload_begin", { path: destPath });
-        uploadID = String(begin.upload_id || "");
-        if (!uploadID) throw new Error(t.tr("upload_id missing", "upload_id 缺失"));
-
-        for (let off = 0; off < file.size; off += chunkSize) {
-          const end = Math.min(off + chunkSize, file.size);
-          const ab = await file.slice(off, end).arrayBuffer();
-          const b64 = b64EncodeBytes(new Uint8Array(ab));
-          await callOkCommand("fs_upload_chunk", { upload_id: uploadID, b64 });
-          setUploadStatus(t.tr(`Uploading ${destPath}: ${end}/${file.size} bytes`, `上传中 ${destPath}: ${end}/${file.size} bytes`));
+    try {
+      for (const item of items) {
+        const err = validateFsNameSegment(item.file.name);
+        if (err) {
+          updateUploadItem(item.id, { status: "failed", error: err });
+          setUploadStatus(err);
+          failed++;
+          continue;
         }
 
-        const commit = await callOkCommand("fs_upload_commit", { upload_id: uploadID });
-        setUploadStatus(
-          t.tr(
-            `Done: ${commit.path || destPath} (${commit.bytes || file.size} bytes)`,
-            `完成：${commit.path || destPath}（${commit.bytes || file.size} bytes）`
-          )
-        );
-      } catch (e: any) {
-        if (uploadID) {
-          try {
-            await callOkCommand("fs_upload_abort", { upload_id: uploadID });
-          } catch {
-            // ignore
-          }
-        }
-        setUploadStatus(t.tr(`Upload failed: ${String(e?.message || e)}`, `上传失败：${String(e?.message || e)}`));
-        return;
+        const res = await uploadOneFile(item);
+        if (res.ok) ok++;
+        else failed++;
       }
+    } finally {
+      setUploadBusy(false);
     }
 
     setUploadFile(null);
@@ -4598,6 +4654,74 @@ export default function HomePage() {
     } catch {
       // ignore
     }
+
+    if (ok && !failed) pushToast(t.tr(`Uploaded ${ok} file(s)`, `上传完成：${ok} 个文件`), "ok");
+    else if (ok && failed) pushToast(t.tr(`Uploaded ${ok}, ${failed} failed`, `上传完成：成功 ${ok} 个，失败 ${failed} 个`), "error", 6000);
+    else pushToast(t.tr(`Upload failed (${failed})`, `上传失败：${failed} 个`), "error", 6000);
+
+    return { ok, failed };
+  }
+
+  async function retryUploadItem(uploadItemId: string) {
+    if (uploadBusy) return;
+    if (!selected) {
+      setUploadStatus(t.tr("Select a daemon first", "请先选择 Daemon"));
+      return;
+    }
+    const id = String(uploadItemId || "");
+    if (!id) return;
+    const item = (Array.isArray(uploadItems) ? uploadItems : []).find((x) => x && x.id === id) || null;
+    if (!item) return;
+
+    setUploadBusy(true);
+    try {
+      const res = await uploadOneFile(item);
+      if (res.ok) pushToast(t.tr(`Uploaded: ${item.destPath}`, `上传完成：${item.destPath}`), "ok");
+      else pushToast(t.tr(`Upload failed: ${item.destPath}`, `上传失败：${item.destPath}`), "error", 6000, String(res.error || ""));
+    } finally {
+      setUploadBusy(false);
+    }
+
+    try {
+      const payload = await callOkCommand("fs_list", { path: fsPath });
+      setFsEntries(payload.entries || []);
+    } catch {
+      // ignore
+    }
+  }
+
+  async function retryFailedUploads() {
+    if (uploadBusy) return;
+    if (!selected) {
+      setUploadStatus(t.tr("Select a daemon first", "请先选择 Daemon"));
+      return;
+    }
+
+    const failedItems = (Array.isArray(uploadItems) ? uploadItems : []).filter((x) => x && x.status === "failed");
+    if (!failedItems.length) return;
+
+    setUploadBusy(true);
+    let ok = 0;
+    let failed = 0;
+    try {
+      for (const item of failedItems) {
+        const res = await uploadOneFile(item);
+        if (res.ok) ok++;
+        else failed++;
+      }
+    } finally {
+      setUploadBusy(false);
+    }
+
+    try {
+      const payload = await callOkCommand("fs_list", { path: fsPath });
+      setFsEntries(payload.entries || []);
+    } catch {
+      // ignore
+    }
+
+    if (ok && !failed) pushToast(t.tr(`Retried ${ok} file(s)`, `重试完成：成功 ${ok} 个`), "ok");
+    else pushToast(t.tr(`Retried ${ok}, ${failed} failed`, `重试完成：成功 ${ok} 个，失败 ${failed} 个`), "error", 6000);
   }
 
   async function uploadSelectedFile() {
@@ -4631,7 +4755,8 @@ export default function HomePage() {
 
     const destPath = joinRelPath(fsPath, file.name);
     try {
-      await uploadFilesNow([file]);
+      const res = await uploadFilesNow([file]);
+      if (!res.ok || res.failed) return;
       setUploadStatus(t.tr(`Extracting ${destPath} ...`, `解压中 ${destPath} ...`));
       await callOkCommand("fs_unzip", { zip_path: destPath, dest_dir: fsPath, instance_id: fsPath, strip_top_level: false }, 10 * 60_000);
       try {
@@ -7823,10 +7948,14 @@ export default function HomePage() {
     uploadInputKey,
     uploadFile,
     setUploadFile,
+    uploadItems,
+    uploadBusy,
     uploadSelectedFile,
     uploadFilesNow,
     uploadZipAndExtractHere,
     uploadStatus,
+    retryUploadItem,
+    retryFailedUploads,
     refreshFsNow,
 	    mkdirFsHere,
 	    createFileHere,

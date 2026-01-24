@@ -312,10 +312,14 @@ export default function FilesView() {
     uploadInputKey,
     uploadFile,
     setUploadFile,
+    uploadItems,
+    uploadBusy,
     uploadSelectedFile,
     uploadFilesNow,
     uploadZipAndExtractHere,
     uploadStatus,
+    retryUploadItem,
+    retryFailedUploads,
     joinRelPath,
     parentRelPath,
     fmtBytes,
@@ -1217,15 +1221,29 @@ export default function FilesView() {
           <input
             key={uploadInputKey}
             type="file"
-            onChange={(e) => setUploadFile(e.target.files && e.target.files.length ? e.target.files[0] : null)}
+            multiple
+            disabled={uploadBusy}
+            onChange={(e: any) => {
+              const list = Array.from(e.target.files || []);
+              if (!list.length) {
+                setUploadFile(null);
+                return;
+              }
+              if (list.length === 1) {
+                setUploadFile(list[0]);
+                return;
+              }
+              setUploadFile(null);
+              uploadFilesNow(list);
+            }}
           />
-          <button type="button" onClick={uploadSelectedFile} disabled={!uploadFile}>
+          <button type="button" onClick={uploadSelectedFile} disabled={!uploadFile || uploadBusy}>
             {t.tr("Upload", "上传")}
           </button>
           <button
             type="button"
             onClick={uploadZipAndExtractHere}
-            disabled={!uploadFile || !String(uploadFile?.name || "").toLowerCase().endsWith(".zip") || !fsPath}
+            disabled={!uploadFile || !String(uploadFile?.name || "").toLowerCase().endsWith(".zip") || !fsPath || uploadBusy}
             title={fsPath ? "" : t.tr("Cannot extract to servers/ root; select a folder first", "不能解压到 servers/ 根目录；请先选择文件夹")}
           >
             {t.tr("Upload & Extract (.zip)", "上传并解压 (.zip)")}
@@ -1237,6 +1255,76 @@ export default function FilesView() {
           ) : null}
           {uploadStatus ? <span className="muted">{uploadStatus}</span> : null}
         </div>
+        {Array.isArray(uploadItems) && uploadItems.length ? (
+          <div style={{ marginTop: 10 }}>
+            <div className="row" style={{ justifyContent: "space-between", gap: 10 }}>
+              <span className="muted">
+                {t.tr("Uploads", "上传任务")}:{" "}
+                <code>
+                  {uploadItems.filter((x: any) => x && x.status === "done").length}/{uploadItems.length}
+                </code>
+                {uploadItems.some((x: any) => x && x.status === "failed") ? (
+                  <>
+                    {" · "}
+                    <span className="badge danger">{t.tr("failed", "失败")}</span>
+                  </>
+                ) : null}
+              </span>
+              {uploadItems.some((x: any) => x && x.status === "failed") ? (
+                <div className="btnGroup">
+                  <button type="button" onClick={retryFailedUploads} disabled={uploadBusy}>
+                    {t.tr("Retry failed", "重试失败")}
+                  </button>
+                </div>
+              ) : null}
+            </div>
+
+            <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 6 }}>
+              {uploadItems.map((it: any) => {
+                const total = Number(it?.bytesTotal || 0);
+                const done = Math.max(0, Math.min(total, Number(it?.bytesUploaded || 0)));
+                const status = String(it?.status || "");
+                const badgeClass =
+                  status === "done" ? "badge ok" : status === "uploading" ? "badge warn" : status === "failed" ? "badge danger" : "badge";
+                const statusLabel =
+                  status === "done"
+                    ? t.tr("done", "完成")
+                    : status === "uploading"
+                      ? t.tr("uploading", "上传中")
+                      : status === "failed"
+                        ? t.tr("failed", "失败")
+                        : t.tr("queued", "排队中");
+
+                return (
+                  <div key={String(it?.id || "")} style={{ padding: "6px 10px", border: "1px solid var(--border)", borderRadius: 10 }}>
+                    <div className="row" style={{ justifyContent: "space-between", gap: 10 }}>
+                      <div className="row" style={{ gap: 10, minWidth: 0 }}>
+                        <span className={badgeClass}>{statusLabel}</span>
+                        <code style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{String(it?.destPath || it?.file?.name || "")}</code>
+                      </div>
+                      <div className="row" style={{ gap: 10 }}>
+                        <span className="muted">
+                          {fmtBytes(done)}/{fmtBytes(total)}
+                        </span>
+                        {status === "failed" ? (
+                          <button type="button" onClick={() => retryUploadItem(String(it?.id || ""))} disabled={uploadBusy}>
+                            {t.tr("Retry", "重试")}
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
+                    <progress value={done} max={Math.max(1, total)} style={{ width: "100%", height: 10, marginTop: 6 }} />
+                    {it?.error ? (
+                      <div className="hint" style={{ marginTop: 6 }}>
+                        {String(it.error)}
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ) : null}
         <div className="hint" style={{ marginTop: 6 }}>
           {t.tr("Drag & drop files here to upload into", "将文件拖拽到这里上传到")} <code>servers/{fsPath || ""}</code>.
         </div>
