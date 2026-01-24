@@ -10,6 +10,12 @@
   --space-6: 24px;
   --space-7: 32px;
 
+  --btn-min-height: 30px;
+  --btn-pad-y: 6px;
+  --btn-pad-x: 9px;
+  --btn-icon-size: 32px;
+  --btn-icon-pad: 6px;
+
   --font-size-2xs: 11px;
   --font-size-xs: 12px;
   --font-size-sm: 13px;
@@ -1612,10 +1618,10 @@ button {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  padding: 6px 9px;
+  padding: var(--btn-pad-y) var(--btn-pad-x);
   font-size: var(--font-size-xs);
   line-height: var(--line-height-tight);
-  min-height: 30px;
+  min-height: var(--btn-min-height);
   cursor: pointer;
   transition: background 0.15s ease, border-color 0.15s ease, transform 0.02s ease;
 }
@@ -1628,9 +1634,9 @@ button.iconOnly {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 6px;
-  width: 32px;
-  height: 32px;
+  padding: var(--btn-icon-pad);
+  width: var(--btn-icon-size);
+  height: var(--btn-icon-size);
 }
 
 .ico {
@@ -2870,6 +2876,13 @@ tr:hover td {
 }
 
 @media (max-width: 900px) {
+  :root {
+    --btn-min-height: 44px;
+    --btn-pad-y: 10px;
+    --btn-pad-x: 12px;
+    --btn-icon-size: 44px;
+    --btn-icon-pad: 10px;
+  }
   .appShell {
     grid-template-columns: 1fr;
     padding: 14px;
@@ -2950,15 +2963,6 @@ tr:hover td {
   }
   .grid2 {
     grid-template-columns: 1fr;
-  }
-  button {
-    min-height: 44px;
-    padding: 10px 12px;
-  }
-  button.iconOnly {
-    width: 44px;
-    height: 44px;
-    padding: 10px;
   }
   button.navItem {
     padding: 14px 12px;
