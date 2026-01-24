@@ -831,6 +831,7 @@ export default function HomePage() {
   const [helpDocTitle, setHelpDocTitle] = useState<string>("");
   const [helpDocText, setHelpDocText] = useState<string>("");
   const [helpDocStatus, setHelpDocStatus] = useState<string>("");
+  const [themePickerOpen, setThemePickerOpen] = useState<boolean>(false);
   const [onboardingOpen, setOnboardingOpen] = useState<boolean>(false);
   const [onboardingStep, setOnboardingStep] = useState<number>(0);
 
@@ -1590,6 +1591,11 @@ export default function HomePage() {
           setHelpOpen(false);
           return;
         }
+        if (themePickerOpen) {
+          e.preventDefault();
+          setThemePickerOpen(false);
+          return;
+        }
         if (userMenuOpen) {
           e.preventDefault();
           setUserMenuOpen(false);
@@ -1660,6 +1666,7 @@ export default function HomePage() {
     shortcutsOpen,
     changelogOpen,
     helpOpen,
+    themePickerOpen,
     userMenuOpen,
     notificationsOpen,
     cmdPaletteOpen,
@@ -7994,6 +8001,164 @@ export default function HomePage() {
 	        </div>
 	      ) : null}
 
+        {themePickerOpen ? (
+          <div className="modalOverlay" onClick={() => setThemePickerOpen(false)}>
+            <div className="modal" style={{ width: "min(980px, 100%)" }} onClick={(e) => e.stopPropagation()}>
+              <div className="modalHeader">
+                <div>
+                  <div style={{ fontWeight: 800 }}>{t.tr("Theme", "主题")}</div>
+                  <div className="hint">{t.tr("Pick a theme preset. You can switch anytime.", "选择主题预设。你可以随时切换。")}</div>
+                </div>
+                <button type="button" onClick={() => setThemePickerOpen(false)}>
+                  {t.tr("Close", "关闭")}
+                </button>
+              </div>
+
+              <div className="modalBody">
+                <div className="themeGrid">
+                  <button
+                    type="button"
+                    className={`themeCardBtn ${themeMode === "auto" ? "selected" : ""}`}
+                    onClick={() => {
+                      setThemeMode("auto");
+                      setThemePickerOpen(false);
+                    }}
+                  >
+                    <div className="row" style={{ justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "nowrap" }}>
+                      <div style={{ fontWeight: 800, minWidth: 0 }}>{t.tr("Auto (System)", "自动（系统）")}</div>
+                      {themeMode === "auto" ? <span className="badge ok">{t.tr("Current", "当前")}</span> : null}
+                    </div>
+                    <div className="hint" style={{ marginTop: 6 }}>
+                      {t.tr("Matches your OS theme preference.", "跟随系统主题偏好。")}
+                    </div>
+                    <div className="themePreviewAuto" aria-hidden="true">
+                      <div className="themePreview themePreviewSmall" data-theme="dark">
+                        <div className="themePreviewSurface">
+                          <div className="themePreviewRow">
+                            <div className="themePreviewDots">
+                              <span className="themePreviewDot primary" />
+                              <span className="themePreviewDot ok" />
+                              <span className="themePreviewDot danger" />
+                            </div>
+                          </div>
+                          <div className="themePreviewLine" style={{ width: "70%" }} />
+                          <div className="themePreviewLine" style={{ width: "52%" }} />
+                        </div>
+                      </div>
+                      <div className="themePreview themePreviewSmall" data-theme="light">
+                        <div className="themePreviewSurface">
+                          <div className="themePreviewRow">
+                            <div className="themePreviewDots">
+                              <span className="themePreviewDot primary" />
+                              <span className="themePreviewDot ok" />
+                              <span className="themePreviewDot danger" />
+                            </div>
+                          </div>
+                          <div className="themePreviewLine" style={{ width: "70%" }} />
+                          <div className="themePreviewLine" style={{ width: "52%" }} />
+                        </div>
+                      </div>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    className={`themeCardBtn ${themeMode === "dark" ? "selected" : ""}`}
+                    onClick={() => {
+                      setThemeMode("dark");
+                      setThemePickerOpen(false);
+                    }}
+                  >
+                    <div className="row" style={{ justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "nowrap" }}>
+                      <div style={{ fontWeight: 800, minWidth: 0 }}>{t.tr("Dark", "深色")}</div>
+                      {themeMode === "dark" ? <span className="badge ok">{t.tr("Current", "当前")}</span> : null}
+                    </div>
+                    <div className="hint" style={{ marginTop: 6 }}>
+                      {t.tr("Optimized for low-light and long sessions.", "适合低光环境与长时间使用。")}
+                    </div>
+                    <div className="themePreview" data-theme="dark" aria-hidden="true">
+                      <div className="themePreviewSurface">
+                        <div className="themePreviewRow">
+                          <div className="themePreviewDots">
+                            <span className="themePreviewDot primary" />
+                            <span className="themePreviewDot ok" />
+                            <span className="themePreviewDot danger" />
+                          </div>
+                        </div>
+                        <div className="themePreviewLine" style={{ width: "70%" }} />
+                        <div className="themePreviewLine" style={{ width: "52%" }} />
+                        <div className="themePreviewBtn">{t.tr("Button", "按钮")}</div>
+                      </div>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    className={`themeCardBtn ${themeMode === "light" ? "selected" : ""}`}
+                    onClick={() => {
+                      setThemeMode("light");
+                      setThemePickerOpen(false);
+                    }}
+                  >
+                    <div className="row" style={{ justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "nowrap" }}>
+                      <div style={{ fontWeight: 800, minWidth: 0 }}>{t.tr("Light", "浅色")}</div>
+                      {themeMode === "light" ? <span className="badge ok">{t.tr("Current", "当前")}</span> : null}
+                    </div>
+                    <div className="hint" style={{ marginTop: 6 }}>
+                      {t.tr("Optimized for daylight and print-like readability.", "适合强光环境与类纸阅读。")}
+                    </div>
+                    <div className="themePreview" data-theme="light" aria-hidden="true">
+                      <div className="themePreviewSurface">
+                        <div className="themePreviewRow">
+                          <div className="themePreviewDots">
+                            <span className="themePreviewDot primary" />
+                            <span className="themePreviewDot ok" />
+                            <span className="themePreviewDot danger" />
+                          </div>
+                        </div>
+                        <div className="themePreviewLine" style={{ width: "70%" }} />
+                        <div className="themePreviewLine" style={{ width: "52%" }} />
+                        <div className="themePreviewBtn">{t.tr("Button", "按钮")}</div>
+                      </div>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    className={`themeCardBtn ${themeMode === "contrast" ? "selected" : ""}`}
+                    onClick={() => {
+                      setThemeMode("contrast");
+                      setThemePickerOpen(false);
+                    }}
+                  >
+                    <div className="row" style={{ justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "nowrap" }}>
+                      <div style={{ fontWeight: 800, minWidth: 0 }}>{t.tr("High Contrast", "高对比度")}</div>
+                      {themeMode === "contrast" ? <span className="badge ok">{t.tr("Current", "当前")}</span> : null}
+                    </div>
+                    <div className="hint" style={{ marginTop: 6 }}>
+                      {t.tr("Higher contrast for accessibility and clarity.", "更高对比度，增强可访问性与清晰度。")}
+                    </div>
+                    <div className="themePreview" data-theme="contrast" aria-hidden="true">
+                      <div className="themePreviewSurface">
+                        <div className="themePreviewRow">
+                          <div className="themePreviewDots">
+                            <span className="themePreviewDot primary" />
+                            <span className="themePreviewDot ok" />
+                            <span className="themePreviewDot danger" />
+                          </div>
+                        </div>
+                        <div className="themePreviewLine" style={{ width: "70%" }} />
+                        <div className="themePreviewLine" style={{ width: "52%" }} />
+                        <div className="themePreviewBtn">{t.tr("Button", "按钮")}</div>
+                      </div>
+                    </div>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
 	      {onboardingOpen ? (
 	        <div className="modalOverlay" onClick={() => closeOnboarding(true)}>
 	          <div className="modal" style={{ width: "min(920px, 100%)" }} onClick={(e) => e.stopPropagation()}>
@@ -8484,16 +8649,23 @@ export default function HomePage() {
 	              <div className="row" style={{ marginTop: 8, justifyContent: "space-between" }}>
 	                <span className="muted">{t.tr("Theme", "主题")}</span>
 	                <div style={{ width: 170 }}>
-	                  <Select
-	                    value={themeMode}
-	                    onChange={(v) => setThemeMode(v as ThemeMode)}
-	                    options={[
-	                      { value: "auto", label: t.tr("Auto (System)", "自动（系统）") },
-	                      { value: "light", label: t.tr("Light", "浅色") },
-	                      { value: "dark", label: t.tr("Dark", "深色") },
-	                      { value: "contrast", label: t.tr("High Contrast", "高对比度") },
-	                    ]}
-	                  />
+                    <button
+                      type="button"
+                      className="secondary"
+                      style={{ width: "100%", justifyContent: "space-between" }}
+                      onClick={() => setThemePickerOpen(true)}
+                    >
+                      <span>
+                        {themeMode === "auto"
+                          ? t.tr("Auto (System)", "自动（系统）")
+                          : themeMode === "light"
+                            ? t.tr("Light", "浅色")
+                            : themeMode === "contrast"
+                              ? t.tr("High Contrast", "高对比度")
+                              : t.tr("Dark", "深色")}
+                      </span>
+                      <span aria-hidden="true">▾</span>
+                    </button>
 	                </div>
 	              </div>
 	            </>
