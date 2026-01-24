@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useAppCtx } from "../appCtx";
 import CopyButton from "../ui/CopyButton";
+import EnvHelpButton from "../ui/EnvHelpButton";
 import Field from "../ui/Field";
 import Select from "../ui/Select";
 import TimeAgo from "../ui/TimeAgo";
@@ -1207,7 +1208,12 @@ export default function PanelView() {
 
               {show("curseforge", "api key", "cf_") ? (
                 <Field
-                  label={t.tr("CurseForge API Key (optional)", "CurseForge API Key（可选）")}
+                  label={
+                    <span className="row" style={{ justifyContent: "space-between", gap: 10, flexWrap: "nowrap" }}>
+                      <span>{t.tr("CurseForge API Key (optional)", "CurseForge API Key（可选）")}</span>
+                      <EnvHelpButton env="ELEGANTMC_CURSEFORGE_API_KEY" doc="readme" />
+                    </span>
+                  }
                   hint={t.tr(
                     "After setting this, CurseForge search/install works without environment variables.",
                     "配置后可直接使用 CurseForge 搜索/下载安装（不需要再改环境变量）"
@@ -1310,20 +1316,26 @@ export default function PanelView() {
 	        )}
 	      </div>
 
-        <div className="card" id="panel-security-headers">
-          <div className="toolbar">
-            <div className="toolbarLeft" style={{ alignItems: "center" }}>
-              <div>
-                <h2>{t.tr("Security Headers", "安全响应头")}</h2>
-                {securityHeadersBusy ? (
-                  <div className="hint">{t.tr("Loading...", "加载中...")}</div>
-                ) : securityHeadersStatus ? (
-                  <div className="hint">{securityHeadersStatus}</div>
-                ) : (
-                  <div className="hint">{t.tr("Current HTTP response headers computed from env.", "当前根据环境变量计算出的响应头配置。")}</div>
-                )}
-              </div>
+      <div className="card" id="panel-security-headers">
+        <div className="toolbar">
+          <div className="toolbarLeft" style={{ alignItems: "center" }}>
+            <div>
+              <h2>
+                {t.tr("Security Headers", "安全响应头")}
+                <EnvHelpButton
+                  env={["ELEGANTMC_PANEL_HSTS_PRESET", "ELEGANTMC_PANEL_CSP_PRESET", "ELEGANTMC_PANEL_REFERRER_POLICY_PRESET"]}
+                  doc="security"
+                />
+              </h2>
+              {securityHeadersBusy ? (
+                <div className="hint">{t.tr("Loading...", "加载中...")}</div>
+              ) : securityHeadersStatus ? (
+                <div className="hint">{securityHeadersStatus}</div>
+              ) : (
+                <div className="hint">{t.tr("Current HTTP response headers computed from env.", "当前根据环境变量计算出的响应头配置。")}</div>
+              )}
             </div>
+          </div>
             <div className="toolbarRight">
               <button type="button" className="iconBtn" onClick={refreshSecurityHeaders} disabled={securityHeadersBusy}>
                 {t.tr("Refresh", "刷新")}

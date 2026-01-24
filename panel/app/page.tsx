@@ -6,6 +6,7 @@ import { AppCtxProvider } from "./appCtx";
 import { createT, normalizeLocale, type Locale } from "./i18n";
 import Icon from "./ui/Icon";
 import CopyButton from "./ui/CopyButton";
+import EnvHelpButton from "./ui/EnvHelpButton";
 import TimeAgo from "./ui/TimeAgo";
 import StatusBadge from "./ui/StatusBadge";
 import ErrorBoundary from "./ui/ErrorBoundary";
@@ -903,6 +904,8 @@ export default function HomePage() {
   const [helpDocTitle, setHelpDocTitle] = useState<string>("");
   const [helpDocText, setHelpDocText] = useState<string>("");
   const [helpDocStatus, setHelpDocStatus] = useState<string>("");
+  const [helpFind, setHelpFind] = useState<string>("");
+  const helpDocPreRef = useRef<HTMLPreElement | null>(null);
   const [themePickerOpen, setThemePickerOpen] = useState<boolean>(false);
   const [onboardingOpen, setOnboardingOpen] = useState<boolean>(false);
   const [onboardingStep, setOnboardingStep] = useState<number>(0);
@@ -2840,6 +2843,7 @@ export default function HomePage() {
     if (!key) return;
     setHelpDoc(key);
     setHelpDocStatus(t.tr("Loading...", "加载中..."));
+    setHelpFind("");
     try {
       const res = await apiFetch(`/api/docs?name=${encodeURIComponent(key)}`, { cache: "no-store" });
       const json = await res.json().catch(() => null);
@@ -2856,10 +2860,46 @@ export default function HomePage() {
 
   async function openHelpModal() {
     setHelpOpen(true);
+    setHelpFind("");
     const doc = defaultHelpDocForTab(tab);
     if (helpDocText && helpDoc === doc) return;
     await loadHelpDoc(doc);
   }
+
+  async function openHelpDoc(name: string, opts?: { find?: string }) {
+    setHelpOpen(true);
+    const doc = String(name || "").trim().toLowerCase();
+    const query = String(opts?.find || "").trim();
+    if (!doc) return;
+    if (helpDocText && helpDoc === doc) {
+      setHelpFind(query);
+      return;
+    }
+    if (query) setHelpFind("");
+    await loadHelpDoc(doc);
+    setHelpFind(query);
+  }
+
+  useEffect(() => {
+    try {
+      if (!helpOpen) return;
+      const q = String(helpFind || "").trim();
+      if (!q) return;
+      const text = String(helpDocText || "");
+      if (!text) return;
+      const idx = text.toLowerCase().indexOf(q.toLowerCase());
+      if (idx < 0) return;
+      const pre = helpDocPreRef.current;
+      if (!pre) return;
+      const line = text.slice(0, idx).split("\n").length - 1;
+      const lhRaw = window.getComputedStyle(pre).lineHeight;
+      const lhNum = Number.parseFloat(lhRaw);
+      const lh = Number.isFinite(lhNum) && lhNum > 0 ? lhNum : 18;
+      pre.scrollTop = Math.max(0, (line - 2) * lh);
+    } catch {
+      // ignore
+    }
+  }, [helpDocText, helpFind, helpOpen]);
 
   function openPanelSection(id: string) {
     setUserMenuOpen(false);
@@ -7743,6 +7783,7 @@ export default function HomePage() {
 	    confirmDialog,
 	    promptDialog,
 	    openHelpModal,
+	    openHelpDoc,
 	    openShareView,
 	    makeDeployComposeYml,
 	    maskToken,
@@ -7769,19 +7810,22 @@ export default function HomePage() {
               <div>
                 <div style={{ fontWeight: 800 }}>{t.tr("Admin Login", "管理员登录")}</div>
                 <div className="hint">
-                  {locale === "zh" ? (
-                    <>
-                      通过环境变量设置 <code>ELEGANTMC_PANEL_ADMIN_PASSWORD</code>（docker compose：可用 inline env 或 compose 里的{" "}
-                      <code>environment:</code>）。如果你没有设置，请查看 Panel 日志获取自动生成的密码（<code>docker compose logs panel</code>）。
-                    </>
-                  ) : (
-                    <>
-                      Set <code>ELEGANTMC_PANEL_ADMIN_PASSWORD</code> via environment variables (docker compose: inline env or <code>environment:</code>{" "}
-                      in compose). If you did not set it, check Panel logs for the generated password (<code>docker compose logs panel</code>).
-                    </>
-                  )}
-                </div>
-              </div>
+	                  {locale === "zh" ? (
+	                    <>
+	                      通过环境变量设置 <code>ELEGANTMC_PANEL_ADMIN_PASSWORD</code>{" "}
+	                      <EnvHelpButton env="ELEGANTMC_PANEL_ADMIN_PASSWORD" doc="readme" />（docker compose：可用 inline env 或 compose 里的{" "}
+	                      <code>environment:</code>）。如果你没有设置，请查看 Panel 日志获取自动生成的密码（<code>docker compose logs panel</code>）。
+	                    </>
+	                  ) : (
+	                    <>
+	                      Set <code>ELEGANTMC_PANEL_ADMIN_PASSWORD</code>{" "}
+	                      <EnvHelpButton env="ELEGANTMC_PANEL_ADMIN_PASSWORD" doc="readme" /> via environment variables (docker compose: inline env or{" "}
+	                      <code>environment:</code> in compose). If you did not set it, check Panel logs for the generated password (
+	                      <code>docker compose logs panel</code>).
+	                    </>
+	                  )}
+	                </div>
+	              </div>
             </div>
 
             <form
@@ -8267,15 +8311,22 @@ export default function HomePage() {
 	                </div>
 	              </div>
 
-	              <div style={{ minWidth: 0 }}>
-	                <h3>{helpDocTitle || t.tr("Doc", "文档")}</h3>
-	                {helpDocStatus ? <div className="hint">{helpDocStatus}</div> : null}
-	                {helpDocText ? (
-	                  <pre style={{ maxHeight: 520, overflow: "auto" }}>{helpDocText}</pre>
-	                ) : (
-	                  <div className="hint">{t.tr("Select a doc to view.", "请选择要查看的文档。")}</div>
-	                )}
-	              </div>
+		              <div style={{ minWidth: 0 }}>
+		                <h3>{helpDocTitle || t.tr("Doc", "文档")}</h3>
+		                {helpFind ? (
+		                  <div className="hint">
+		                    {t.tr("search", "搜索")}: <code>{helpFind}</code>
+		                  </div>
+		                ) : null}
+		                {helpDocStatus ? <div className="hint">{helpDocStatus}</div> : null}
+		                {helpDocText ? (
+		                  <pre ref={helpDocPreRef} style={{ maxHeight: 520, overflow: "auto" }}>
+		                    {helpDocText}
+		                  </pre>
+		                ) : (
+		                  <div className="hint">{t.tr("Select a doc to view.", "请选择要查看的文档。")}</div>
+		                )}
+		              </div>
 	            </div>
 	          </div>
 	        </div>
@@ -10956,22 +11007,37 @@ export default function HomePage() {
               </button>
             </div>
 
-            <div className="grid2" style={{ alignItems: "start" }}>
-              <div className="field" style={{ gridColumn: "1 / -1" }}>
-                <label>{t.tr("Panel WS URL", "Panel WS 地址")}</label>
-                <input value={deployPanelWsUrl} onChange={(e) => setDeployPanelWsUrl(e.target.value)} placeholder="wss://panel.example.com/ws/daemon" />
-                <div className="hint">{t.tr("Use wss:// for HTTPS panels; use ws:// for HTTP panels.", "如果面板是 HTTPS，请用 wss://；HTTP 则用 ws://")}</div>
-              </div>
-              <div className="field">
-                <label>{t.tr("daemon_id", "daemon_id")}</label>
-                <input value={deployNodeId} readOnly />
-              </div>
-              <div className="field">
-                <label>{t.tr("token", "token")}</label>
-                <input value={deployToken} readOnly />
-              </div>
-              <div className="field" style={{ gridColumn: "1 / -1" }}>
-                <label>{t.tr("docker-compose.yml", "docker-compose.yml")}</label>
+	            <div className="grid2" style={{ alignItems: "start" }}>
+	              <div className="field" style={{ gridColumn: "1 / -1" }}>
+	                <label>
+	                  <span className="row" style={{ justifyContent: "space-between", gap: 10, flexWrap: "nowrap" }}>
+	                    <span>{t.tr("Panel WS URL", "Panel WS 地址")}</span>
+	                    <EnvHelpButton env="ELEGANTMC_PANEL_WS_URL" doc="readme" />
+	                  </span>
+	                </label>
+	                <input value={deployPanelWsUrl} onChange={(e) => setDeployPanelWsUrl(e.target.value)} placeholder="wss://panel.example.com/ws/daemon" />
+	                <div className="hint">{t.tr("Use wss:// for HTTPS panels; use ws:// for HTTP panels.", "如果面板是 HTTPS，请用 wss://；HTTP 则用 ws://")}</div>
+	              </div>
+	              <div className="field">
+	                <label>
+	                  <span className="row" style={{ justifyContent: "space-between", gap: 10, flexWrap: "nowrap" }}>
+	                    <span>{t.tr("daemon_id", "daemon_id")}</span>
+	                    <EnvHelpButton env="ELEGANTMC_DAEMON_ID" doc="readme" />
+	                  </span>
+	                </label>
+	                <input value={deployNodeId} readOnly />
+	              </div>
+	              <div className="field">
+	                <label>
+	                  <span className="row" style={{ justifyContent: "space-between", gap: 10, flexWrap: "nowrap" }}>
+	                    <span>{t.tr("token", "token")}</span>
+	                    <EnvHelpButton env="ELEGANTMC_TOKEN" doc="readme" />
+	                  </span>
+	                </label>
+	                <input value={deployToken} readOnly />
+	              </div>
+	              <div className="field" style={{ gridColumn: "1 / -1" }}>
+	                <label>{t.tr("docker-compose.yml", "docker-compose.yml")}</label>
                 <textarea readOnly rows={12} value={deployComposeYml} style={{ width: "100%" }} onFocus={(e) => e.currentTarget.select()} />
                 <div className="btnGroup" style={{ justifyContent: "flex-end" }}>
                   <CopyButton text={deployComposeYml} />
@@ -11019,17 +11085,27 @@ export default function HomePage() {
               </button>
             </div>
 
-            <div className="grid2" style={{ alignItems: "start" }}>
-              <div className="field">
-                <label>{t.tr("daemon_id", "daemon_id")}</label>
-                <input value={newNodeId} onChange={(e) => setNewNodeId(e.target.value)} placeholder="my-node" />
-                <div className="hint">{t.tr("Suggestion: A-Z a-z 0-9 . _ - (max 64)", "建议：A-Z a-z 0-9 . _ -（最长 64）")}</div>
-              </div>
-              <div className="field">
-                <label>{t.tr("token (optional)", "token（可选）")}</label>
-                <input value={newNodeToken} onChange={(e) => setNewNodeToken(e.target.value)} placeholder={t.tr("leave blank to auto-generate", "留空则自动生成")} />
-              </div>
-            </div>
+	            <div className="grid2" style={{ alignItems: "start" }}>
+	              <div className="field">
+	                <label>
+	                  <span className="row" style={{ justifyContent: "space-between", gap: 10, flexWrap: "nowrap" }}>
+	                    <span>{t.tr("daemon_id", "daemon_id")}</span>
+	                    <EnvHelpButton env="ELEGANTMC_DAEMON_ID" doc="readme" />
+	                  </span>
+	                </label>
+	                <input value={newNodeId} onChange={(e) => setNewNodeId(e.target.value)} placeholder="my-node" />
+	                <div className="hint">{t.tr("Suggestion: A-Z a-z 0-9 . _ - (max 64)", "建议：A-Z a-z 0-9 . _ -（最长 64）")}</div>
+	              </div>
+	              <div className="field">
+	                <label>
+	                  <span className="row" style={{ justifyContent: "space-between", gap: 10, flexWrap: "nowrap" }}>
+	                    <span>{t.tr("token (optional)", "token（可选）")}</span>
+	                    <EnvHelpButton env="ELEGANTMC_TOKEN" doc="readme" />
+	                  </span>
+	                </label>
+	                <input value={newNodeToken} onChange={(e) => setNewNodeToken(e.target.value)} placeholder={t.tr("leave blank to auto-generate", "留空则自动生成")} />
+	              </div>
+	            </div>
 
             <div className="btnGroup" style={{ marginTop: 12, justifyContent: "flex-end" }}>
               <button

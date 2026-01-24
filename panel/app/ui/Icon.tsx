@@ -11,6 +11,7 @@ export type IconName =
   | "menu"
   | "bell"
   | "link"
+  | "help"
   | "pin"
   | "cpu"
   | "memory"
@@ -209,6 +210,26 @@ export default function Icon({ name, size = 14 }: { name: IconName; size?: numbe
             strokeLinecap="round"
             strokeLinejoin="round"
           />
+        </svg>
+      );
+    case "help":
+      return (
+        <svg {...common}>
+          <path
+            d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20z"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+          <path
+            d="M9.5 9a2.5 2.5 0 0 1 5 0c0 2-2.5 2-2.5 4"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+          <path d="M12 17h.01" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
         </svg>
       );
     case "pin":
