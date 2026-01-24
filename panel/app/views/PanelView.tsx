@@ -41,6 +41,16 @@ export default function PanelView() {
   const [sessionsBusy, setSessionsBusy] = useState<boolean>(false);
   const [sessionsQuery, setSessionsQuery] = useState<string>("");
 
+  const [auditEntries, setAuditEntries] = useState<any[]>([]);
+  const [auditStatus, setAuditStatus] = useState<string>("");
+  const [auditBusy, setAuditBusy] = useState<boolean>(false);
+  const [auditActionQuery, setAuditActionQuery] = useState<string>("");
+  const [auditUserQuery, setAuditUserQuery] = useState<string>("");
+  const [auditTextQuery, setAuditTextQuery] = useState<string>("");
+  const [auditRange, setAuditRange] = useState<string>("7d");
+  const [auditLimit, setAuditLimit] = useState<string>("200");
+  const [auditTruncated, setAuditTruncated] = useState<boolean>(false);
+
   const [users, setUsers] = useState<any[]>([]);
   const [usersStatus, setUsersStatus] = useState<string>("");
   const [usersBusy, setUsersBusy] = useState<boolean>(false);
@@ -163,6 +173,11 @@ export default function PanelView() {
     return () => {
       cancelled = true;
     };
+  }, [apiFetch, t]);
+
+  useEffect(() => {
+    const p = refreshAudit();
+    if (p && typeof (p as any).then === "function") (p as any).catch(() => null);
   }, [apiFetch, t]);
 
   async function refreshSessions() {
@@ -530,6 +545,64 @@ export default function PanelView() {
     }
   }
 
+  function sinceUnixForAuditRange(range: string, nowUnix: number) {
+    const r = String(range || "").trim().toLowerCase();
+    if (r === "1h") return nowUnix - 60 * 60;
+    if (r === "24h") return nowUnix - 60 * 60 * 24;
+    if (r === "7d") return nowUnix - 60 * 60 * 24 * 7;
+    if (r === "30d") return nowUnix - 60 * 60 * 24 * 30;
+    return 0;
+  }
+
+  async function refreshAudit() {
+    setAuditBusy(true);
+    setAuditStatus(t.tr("Loading...", "加载中..."));
+    try {
+      const now = Math.floor(Date.now() / 1000);
+      const limitRaw = Number(auditLimit || 0);
+      const limit = Math.max(50, Math.min(1000, Math.round(Number.isFinite(limitRaw) ? limitRaw : 200)));
+      const sinceUnix = sinceUnixForAuditRange(auditRange, now);
+
+      const qs = new URLSearchParams();
+      qs.set("limit", String(limit));
+      if (sinceUnix > 0) qs.set("since_unix", String(sinceUnix));
+
+      const actionQ = auditActionQuery.trim();
+      const userQ = auditUserQuery.trim();
+      const q = auditTextQuery.trim();
+      if (actionQ) qs.set("action", actionQ);
+      if (userQ) qs.set("user", userQ);
+      if (q) qs.set("q", q);
+
+      const res = await apiFetch(`/api/audit?${qs.toString()}`, { cache: "no-store" });
+      const json = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(json?.error || t.tr("failed", "失败"));
+      setAuditEntries(Array.isArray(json?.entries) ? json.entries : []);
+      setAuditTruncated(!!json?.truncated);
+      setAuditStatus("");
+    } catch (e: any) {
+      setAuditEntries([]);
+      setAuditTruncated(false);
+      setAuditStatus(String(e?.message || e));
+    } finally {
+      setAuditBusy(false);
+    }
+  }
+
+  function exportAuditJson() {
+    try {
+      const blob = new Blob([auditExportJson], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `audit-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
+      a.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 800);
+    } catch {
+      // ignore
+    }
+  }
+
   useEffect(() => {
     if (backupPresetInstanceId.trim()) return;
     if (Array.isArray(serverDirs) && serverDirs.length) setBackupPresetInstanceId(String(serverDirs[0] || ""));
@@ -571,6 +644,8 @@ export default function PanelView() {
       return hay.includes(q);
     });
   }, [sessions, sessionsQuery]);
+
+  const auditExportJson = useMemo(() => JSON.stringify(Array.isArray(auditEntries) ? auditEntries : [], null, 2), [auditEntries]);
 
   function uniqueTaskId(existingTasks: any[], base: string) {
     const used = new Set((existingTasks || []).map((t) => String(t?.id || "").trim()).filter(Boolean));
@@ -817,6 +892,7 @@ export default function PanelView() {
     { id: "panel-tokens", label: t.tr("API Tokens", "API Tokens") },
     { id: "panel-tasks", label: t.tr("Tasks", "任务") },
     { id: "panel-sessions", label: t.tr("Sessions", "会话") },
+    { id: "panel-audit", label: t.tr("Audit Log", "审计日志") },
   ];
 
   function scrollToPanelSection(id: string) {
@@ -1727,6 +1803,133 @@ export default function PanelView() {
           <div className="emptyState">{t.tr("No matches.", "没有匹配项。")}</div>
         ) : (
           <div className="emptyState">{t.tr("No sessions found.", "暂无会话。")}</div>
+        )}
+      </div>
+
+      <div className="card" id="panel-audit">
+        <div className="toolbar">
+          <div className="toolbarLeft" style={{ alignItems: "center" }}>
+            <div>
+              <h2>{t.tr("Audit Log", "审计日志")}</h2>
+              {auditStatus ? (
+                <div className="hint">{auditStatus}</div>
+              ) : (
+                <div className="hint">
+                  {t.tr("Security/audit events from the server (audit.log).", "来自服务端的安全/审计事件（audit.log）。")}{" "}
+                  {auditTruncated ? <span className="badge warn">{t.tr("truncated", "已截断")}</span> : null}
+                </div>
+              )}
+            </div>
+          </div>
+          <div className="toolbarRight">
+            <button type="button" className="iconBtn" onClick={refreshAudit} disabled={auditBusy}>
+              {t.tr("Refresh", "刷新")}
+            </button>
+            <CopyButton
+              text={auditExportJson}
+              disabled={!auditEntries.length}
+              label={t.tr("Copy JSON", "复制 JSON")}
+              tooltip={t.tr("Copy JSON", "复制 JSON")}
+              ariaLabel={t.tr("Copy JSON", "复制 JSON")}
+            />
+            <button type="button" className="iconBtn" onClick={exportAuditJson} disabled={!auditEntries.length}>
+              {t.tr("Export JSON", "导出 JSON")}
+            </button>
+          </div>
+        </div>
+
+        <div className="grid2" style={{ alignItems: "end", marginTop: 12 }}>
+          <Field label={t.tr("Action", "动作")} hint={t.tr("e.g. auth.login_ok", "例如 auth.login_ok")}>
+            <input value={auditActionQuery} onChange={(e) => setAuditActionQuery(e.target.value)} placeholder="auth." />
+          </Field>
+          <Field label={t.tr("User", "用户")} hint={t.tr("e.g. admin", "例如 admin")}>
+            <input value={auditUserQuery} onChange={(e) => setAuditUserQuery(e.target.value)} placeholder="admin" />
+          </Field>
+          <Field label={t.tr("Time range", "时间范围")}>
+            <Select
+              value={auditRange}
+              onChange={(v) => setAuditRange(String(v || ""))}
+              options={[
+                { value: "1h", label: t.tr("Last 1h", "最近 1 小时") },
+                { value: "24h", label: t.tr("Last 24h", "最近 24 小时") },
+                { value: "7d", label: t.tr("Last 7d", "最近 7 天") },
+                { value: "30d", label: t.tr("Last 30d", "最近 30 天") },
+                { value: "all", label: t.tr("All", "全部") },
+              ]}
+            />
+          </Field>
+          <Field label={t.tr("Limit", "数量")}>
+            <Select
+              value={auditLimit}
+              onChange={(v) => setAuditLimit(String(v || ""))}
+              options={[
+                { value: "100", label: "100" },
+                { value: "200", label: "200" },
+                { value: "500", label: "500" },
+                { value: "1000", label: "1000" },
+              ]}
+            />
+          </Field>
+          <Field
+            label={t.tr("Search", "搜索")}
+            hint={t.tr("Matches action/user/IP/detail.", "匹配动作/用户/IP/详情。")}
+            style={{ gridColumn: "1 / -1" }}
+          >
+            <input value={auditTextQuery} onChange={(e) => setAuditTextQuery(e.target.value)} placeholder={t.tr("Type to filter…", "输入以筛选…")} />
+          </Field>
+        </div>
+
+        {auditEntries.length ? (
+          <div className="tableScroll" style={{ marginTop: 12, maxHeight: 520, overflow: "auto" }}>
+            <table className="compact">
+              <thead>
+                <tr>
+                  <th>{t.tr("Time", "时间")}</th>
+                  <th>{t.tr("Action", "动作")}</th>
+                  <th>{t.tr("User", "用户")}</th>
+                  <th>{t.tr("Auth", "认证")}</th>
+                  <th>{t.tr("IP", "IP")}</th>
+                  <th>{t.tr("Detail", "详情")}</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {auditEntries.map((e: any, idx: number) => {
+                  const ts = Number(e?.ts_unix || 0);
+                  const action = String(e?.action || "-");
+                  const user = String(e?.user || "-");
+                  const auth = String(e?.auth || "-");
+                  const ip = String(e?.ip || "-");
+                  const detailStr = e?.detail ? JSON.stringify(e.detail) : "";
+                  const detailShort = detailStr.length > 140 ? `${detailStr.slice(0, 140)}…` : detailStr || "-";
+                  const rowJson = JSON.stringify(e, null, 2);
+                  return (
+                    <tr key={`${ts}-${idx}`}>
+                      <td style={{ whiteSpace: "nowrap" }}>{ts ? <TimeAgo unix={ts} /> : "-"}</td>
+                      <td>
+                        <code>{action}</code>
+                      </td>
+                      <td>{user ? <code>{user}</code> : "-"}</td>
+                      <td>
+                        <span className={`badge ${auth === "session" ? "ok" : auth === "api_token" ? "warn" : ""}`.trim()}>{auth || "-"}</span>
+                      </td>
+                      <td>{ip ? <code>{ip}</code> : "-"}</td>
+                      <td style={{ maxWidth: 520 }}>
+                        <code title={detailStr}>{detailShort}</code>
+                      </td>
+                      <td style={{ textAlign: "right" }}>
+                        <CopyButton text={rowJson} iconOnly tooltip={t.tr("Copy entry", "复制条目")} ariaLabel={t.tr("Copy entry", "复制条目")} />
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="emptyState" style={{ marginTop: 12 }}>
+            {auditBusy ? t.tr("Loading...", "加载中...") : t.tr("No audit entries found.", "暂无审计日志。")}
+          </div>
         )}
       </div>
         </div>

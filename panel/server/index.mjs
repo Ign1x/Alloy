@@ -1885,6 +1885,82 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
+    if (url.pathname === "/api/audit" && req.method === "GET") {
+      if (!requireAdmin(req, res)) return;
+      const limitRaw = Number(url.searchParams.get("limit") || 200);
+      const limit = Math.max(1, Math.min(1000, Math.round(Number.isFinite(limitRaw) ? limitRaw : 200)));
+      const maxBytesRaw = Number(url.searchParams.get("max_bytes") || 900_000);
+      const maxBytes = Math.max(80_000, Math.min(2_000_000, Math.round(Number.isFinite(maxBytesRaw) ? maxBytesRaw : 900_000)));
+
+      const sinceRaw = Number(url.searchParams.get("since_unix") || 0);
+      const untilRaw = Number(url.searchParams.get("until_unix") || 0);
+      const sinceUnix = Number.isFinite(sinceRaw) && sinceRaw > 0 ? Math.floor(sinceRaw) : 0;
+      const untilUnix = Number.isFinite(untilRaw) && untilRaw > 0 ? Math.floor(untilRaw) : 0;
+      const actionQ = String(url.searchParams.get("action") || "").trim().toLowerCase();
+      const userQ = String(url.searchParams.get("user") || "").trim().toLowerCase();
+      const q = String(url.searchParams.get("q") || "").trim().toLowerCase();
+
+      let truncated = false;
+      const entries = [];
+
+      try {
+        const st = await fs.stat(AUDIT_LOG_PATH);
+        const start = Math.max(0, Number(st?.size || 0) - maxBytes);
+        truncated = start > 0;
+
+        let fh = null;
+        try {
+          fh = await fs.open(AUDIT_LOG_PATH, "r");
+          const len = Math.max(0, Number(st?.size || 0) - start);
+          const buf = Buffer.alloc(len);
+          await fh.read(buf, 0, len, start);
+          const text = buf.toString("utf8");
+          let lines = text.split(/\r?\n/);
+          if (start > 0) lines = lines.slice(1); // drop partial line
+
+          for (let i = lines.length - 1; i >= 0 && entries.length < limit; i--) {
+            const line = String(lines[i] || "").trim();
+            if (!line) continue;
+            const entry = safeJsonParse(line);
+            if (!entry || typeof entry !== "object") continue;
+
+            const ts = Number(entry?.ts_unix || 0);
+            if (sinceUnix > 0 && Number.isFinite(ts) && ts > 0 && ts < sinceUnix) break;
+            if (untilUnix > 0 && Number.isFinite(ts) && ts > untilUnix) continue;
+
+            const action = String(entry?.action || "");
+            const user = String(entry?.user || "");
+            if (actionQ && !action.toLowerCase().includes(actionQ)) continue;
+            if (userQ && !user.toLowerCase().includes(userQ)) continue;
+
+            if (q) {
+              const ip = String(entry?.ip || "");
+              const auth = String(entry?.auth || "");
+              const session = String(entry?.session || "");
+              const tokenID = String(entry?.token_id || "");
+              const detailStr = JSON.stringify(entry?.detail || {});
+              const hay = `${action} ${user} ${ip} ${auth} ${session} ${tokenID} ${detailStr}`.toLowerCase();
+              if (!hay.includes(q)) continue;
+            }
+
+            entries.push(entry);
+          }
+        } finally {
+          if (fh) {
+            try {
+              await fh.close();
+            } catch {
+              // ignore
+            }
+          }
+        }
+      } catch (e) {
+        if (e?.code !== "ENOENT") return json(res, 500, { error: String(e?.message || e) });
+      }
+
+      return json(res, 200, { entries, truncated });
+    }
+
     if (url.pathname === "/api/auth/users" && req.method === "GET") {
       if (!requireSessionAdmin(req, res)) return;
       await loadUsersFromDisk();
