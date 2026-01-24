@@ -7,6 +7,7 @@ import Icon from "../ui/Icon";
 import Select from "../ui/Select";
 import DangerZone from "../ui/DangerZone";
 import Sparkline from "../ui/Sparkline";
+import TimeAgo from "../ui/TimeAgo";
 
 type RenderLogLine = { text: string; level: "" | "warn" | "error" };
 
@@ -1502,7 +1503,7 @@ export default function GamesView() {
             <div className="v">
               {typeof instanceStatus?.last_exit_unix === "number" && instanceStatus.last_exit_unix > 0 ? (
                 <span className={instanceStatus?.last_exit_signal || (typeof instanceStatus?.last_exit_code === "number" && instanceStatus.last_exit_code !== 0) ? "badge warn" : "badge"}>
-                  {fmtUnix(instanceStatus.last_exit_unix)}
+                  <TimeAgo unix={instanceStatus.last_exit_unix} />
                 </span>
               ) : (
                 <span className="muted">-</span>
@@ -1711,7 +1712,7 @@ export default function GamesView() {
 
           <div className="kv">
             <div className="k">{t.tr("Last heartbeat", "最后心跳")}</div>
-            <div className="v">{fmtUnix(selectedDaemon?.heartbeat?.server_time_unix)}</div>
+            <div className="v"><TimeAgo unix={selectedDaemon?.heartbeat?.server_time_unix} /></div>
           </div>
         </div>
       </div>
@@ -1825,7 +1826,7 @@ export default function GamesView() {
                       {p.remote_addr}:{p.remote_port}
                     </code>
                     <span className="hint">
-                      {t.tr("started", "启动")}: {fmtUnix(p.started_unix)}
+                      {t.tr("started", "启动")}: <TimeAgo unix={p.started_unix} />
                     </span>
                   </div>
                 ))}
@@ -1930,7 +1931,7 @@ export default function GamesView() {
                 {tpsInfo?.mspt != null ? <span className="badge">MSPT {tpsInfo.mspt.toFixed(2)}</span> : null}
               </div>
               <div className="hint" style={{ marginTop: 6 }}>
-                {t.tr("last query", "最后查询")}: <code>{tpsInfo ? fmtUnix(tpsInfo.atUnix) : "-"}</code>
+                {t.tr("last query", "最后查询")}: <code>{tpsInfo ? <TimeAgo unix={tpsInfo.atUnix} /> : "-"}</code>
               </div>
             </div>
           </div>
@@ -1961,7 +1962,8 @@ export default function GamesView() {
                   {t.tr("size", "大小")}: <code>{instanceUsageBytes == null ? "-" : fmtBytes(instanceUsageBytes)}</code>
                   {instanceUsageStatus ? ` · ${instanceUsageStatus}` : ""}
                   {" · "}
-                  {t.tr("last backup", "最近备份")}: {lastBackup.unix ? fmtUnix(lastBackup.unix) : Array.isArray(backupZips) && backupZips.length ? lastBackup.file : "-"}
+                  {t.tr("last backup", "最近备份")}:{" "}
+                  {lastBackup.unix ? <TimeAgo unix={lastBackup.unix} /> : Array.isArray(backupZips) && backupZips.length ? lastBackup.file : "-"}
                 </div>
               ) : null}
             </div>
@@ -2055,7 +2057,7 @@ export default function GamesView() {
                           : "tar.gz";
                     return (
                       <tr key={path}>
-                        <td className="muted">{unix ? fmtUnix(unix) : "-"}</td>
+                        <td className="muted">{unix ? <TimeAgo unix={unix} /> : "-"}</td>
                         <td style={{ minWidth: 0 }}>
                           <div className="row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                             <span className="badge">{format}</span>
@@ -2865,7 +2867,7 @@ export default function GamesView() {
                     </>
                   ) : cmdOutputs[0] ? (
                     <>
-                      {fmtUnix(cmdOutputs[0].startedUnix)} · <code>{cmdOutputs[0].cmd}</code>
+                      <TimeAgo unix={cmdOutputs[0].startedUnix} /> · <code>{cmdOutputs[0].cmd}</code>
                     </>
                   ) : null}
                 </div>

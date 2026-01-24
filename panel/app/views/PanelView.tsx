@@ -5,6 +5,7 @@ import { useAppCtx } from "../appCtx";
 import CopyButton from "../ui/CopyButton";
 import Field from "../ui/Field";
 import Select from "../ui/Select";
+import TimeAgo from "../ui/TimeAgo";
 
 export default function PanelView() {
   const {
@@ -1068,8 +1069,8 @@ export default function PanelView() {
               {users.map((u: any) => {
                 const id = String(u?.id || "").trim();
                 const username = String(u?.username || "").trim() || "-";
-                const created = u?.created_at_unix ? fmtUnix(Number(u.created_at_unix)) : "-";
-                const updated = u?.updated_at_unix ? fmtUnix(Number(u.updated_at_unix)) : "-";
+                const createdUnix = u?.created_at_unix ? Number(u.created_at_unix) : 0;
+                const updatedUnix = u?.updated_at_unix ? Number(u.updated_at_unix) : 0;
                 const totp = !!u?.totp_enabled;
                 const isSelf = !!authMe?.user_id && String(authMe.user_id) === id;
                 return (
@@ -1078,8 +1079,8 @@ export default function PanelView() {
                       <code>{username}</code>
                     </td>
                     <td>{totp ? <span className="badge ok">{t.tr("on", "开启")}</span> : <span className="badge">{t.tr("off", "关闭")}</span>}</td>
-                    <td>{created}</td>
-                    <td>{updated}</td>
+                    <td>{createdUnix ? <TimeAgo unix={createdUnix} /> : "-"}</td>
+                    <td>{updatedUnix ? <TimeAgo unix={updatedUnix} /> : "-"}</td>
                     <td style={{ textAlign: "right" }}>
                       <div className="btnGroup" style={{ justifyContent: "flex-end" }}>
                         {isSelf && !totp ? (
@@ -1166,14 +1167,14 @@ export default function PanelView() {
               {apiTokens.map((tok: any) => {
                 const id = String(tok?.id || "").trim();
                 const name = String(tok?.name || "").trim() || "-";
-                const created = tok?.created_at_unix ? fmtUnix(Number(tok.created_at_unix)) : "-";
-                const lastUsed = tok?.last_used_at_unix ? fmtUnix(Number(tok.last_used_at_unix)) : "-";
+                const createdUnix = tok?.created_at_unix ? Number(tok.created_at_unix) : 0;
+                const lastUsedUnix = tok?.last_used_at_unix ? Number(tok.last_used_at_unix) : 0;
                 const fp = String(tok?.fingerprint || "").trim() || "-";
                 return (
                   <tr key={id || fp}>
                     <td style={{ minWidth: 220 }}>{name}</td>
-                    <td>{created}</td>
-                    <td>{lastUsed}</td>
+                    <td>{createdUnix ? <TimeAgo unix={createdUnix} /> : "-"}</td>
+                    <td>{lastUsedUnix ? <TimeAgo unix={lastUsedUnix} /> : "-"}</td>
                     <td>
                       <code>{fp}</code>
                     </td>
@@ -1271,7 +1272,7 @@ export default function PanelView() {
 	              label={t.tr("Schedule", "时间")}
 	              hint={
 	                <>
-	                  {t.tr("Next run", "下次运行")}: <code>{fmtUnix(Number(backupSchedulePreview.next_run_unix || nowUnix))}</code> ·{" "}
+	                  {t.tr("Next run", "下次运行")}: <code><TimeAgo unix={Number(backupSchedulePreview.next_run_unix || nowUnix)} /></code> ·{" "}
 	                  <span className="muted">
 	                    {t.tr("cron (ref)", "cron（参考）")}: <code>{String(backupSchedulePreview.cron || "-")}</code>
 	                  </span>
@@ -1450,9 +1451,9 @@ export default function PanelView() {
                       <code>{String(t.instance_id || "-")}</code>
 	                    </td>
 	                    <td>{t.every_sec ? `${Number(t.every_sec)}s` : "-"}</td>
-	                    <td>{t.at_unix ? fmtUnix(Number(t.at_unix)) : "-"}</td>
+	                    <td>{t.at_unix ? <TimeAgo unix={Number(t.at_unix)} /> : "-"}</td>
 	                    <td>{nextRunLabel(t)}</td>
-	                    <td>{t.last_run_unix ? fmtUnix(Number(t.last_run_unix)) : "-"}</td>
+	                    <td>{t.last_run_unix ? <TimeAgo unix={Number(t.last_run_unix)} /> : "-"}</td>
 	                    <td style={{ maxWidth: 260, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
 	                      {String(t.last_error || "")}
 	                    </td>
@@ -1550,8 +1551,8 @@ export default function PanelView() {
                 const id = String(s?.id || "").trim();
                 const masked = String(s?.token_masked || "").trim() || "-";
                 const user = String(s?.username || s?.user_id || "").trim() || "-";
-                const created = s?.created_at_unix ? fmtUnix(Number(s.created_at_unix)) : "-";
-                const expires = s?.expires_at_unix ? fmtUnix(Number(s.expires_at_unix)) : "-";
+                const createdUnix = s?.created_at_unix ? Number(s.created_at_unix) : 0;
+                const expiresUnix = s?.expires_at_unix ? Number(s.expires_at_unix) : 0;
                 const current = !!s?.current;
                 return (
                   <tr key={id || masked}>
@@ -1559,8 +1560,8 @@ export default function PanelView() {
                       <code>{masked}</code> {current ? <span className="badge ok">{t.tr("current", "当前")}</span> : null}
                     </td>
                     <td>{user}</td>
-                    <td>{created}</td>
-                    <td>{expires}</td>
+                    <td>{createdUnix ? <TimeAgo unix={createdUnix} /> : "-"}</td>
+                    <td>{expiresUnix ? <TimeAgo unix={expiresUnix} /> : "-"}</td>
                     <td style={{ textAlign: "right" }}>
                       <div className="btnGroup" style={{ justifyContent: "flex-end" }}>
                         <button type="button" className="dangerBtn" onClick={() => revokeSession(id, masked)} disabled={sessionsBusy || !id}>

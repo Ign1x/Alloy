@@ -6,6 +6,7 @@ import { AppCtxProvider } from "./appCtx";
 import { createT, normalizeLocale, type Locale } from "./i18n";
 import Icon from "./ui/Icon";
 import CopyButton from "./ui/CopyButton";
+import TimeAgo from "./ui/TimeAgo";
 import ErrorBoundary from "./ui/ErrorBoundary";
 import DangerZone from "./ui/DangerZone";
 import Select from "./ui/Select";
@@ -7848,9 +7849,7 @@ export default function HomePage() {
 	                          {n.kind === "ok" ? t.tr("Success", "成功") : n.kind === "error" ? t.tr("Error", "错误") : t.tr("Notice", "提示")}
 	                          {!n.seen ? <span className="notifDot" aria-hidden="true" /> : null}
 	                        </div>
-	                        <time className="notifTime" dateTime={new Date(n.atMs).toISOString()} title={fmtUnix(Math.floor(n.atMs / 1000))}>
-	                          {fmtUnix(Math.floor(n.atMs / 1000))}
-	                        </time>
+	                        <TimeAgo className="notifTime" unix={Math.floor(n.atMs / 1000)} />
 	                      </div>
 	                      <div className="notifBody">{n.message}</div>
 	                      <div className="notifActions">
@@ -8106,11 +8105,11 @@ export default function HomePage() {
               <div className="pageSubtitle">
                 {t.tr("daemon", "daemon")}: <code>{selectedDaemon?.id || "-"}</code> ·{" "}
                 {selectedDaemon?.connected ? <span className="badge ok">{t.tr("online", "在线")}</span> : <span className="badge">{t.tr("offline", "离线")}</span>} ·{" "}
-                {t.tr("last", "最近")}: {fmtUnix(selectedDaemon?.lastSeenUnix)}
+                {t.tr("last", "最近")}: <TimeAgo unix={selectedDaemon?.lastSeenUnix} />
                 {daemonsCacheAtUnix > 0 ? (
                   <>
                     {" "}
-                    · {t.tr("updated", "更新时间")}: {fmtUnix(daemonsCacheAtUnix)}
+                    · {t.tr("updated", "更新时间")}: <TimeAgo unix={daemonsCacheAtUnix} />
                   </>
                 ) : authed === true ? (
                   <> · {t.tr("connecting…", "连接中…")}</>
@@ -8155,7 +8154,7 @@ export default function HomePage() {
         {authed === true && selectedDaemon && !selectedDaemon.connected ? (
           <div className="offlineBanner">
             <b>{t.tr("Daemon offline.", "Daemon 离线。")}</b> {t.tr("last seen", "最后在线")}:
-            <code> {fmtUnix(selectedDaemon.lastSeenUnix)}</code>. {t.tr("Actions are disabled until it reconnects.", "在重新连接前，操作已禁用。")}
+            <code> <TimeAgo unix={selectedDaemon.lastSeenUnix} /></code>. {t.tr("Actions are disabled until it reconnects.", "在重新连接前，操作已禁用。")}
           </div>
         ) : null}
 
@@ -8193,7 +8192,7 @@ export default function HomePage() {
 	        {authed === true && error && daemons.length && daemonsCacheAtUnix > 0 ? (
 	          <div className="offlineBanner">
 	            <b>{t.tr("Offline mode.", "离线模式。")}</b> {t.tr("Showing cached state from", "正在显示缓存数据，时间")}:{" "}
-	            <code>{fmtUnix(daemonsCacheAtUnix)}</code>.
+	            <code><TimeAgo unix={daemonsCacheAtUnix} /></code>.
 	          </div>
 	        ) : null}
 

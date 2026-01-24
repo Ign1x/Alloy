@@ -5,6 +5,7 @@ import { useAppCtx } from "../appCtx";
 import CopyButton from "../ui/CopyButton";
 import Icon from "../ui/Icon";
 import Select from "../ui/Select";
+import TimeAgo from "../ui/TimeAgo";
 import Tooltip from "../ui/Tooltip";
 
 type DiffLine = {
@@ -1247,7 +1248,7 @@ export default function FilesView() {
                         </td>
                         <td>{e.isDir ? "dir" : "file"}</td>
                         <td>{e.isDir ? "-" : fmtBytes(Number(e.size || 0))}</td>
-                        <td>{fmtUnix(Number(e.mtime_unix || 0))}</td>
+                        <td><TimeAgo unix={Number(e.mtime_unix || 0)} /></td>
                         <td style={{ textAlign: "right" }}>
                           <div className="btnGroup" style={{ justifyContent: "flex-end" }}>
                             <button type="button" onClick={() => renameFsEntry(e)}>

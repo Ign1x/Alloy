@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useAppCtx } from "../appCtx";
 import Icon from "../ui/Icon";
 import DangerZone from "../ui/DangerZone";
+import TimeAgo from "../ui/TimeAgo";
 
 export default function FrpView() {
   const {
@@ -17,7 +18,6 @@ export default function FrpView() {
     setTab,
     removeFrpProfile,
     copyText,
-    fmtUnix,
     setProfilesStatus,
     apiFetch,
     confirmDialog,
@@ -85,7 +85,7 @@ export default function FrpView() {
                   </div>
 
                   <div className="hint">
-                    {t.tr("checked", "检测")}: {fmtUnix(checkedAt)}
+                    {t.tr("checked", "检测")}: <TimeAgo unix={checkedAt} />
                   </div>
                   {p.status?.error && online === false ? <div className="hint">{p.status.error}</div> : null}
 

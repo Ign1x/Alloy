@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { useAppCtx } from "../appCtx";
 import Icon from "../ui/Icon";
 import Select from "../ui/Select";
+import TimeAgo from "../ui/TimeAgo";
 
 export default function NodesView() {
   const {
@@ -17,7 +18,6 @@ export default function NodesView() {
     openNodeDetails,
     copyText,
     pct,
-    fmtUnix,
     fmtBytes,
     setSelected,
     setTab,
@@ -155,7 +155,7 @@ export default function NodesView() {
                     <div style={{ minWidth: 0 }}>
                       <div className="itemTitle">{n.id}</div>
                       <div className="itemMeta">
-                        {t.tr("last", "最近")}: {fmtUnix(n.lastSeenUnix)} · {t.tr("instances", "实例")}: {instances.length}
+                        {t.tr("last", "最近")}: <TimeAgo unix={n.lastSeenUnix} /> · {t.tr("instances", "实例")}: {instances.length}
                         {daemonVer ? ` · v${daemonVer}` : ""}
                       </div>
                     </div>
