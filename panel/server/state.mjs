@@ -94,18 +94,16 @@ async function ensureTokensLoaded() {
     state.daemonTokens = {};
   }
 
-  if (!Object.keys(state.daemonTokens).length) {
-    const rawEnv = process.env.ELEGANTMC_DAEMON_TOKENS_JSON;
-    if (rawEnv) {
-      try {
-        const parsed = JSON.parse(rawEnv);
-        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-          state.daemonTokens = parsed;
-          await writeFileAtomic(DAEMON_TOKENS_PATH, JSON.stringify(state.daemonTokens, null, 2));
-        }
-      } catch {
-        // ignore
+  const rawEnv = process.env.ELEGANTMC_DAEMON_TOKENS_JSON;
+  if (rawEnv) {
+    try {
+      const parsed = JSON.parse(rawEnv);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        state.daemonTokens = { ...(state.daemonTokens || {}), ...parsed };
+        await writeFileAtomic(DAEMON_TOKENS_PATH, JSON.stringify(state.daemonTokens, null, 2));
       }
+    } catch {
+      // ignore
     }
   }
 

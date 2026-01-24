@@ -23,7 +23,8 @@ services:
       ELEGANTMC_PANEL_HSTS: "${ELEGANTMC_PANEL_HSTS:-}"
       ELEGANTMC_ENABLE_ADVANCED: "${ELEGANTMC_ENABLE_ADVANCED:-}"
       # Local quickstart node (change in production).
-      ELEGANTMC_DAEMON_TOKENS_JSON: "{\"${ELEGANTMC_DAEMON_ID:-local-node}\":\"${ELEGANTMC_TOKEN:-local-dev-token}\"}"
+      # Note: Tokens are persisted under ELEGANTMC_PANEL_DATA_DIR. This env value is merged on startup.
+      ELEGANTMC_DAEMON_TOKENS_JSON: '{"${ELEGANTMC_DAEMON_ID:-local-node}":"${ELEGANTMC_TOKEN:-local-dev-token}"}'
       ELEGANTMC_PANEL_DATA_DIR: "/data"
       # Optional mirrors (recommended in China)
       ELEGANTMC_MOJANG_META_BASE_URL: "${ELEGANTMC_MOJANG_META_BASE_URL:-}"

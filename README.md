@@ -63,6 +63,8 @@ docker compose up -d --build
 
 > 如果你修改了 `ELEGANTMC_PANEL_PORT`，Panel 会监听同一个端口，Daemon 也会自动连到 `ws://panel:<port>/ws/daemon`（同一个 compose 内）。
 
+> 注意：节点 token 会持久化到 Panel 数据目录（Docker 默认 volume：`elegantmc-panel-data`）。修改 `ELEGANTMC_DAEMON_ID` / `ELEGANTMC_TOKEN` 后重启 compose 会更新映射；如需完全重置请 `docker compose down -v`。
+
 > 直连端口：`docker-compose.yml` 默认把 Daemon 容器的 `25565-25600` 映射到宿主机同端口（方便在 Panel 里调整 Game Port 并从本机/LAN 直连）。
 
 ### 国内网络加速（可选）
