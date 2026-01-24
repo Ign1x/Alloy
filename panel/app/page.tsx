@@ -6,6 +6,7 @@ import { AppCtxProvider } from "./appCtx";
 import { createT, normalizeLocale, type Locale } from "./i18n";
 import Icon from "./ui/Icon";
 import CopyButton from "./ui/CopyButton";
+import CodeBlock from "./ui/CodeBlock";
 import EnvHelpButton from "./ui/EnvHelpButton";
 import TimeAgo from "./ui/TimeAgo";
 import StatusBadge from "./ui/StatusBadge";
@@ -10137,21 +10138,29 @@ export default function HomePage() {
                   ) : null}
 
 	                <h3 style={{ marginTop: 12 }}>{t.tr("Install Logs", "安装日志")}</h3>
-	                <pre style={{ maxHeight: 360, overflow: "auto" }}>
-                  {logs
-                    .filter((l) => {
-                      if (l.source !== "install") return false;
-                      if (installInstance && l.instance !== installInstance) return false;
-                      if (installStartUnix > 0 && (l.ts_unix || 0) < installStartUnix - 1) return false;
-                      return true;
-                    })
-                    .slice(-500)
-                    .map((l) => {
-                      const ts = fmtTime(Number(l.ts_unix || 0));
-                      return `[${ts}] ${l.line || ""}`;
-                    })
-                    .join("\n") || t.tr("<no install logs>", "<无安装日志>")}
-                </pre>
+	                <CodeBlock
+	                  text={
+	                    logs
+	                      .filter((l) => {
+	                        if (l.source !== "install") return false;
+	                        if (installInstance && l.instance !== installInstance) return false;
+	                        if (installStartUnix > 0 && (l.ts_unix || 0) < installStartUnix - 1) return false;
+	                        return true;
+	                      })
+	                      .slice(-500)
+	                      .map((l) => {
+	                        const ts = fmtTime(Number(l.ts_unix || 0));
+	                        return `[${ts}] ${l.line || ""}`;
+	                      })
+	                      .join("\n") || t.tr("<no install logs>", "<无安装日志>")
+	                  }
+	                  maxHeight={360}
+	                  storageKey="install-logs"
+	                  initialWrap
+	                  initialLineNumbers
+	                  wrapLabel={t.tr("Wrap", "自动换行")}
+	                  lineNumbersLabel={t.tr("Lines", "行号")}
+	                />
           </ManagedModal>
 
           <ManagedModal
@@ -11267,28 +11276,35 @@ export default function HomePage() {
 	              </div>
 	              <div className="field" style={{ gridColumn: "1 / -1" }}>
 	                <label>{t.tr("docker-compose.yml", "docker-compose.yml")}</label>
-                <textarea readOnly rows={12} value={deployComposeYml} style={{ width: "100%" }} onFocus={(e) => e.currentTarget.select()} />
-                <div className="btnGroup" style={{ justifyContent: "flex-end" }}>
-                  <CopyButton text={deployComposeYml} />
-                  <button
-                    type="button"
-                    className="iconBtn"
-                    onClick={() => {
-                      const blob = new Blob([deployComposeYml], { type: "text/yaml;charset=utf-8" });
-                      const url = URL.createObjectURL(blob);
-                      const a = document.createElement("a");
-                      a.href = url;
-                      a.download = deployNodeId ? `elegantmc-daemon-${deployNodeId}.yml` : "elegantmc-daemon.yml";
-                      document.body.appendChild(a);
-                      a.click();
-                      a.remove();
-                      URL.revokeObjectURL(url);
-                    }}
-                  >
-                    <Icon name="download" />
-                    {t.tr("Download", "下载")}
-                  </button>
-                </div>
+                <CodeBlock
+                  text={deployComposeYml}
+                  maxHeight={420}
+                  storageKey="deploy-compose"
+                  initialLineNumbers
+                  wrapLabel={t.tr("Wrap", "自动换行")}
+                  lineNumbersLabel={t.tr("Lines", "行号")}
+                  actions={
+                    <button
+                      type="button"
+                      className="iconBtn iconOnly"
+                      aria-label={t.tr("Download", "下载")}
+                      title={t.tr("Download", "下载")}
+                      onClick={() => {
+                        const blob = new Blob([deployComposeYml], { type: "text/yaml;charset=utf-8" });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement("a");
+                        a.href = url;
+                        a.download = deployNodeId ? `elegantmc-daemon-${deployNodeId}.yml` : "elegantmc-daemon.yml";
+                        document.body.appendChild(a);
+                        a.click();
+                        a.remove();
+                        URL.revokeObjectURL(url);
+                      }}
+                    >
+                      <Icon name="download" />
+                    </button>
+                  }
+                />
               </div>
             </div>
       </ManagedModal>

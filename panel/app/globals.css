@@ -2004,6 +2004,29 @@ pre {
   counter-reset: codeLine;
 }
 
+.codeToolbar {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--code-border);
+  background: var(--code-bg);
+}
+
+.codeToolbarTitle {
+  font-weight: 800;
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-tight);
+}
+
+.codeToolbarHint {
+  margin-top: 2px;
+}
+
 pre.codePre {
   margin: 0;
   border: 0;
