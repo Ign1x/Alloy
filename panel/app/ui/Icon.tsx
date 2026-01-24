@@ -1,6 +1,6 @@
 "use client";
 
-export type IconName = "plus" | "refresh" | "copy" | "download" | "trash" | "settings" | "search" | "menu";
+export type IconName = "plus" | "refresh" | "copy" | "download" | "trash" | "settings" | "search" | "menu" | "cpu" | "memory" | "disk";
 
 export default function Icon({ name, size = 14 }: { name: IconName; size?: number }) {
   const common = {
@@ -157,6 +157,29 @@ export default function Icon({ name, size = 14 }: { name: IconName; size?: numbe
       return (
         <svg {...common}>
           <path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+        </svg>
+      );
+    case "cpu":
+      return (
+        <svg {...common}>
+          <path d="M9 9h6v6H9z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
+          <path d="M9 3v3M15 3v3M9 18v3M15 18v3M3 9h3M3 15h3M18 9h3M18 15h3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+        </svg>
+      );
+    case "memory":
+      return (
+        <svg {...common}>
+          <path d="M7 8h10v8H7z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
+          <path d="M9 8v8M12 8v8M15 8v8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+          <path d="M6 10H4M6 14H4M20 10h-2M20 14h-2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+        </svg>
+      );
+    case "disk":
+      return (
+        <svg {...common}>
+          <path d="M6 6h12v12H6z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
+          <path d="M8 10h8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+          <path d="M9 14h.01M12 14h.01M15 14h.01" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
         </svg>
       );
     default:

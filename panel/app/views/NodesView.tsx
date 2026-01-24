@@ -143,6 +143,9 @@ export default function NodesView() {
               const instances = Array.isArray(hb?.instances) ? hb.instances : [];
               const memPct = mem?.total_bytes ? pct(mem.used_bytes, mem.total_bytes) : null;
               const diskPct = disk?.total_bytes ? pct(disk.used_bytes, disk.total_bytes) : null;
+              const cpuKind = cpu == null ? "" : cpu >= 90 ? "bad" : cpu >= 70 ? "warn" : "ok";
+              const memKind = memPct == null ? "" : memPct >= 90 ? "bad" : memPct >= 75 ? "warn" : "ok";
+              const diskKind = diskPct == null ? "" : diskPct >= 92 ? "bad" : diskPct >= 80 ? "warn" : "ok";
               const daemonVer = String(n?.hello?.version || "").trim();
               const panelVer = String(panelInfo?.version || "").trim();
               const verMismatch = !!daemonVer && !!panelVer && daemonVer !== panelVer && panelVer !== "dev";
@@ -166,25 +169,45 @@ export default function NodesView() {
                     </div>
                   </div>
 
-                  <div className="row" style={{ gap: 8 }}>
-                    <span className="badge">{cpu == null ? t.tr("CPU -", "CPU -") : `CPU ${cpu.toFixed(1)}%`}</span>
-                    <span className="badge">{memPct == null ? t.tr("MEM -", "MEM -") : `MEM ${memPct.toFixed(0)}%`}</span>
-                    <span className="badge">{diskPct == null ? t.tr("DISK -", "DISK -") : `DISK ${diskPct.toFixed(0)}%`}</span>
+                  <div className="metricGrid">
+                    <div className={["metricCard", cpuKind].filter(Boolean).join(" ")}>
+                      <div className="metricHead">
+                        <Icon name="cpu" /> CPU
+                      </div>
+                      <div className="metricValue">{cpu == null ? "—" : `${cpu.toFixed(0)}%`}</div>
+                      <div className="metricSub">{cpu == null ? t.tr("No data", "暂无数据") : t.tr("usage", "使用率")}</div>
+                    </div>
+                    <div className={["metricCard", memKind].filter(Boolean).join(" ")}>
+                      <div className="metricHead">
+                        <Icon name="memory" /> MEM
+                      </div>
+                      <div className="metricValue">{memPct == null ? "—" : `${memPct.toFixed(0)}%`}</div>
+                      <div className="metricSub">
+                        {mem?.total_bytes ? (
+                          <>
+                            {fmtBytes(mem.used_bytes)}/{fmtBytes(mem.total_bytes)}
+                          </>
+                        ) : (
+                          t.tr("No data", "暂无数据")
+                        )}
+                      </div>
+                    </div>
+                    <div className={["metricCard", diskKind].filter(Boolean).join(" ")}>
+                      <div className="metricHead">
+                        <Icon name="disk" /> DISK
+                      </div>
+                      <div className="metricValue">{diskPct == null ? "—" : `${diskPct.toFixed(0)}%`}</div>
+                      <div className="metricSub">
+                        {disk?.total_bytes ? (
+                          <>
+                            {fmtBytes(disk.used_bytes)}/{fmtBytes(disk.total_bytes)} · {fmtBytes(disk.free_bytes)} {t.tr("free", "可用")}
+                          </>
+                        ) : (
+                          t.tr("No data", "暂无数据")
+                        )}
+                      </div>
+                    </div>
                   </div>
-                  {mem?.total_bytes ? (
-                    <div className="hint">
-                      {fmtBytes(mem.used_bytes)}/{fmtBytes(mem.total_bytes)}
-                    </div>
-                  ) : (
-                    <div className="hint">{t.tr("memory: -", "内存：-")}</div>
-                  )}
-                  {disk?.total_bytes ? (
-                    <div className="hint">
-                      {t.tr("disk", "磁盘")}: {fmtBytes(disk.used_bytes)}/{fmtBytes(disk.total_bytes)} ({fmtBytes(disk.free_bytes)} {t.tr("free", "可用")})
-                    </div>
-                  ) : (
-                    <div className="hint">{t.tr("disk: -", "磁盘：-")}</div>
-                  )}
 
                   <div className="row" style={{ justifyContent: "space-between", gap: 10, minWidth: 0 }}>
                     <div className="row" style={{ gap: 8, minWidth: 0 }}>
