@@ -1751,6 +1751,22 @@ button {
   transition: background 0.15s ease, border-color 0.15s ease, transform 0.02s ease;
 }
 
+/* Button variants:
+  - default: neutral control button
+  - .primary: primary action
+  - .secondary: surface action
+  - .danger / .dangerBtn: destructive action
+  - .ghost: subtle hover only
+  - .linkBtn: inline link-like button
+  - .iconOnly: square icon button
+  - sizes: .btnSm / .btnMd / .btnLg
+*/
+
+button:hover:not(:disabled):not(.primary):not(.secondary):not(.danger):not(.dangerBtn):not(.ghost):not(.linkBtn) {
+  background: var(--surface2);
+  border-color: var(--border2);
+}
+
 button.iconBtn {
   gap: 6px;
 }
@@ -1832,7 +1848,7 @@ button.iconOnly {
   max-width: min(360px, 70vw);
 }
 
-button:active {
+button:active:not(:disabled) {
   transform: translateY(1px);
 }
 
@@ -1870,7 +1886,7 @@ button.primary {
   border-color: var(--primary-border);
 }
 
-button.primary:hover {
+button.primary:hover:not(:disabled) {
   background: linear-gradient(180deg, rgba(139, 92, 246, 0.98), rgba(139, 92, 246, 0.80));
 }
 
@@ -1879,7 +1895,7 @@ button.dangerBtn {
   border-color: var(--danger-border);
 }
 
-button.dangerBtn:hover {
+button.dangerBtn:hover:not(:disabled) {
   background: rgba(248, 113, 113, 0.20);
 }
 
