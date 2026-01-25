@@ -240,6 +240,7 @@ export default function GamesView() {
   const [logMatchOnly, setLogMatchOnly] = useState<boolean>(false);
   const [logLevelFilter, setLogLevelFilter] = useState<"all" | "warn" | "error">("all");
   const [logTimeMode, setLogTimeMode] = useState<"local" | "relative">("local");
+  const [logPreset, setLogPreset] = useState<string>("");
   const [autoScroll, setAutoScroll] = useState<boolean>(true);
   const [wrapLogs, setWrapLogs] = useState<boolean>(true);
   const [highlightLogs, setHighlightLogs] = useState<boolean>(true);
@@ -588,6 +589,70 @@ export default function GamesView() {
       return { mode: "regex" as const, q, re: null as RegExp | null, error: String(e?.message || e) };
     }
   }, [logQuery, logRegex]);
+
+  const logPresetDefs = useMemo(() => {
+    return [
+      {
+        id: "exceptions",
+        label: t.tr("Exceptions / stacktrace", "异常 / 堆栈"),
+        regex: true,
+        query: "(Exception|Error|Stacktrace|Caused by)",
+        matchOnly: true,
+        level: "error" as const,
+      },
+      {
+        id: "cant_keep_up",
+        label: t.tr("Can't keep up", "Can't keep up（卡顿）"),
+        regex: false,
+        query: "Can't keep up",
+        matchOnly: true,
+        level: "warn" as const,
+      },
+      {
+        id: "timed_out",
+        label: t.tr("Timed out", "Timed out（超时）"),
+        regex: true,
+        query: "Timed out|timed out|timeout|Read timed out",
+        matchOnly: true,
+        level: "warn" as const,
+      },
+      {
+        id: "oom",
+        label: t.tr("Out of memory", "内存溢出"),
+        regex: true,
+        query: "OutOfMemoryError|GC overhead limit exceeded",
+        matchOnly: true,
+        level: "error" as const,
+      },
+      {
+        id: "watchdog",
+        label: t.tr("Server watchdog", "服务端 Watchdog"),
+        regex: true,
+        query: "watchdog|Server Hang Watchdog|A single server tick took",
+        matchOnly: true,
+        level: "error" as const,
+      },
+      {
+        id: "login_errors",
+        label: t.tr("Login / auth errors", "登录/认证错误"),
+        regex: true,
+        query: "Failed to verify username|Not authenticated|Disconnecting",
+        matchOnly: true,
+        level: "warn" as const,
+      },
+    ] as Array<{
+      id: string;
+      label: string;
+      regex: boolean;
+      query: string;
+      matchOnly: boolean;
+      level: "all" | "warn" | "error";
+    }>;
+  }, [t]);
+
+  const logPresetOptions = useMemo(() => {
+    return logPresetDefs.map((p) => ({ value: p.id, label: p.label }));
+  }, [logPresetDefs]);
 
   const historyFilter = useMemo(() => {
     const q = String(historySearchQuery || "").trim();
@@ -3061,6 +3126,23 @@ export default function GamesView() {
                 </>
               ) : null}
             </div>
+            <Select
+              value={logPreset}
+              onChange={(v) => {
+                const id = String(v || "");
+                setLogPreset("");
+                const preset = logPresetDefs.find((p) => p.id === id);
+                if (!preset) return;
+                setLogRegex(preset.regex);
+                setLogMatchOnly(preset.matchOnly);
+                setLogLevelFilter(preset.level);
+                setLogQueryRaw(preset.query);
+              }}
+              placeholder={t.tr("Presets…", "预设…")}
+              options={logPresetOptions}
+              style={{ width: 200 }}
+              disabled={!instanceId.trim()}
+            />
             <label className="checkRow" style={{ userSelect: "none" }}>
               <input type="checkbox" checked={logMatchOnly} onChange={(e) => setLogMatchOnly(e.target.checked)} />{" "}
               {t.tr("Only matches", "仅匹配")}
