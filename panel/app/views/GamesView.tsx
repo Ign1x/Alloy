@@ -2358,15 +2358,15 @@ function GamesView() {
                   const running = !!runningById[id];
                   const isActive = id === instanceId;
                   return (
-                    <div
-                      key={id}
-                      className="itemCard"
-                      style={{ opacity: running ? 1 : 0.9, borderColor: isActive ? "var(--ok-border)" : undefined }}
-                      role="button"
-                      tabIndex={0}
-                      onClick={() => setInstanceId(id)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" || e.key === " ") {
+	                    <div
+	                      key={id}
+	                      className={["itemCard", isActive ? "active" : ""].filter(Boolean).join(" ")}
+	                      style={{ opacity: running ? 1 : 0.9 }}
+	                      role="button"
+	                      tabIndex={0}
+	                      onClick={() => setInstanceId(id)}
+	                      onKeyDown={(e) => {
+	                        if (e.key === "Enter" || e.key === " ") {
                           e.preventDefault();
                           setInstanceId(id);
                         }

@@ -1214,6 +1214,7 @@ button.themeCardBtn.selected {
 
 .virtRow.active {
   background: rgba(34, 197, 94, 0.10);
+  border-top-color: var(--ok-border);
 }
 
 :root[data-theme="light"] .virtRow.active {
@@ -1355,6 +1356,15 @@ button.themeCardBtn.selected {
   flex-direction: column;
   gap: var(--space-2);
   min-width: 0;
+}
+
+.itemCard.active {
+  border-color: var(--ok-border);
+  background: rgba(34, 197, 94, 0.08);
+}
+
+:root[data-theme="light"] .itemCard.active {
+  background: rgba(34, 197, 94, 0.06);
 }
 
 .itemCard[role="button"]:focus-visible {
