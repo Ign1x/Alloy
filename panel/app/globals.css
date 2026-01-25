@@ -2946,7 +2946,7 @@ button.logTopPill:hover {
   border-radius: var(--radius);
   border: 1px solid var(--border);
   background: var(--surface);
-  padding: 10px 12px;
+  padding: var(--space-3);
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
@@ -2984,8 +2984,8 @@ button.logTopPill:hover {
 .notifHead {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
-  gap: 10px;
+  align-items: center;
+  gap: var(--space-2);
 }
 
 .notifTitle {
@@ -2993,6 +2993,11 @@ button.logTopPill:hover {
   align-items: center;
   gap: 8px;
   font-weight: var(--font-weight-semibold);
+  font-size: var(--font-size-2xs);
+  line-height: var(--line-height-tight);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--notif-accent, var(--muted2));
 }
 
 .notifDot {
@@ -3011,7 +3016,8 @@ button.logTopPill:hover {
 }
 
 .notifBody {
-  color: var(--muted);
+  color: var(--text);
+  font-size: var(--font-size-sm);
   overflow-wrap: anywhere;
   word-break: break-word;
 }
