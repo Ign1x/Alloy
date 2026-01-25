@@ -361,6 +361,9 @@ h3 {
 }
 
 .card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.018)), var(--card);
   border: 1px solid var(--border);
   border-radius: var(--radius-card);
@@ -370,7 +373,23 @@ h3 {
 }
 
 .card > h2 {
-  margin-bottom: 10px;
+  margin: 0;
+}
+
+.card h1,
+.card h2,
+.card h3 {
+  margin: 0;
+}
+
+.toolbar h1,
+.toolbar h2,
+.toolbar h3 {
+  margin: 0;
+}
+
+.card > .toolbar {
+  margin-bottom: 0;
 }
 
 .card.danger {
@@ -1179,10 +1198,7 @@ button.themeCardBtn.selected {
 
 :root[data-density="compact"] .card {
   padding: 12px;
-}
-
-:root[data-density="compact"] .card > h2 {
-  margin-bottom: 8px;
+  gap: var(--space-2);
 }
 
 :root[data-density="compact"] .toolbar {
