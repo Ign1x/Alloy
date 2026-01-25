@@ -137,8 +137,8 @@
   --surface2: rgba(255, 255, 255, 0.12);
   --card: rgba(8, 10, 16, 0.92);
   --card2: rgba(8, 10, 16, 0.98);
-  --border: rgba(255, 255, 255, 0.24);
-  --border2: rgba(255, 255, 255, 0.32);
+  --border: rgba(255, 255, 255, 0.38);
+  --border2: rgba(255, 255, 255, 0.52);
   --text: rgba(255, 255, 255, 0.98);
   --muted: rgba(255, 255, 255, 0.82);
   --muted2: rgba(255, 255, 255, 0.68);
@@ -2959,6 +2959,20 @@ th {
 
 tr:hover td {
   background: var(--surface);
+}
+
+:root[data-theme="contrast"] th {
+  background: var(--surface2);
+  color: var(--muted);
+}
+
+:root[data-theme="contrast"] tr:hover td {
+  background: var(--surface2);
+}
+
+:root[data-theme="contrast"] th,
+:root[data-theme="contrast"] td {
+  border-bottom-color: var(--border2);
 }
 
 @media (max-width: 900px) {
