@@ -3225,6 +3225,20 @@ tr:hover td {
   border-bottom-color: var(--border2);
 }
 
+@media (pointer: coarse) {
+  :root {
+    --btn-min-height: 44px;
+    --btn-pad-y: 10px;
+    --btn-pad-x: 12px;
+    --btn-icon-size: 44px;
+    --btn-icon-pad: 10px;
+
+    --control-min-height: 44px;
+    --control-pad-y: 12px;
+    --control-pad-x: 12px;
+  }
+}
+
 @media (max-width: 900px) {
   :root {
     --btn-min-height: 44px;
