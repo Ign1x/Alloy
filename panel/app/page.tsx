@@ -8047,6 +8047,35 @@ export default function HomePage() {
     }
   }
 
+  async function mcLogSearch(instanceOverride?: string, opts?: any) {
+    if (!selectedDaemon?.connected) {
+      throw new Error(t.tr("daemon offline", "daemon 离线"));
+    }
+    const inst = String(instanceOverride ?? instanceId).trim();
+    if (!inst) throw new Error(t.tr("instance_id is required", "instance_id 不能为空"));
+
+    const query = String(opts?.query ?? opts?.q ?? "").trim();
+    if (!query) throw new Error(t.tr("query is required", "query 不能为空"));
+
+    const args: any = {
+      instance_id: inst,
+      query,
+      regex: !!opts?.regex,
+      case_sensitive: !!opts?.case_sensitive,
+      include_gz: opts?.include_gz == null ? true : !!opts?.include_gz,
+    };
+    const maxFilesRaw = Math.round(Number(opts?.max_files ?? opts?.maxFiles ?? NaN));
+    if (Number.isFinite(maxFilesRaw)) args.max_files = Math.max(1, Math.min(60, maxFilesRaw));
+    const maxMatchesRaw = Math.round(Number(opts?.max_matches ?? opts?.maxMatches ?? NaN));
+    if (Number.isFinite(maxMatchesRaw)) args.max_matches = Math.max(1, Math.min(2000, maxMatchesRaw));
+    const beforeRaw = Math.round(Number(opts?.context_before ?? opts?.before ?? NaN));
+    if (Number.isFinite(beforeRaw)) args.context_before = Math.max(0, Math.min(20, beforeRaw));
+    const afterRaw = Math.round(Number(opts?.context_after ?? opts?.after ?? NaN));
+    if (Number.isFinite(afterRaw)) args.context_after = Math.max(0, Math.min(20, afterRaw));
+
+    return await callOkCommand("mc_log_search", args, 60_000);
+  }
+
   async function addFrpProfile() {
     setProfilesStatus("");
     try {
@@ -8505,6 +8534,7 @@ export default function HomePage() {
     setConsoleLine,
     sendConsoleLine,
     downloadLatestLog,
+    mcLogSearch,
 
     // FRP
     profiles,

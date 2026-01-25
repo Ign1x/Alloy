@@ -596,6 +596,8 @@ func (e *Executor) Execute(ctx context.Context, cmd protocol.Command) protocol.C
 		return e.mcDelete(ctx, cmd)
 	case "mc_console":
 		return e.mcConsole(ctx, cmd)
+	case "mc_log_search":
+		return e.mcLogSearch(ctx, cmd)
 	case "frp_start":
 		return e.frpStart(ctx, cmd)
 	case "frp_stop":

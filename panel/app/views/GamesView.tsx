@@ -210,6 +210,7 @@ export default function GamesView() {
     setConsoleLine,
     sendConsoleLine,
     downloadLatestLog,
+    mcLogSearch,
     setFsPath,
     openFileByPath,
     fsReadText,
@@ -242,6 +243,16 @@ export default function GamesView() {
   const [autoScroll, setAutoScroll] = useState<boolean>(true);
   const [wrapLogs, setWrapLogs] = useState<boolean>(true);
   const [highlightLogs, setHighlightLogs] = useState<boolean>(true);
+  const [historySearchOpen, setHistorySearchOpen] = useState<boolean>(false);
+  const [historySearchBusy, setHistorySearchBusy] = useState<boolean>(false);
+  const [historySearchStatus, setHistorySearchStatus] = useState<string>("");
+  const [historySearchQuery, setHistorySearchQuery] = useState<string>("");
+  const [historySearchRegex, setHistorySearchRegex] = useState<boolean>(false);
+  const [historySearchMaxFiles, setHistorySearchMaxFiles] = useState<number>(12);
+  const [historySearchMaxMatches, setHistorySearchMaxMatches] = useState<number>(200);
+  const [historySearchBefore, setHistorySearchBefore] = useState<number>(0);
+  const [historySearchAfter, setHistorySearchAfter] = useState<number>(0);
+  const [historySearchResult, setHistorySearchResult] = useState<any | null>(null);
   const [logFindIdx, setLogFindIdx] = useState<number>(0);
   const [logPaused, setLogPaused] = useState<boolean>(false);
   const [logClearAtUnix, setLogClearAtUnix] = useState<number>(0);
@@ -578,6 +589,19 @@ export default function GamesView() {
     }
   }, [logQuery, logRegex]);
 
+  const historyFilter = useMemo(() => {
+    const q = String(historySearchQuery || "").trim();
+    if (!q) return { mode: "none" as const, q: "", qLower: "", re: null as RegExp | null, error: "" };
+    if (!historySearchRegex) return { mode: "text" as const, q, qLower: q.toLowerCase(), re: null as RegExp | null, error: "" };
+    const limit = 200;
+    if (q.length > limit) return { mode: "regex" as const, q, qLower: "", re: null as RegExp | null, error: `Pattern too long (>${limit})` };
+    try {
+      return { mode: "regex" as const, q, qLower: "", re: new RegExp(q, "i"), error: "" };
+    } catch (e: any) {
+      return { mode: "regex" as const, q, qLower: "", re: null as RegExp | null, error: String(e?.message || e) };
+    }
+  }, [historySearchQuery, historySearchRegex]);
+
   useEffect(() => {
     setLogClearAtUnix(0);
   }, [instanceId, logView]);
@@ -713,6 +737,48 @@ export default function GamesView() {
       window.setTimeout(() => scrollToLogLine(logMatchLineIdxs[next] ?? 0), 0);
       return next;
     });
+  }
+
+  async function runHistorySearchNow() {
+    const inst = instanceId.trim();
+    if (!inst) {
+      setHistorySearchStatus(t.tr("Select a game first", "请先选择游戏"));
+      return;
+    }
+    if (!selectedDaemon?.connected) {
+      setHistorySearchStatus(t.tr("daemon offline", "daemon 离线"));
+      return;
+    }
+    const q = String(historySearchQuery || "").trim();
+    if (!q) {
+      setHistorySearchStatus(t.tr("query required", "query 不能为空"));
+      return;
+    }
+    if (historyFilter.mode === "regex" && historyFilter.error) {
+      setHistorySearchStatus(`${t.tr("regex error", "正则错误")}: ${historyFilter.error}`);
+      return;
+    }
+
+    setHistorySearchBusy(true);
+    setHistorySearchStatus(t.tr("Searching...", "搜索中..."));
+    try {
+      const out = await mcLogSearch(inst, {
+        query: q,
+        regex: !!historySearchRegex,
+        max_files: Math.max(1, Math.min(60, Math.round(Number(historySearchMaxFiles || 0) || 12))),
+        max_matches: Math.max(1, Math.min(2000, Math.round(Number(historySearchMaxMatches || 0) || 200))),
+        context_before: Math.max(0, Math.min(20, Math.round(Number(historySearchBefore || 0) || 0))),
+        context_after: Math.max(0, Math.min(20, Math.round(Number(historySearchAfter || 0) || 0))),
+      });
+      setHistorySearchResult(out);
+      const hits = Array.isArray((out as any)?.matches) ? (out as any).matches.length : 0;
+      setHistorySearchStatus(hits ? "" : t.tr("No matches", "没有匹配"));
+    } catch (e: any) {
+      setHistorySearchResult(null);
+      setHistorySearchStatus(String(e?.message || e));
+    } finally {
+      setHistorySearchBusy(false);
+    }
   }
 
   useEffect(() => {
@@ -3072,6 +3138,26 @@ export default function GamesView() {
               <Icon name="download" />
               latest.log
             </button>
+            <button
+              type="button"
+              className="iconBtn"
+              onClick={() => {
+                setHistorySearchResult(null);
+                setHistorySearchStatus("");
+                setHistorySearchQuery(String(logQueryRaw || "").trim());
+                setHistorySearchRegex(!!logRegex);
+                setHistorySearchMaxFiles(12);
+                setHistorySearchMaxMatches(200);
+                setHistorySearchBefore(0);
+                setHistorySearchAfter(0);
+                setHistorySearchOpen(true);
+              }}
+              disabled={!selectedDaemon?.connected || !instanceId.trim()}
+              title={t.tr("Search server log files on disk (latest + rotated).", "在磁盘日志文件中搜索（latest + 历史轮转）。")}
+            >
+              <Icon name="search" />
+              {t.tr("History search…", "历史搜索…")}
+            </button>
           </div>
         </div>
         <div className="logScrollWrap">
@@ -3307,6 +3393,206 @@ export default function GamesView() {
           </div>
         ) : null}
       </div>
+
+      <ManagedModal
+        id="logs-history-search"
+        open={historySearchOpen}
+        onOverlayClick={() => (!historySearchBusy ? setHistorySearchOpen(false) : null)}
+        modalStyle={{ width: "min(980px, 100%)" }}
+        ariaLabel={t.tr("Log history search", "日志历史搜索")}
+      >
+        <div className="modalHeader">
+          <div>
+            <div style={{ fontWeight: 800 }}>{t.tr("Log history search", "日志历史搜索")}</div>
+            <div className="hint">
+              {t.tr("game", "游戏")}: <code>{instanceId.trim() || "-"}</code> · <code>servers/&lt;instance&gt;/logs/</code>
+            </div>
+          </div>
+          <button type="button" onClick={() => setHistorySearchOpen(false)} disabled={historySearchBusy}>
+            {t.tr("Close", "关闭")}
+          </button>
+        </div>
+
+        <div className="grid2" style={{ alignItems: "start" }}>
+          <div className="field" style={{ gridColumn: "1 / -1" }}>
+            <label>{t.tr("Query", "查询")}</label>
+            <input
+              value={historySearchQuery}
+              onChange={(e) => setHistorySearchQuery(String(e.target.value || ""))}
+              placeholder={t.tr("e.g. Exception, Can't keep up, Timed out…", "例如 Exception、Can't keep up、Timed out…")}
+              onKeyDown={(e: any) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  runHistorySearchNow();
+                }
+              }}
+            />
+            <div className="row" style={{ marginTop: 8, gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+              <label className="checkRow" style={{ userSelect: "none" }}>
+                <input type="checkbox" checked={historySearchRegex} onChange={(e) => setHistorySearchRegex(e.target.checked)} />{" "}
+                {t.tr("Regex", "正则")}
+              </label>
+              {historyFilter.mode === "regex" && historyFilter.error ? (
+                <span className="badge" title={historyFilter.error}>
+                  {t.tr("regex error", "正则错误")}
+                </span>
+              ) : null}
+              <span className="hint">{t.tr("Searches latest.log and rotated logs (including .gz).", "会搜索 latest.log 和历史轮转日志（含 .gz）。")}</span>
+            </div>
+          </div>
+          <div className="field">
+            <label>{t.tr("Max files", "最多文件")}</label>
+            <input
+              type="number"
+              value={Number.isFinite(historySearchMaxFiles) ? historySearchMaxFiles : 12}
+              onChange={(e) => setHistorySearchMaxFiles(Math.max(1, Math.min(60, Math.round(Number(e.target.value) || 12))))}
+              min={1}
+              max={60}
+            />
+          </div>
+          <div className="field">
+            <label>{t.tr("Max matches", "最多匹配")}</label>
+            <input
+              type="number"
+              value={Number.isFinite(historySearchMaxMatches) ? historySearchMaxMatches : 200}
+              onChange={(e) => setHistorySearchMaxMatches(Math.max(1, Math.min(2000, Math.round(Number(e.target.value) || 200))))}
+              min={1}
+              max={2000}
+            />
+          </div>
+          <div className="field">
+            <label>{t.tr("Context before", "前置上下文")}</label>
+            <input
+              type="number"
+              value={Number.isFinite(historySearchBefore) ? historySearchBefore : 0}
+              onChange={(e) => setHistorySearchBefore(Math.max(0, Math.min(20, Math.round(Number(e.target.value) || 0))))}
+              min={0}
+              max={20}
+            />
+          </div>
+          <div className="field">
+            <label>{t.tr("Context after", "后置上下文")}</label>
+            <input
+              type="number"
+              value={Number.isFinite(historySearchAfter) ? historySearchAfter : 0}
+              onChange={(e) => setHistorySearchAfter(Math.max(0, Math.min(20, Math.round(Number(e.target.value) || 0))))}
+              min={0}
+              max={20}
+            />
+          </div>
+        </div>
+
+        <div className="row" style={{ marginTop: 12, justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+          <div className="hint">{historySearchStatus}</div>
+          <div className="btnGroup" style={{ justifyContent: "flex-end" }}>
+            <button type="button" onClick={() => setHistorySearchOpen(false)} disabled={historySearchBusy}>
+              {t.tr("Cancel", "取消")}
+            </button>
+            <button
+              type="button"
+              className="primary"
+              onClick={runHistorySearchNow}
+              disabled={!selectedDaemon?.connected || !instanceId.trim() || historySearchBusy || !String(historySearchQuery || "").trim()}
+            >
+              {historySearchBusy ? t.tr("Searching...", "搜索中...") : t.tr("Search", "搜索")}
+            </button>
+          </div>
+        </div>
+
+        {historySearchResult ? (
+          <div style={{ marginTop: 12 }}>
+            <div className="hint">
+              {t.tr("matches", "匹配")}:{" "}
+              <code>{Array.isArray(historySearchResult?.matches) ? historySearchResult.matches.length : 0}</code>
+              {" · "}
+              {t.tr("files scanned", "扫描文件")}:{" "}
+              <code>{Array.isArray(historySearchResult?.files) ? historySearchResult.files.length : 0}</code>
+              {historySearchResult?.truncated ? (
+                <>
+                  {" · "}
+                  <span className="badge warn">{t.tr("truncated", "已截断")}</span>
+                </>
+              ) : null}
+            </div>
+
+            {Array.isArray(historySearchResult?.matches) && historySearchResult.matches.length ? (
+              <div className="stack" style={{ marginTop: 10, gap: 10, maxHeight: 520, overflow: "auto" }}>
+                {historySearchResult.matches.slice(0, 200).map((m: any, idx: number) => {
+                  const file = String(m?.file || "").trim();
+                  const path = String(m?.path || "").trim();
+                  const lineNo = Math.max(0, Math.round(Number(m?.line_no || 0) || 0));
+                  const approx = !!m?.line_no_approx;
+                  const before = Array.isArray(m?.before) ? m.before.map((s: any) => String(s || "")) : [];
+                  const after = Array.isArray(m?.after) ? m.after.map((s: any) => String(s || "")) : [];
+                  const text = String(m?.text || "");
+                  const mtimeUnix = Math.floor(Number(m?.file_mtime_unix || 0));
+                  const title = file ? file : path ? path.split("/").pop() : t.tr("<unknown>", "<未知>");
+                  const lineLabel = lineNo ? `${approx ? "~" : ""}L${lineNo}` : "-";
+                  return (
+                    <div key={`${path}:${lineNo}:${idx}`} className="itemCard">
+                      <div className="itemCardHeader" style={{ alignItems: "flex-start" }}>
+                        <div style={{ minWidth: 0 }}>
+                          <div className="itemTitle" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                            <code style={{ maxWidth: 520, overflow: "hidden", textOverflow: "ellipsis" }}>{title}</code>
+                            <span className="badge">{lineLabel}</span>
+                            {mtimeUnix > 0 ? (
+                              <span className="muted">
+                                <TimeAgo unix={mtimeUnix} />
+                              </span>
+                            ) : null}
+                          </div>
+                          <div className="itemMeta" style={{ marginTop: 6 }}>
+                            <span className="logLineText">
+                              {historyFilter.mode === "text" && historyFilter.qLower
+                                ? highlightText(text, historyFilter.qLower)
+                                : historyFilter.mode === "regex" && historyFilter.re
+                                  ? highlightRegex(text, historyFilter.re)
+                                  : text}
+                            </span>
+                          </div>
+                          {before.length || after.length ? (
+                            <pre
+                              className="diffFrame"
+                              style={{ marginTop: 10, maxHeight: 200, overflow: "auto", whiteSpace: "pre-wrap", wordBreak: "break-word" }}
+                            >
+                              {[
+                                ...(before.length ? before.map((l: string) => `  ${l}`) : []),
+                                `> ${text}`,
+                                ...(after.length ? after.map((l: string) => `  ${l}`) : []),
+                              ].join("\n")}
+                            </pre>
+                          ) : null}
+                        </div>
+                        <div className="btnGroup" style={{ justifyContent: "flex-end" }}>
+                          <CopyButton iconOnly text={text} tooltip={t.tr("Copy line", "复制该行")} ariaLabel={t.tr("Copy line", "复制该行")} disabled={!text} />
+                          <button
+                            type="button"
+                            className="iconBtn"
+                            onClick={async () => {
+                              if (!path) return;
+                              setTab("files");
+                              await openFileByPath(path);
+                              setHistorySearchOpen(false);
+                            }}
+                            disabled={!path}
+                          >
+                            {t.tr("Open file", "打开文件")}
+                          </button>
+                        </div>
+                      </div>
+                      <div className="itemCardBody" style={{ display: "none" }} />
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="hint" style={{ marginTop: 10 }}>
+                {historySearchStatus || t.tr("No matches.", "没有匹配。")}
+              </div>
+            )}
+          </div>
+        ) : null}
+      </ManagedModal>
 
       <ManagedModal
         id="games-backup-create"
