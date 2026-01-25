@@ -990,6 +990,7 @@ export default function HomePage() {
   const [restoreStatus, setRestoreStatus] = useState<string>("");
   const [restoreCandidates, setRestoreCandidates] = useState<string[]>([]);
   const [restoreZipPath, setRestoreZipPath] = useState<string>("");
+  const [backupRetentionKeepLast, setBackupRetentionKeepLast] = useState<number>(0);
   const [trashOpen, setTrashOpen] = useState<boolean>(false);
   const [trashStatus, setTrashStatus] = useState<string>("");
   const [trashItems, setTrashItems] = useState<any[]>([]);
@@ -2681,6 +2682,10 @@ export default function HomePage() {
     const frpRemoteRaw = Math.round(Number(cfg?.frp_remote_port ?? frpRemotePort));
     const frpRemoteVal = Number.isFinite(frpRemoteRaw) && frpRemoteRaw >= 0 && frpRemoteRaw <= 65535 ? frpRemoteRaw : 0;
 
+    const retentionRaw = cfg?.backup_retention_keep_last ?? cfg?.backupRetentionKeepLast;
+    const retentionNum = Math.round(Number(retentionRaw ?? NaN));
+    const retentionKeepLast = Number.isFinite(retentionNum) ? Math.max(0, Math.min(1000, retentionNum)) : null;
+
     const preset = normalizeJvmPreset(cfg?.jvm_args_preset ?? cfg?.jvmArgsPreset ?? jvmArgsPreset);
     const extraText = String(cfg?.jvm_args_extra ?? cfg?.jvmArgsExtra ?? jvmArgsExtra ?? "");
     const jvmArgs =
@@ -2699,6 +2704,7 @@ export default function HomePage() {
       enable_frp: !!(cfg?.enable_frp ?? enableFrp),
       frp_profile_id: String(cfg?.frp_profile_id ?? frpProfileId),
       frp_remote_port: frpRemoteVal,
+      ...(retentionKeepLast != null ? { backup_retention_keep_last: retentionKeepLast } : {}),
       updated_at_unix: Math.floor(Date.now() / 1000),
     };
     if (typeof cfg?.server_kind === "string") payload.server_kind = String(cfg.server_kind).trim();
@@ -3303,6 +3309,12 @@ export default function HomePage() {
         if (typeof c.frp_profile_id === "string") setFrpProfileId(c.frp_profile_id);
         if (Number.isFinite(Number(c.frp_remote_port))) setFrpRemotePort(Number(c.frp_remote_port));
         if (Number.isFinite(Number(c.game_port))) setGamePort(Number(c.game_port));
+        if (Number.isFinite(Number(c.backup_retention_keep_last))) {
+          const keep = Math.max(0, Math.min(1000, Math.round(Number(c.backup_retention_keep_last) || 0)));
+          setBackupRetentionKeepLast(keep);
+        } else {
+          setBackupRetentionKeepLast(0);
+        }
 
         const nowUnix = Math.floor(Date.now() / 1000);
         const kind = typeof c.server_kind === "string" ? String(c.server_kind || "").trim() : "";
@@ -3412,6 +3424,7 @@ export default function HomePage() {
     setInstanceUsageBytes(null);
     setInstanceUsageStatus("");
     setInstanceUsageBusy(false);
+    setBackupRetentionKeepLast(0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [instanceId]);
 
@@ -6772,7 +6785,10 @@ export default function HomePage() {
       const formatRaw = String(opts?.format || "").trim().toLowerCase();
       const format = formatRaw === "zip" ? "zip" : formatRaw === "tar.gz" || formatRaw === "tgz" ? "tar.gz" : "";
       const stop = typeof opts?.stop === "boolean" ? !!opts.stop : true;
-      const keepLast = Math.max(0, Math.min(1000, Math.round(Number(opts?.keep_last ?? opts?.keepLast ?? 0) || 0)));
+      const keepLastRaw = opts?.keep_last ?? opts?.keepLast ?? null;
+      const keepLastNum = Math.round(Number(keepLastRaw ?? NaN));
+      const keepLastDefault = Math.max(0, Math.min(1000, Math.round(Number(backupRetentionKeepLast || 0) || 0)));
+      const keepLast = Number.isFinite(keepLastNum) ? Math.max(0, Math.min(1000, keepLastNum)) : keepLastDefault;
       const comment = String(opts?.comment || "").trim();
 
       setServerOpStatus(t.tr("Creating backup...", "创建备份中..."));
@@ -6967,8 +6983,14 @@ export default function HomePage() {
           const lower = String(e.name).toLowerCase();
           return lower.endsWith(".zip") || lower.endsWith(".tar.gz") || lower.endsWith(".tgz");
         })
+        .slice()
+        .sort((a: any, b: any) => {
+          const am = Math.floor(Number(a?.mtime_unix || 0));
+          const bm = Math.floor(Number(b?.mtime_unix || 0));
+          if (Number.isFinite(am) && Number.isFinite(bm) && am !== bm) return bm - am;
+          return String(b?.name || "").localeCompare(String(a?.name || ""));
+        })
         .map((e: any) => joinRelPath(base, String(e.name)));
-      list.sort((a: string, b: string) => b.localeCompare(a));
       setRestoreCandidates(list);
       setRestoreZipPath(list[0] || "");
       setRestoreStatus(list.length ? "" : t.tr("No backups found", "未找到备份"));
@@ -6983,6 +7005,73 @@ export default function HomePage() {
     const inst = String(instanceOverride ?? instanceId).trim();
     if (!inst) return;
     await refreshRestoreCandidates(inst);
+  }
+
+  async function saveBackupRetentionKeepLast(keepLastRaw: number) {
+    if (!selectedDaemon?.connected) {
+      setServerOpStatus(t.tr("daemon offline", "daemon 离线"));
+      return false;
+    }
+    const inst = instanceId.trim();
+    if (!inst) {
+      setServerOpStatus(t.tr("instance_id is required", "instance_id 不能为空"));
+      return false;
+    }
+
+    const keepLast = Math.max(0, Math.min(1000, Math.round(Number(keepLastRaw || 0) || 0)));
+    setServerOpStatus(t.tr("Saving retention policy...", "保存保留策略中..."));
+    try {
+      await writeInstanceConfig(inst, { backup_retention_keep_last: keepLast });
+      setBackupRetentionKeepLast(keepLast);
+      pushToast(t.tr("Retention policy saved", "保留策略已保存"), "ok");
+      setServerOpStatus(t.tr("Saved", "已保存"));
+      setTimeout(() => setServerOpStatus(""), 900);
+      return true;
+    } catch (e: any) {
+      setServerOpStatus(String(e?.message || e));
+      return false;
+    }
+  }
+
+  async function pruneBackups(keepLastRaw: number) {
+    if (gameActionBusy) return false;
+    if (!selectedDaemon?.connected) {
+      setServerOpStatus(t.tr("daemon offline", "daemon 离线"));
+      return false;
+    }
+    const inst = instanceId.trim();
+    if (!inst) {
+      setServerOpStatus(t.tr("instance_id is required", "instance_id 不能为空"));
+      return false;
+    }
+
+    const keepLast = Math.max(0, Math.min(1000, Math.round(Number(keepLastRaw || 0) || 0)));
+    if (keepLast <= 0) {
+      pushToast(t.tr("Keep last is 0 (no prune)", "保留最近为 0（不清理）"), "info");
+      return true;
+    }
+
+    setGameActionBusy(true);
+    setServerOpStatus(t.tr("Pruning backups...", "清理备份中..."));
+    try {
+      const out = await callOkCommand("mc_backup_prune", { instance_id: inst, keep_last: keepLast }, 60_000);
+      const removed = Math.max(0, Math.round(Number(out?.removed || 0)));
+      const total = Math.max(0, Math.round(Number(out?.total || 0)));
+      const kept = Math.max(0, Math.round(Number(out?.kept || 0)));
+      pushToast(
+        t.tr(`Backups pruned: removed=${removed} kept=${kept} total=${total}`, `备份已清理：删除=${removed} 保留=${kept} 总计=${total}`),
+        "ok"
+      );
+      setServerOpStatus(t.tr("Pruned", "已清理"));
+      setTimeout(() => setServerOpStatus(""), 900);
+      await refreshBackupZips(inst);
+      return true;
+    } catch (e: any) {
+      setServerOpStatus(String(e?.message || e));
+      return false;
+    } finally {
+      setGameActionBusy(false);
+    }
   }
 
   async function openRestoreModal() {
@@ -8114,6 +8203,9 @@ export default function HomePage() {
     backupZips: restoreCandidates,
     backupZipsStatus: restoreStatus,
     refreshBackupZips,
+    backupRetentionKeepLast,
+    saveBackupRetentionKeepLast,
+    pruneBackups,
     restoreBackupNow,
     frpOpStatus,
     serverOpStatus,

@@ -180,6 +180,9 @@ export default function GamesView() {
     backupZips,
     backupZipsStatus,
     refreshBackupZips,
+    backupRetentionKeepLast,
+    saveBackupRetentionKeepLast,
+    pruneBackups,
     frpOpStatus,
     serverOpStatus,
     gameActionBusy,
@@ -311,6 +314,9 @@ export default function GamesView() {
   const [backupNewStop, setBackupNewStop] = useState<boolean>(true);
   const [backupNewKeepLast, setBackupNewKeepLast] = useState<number>(0);
   const [backupNewComment, setBackupNewComment] = useState<string>("");
+
+  const [backupRetentionOpen, setBackupRetentionOpen] = useState<boolean>(false);
+  const [backupRetentionDraft, setBackupRetentionDraft] = useState<number>(0);
 
   const [tpsInfo, setTpsInfo] = useState<{
     atUnix: number;
@@ -536,6 +542,13 @@ export default function GamesView() {
     const unix = m ? Number(m[1]) : null;
     return { unix: Number.isFinite(Number(unix)) ? Number(unix) : null, file };
   }, [backupZips, backupMetaByPath]);
+
+  const backupRetentionPreview = useMemo(() => {
+    const all = Array.isArray(backupZips) ? backupZips : [];
+    const keepLast = Math.max(0, Math.min(1000, Math.round(Number(backupRetentionDraft || 0) || 0)));
+    if (keepLast <= 0) return { keepLast, keep: all, del: [] as string[] };
+    return { keepLast, keep: all.slice(0, keepLast), del: all.slice(keepLast) };
+  }, [backupZips, backupRetentionDraft]);
 
   useEffect(() => {
     if (!logPaused) {
@@ -2297,6 +2310,9 @@ export default function GamesView() {
                   {" · "}
                   {t.tr("last backup", "最近备份")}:{" "}
                   {lastBackup.unix ? <TimeAgo unix={lastBackup.unix} /> : Array.isArray(backupZips) && backupZips.length ? lastBackup.file : "-"}
+                  {" · "}
+                  {t.tr("keep last", "保留最近")}:{" "}
+                  <code>{backupRetentionKeepLast > 0 ? backupRetentionKeepLast : t.tr("all", "全部")}</code>
                 </div>
               ) : null}
             </div>
@@ -2308,7 +2324,7 @@ export default function GamesView() {
               onClick={() => {
                 setBackupNewStop(true);
                 setBackupNewFormat("tar.gz");
-                setBackupNewKeepLast(0);
+                setBackupNewKeepLast(Math.max(0, Math.min(1000, Math.round(Number(backupRetentionKeepLast || 0) || 0))));
                 setBackupNewComment("");
                 setBackupNewOpen(true);
               }}
@@ -2317,6 +2333,17 @@ export default function GamesView() {
             >
               <Icon name="plus" />
               {t.tr("New backup", "新建备份")}
+            </button>
+            <button
+              type="button"
+              className="iconBtn"
+              onClick={() => {
+                setBackupRetentionDraft(Math.max(0, Math.min(1000, Math.round(Number(backupRetentionKeepLast || 0) || 0))));
+                setBackupRetentionOpen(true);
+              }}
+              disabled={!selectedDaemon?.connected || !instanceId.trim() || gameActionBusy}
+            >
+              {t.tr("Retention…", "保留策略…")}
             </button>
             <button
               type="button"
@@ -3366,6 +3393,153 @@ export default function GamesView() {
                 </button>
               </div>
             </div>
+      </ManagedModal>
+
+      <ManagedModal
+        id="games-backup-retention"
+        open={backupRetentionOpen}
+        onOverlayClick={() => (!gameActionBusy ? setBackupRetentionOpen(false) : null)}
+        modalStyle={{ width: "min(760px, 100%)" }}
+        ariaLabel={t.tr("Backup retention policy", "备份保留策略")}
+      >
+        <div className="modalHeader">
+          <div>
+            <div style={{ fontWeight: 800 }}>{t.tr("Backup retention", "备份保留")}</div>
+            <div className="hint">
+              {t.tr("game", "游戏")}: <code>{instanceId.trim() || "-"}</code>
+            </div>
+            <div className="hint">
+              {t.tr(
+                "This sets a per-instance keep-last policy. Preview is based on current list order.",
+                "这是按实例设置的“保留最近 N 个”策略。预览基于当前列表顺序。"
+              )}
+            </div>
+          </div>
+          <button type="button" onClick={() => setBackupRetentionOpen(false)} disabled={gameActionBusy}>
+            {t.tr("Close", "关闭")}
+          </button>
+        </div>
+
+        <div className="grid2" style={{ alignItems: "start" }}>
+          <div className="field">
+            <label>{t.tr("Keep last", "保留最近")}</label>
+            <input
+              type="number"
+              value={Number.isFinite(backupRetentionDraft) ? backupRetentionDraft : 0}
+              onChange={(e) => setBackupRetentionDraft(Math.max(0, Math.min(1000, Math.round(Number(e.target.value) || 0))))}
+              min={0}
+              max={1000}
+            />
+            <div className="hint">{t.tr("0 = keep everything (no prune).", "0 = 全部保留（不自动清理）。")}</div>
+          </div>
+          <div className="field">
+            <label>{t.tr("Preview", "预览")}</label>
+            <div className="hint">
+              {t.tr("total", "总计")}: <code>{Array.isArray(backupZips) ? backupZips.length : 0}</code>
+              {" · "}
+              {t.tr("keep", "保留")}: <code>{backupRetentionPreview.keep.length}</code>
+              {" · "}
+              {t.tr("delete", "删除")}: <code>{backupRetentionPreview.del.length}</code>
+            </div>
+            <div className="hint" style={{ marginTop: 6 }}>
+              {(() => {
+                const bytes = (backupRetentionPreview.del || []).reduce((sum, p) => {
+                  const meta = backupMetaByPath[String(p || "")] || null;
+                  const b = meta && Number.isFinite(Number(meta?.bytes)) ? Number(meta.bytes) : 0;
+                  return sum + (b > 0 ? b : 0);
+                }, 0);
+                const anyBytes = (backupRetentionPreview.del || []).some((p) => {
+                  const meta = backupMetaByPath[String(p || "")] || null;
+                  const b = meta && Number.isFinite(Number(meta?.bytes)) ? Number(meta.bytes) : 0;
+                  return b > 0;
+                });
+                return anyBytes ? (
+                  <>
+                    {t.tr("estimated delete size", "预计删除大小")}: <code>{fmtBytes(bytes)}</code>
+                  </>
+                ) : (
+                  t.tr("No size metadata available for estimation.", "暂无可用于估算的大小元数据。")
+                );
+              })()}
+            </div>
+          </div>
+
+          <div className="field" style={{ gridColumn: "1 / -1" }}>
+            <label>{t.tr("Will be deleted", "将被删除")}</label>
+            {backupRetentionPreview.del.length ? (
+              <div style={{ maxHeight: 220, overflow: "auto", border: "1px solid var(--border)", borderRadius: 10, padding: 10 }}>
+                <div className="hint">{t.tr("showing", "显示")} {Math.min(40, backupRetentionPreview.del.length)} / {backupRetentionPreview.del.length}</div>
+                <ul style={{ margin: "8px 0 0 18px" }}>
+                  {backupRetentionPreview.del.slice(0, 40).map((p) => {
+                    const path = String(p || "");
+                    const file = path.split("/").pop() || path;
+                    return (
+                      <li key={path}>
+                        <code>{file}</code>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            ) : (
+              <div className="hint">{t.tr("Nothing will be deleted.", "不会删除任何备份。")}</div>
+            )}
+          </div>
+        </div>
+
+        <div className="row" style={{ marginTop: 12, justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+          <div className="hint">{serverOpStatus ? serverOpStatus : ""}</div>
+          <div className="btnGroup" style={{ justifyContent: "flex-end" }}>
+            <button type="button" onClick={() => setBackupRetentionOpen(false)} disabled={gameActionBusy}>
+              {t.tr("Cancel", "取消")}
+            </button>
+            <button
+              type="button"
+              className="iconBtn"
+              onClick={async () => {
+                const keepLast = Math.max(0, Math.min(1000, Math.round(Number(backupRetentionDraft || 0) || 0)));
+                await saveBackupRetentionKeepLast(keepLast);
+              }}
+              disabled={!selectedDaemon?.connected || !instanceId.trim() || gameActionBusy}
+            >
+              {t.tr("Save policy", "保存策略")}
+            </button>
+            <button
+              type="button"
+              className="dangerBtn"
+              onClick={async () => {
+                const inst = instanceId.trim();
+                if (!inst) return;
+                const keepLast = Math.max(0, Math.min(1000, Math.round(Number(backupRetentionDraft || 0) || 0)));
+                const delCount = backupRetentionPreview.del.length;
+                if (keepLast <= 0 || delCount <= 0) {
+                  await saveBackupRetentionKeepLast(keepLast);
+                  setBackupRetentionOpen(false);
+                  return;
+                }
+                const ok = await confirmDialog(
+                  t.tr(
+                    `Prune backups now to keep last ${keepLast}?\n\nThis will delete ${delCount} backup(s).`,
+                    `现在清理备份并保留最近 ${keepLast} 个？\n\n这将删除 ${delCount} 个备份。`
+                  ),
+                  {
+                    title: t.tr("Prune backups", "清理备份"),
+                    confirmLabel: t.tr("Prune", "清理"),
+                    cancelLabel: t.tr("Cancel", "取消"),
+                    danger: true,
+                  }
+                );
+                if (!ok) return;
+                await saveBackupRetentionKeepLast(keepLast);
+                await pruneBackups(keepLast);
+                setBackupRetentionOpen(false);
+              }}
+              disabled={!selectedDaemon?.connected || !instanceId.trim() || gameActionBusy}
+            >
+              {t.tr("Save & prune", "保存并清理")}
+            </button>
+          </div>
+        </div>
       </ManagedModal>
     </div>
   );
