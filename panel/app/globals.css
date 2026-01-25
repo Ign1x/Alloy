@@ -2813,7 +2813,7 @@ button.logTopPill:hover {
 .drawerOverlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.55);
+  background: rgba(0, 0, 0, 0.50);
   display: flex;
   align-items: stretch;
   justify-content: flex-end;
@@ -2821,15 +2821,15 @@ button.logTopPill:hover {
 }
 
 .drawer {
-  width: min(520px, calc(100vw - 32px));
+  width: min(560px, calc(100vw - 32px));
   height: 100%;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.02)), var(--card2);
   border-left: 1px solid var(--border2);
   box-shadow: -18px 0 60px rgba(0, 0, 0, 0.58);
-  padding: 14px;
+  padding: var(--space-4);
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--space-3);
 }
 
 @media (prefers-reduced-motion: no-preference) {
