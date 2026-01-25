@@ -33,6 +33,34 @@ ElegantMC 是一个「公网 Web Panel + 本地 Daemon」的 Minecraft 开服与
 - `panel/`：Next.js Web Panel（自建 Node server）
 - `docker-compose.yml`：本机一键体验（Panel + Daemon 同机，本地 build）
 
+## 架构（Panel / Daemon / FRP）
+
+```mermaid
+flowchart LR
+  Admin["Browser (Admin)"] -->|HTTPS| Panel["Panel (Next.js)"]
+
+  Daemon["Daemon (Go)"] -->|WebSocket out: /ws/daemon| Panel
+  Panel -->|Commands/Responses over WS| Daemon
+
+  Daemon -->|spawn/manage| MC["Minecraft Server Process"]
+
+  Player["Minecraft Client"] -->|LAN / Port mapping (optional)| MC
+
+  subgraph FRP["FRP (optional)"]
+    FRPS["frps (VPS)"] -->|tunnel| FRPC["frpc (managed by Daemon)"]
+  end
+  FRPC -->|connect bindPort| FRPS
+  Player -->|TCP remote_port| FRPS
+  FRPC -->|local_port| MC
+```
+
+### 数据流（简版）
+
+- **认证/配对**：Panel 保存 `daemon_id → token`；Daemon 启动时用同一 token 连接 Panel。
+- **控制链路**：Daemon 主动建立 WebSocket 出站连接；Panel 通过该连接下发命令（启动/停止、文件操作、安装等），Daemon 执行并回传结果/日志。
+- **沙箱**：Daemon 默认只操作 `ELEGANTMC_BASE_DIR` 下的 `servers/`，避免越权读写系统文件。
+- **FRP（可选）**：Panel 保存 frps 配置；Daemon 自动生成 frpc 配置并托管 frpc 子进程，Panel 在 Games 页展示可复制的公网连接地址。
+
 ## Docker 一键启动（推荐）
 
 ### 1) 启动（默认无需 `.env`）
