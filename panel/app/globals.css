@@ -3142,7 +3142,7 @@ table {
 th,
 td {
   text-align: left;
-  padding: 10px 8px;
+  padding: 10px 10px;
   border-bottom: 1px solid var(--border);
   vertical-align: top;
   overflow-wrap: anywhere;
@@ -3151,7 +3151,7 @@ td {
 
 table.compact th,
 table.compact td {
-  padding: 8px 8px;
+  padding: 8px 10px;
 }
 
 tbody tr:last-child td {
@@ -3163,11 +3163,12 @@ th {
   color: var(--muted2);
   font-weight: var(--font-weight-medium);
   letter-spacing: 0.01em;
-  background: var(--surface);
+  border-bottom-color: var(--border2);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.02)), var(--surface);
 }
 
 tr:hover td {
-  background: var(--surface);
+  background: var(--surface2);
 }
 
 :root[data-theme="contrast"] th {
