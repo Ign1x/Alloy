@@ -1594,7 +1594,7 @@ function FilesView() {
                         ) : null}
                       </div>
                     </div>
-                    <progress value={done} max={Math.max(1, total)} style={{ width: "100%", height: 10, marginTop: 6 }} />
+                    <progress className="uiProgress" value={done} max={Math.max(1, total)} />
                     {it?.error ? (
                       <div className="hint" style={{ marginTop: 6 }}>
                         {String(it.error)}

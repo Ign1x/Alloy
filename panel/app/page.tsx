@@ -11686,7 +11686,7 @@ export default function HomePage() {
                           <span className="muted">{t.tr("file", "文件")}:</span> <code>{installProgress.currentFile}</code>
                         </div>
                       ) : null}
-                      <progress value={installProgress.done} max={installProgress.total} style={{ width: "100%", height: 14, marginTop: 8 }} />
+                      <progress className="uiProgress" value={installProgress.done} max={installProgress.total} />
                     </div>
                   ) : null}
 

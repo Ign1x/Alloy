@@ -2197,6 +2197,29 @@ button.linkBtn:focus-visible {
   border-radius: var(--radius-control);
 }
 
+progress.uiProgress {
+  width: 100%;
+  height: 12px;
+  margin-top: 6px;
+  border-radius: 999px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  appearance: none;
+}
+
+progress.uiProgress::-webkit-progress-bar {
+  background: var(--surface);
+}
+
+progress.uiProgress::-webkit-progress-value {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.20), rgba(255, 255, 255, 0.02)), var(--primary);
+}
+
+progress.uiProgress::-moz-progress-bar {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.20), rgba(255, 255, 255, 0.02)), var(--primary);
+}
+
 button {
   display: inline-flex;
   align-items: center;
