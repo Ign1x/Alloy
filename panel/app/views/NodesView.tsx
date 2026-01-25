@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useAppActions, useAppCore, useAppI18n, useAppNodes, useAppPanel } from "../appCtx";
 import Icon from "../ui/Icon";
 import Select from "../ui/Select";
@@ -57,6 +57,72 @@ function NodesView() {
     if (!q) return filtered;
     return filtered.filter((n: any) => String(n?.id || "").toLowerCase().includes(q));
   }, [nodes, pinnedSet, query, pct, sortBy, statusFilter]);
+
+  const nodesVirtualEnabled = viewNodes.length > 220;
+  const nodeRowH = 86;
+  const nodesListScrollRef = useRef<HTMLDivElement | null>(null);
+  const [nodesListScrollTop, setNodesListScrollTop] = useState<number>(0);
+  const [nodesListViewportH, setNodesListViewportH] = useState<number>(520);
+  const [nodesListPendingFocusIdx, setNodesListPendingFocusIdx] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!nodesVirtualEnabled) return;
+    const el = nodesListScrollRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const update = () => setNodesListViewportH(Math.max(120, el.clientHeight || 520));
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [nodesVirtualEnabled]);
+
+  const nodesListVirtual = useMemo(() => {
+    const list = Array.isArray(viewNodes) ? viewNodes : [];
+    const total = list.length;
+    const enabled = nodesVirtualEnabled;
+    if (!enabled) return { enabled: false, visible: list, start: 0, topPad: 0, bottomPad: 0 };
+
+    const overscan = 8;
+    const start = Math.max(0, Math.floor(nodesListScrollTop / nodeRowH) - overscan);
+    const visibleCount = Math.ceil(nodesListViewportH / nodeRowH) + overscan * 2;
+    const end = Math.min(total, start + visibleCount);
+    const topPad = start * nodeRowH;
+    const bottomPad = Math.max(0, (total - end) * nodeRowH);
+    return { enabled: true, visible: list.slice(start, end), start, topPad, bottomPad };
+  }, [viewNodes, nodesVirtualEnabled, nodesListScrollTop, nodesListViewportH]);
+
+  function focusNodeRow(idx: number) {
+    if (!nodesListVirtual.enabled) return;
+    const total = viewNodes.length;
+    const next = Math.max(0, Math.min(total - 1, Math.round(Number(idx || 0))));
+    const el = nodesListScrollRef.current;
+    if (el) {
+      const top = next * nodeRowH;
+      const bottom = top + nodeRowH;
+      const viewTop = el.scrollTop;
+      const viewBottom = viewTop + el.clientHeight;
+      if (top < viewTop) el.scrollTop = top;
+      else if (bottom > viewBottom) el.scrollTop = Math.max(0, bottom - el.clientHeight);
+    }
+    setNodesListPendingFocusIdx(next);
+  }
+
+  useEffect(() => {
+    if (!nodesListVirtual.enabled) return;
+    if (nodesListPendingFocusIdx == null) return;
+    const start = nodesListVirtual.start;
+    const end = start + nodesListVirtual.visible.length;
+    if (nodesListPendingFocusIdx < start || nodesListPendingFocusIdx >= end) return;
+    const root = nodesListScrollRef.current;
+    const el = root?.querySelector<HTMLElement>(`[data-virt-idx="${nodesListPendingFocusIdx}"]`);
+    if (!el) return;
+    try {
+      el.focus();
+      setNodesListPendingFocusIdx(null);
+    } catch {
+      // ignore
+    }
+  }, [nodesListPendingFocusIdx, nodesListVirtual.enabled, nodesListVirtual.start, nodesListVirtual.visible.length]);
 
   return (
     <div className="stack">
@@ -128,8 +194,132 @@ function NodesView() {
         </div>
 
         {viewNodes.length ? (
-          <div className="cardGrid">
-            {viewNodes.map((n: any) => {
+          nodesListVirtual.enabled ? (
+            <div
+              ref={nodesListScrollRef}
+              className="virtList"
+              style={{ maxHeight: 720 }}
+              onScroll={(e) => setNodesListScrollTop(e.currentTarget.scrollTop)}
+              role="list"
+              aria-label={t.tr("Nodes", "节点")}
+            >
+              {nodesListVirtual.topPad > 0 ? <div style={{ height: nodesListVirtual.topPad }} /> : null}
+              {nodesListVirtual.visible.map((n: any, localIdx: number) => {
+                const absIdx = nodesListVirtual.start + localIdx;
+                const hb = n.heartbeat || {};
+                const cpu = typeof hb?.cpu?.usage_percent === "number" ? hb.cpu.usage_percent : null;
+                const mem = hb?.mem || {};
+                const disk = hb?.disk || {};
+                const instances = Array.isArray(hb?.instances) ? hb.instances : [];
+                const memPct = mem?.total_bytes ? pct(mem.used_bytes, mem.total_bytes) : null;
+                const diskPct = disk?.total_bytes ? pct(disk.used_bytes, disk.total_bytes) : null;
+                const isPinned = pinnedSet.has(String(n?.id || ""));
+                const daemonVer = String(n?.hello?.version || "").trim();
+                const panelVer = String(panelInfo?.version || "").trim();
+                const verMismatch = !!daemonVer && !!panelVer && daemonVer !== panelVer && panelVer !== "dev";
+                const nodeId = String(n?.id || "");
+                const line = [
+                  `${t.tr("last", "最近")}:`,
+                  `${t.tr("instances", "实例")}: ${instances.length}`,
+                  daemonVer ? `v${daemonVer}` : "",
+                  cpu == null ? "" : `CPU ${cpu.toFixed(0)}%`,
+                  memPct == null ? "" : `MEM ${memPct.toFixed(0)}%`,
+                  diskPct == null ? "" : `DISK ${diskPct.toFixed(0)}%`,
+                ]
+                  .filter(Boolean)
+                  .join(" · ");
+                return (
+                  <div
+                    key={nodeId}
+                    data-virt-idx={absIdx}
+                    className="virtRow"
+                    style={{ height: nodeRowH, opacity: n.connected ? 1 : 0.78 }}
+                    role="listitem"
+                    tabIndex={0}
+                    onClick={() => openNodeDetails(nodeId)}
+                    onKeyDown={(e) => {
+                      const target = e.target as any;
+                      if (target && typeof target.closest === "function" && target.closest("button") && target !== e.currentTarget) return;
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        openNodeDetails(nodeId);
+                        return;
+                      }
+                      if (e.key === "ArrowDown") {
+                        e.preventDefault();
+                        focusNodeRow(absIdx + 1);
+                        return;
+                      }
+                      if (e.key === "ArrowUp") {
+                        e.preventDefault();
+                        focusNodeRow(absIdx - 1);
+                      }
+                    }}
+                  >
+                    <div className="virtRowMain">
+                      <div className="virtRowTitle">
+                        <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{nodeId}</span>
+                        <StatusBadge tone={n.connected ? "ok" : "danger"}>{n.connected ? t.tr("online", "在线") : t.tr("offline", "离线")}</StatusBadge>
+                        {verMismatch ? (
+                          <span className="badge warn" title={t.tr("Panel/daemon version mismatch", "Panel/daemon 版本不一致")}>
+                            {t.tr("version mismatch", "版本不一致")}
+                          </span>
+                        ) : null}
+                        {isPinned ? <span className="badge">{t.tr("pinned", "已置顶")}</span> : null}
+                      </div>
+                      <div className="virtRowSub" title={line}>
+                        <span className="virtRowMetaText">
+                          {t.tr("last", "最近")}: <TimeAgo unix={n.lastSeenUnix} /> · {t.tr("instances", "实例")}: {instances.length}
+                          {daemonVer ? ` · v${daemonVer}` : ""}
+                          {cpu == null ? "" : ` · CPU ${cpu.toFixed(0)}%`}
+                          {memPct == null ? "" : ` · MEM ${memPct.toFixed(0)}%`}
+                          {diskPct == null ? "" : ` · DISK ${diskPct.toFixed(0)}%`}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="virtRowActions">
+                      <button
+                        type="button"
+                        className="iconBtn iconOnly"
+                        title={isPinned ? t.tr(`Unpin node ${nodeId}`, `取消置顶节点 ${nodeId}`) : t.tr(`Pin node ${nodeId}`, `置顶节点 ${nodeId}`)}
+                        aria-label={isPinned ? t.tr(`Unpin node ${nodeId}`, `取消置顶节点 ${nodeId}`) : t.tr(`Pin node ${nodeId}`, `置顶节点 ${nodeId}`)}
+                        aria-pressed={isPinned}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          togglePinnedDaemon(nodeId);
+                        }}
+                      >
+                        <Icon name="pin" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openNodeDetails(nodeId);
+                        }}
+                      >
+                        {t.tr("Details", "详情")}
+                      </button>
+                      <button
+                        type="button"
+                        className="primary"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelected(nodeId);
+                          setTab("games");
+                        }}
+                      >
+                        {t.tr("Manage", "管理")}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+              {nodesListVirtual.bottomPad > 0 ? <div style={{ height: nodesListVirtual.bottomPad }} /> : null}
+            </div>
+          ) : (
+            <div className="cardGrid">
+              {viewNodes.map((n: any) => {
               const hb = n.heartbeat || {};
               const cpu = typeof hb?.cpu?.usage_percent === "number" ? hb.cpu.usage_percent : null;
               const mem = hb?.mem || {};
@@ -338,6 +528,7 @@ function NodesView() {
               );
             })}
           </div>
+          )
         ) : nodesStatus === "Loading..." || nodesStatus === "加载中..." ? (
           <div className="cardGrid">
             {Array.from({ length: 6 }).map((_, i) => (

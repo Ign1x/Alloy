@@ -527,6 +527,72 @@ function GamesView() {
     return list;
   }, [filteredServerDirs, favoriteSet]);
 
+  const instVirtualEnabled = sortedServerDirs.length > 220;
+  const instRowH = 86;
+  const instListScrollRef = useRef<HTMLDivElement | null>(null);
+  const [instListScrollTop, setInstListScrollTop] = useState<number>(0);
+  const [instListViewportH, setInstListViewportH] = useState<number>(520);
+  const [instListPendingFocusIdx, setInstListPendingFocusIdx] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!instVirtualEnabled) return;
+    const el = instListScrollRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const update = () => setInstListViewportH(Math.max(120, el.clientHeight || 520));
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [instVirtualEnabled]);
+
+  const instListVirtual = useMemo(() => {
+    const list = Array.isArray(sortedServerDirs) ? sortedServerDirs : [];
+    const total = list.length;
+    const enabled = instVirtualEnabled;
+    if (!enabled) return { enabled: false, visible: list, start: 0, topPad: 0, bottomPad: 0 };
+
+    const overscan = 8;
+    const start = Math.max(0, Math.floor(instListScrollTop / instRowH) - overscan);
+    const visibleCount = Math.ceil(instListViewportH / instRowH) + overscan * 2;
+    const end = Math.min(total, start + visibleCount);
+    const topPad = start * instRowH;
+    const bottomPad = Math.max(0, (total - end) * instRowH);
+    return { enabled: true, visible: list.slice(start, end), start, topPad, bottomPad };
+  }, [sortedServerDirs, instVirtualEnabled, instListScrollTop, instListViewportH]);
+
+  function focusInstRow(idx: number) {
+    if (!instListVirtual.enabled) return;
+    const total = sortedServerDirs.length;
+    const next = Math.max(0, Math.min(total - 1, Math.round(Number(idx || 0))));
+    const el = instListScrollRef.current;
+    if (el) {
+      const top = next * instRowH;
+      const bottom = top + instRowH;
+      const viewTop = el.scrollTop;
+      const viewBottom = viewTop + el.clientHeight;
+      if (top < viewTop) el.scrollTop = top;
+      else if (bottom > viewBottom) el.scrollTop = Math.max(0, bottom - el.clientHeight);
+    }
+    setInstListPendingFocusIdx(next);
+  }
+
+  useEffect(() => {
+    if (!instListVirtual.enabled) return;
+    if (instListPendingFocusIdx == null) return;
+    const start = instListVirtual.start;
+    const end = start + instListVirtual.visible.length;
+    if (instListPendingFocusIdx < start || instListPendingFocusIdx >= end) return;
+    const root = instListScrollRef.current;
+    const el = root?.querySelector<HTMLElement>(`[data-virt-idx="${instListPendingFocusIdx}"]`);
+    if (!el) return;
+    try {
+      el.focus();
+      setInstListPendingFocusIdx(null);
+    } catch {
+      // ignore
+    }
+  }, [instListPendingFocusIdx, instListVirtual.enabled, instListVirtual.start, instListVirtual.visible.length]);
+
   const instanceProxies = useMemo(() => {
     const inst = String(instanceId || "").trim();
     const list = Array.isArray(selectedDaemon?.heartbeat?.frp_proxies) ? selectedDaemon.heartbeat.frp_proxies : [];
@@ -2155,64 +2221,78 @@ function GamesView() {
                 {t.tr("shown", "显示")}: {sortedServerDirs.length}
               </span>
             </div>
-            <div className="cardGrid">
-              {sortedServerDirs.map((id: string) => {
-                const tags = (instanceTagsById && (instanceTagsById as any)[id]) || [];
-                const tagList = Array.isArray(tags) ? tags.map((s: any) => String(s || "").trim()).filter(Boolean) : [];
-                const note = String((instanceNotesById && (instanceNotesById as any)[id]) || "").trim();
-                const noteOneLine = note ? note.split(/\r?\n/)[0].slice(0, 120) : "";
-                const meta = (instanceMetaById && (instanceMetaById as any)[id]) || null;
-                const kindKey = String(meta?.server_kind || "").trim().toLowerCase();
-                const kind = kindKey ? `${kindKey.slice(0, 1).toUpperCase()}${kindKey.slice(1)}` : "";
-                const ver = String(meta?.server_version || "").trim();
-                const kindVer = [kind, ver].filter(Boolean).join(" ");
-                const portRaw = meta?.game_port != null ? Math.round(Number(meta.game_port)) : 0;
-                const port = Number.isFinite(portRaw) && portRaw >= 1 && portRaw <= 65535 ? portRaw : 0;
-                const running = !!runningById[id];
-                const isActive = id === instanceId;
-                return (
-                  <div
-                    key={id}
-                    className="itemCard"
-                    style={{ opacity: running ? 1 : 0.9, borderColor: isActive ? "var(--ok-border)" : undefined }}
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => setInstanceId(id)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        setInstanceId(id);
-                      }
-                    }}
-                  >
-                    <div className="itemCardHeader">
-                      <div style={{ minWidth: 0 }}>
-                        <div className="itemTitle" style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                          <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{id}</span>
+            {instListVirtual.enabled ? (
+              <div
+                ref={instListScrollRef}
+                className="virtList"
+                style={{ maxHeight: 720 }}
+                onScroll={(e) => setInstListScrollTop(e.currentTarget.scrollTop)}
+                role="list"
+                aria-label={t.tr("Instances", "实例")}
+              >
+                {instListVirtual.topPad > 0 ? <div style={{ height: instListVirtual.topPad }} /> : null}
+                {instListVirtual.visible.map((id: string, localIdx: number) => {
+                  const absIdx = instListVirtual.start + localIdx;
+                  const tags = (instanceTagsById && (instanceTagsById as any)[id]) || [];
+                  const tagList = Array.isArray(tags) ? tags.map((s: any) => String(s || "").trim()).filter(Boolean) : [];
+                  const note = String((instanceNotesById && (instanceNotesById as any)[id]) || "").trim();
+                  const noteOneLine = note ? note.split(/\r?\n/)[0].slice(0, 120) : "";
+                  const meta = (instanceMetaById && (instanceMetaById as any)[id]) || null;
+                  const kindKey = String(meta?.server_kind || "").trim().toLowerCase();
+                  const kind = kindKey ? `${kindKey.slice(0, 1).toUpperCase()}${kindKey.slice(1)}` : "";
+                  const ver = String(meta?.server_version || "").trim();
+                  const kindVer = [kind, ver].filter(Boolean).join(" ");
+                  const portRaw = meta?.game_port != null ? Math.round(Number(meta.game_port)) : 0;
+                  const port = Number.isFinite(portRaw) && portRaw >= 1 && portRaw <= 65535 ? portRaw : 0;
+                  const running = !!runningById[id];
+                  const isActive = id === instanceId;
+                  const line = [
+                    kindVer ? kindVer : "",
+                    port ? `:${port}` : "",
+                    tagList.length ? `${t.tr("tags", "标签")}: ${tagList.join(", ")}` : t.tr("no tags", "无标签"),
+                    noteOneLine ? `· ${noteOneLine}` : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" ");
+                  return (
+                    <div
+                      key={id}
+                      data-virt-idx={absIdx}
+                      className={`virtRow ${isActive ? "active" : ""}`.trim()}
+                      style={{ height: instRowH }}
+                      role="listitem"
+                      tabIndex={0}
+                      onClick={() => setInstanceId(id)}
+                      onKeyDown={(e) => {
+                        const target = e.target as any;
+                        if (target && typeof target.closest === "function" && target.closest("button") && target !== e.currentTarget) return;
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          setInstanceId(id);
+                          return;
+                        }
+                        if (e.key === "ArrowDown") {
+                          e.preventDefault();
+                          focusInstRow(absIdx + 1);
+                          return;
+                        }
+                        if (e.key === "ArrowUp") {
+                          e.preventDefault();
+                          focusInstRow(absIdx - 1);
+                        }
+                      }}
+                    >
+                      <div className="virtRowMain">
+                        <div className="virtRowTitle">
+                          <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{id}</span>
                           {favoriteSet.has(id) ? <span className="badge">★</span> : null}
+                          <StatusBadge tone={running ? "ok" : "neutral"}>{running ? t.tr("running", "运行中") : t.tr("stopped", "已停止")}</StatusBadge>
                         </div>
-                        {kindVer || port ? (
-                          <div className="row" style={{ marginTop: 6, gap: 6, flexWrap: "wrap" }}>
-                            {kindVer ? <span className="badge">{kindVer}</span> : null}
-                            {port ? <span className="badge">:{port}</span> : null}
-                          </div>
-                        ) : null}
-                        <div className="itemMeta">
-                          {tagList.length ? (
-                            <span>
-                              {t.tr("tags", "标签")}: {tagList.join(", ")}
-                            </span>
-                          ) : (
-                            <span className="muted">{t.tr("no tags", "无标签")}</span>
-                          )}
-                          {noteOneLine ? <span> · {noteOneLine}</span> : null}
+                        <div className="virtRowSub" title={line}>
+                          <span className="virtRowMetaText">{line || "—"}</span>
                         </div>
                       </div>
-                      <StatusBadge tone={running ? "ok" : "neutral"}>{running ? t.tr("running", "运行中") : t.tr("stopped", "已停止")}</StatusBadge>
-                    </div>
-
-                    <div className="itemFooter">
-                      <div className="btnGroup" style={{ justifyContent: "flex-start" }}>
+                      <div className="virtRowActions">
                         <button
                           type="button"
                           className={running ? "" : "primary"}
@@ -2251,10 +2331,112 @@ function GamesView() {
                         </button>
                       </div>
                     </div>
-                  </div>
-                );
-              })}
-            </div>
+                  );
+                })}
+                {instListVirtual.bottomPad > 0 ? <div style={{ height: instListVirtual.bottomPad }} /> : null}
+              </div>
+            ) : (
+              <div className="cardGrid">
+                {sortedServerDirs.map((id: string) => {
+                  const tags = (instanceTagsById && (instanceTagsById as any)[id]) || [];
+                  const tagList = Array.isArray(tags) ? tags.map((s: any) => String(s || "").trim()).filter(Boolean) : [];
+                  const note = String((instanceNotesById && (instanceNotesById as any)[id]) || "").trim();
+                  const noteOneLine = note ? note.split(/\r?\n/)[0].slice(0, 120) : "";
+                  const meta = (instanceMetaById && (instanceMetaById as any)[id]) || null;
+                  const kindKey = String(meta?.server_kind || "").trim().toLowerCase();
+                  const kind = kindKey ? `${kindKey.slice(0, 1).toUpperCase()}${kindKey.slice(1)}` : "";
+                  const ver = String(meta?.server_version || "").trim();
+                  const kindVer = [kind, ver].filter(Boolean).join(" ");
+                  const portRaw = meta?.game_port != null ? Math.round(Number(meta.game_port)) : 0;
+                  const port = Number.isFinite(portRaw) && portRaw >= 1 && portRaw <= 65535 ? portRaw : 0;
+                  const running = !!runningById[id];
+                  const isActive = id === instanceId;
+                  return (
+                    <div
+                      key={id}
+                      className="itemCard"
+                      style={{ opacity: running ? 1 : 0.9, borderColor: isActive ? "var(--ok-border)" : undefined }}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => setInstanceId(id)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          setInstanceId(id);
+                        }
+                      }}
+                    >
+                      <div className="itemCardHeader">
+                        <div style={{ minWidth: 0 }}>
+                          <div className="itemTitle" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                            <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{id}</span>
+                            {favoriteSet.has(id) ? <span className="badge">★</span> : null}
+                          </div>
+                          {kindVer || port ? (
+                            <div className="row" style={{ marginTop: 6, gap: 6, flexWrap: "wrap" }}>
+                              {kindVer ? <span className="badge">{kindVer}</span> : null}
+                              {port ? <span className="badge">:{port}</span> : null}
+                            </div>
+                          ) : null}
+                          <div className="itemMeta">
+                            {tagList.length ? (
+                              <span>
+                                {t.tr("tags", "标签")}: {tagList.join(", ")}
+                              </span>
+                            ) : (
+                              <span className="muted">{t.tr("no tags", "无标签")}</span>
+                            )}
+                            {noteOneLine ? <span> · {noteOneLine}</span> : null}
+                          </div>
+                        </div>
+                        <StatusBadge tone={running ? "ok" : "neutral"}>{running ? t.tr("running", "运行中") : t.tr("stopped", "已停止")}</StatusBadge>
+                      </div>
+
+                      <div className="itemFooter">
+                        <div className="btnGroup" style={{ justifyContent: "flex-start" }}>
+                          <button
+                            type="button"
+                            className={running ? "" : "primary"}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (running) stopServer(id);
+                              else startServerFromSavedConfig(id);
+                            }}
+                            disabled={!selectedDaemon?.connected || gameActionBusy}
+                          >
+                            {running ? t.tr("Stop", "停止") : t.tr("Start", "启动")}
+                          </button>
+                          <button
+                            type="button"
+                            className="iconBtn iconOnly"
+                            title={favoriteSet.has(id) ? t.tr("Unfavorite", "取消收藏") : t.tr("Favorite", "收藏")}
+                            aria-label={favoriteSet.has(id) ? t.tr("Unfavorite", "取消收藏") : t.tr("Favorite", "收藏")}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleFavoriteInstance(id);
+                            }}
+                            disabled={!id.trim()}
+                          >
+                            {favoriteSet.has(id) ? "★" : "☆"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setFsPath(id);
+                              setTab("files");
+                            }}
+                            disabled={!selectedDaemon?.connected}
+                          >
+                            {t.tr("Files", "文件")}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         ) : null}
 

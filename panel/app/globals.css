@@ -1074,6 +1074,82 @@ button.themeCardBtn.selected {
   gap: var(--space-2);
 }
 
+.virtList {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  overflow: auto;
+}
+
+.virtRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: 10px 12px;
+  min-width: 0;
+  cursor: pointer;
+  outline: none;
+  border-top: 1px solid var(--border);
+}
+
+.virtRow:focus-visible {
+  outline: 2px solid var(--primary-border);
+  outline-offset: -2px;
+}
+
+.virtRow.active {
+  background: rgba(34, 197, 94, 0.10);
+}
+
+:root[data-theme="light"] .virtRow.active {
+  background: rgba(34, 197, 94, 0.08);
+}
+
+:root[data-density="compact"] .virtRow {
+  padding: 8px 10px;
+}
+
+.virtRowMain {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.virtRowTitle {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+
+.virtRowTitle > span:first-child {
+  font-weight: var(--font-weight-bold);
+}
+
+.virtRowSub {
+  font-size: var(--font-size-xs);
+  color: var(--muted2);
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.virtRowMetaText {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.virtRowActions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
 :root[data-density="compact"] .card {
   padding: 12px;
 }
