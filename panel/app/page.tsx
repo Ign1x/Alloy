@@ -10709,6 +10709,7 @@ export default function HomePage() {
               <div className="shareBarTitle">
                 <span className="shareBrand">{String(panelSettings?.brand_name || "ElegantMC")}</span>
                 <span className="badge">{t.tr("Share view", "分享视图")}</span>
+                <span className="badge shareReadOnly">{t.tr("read-only", "只读")}</span>
                 <span className="muted">{activeTab.label}</span>
               </div>
               <div className="shareBarMeta">
@@ -10724,7 +10725,7 @@ export default function HomePage() {
               </div>
             </div>
             <div className="shareBarActions">
-              <button type="button" className="iconBtn" onClick={() => copyText(String(window.location.href || ""))}>
+              <button type="button" className="primary iconBtn" onClick={() => copyText(String(window.location.href || ""))}>
                 <Icon name="copy" /> {t.tr("Copy link", "复制链接")}
               </button>
               <button type="button" className="iconBtn" onClick={() => window.print()}>
