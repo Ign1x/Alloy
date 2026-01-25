@@ -411,22 +411,47 @@ h3 {
 
 .dangerZone {
   border: 1px solid var(--danger-border);
-  background: rgba(248, 113, 113, 0.08);
-  border-radius: var(--radius-lg);
-  padding: 12px;
+  background: linear-gradient(180deg, rgba(248, 113, 113, 0.10), rgba(248, 113, 113, 0.04));
+  border-radius: var(--radius-card);
+  padding: 0;
 }
 
 .dangerZoneSummary {
   cursor: pointer;
   user-select: none;
-  font-weight: 800;
+  font-weight: var(--font-weight-bold);
   color: var(--danger);
   list-style: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  transition: background 0.14s ease, color 0.14s ease;
+}
+
+.dangerZoneSummary:hover {
+  background: rgba(248, 113, 113, 0.10);
+}
+
+.dangerZone[open] .dangerZoneSummary {
+  border-bottom: 1px solid var(--danger-border);
+}
+
+.dangerZoneSummary::after {
+  content: "▾";
+  opacity: 0.85;
+  transform: translateY(1px);
+  transition: transform 0.14s ease;
+}
+
+.dangerZone[open] .dangerZoneSummary::after {
+  transform: rotate(180deg);
 }
 
 .dangerZoneSummary:focus-visible {
   outline: none;
-  border-radius: var(--radius);
+  border-radius: var(--radius-card);
   box-shadow: var(--focus-ring);
 }
 
@@ -437,8 +462,17 @@ h3 {
 .dangerZoneBody {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  margin-top: 10px;
+  gap: var(--space-2);
+  padding: var(--space-3);
+}
+
+.dangerZone > .hint {
+  margin-top: 0;
+  padding: 0 var(--space-3) var(--space-3);
+}
+
+.dangerZone > .hint + .dangerZoneBody {
+  padding-top: 0;
 }
 
 @media (prefers-reduced-motion: no-preference) {
