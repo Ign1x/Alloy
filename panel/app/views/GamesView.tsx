@@ -111,6 +111,39 @@ function parseTpsFromLines(lines: string[]) {
   return { tps1: tps[0], tps5: tps[1], tps15: tps[2], mspt };
 }
 
+const USERCACHE_EXPIRY_WINDOW_SEC = 86400 * 30;
+
+function parseUsercacheExpiresOnUnix(expiresOnRaw: string): number | null {
+  const raw = String(expiresOnRaw || "").trim();
+  if (!raw) return null;
+
+  const m = raw.match(
+    /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})(?:\s*(Z|[+-]\d{2}:?\d{2}))?$/
+  );
+  if (m) {
+    const date = m[1] || "";
+    const time = m[2] || "";
+    let tz = m[3] || "Z";
+    if (tz !== "Z") {
+      const tzm = tz.match(/^([+-])(\d{2}):?(\d{2})$/);
+      if (tzm) tz = `${tzm[1]}${tzm[2]}:${tzm[3]}`;
+      else tz = "Z";
+    }
+    const ms = Date.parse(`${date}T${time}${tz}`);
+    return Number.isFinite(ms) ? Math.floor(ms / 1000) : null;
+  }
+
+  const ms = Date.parse(raw);
+  return Number.isFinite(ms) ? Math.floor(ms / 1000) : null;
+}
+
+function estimateUsercacheLastSeenUnix(expiresUnix: number | null): number | null {
+  const ts = Number(expiresUnix || 0);
+  if (!Number.isFinite(ts) || ts <= 0) return null;
+  const last = ts - USERCACHE_EXPIRY_WINDOW_SEC;
+  return last > 0 ? last : null;
+}
+
 export default function GamesView() {
   const {
     t,
@@ -154,6 +187,7 @@ export default function GamesView() {
     localHost,
     gamePort,
     copyText,
+    pushToast,
     enableFrp,
     selectedProfile,
     frpRemotePort,
@@ -246,6 +280,7 @@ export default function GamesView() {
   const [players, setPlayers] = useState<{ name: string; uuid: string; expiresOn: string }[]>([]);
   const [playersQueryRaw, setPlayersQueryRaw] = useState<string>("");
   const [playersQuery, setPlayersQuery] = useState<string>("");
+  const [playersSort, setPlayersSort] = useState<"name" | "lastSeen">("lastSeen");
 
   const [whitelistStatus, setWhitelistStatus] = useState<string>("");
   const [whitelistBusy, setWhitelistBusy] = useState<boolean>(false);
@@ -303,6 +338,38 @@ export default function GamesView() {
     const t = window.setTimeout(() => setPlayersQuery(playersQueryRaw), 150);
     return () => window.clearTimeout(t);
   }, [playersQueryRaw]);
+
+  const playersView = useMemo(() => {
+    const q = String(playersQuery || "").trim().toLowerCase();
+    const list = (Array.isArray(players) ? players : []).filter((p) => {
+      if (!q) return true;
+      return `${p.name} ${p.uuid} ${p.expiresOn}`.toLowerCase().includes(q);
+    });
+
+    const withTs = list.map((p) => {
+      const expiresUnix = parseUsercacheExpiresOnUnix(p.expiresOn);
+      const lastSeenUnix = estimateUsercacheLastSeenUnix(expiresUnix);
+      return { ...p, expiresUnix, lastSeenUnix };
+    });
+
+    withTs.sort((a: any, b: any) => {
+      if (playersSort === "lastSeen") {
+        const ax = Number(a?.lastSeenUnix || 0);
+        const bx = Number(b?.lastSeenUnix || 0);
+        if (ax !== bx) return bx - ax;
+        const an = String(a?.name || "");
+        const bn = String(b?.name || "");
+        return an.localeCompare(bn);
+      }
+      const an = String(a?.name || "");
+      const bn = String(b?.name || "");
+      const c = an.localeCompare(bn);
+      if (c) return c;
+      return String(a?.uuid || "").localeCompare(String(b?.uuid || ""));
+    });
+
+    return withTs as Array<{ name: string; uuid: string; expiresOn: string; expiresUnix: number | null; lastSeenUnix: number | null }>;
+  }, [players, playersQuery, playersSort]);
 
   useEffect(() => {
     if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
@@ -995,6 +1062,87 @@ export default function GamesView() {
     } finally {
       setPlayersBusy(false);
     }
+  }
+
+  async function quickWhitelistPlayer(p: { name: string; uuid: string }) {
+    const inst = instanceId.trim();
+    const name = String(p?.name || "").trim();
+    const uuid = normalizeUuid(String(p?.uuid || ""));
+    if (!inst || !selectedDaemon?.connected) return;
+    if (!name) {
+      pushToast(t.tr("Player name required", "需要玩家名称"), "error");
+      return;
+    }
+    if (!isValidMcName(name)) {
+      pushToast(t.tr("Invalid player name", "玩家名称无效"), "error");
+      return;
+    }
+    const ok = await confirmDialog(t.tr(`Add ${name} to whitelist?`, `将 ${name} 加入白名单？`), {
+      title: t.tr("Whitelist", "白名单"),
+      confirmLabel: t.tr("Add", "添加"),
+      cancelLabel: t.tr("Cancel", "取消"),
+    });
+    if (!ok) return;
+
+    if (running && canControl) {
+      await sendQuickCommand(`whitelist add ${name}`);
+      window.setTimeout(() => refreshWhitelist(), 600);
+      return;
+    }
+
+    try {
+      let existing: { name: string; uuid: string }[] = [];
+      try {
+        const raw = await fsReadText(joinRelPath(inst, "whitelist.json"), 20_000);
+        const parsed = raw && raw.trim() ? JSON.parse(raw) : [];
+        const list = Array.isArray(parsed) ? parsed : [];
+        existing = list
+          .map((it: any) => ({ name: String(it?.name || "").trim(), uuid: normalizeUuid(String(it?.uuid || "")) }))
+          .filter((x: any) => x.name || x.uuid);
+      } catch (e: any) {
+        if (!isNotFoundErr(e)) throw e;
+      }
+
+      const nameKey = name.toLowerCase();
+      const uuidKey = uuid.toLowerCase();
+      const dup = existing.some(
+        (e) =>
+          (uuidKey && String(e.uuid || "").toLowerCase() === uuidKey) ||
+          (nameKey && String(e.name || "").toLowerCase() === nameKey)
+      );
+      if (dup) {
+        pushToast(t.tr(`${name} is already in whitelist`, `${name} 已在白名单中`), "info");
+        return;
+      }
+
+      const next = [...existing, { name, uuid }].sort((a, b) => a.name.localeCompare(b.name));
+      await fsWriteText(joinRelPath(inst, "whitelist.json"), JSON.stringify(next, null, 2) + "\n", 20_000);
+      pushToast(t.tr(`Whitelisted: ${name}`, `已加入白名单：${name}`), "ok");
+      refreshWhitelist();
+    } catch (e: any) {
+      pushToast(String(e?.message || e), "error");
+    }
+  }
+
+  async function quickBanPlayer(nameRaw: string) {
+    const name = String(nameRaw || "").trim();
+    if (!name) return;
+    if (!running || !canControl) {
+      pushToast(t.tr("Server must be running to ban players", "封禁需要服务端在运行"), "error");
+      return;
+    }
+    if (!isValidMcName(name)) {
+      pushToast(t.tr("Invalid player name", "玩家名称无效"), "error");
+      return;
+    }
+    const ok = await confirmDialog(t.tr(`Ban ${name}?`, `封禁 ${name}？`), {
+      title: t.tr("Ban player", "封禁玩家"),
+      confirmLabel: t.tr("Ban", "封禁"),
+      cancelLabel: t.tr("Cancel", "取消"),
+      danger: true,
+    });
+    if (!ok) return;
+    await sendQuickCommand(`ban ${name}`);
   }
 
   async function refreshWhitelist() {
@@ -2455,45 +2603,86 @@ export default function GamesView() {
                 <code>servers/&lt;instance&gt;/usercache.json</code>
                 {playersStatus ? ` · ${playersStatus}` : ""}
               </div>
-              <input
-                value={playersQueryRaw}
-                onChange={(e: any) => setPlayersQueryRaw(e.target.value)}
-                placeholder={t.tr("Search players…", "搜索玩家…")}
-                style={{ width: 260 }}
-                disabled={!instanceId.trim()}
-              />
+              <div className="row" style={{ gap: 8, alignItems: "center" }}>
+                <Select
+                  value={playersSort}
+                  onChange={(v) => setPlayersSort(v === "name" ? "name" : "lastSeen")}
+                  options={[
+                    { value: "lastSeen", label: t.tr("Sort: last seen", "排序：最近登录") },
+                    { value: "name", label: t.tr("Sort: name", "排序：名称") },
+                  ]}
+                  style={{ width: 180 }}
+                  disabled={!instanceId.trim()}
+                />
+                <input
+                  value={playersQueryRaw}
+                  onChange={(e: any) => setPlayersQueryRaw(e.target.value)}
+                  placeholder={t.tr("Search players…", "搜索玩家…")}
+                  style={{ width: 260 }}
+                  disabled={!instanceId.trim()}
+                />
+              </div>
             </div>
-            {players.length ? (
+            {playersView.length ? (
               <table style={{ marginTop: 10 }}>
                 <thead>
                   <tr>
                     <th>{t.tr("Name", "名称")}</th>
                     <th>UUID</th>
-                    <th>{t.tr("Expires", "过期")}</th>
+                    <th>{t.tr("Last seen", "最近登录")}</th>
                     <th />
                   </tr>
                 </thead>
                 <tbody>
-                  {players
-                    .filter((p) => {
-                      const q = String(playersQuery || "").trim().toLowerCase();
-                      if (!q) return true;
-                      return `${p.name} ${p.uuid} ${p.expiresOn}`.toLowerCase().includes(q);
-                    })
-                    .map((p) => (
-                      <tr key={`${p.uuid}-${p.name}`}>
-                        <td>
-                          <code>{p.name || "-"}</code>
-                        </td>
-                        <td>
-                          <code>{p.uuid || "-"}</code>
-                        </td>
-                        <td className="muted">{p.expiresOn || "-"}</td>
-                        <td style={{ textAlign: "right" }}>
-                          <CopyButton iconOnly text={String(p.uuid || p.name || "")} />
-                        </td>
-                      </tr>
-                    ))}
+                  {playersView.map((p) => (
+                    <tr key={`${p.uuid}-${p.name}`}>
+                      <td>
+                        <code>{p.name || "-"}</code>
+                      </td>
+                      <td>
+                        <code>{p.uuid || "-"}</code>
+                      </td>
+                      <td className="muted" title={p.expiresOn || undefined}>
+                        {p.lastSeenUnix ? <TimeAgo unix={p.lastSeenUnix} /> : p.expiresOn || "-"}
+                      </td>
+                      <td style={{ textAlign: "right" }}>
+                        <div className="btnGroup" style={{ justifyContent: "flex-end", flexWrap: "nowrap" }}>
+                          <CopyButton
+                            iconOnly
+                            text={String(p.uuid || "")}
+                            tooltip="Copy UUID"
+                            ariaLabel="Copy UUID"
+                            disabled={!p.uuid}
+                          />
+                          <CopyButton
+                            iconOnly
+                            text={String(p.name || "")}
+                            tooltip={t.tr("Copy name", "复制名称")}
+                            ariaLabel={t.tr("Copy name", "复制名称")}
+                            disabled={!p.name}
+                          />
+                          <button
+                            type="button"
+                            className="iconBtn"
+                            onClick={() => quickWhitelistPlayer({ name: p.name, uuid: p.uuid })}
+                            disabled={!selectedDaemon?.connected || !instanceId.trim() || whitelistBusy || !p.name}
+                            title={t.tr("Add to whitelist", "加入白名单")}
+                          >
+                            {t.tr("Whitelist", "白名单")}
+                          </button>
+                          <button
+                            type="button"
+                            className="dangerBtn"
+                            onClick={() => quickBanPlayer(p.name)}
+                            disabled={!running || !canControl || !p.name}
+                            title={running ? t.tr("Ban player", "封禁玩家") : t.tr("Server is not running", "服务端未运行")}
+                          >
+                            {t.tr("Ban", "封禁")}
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             ) : (
