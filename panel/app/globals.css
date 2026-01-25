@@ -2050,6 +2050,19 @@ code.socketCode:focus-visible {
   border-radius: var(--radius-control);
 }
 
+.field.hasError input:not([type="checkbox"]):not([type="radio"]),
+.field.hasError textarea,
+.field.hasError select {
+  border-color: var(--danger-border);
+}
+
+.field.hasError input:focus,
+.field.hasError textarea:focus,
+.field.hasError select:focus {
+  border-color: var(--danger-border);
+  box-shadow: 0 0 0 1px var(--danger-border) inset, var(--focus-ring);
+}
+
 .checkRow {
   display: flex;
   align-items: center;

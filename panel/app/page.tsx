@@ -1434,10 +1434,15 @@ export default function HomePage() {
   const [profiles, setProfiles] = useState<FrpProfile[]>([]);
   const [profilesStatus, setProfilesStatus] = useState<string>("");
   const [addFrpOpen, setAddFrpOpen] = useState<boolean>(false);
+  const [addFrpShowErrors, setAddFrpShowErrors] = useState<boolean>(false);
   const [newProfileName, setNewProfileName] = useState<string>("");
   const [newProfileAddr, setNewProfileAddr] = useState<string>("");
   const [newProfilePort, setNewProfilePort] = useState<number>(7000);
   const [newProfileToken, setNewProfileToken] = useState<string>("");
+
+  const addFrpNameErr = !String(newProfileName || "").trim() ? t.tr("name is required", "名称不能为空") : "";
+  const addFrpAddrErr = !String(newProfileAddr || "").trim() ? t.tr("server address is required", "服务器地址不能为空") : "";
+  const addFrpPortErr = validatePortUI(newProfilePort, { allowZero: false }, t.tr);
 
   // FRP start params (per action)
   const [enableFrp, setEnableFrp] = useState<boolean>(true);
@@ -2933,6 +2938,7 @@ export default function HomePage() {
     setNewProfileAddr("");
     setNewProfilePort(7000);
     setNewProfileToken("");
+    setAddFrpShowErrors(false);
     setProfilesStatus("");
     setAddFrpOpen(true);
   }
@@ -8482,6 +8488,11 @@ export default function HomePage() {
 
   async function addFrpProfile() {
     setProfilesStatus("");
+    setAddFrpShowErrors(true);
+    if (addFrpNameErr || addFrpAddrErr || addFrpPortErr) {
+      setProfilesStatus(addFrpNameErr || addFrpAddrErr || addFrpPortErr);
+      return;
+    }
     try {
       const res = await apiFetch("/api/frp/profiles", {
         method: "POST",
@@ -8499,6 +8510,7 @@ export default function HomePage() {
       setNewProfileAddr("");
       setNewProfilePort(7000);
       setNewProfileToken("");
+      setAddFrpShowErrors(false);
       await refreshProfiles();
       setProfilesStatus(t.tr("Saved", "已保存"));
       setTimeout(() => setProfilesStatus(""), 800);
@@ -13098,7 +13110,10 @@ export default function HomePage() {
       <ManagedModal
         id="add-frp-server"
         open={addFrpOpen}
-        onOverlayClick={() => setAddFrpOpen(false)}
+        onOverlayClick={() => {
+          setAddFrpOpen(false);
+          setAddFrpShowErrors(false);
+        }}
         modalStyle={{ width: "min(720px, 100%)" }}
         ariaLabel={t.tr("Add FRP Server", "添加 FRP 服务器")}
       >
@@ -13114,15 +13129,27 @@ export default function HomePage() {
             </div>
 
             <div className="grid2" style={{ alignItems: "start" }}>
-              <div className="field">
+              <div className={["field", addFrpShowErrors && addFrpNameErr ? "hasError" : ""].filter(Boolean).join(" ")}>
                 <label>{t.tr("Name", "名称")}</label>
-                <input value={newProfileName} onChange={(e) => setNewProfileName(e.target.value)} placeholder="My FRP" />
+                <input
+                  value={newProfileName}
+                  onChange={(e) => setNewProfileName(e.target.value)}
+                  placeholder="My FRP"
+                  aria-invalid={addFrpShowErrors && !!addFrpNameErr}
+                />
+                {addFrpShowErrors && addFrpNameErr ? <div className="fieldError">{addFrpNameErr}</div> : null}
               </div>
-              <div className="field">
+              <div className={["field", addFrpShowErrors && addFrpAddrErr ? "hasError" : ""].filter(Boolean).join(" ")}>
                 <label>{t.tr("Server Addr", "服务器地址")}</label>
-                <input value={newProfileAddr} onChange={(e) => setNewProfileAddr(e.target.value)} placeholder="frp.example.com" />
+                <input
+                  value={newProfileAddr}
+                  onChange={(e) => setNewProfileAddr(e.target.value)}
+                  placeholder="frp.example.com"
+                  aria-invalid={addFrpShowErrors && !!addFrpAddrErr}
+                />
+                {addFrpShowErrors && addFrpAddrErr ? <div className="fieldError">{addFrpAddrErr}</div> : null}
               </div>
-              <div className="field">
+              <div className={["field", addFrpShowErrors && addFrpPortErr ? "hasError" : ""].filter(Boolean).join(" ")}>
                 <label>{t.tr("Server Port", "服务器端口")}</label>
                 <input
                   type="number"
@@ -13131,16 +13158,21 @@ export default function HomePage() {
                   placeholder="7000"
                   min={1}
                   max={65535}
+                  aria-invalid={addFrpShowErrors && !!addFrpPortErr}
                 />
+                {addFrpShowErrors && addFrpPortErr ? <div className="fieldError">{addFrpPortErr}</div> : null}
               </div>
               <div className="field">
                 <label>{t.tr("Token (optional)", "Token（可选）")}</label>
                 <input value={newProfileToken} onChange={(e) => setNewProfileToken(e.target.value)} placeholder="******" />
+                <div className="fieldHint">
+                  {t.tr("Leave empty if your FRP server does not require it.", "如果 FRP 服务器不需要 token，可留空。")}
+                </div>
               </div>
             </div>
 
             <div className="btnGroup" style={{ marginTop: 12, justifyContent: "flex-end" }}>
-              <button className="primary" type="button" disabled={!newProfileName.trim() || !newProfileAddr.trim()} onClick={addFrpProfile}>
+              <button className="primary" type="button" onClick={addFrpProfile}>
                 {t.tr("Save", "保存")}
               </button>
             </div>
