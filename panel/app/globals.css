@@ -1560,6 +1560,38 @@ button.themeCardBtn.selected {
   min-width: 0;
 }
 
+.metricChip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--pill-gap);
+  padding: var(--pill-pad-y) var(--pill-pad-x);
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-size: var(--font-size-xs);
+  line-height: var(--line-height-tight);
+  white-space: nowrap;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.metricChipLabel {
+  color: var(--muted2);
+  font-size: var(--font-size-2xs);
+  line-height: var(--line-height-tight);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.metricChipValue {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
 .gamesActionGroup {
   flex: 1 1 220px;
 }

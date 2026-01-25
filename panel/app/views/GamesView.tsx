@@ -2109,29 +2109,39 @@ function GamesView() {
           </div>
 
 	          <div className="gamesStickyMetrics">
-	            <span className="badge">
-	              {t.tr("port", "端口")}: <code>{Math.round(Number(gamePort || 25565))}</code>
+	            <span className="metricChip">
+	              <span className="metricChipLabel">{t.tr("port", "端口")}</span>
+	              <span className="metricChipValue">{Math.round(Number(gamePort || 25565))}</span>
 	            </span>
 	            <CopyButton
-              iconOnly
-              text={`${localHost || "127.0.0.1"}:${Math.round(Number(gamePort || 25565))}`}
-              tooltip={t.tr("Copy address", "复制地址")}
-              ariaLabel={t.tr("Copy address", "复制地址")}
-            />
-            <span className="badge">
-              {t.tr("players", "玩家")}: <code>{playersBusy ? "…" : players.length || "-"}</code>
-            </span>
-            <span className="badge">
-              TPS: <code>{tpsInfo?.tps1 == null ? "-" : tpsInfo.tps1.toFixed(2)}</code>
-            </span>
-            <span className="badge">
-              RAM:{" "}
-              <code>
-                {perf.memLatestBytes == null ? "-" : fmtBytes(perf.memLatestBytes)}
-                {perf.memTotalBytes > 0 ? ` / ${fmtBytes(perf.memTotalBytes)}` : ""}
-              </code>
-            </span>
-          </div>
+	              iconOnly
+	              text={`${localHost || "127.0.0.1"}:${Math.round(Number(gamePort || 25565))}`}
+	              tooltip={t.tr("Copy address", "复制地址")}
+	              ariaLabel={t.tr("Copy address", "复制地址")}
+	            />
+	            <span className="metricChip">
+	              <span className="metricChipLabel">{t.tr("players", "玩家")}</span>
+	              <span className="metricChipValue">{playersBusy ? "…" : players.length || "-"}</span>
+	            </span>
+	            <span className="metricChip">
+	              <span className="metricChipLabel">TPS</span>
+	              <span className="metricChipValue">{tpsInfo?.tps1 == null ? "-" : tpsInfo.tps1.toFixed(2)}</span>
+	            </span>
+	            <span
+	              className="metricChip"
+	              title={
+	                perf.memLatestBytes == null
+	                  ? "-"
+	                  : `${fmtBytes(perf.memLatestBytes)}${perf.memTotalBytes > 0 ? ` / ${fmtBytes(perf.memTotalBytes)}` : ""}`
+	              }
+	            >
+	              <span className="metricChipLabel">RAM</span>
+	              <span className="metricChipValue" style={{ maxWidth: 180 }}>
+	                {perf.memLatestBytes == null ? "-" : fmtBytes(perf.memLatestBytes)}
+	                {perf.memTotalBytes > 0 ? ` / ${fmtBytes(perf.memTotalBytes)}` : ""}
+	              </span>
+	            </span>
+	          </div>
 
           <div className="btnGroup gamesActionGroup">
             <button className={running ? "" : "primary"} onClick={() => (running ? stopServer() : startServer())} disabled={!canControl}>
