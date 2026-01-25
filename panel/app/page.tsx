@@ -10514,19 +10514,19 @@ export default function HomePage() {
 				                >
 				                  ×
 				                </button>
-				              </div>
-				              <div className="toastBody">{toast.message}</div>
-				              <div className="toastActions">
-				                {toast.detail ? (
-				                  <button type="button" className="linkBtn" onClick={() => openCopyModal(toast.detail || "")}>
-				                    {t.tr("Copy details", "复制详情")}
-				                  </button>
-				                ) : null}
-				              </div>
-				            </div>
-				          ))}
-				        </div>
-				      ) : null}
+					              </div>
+					              <div className="toastBody">{toast.message}</div>
+					              {toast.detail ? (
+					                <div className="toastActions">
+					                  <button type="button" className="linkBtn" onClick={() => openCopyModal(toast.detail || "")}>
+					                    {t.tr("Copy details", "复制详情")}
+					                  </button>
+					                </div>
+					              ) : null}
+					            </div>
+					          ))}
+					        </div>
+					      ) : null}
 
 			      {undoTrash ? (
 			        <div className="snackbarWrap" aria-live="polite" aria-relevant="additions">

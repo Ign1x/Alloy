@@ -2975,10 +2975,10 @@ button.cmdPaletteItem:disabled {
   padding: 10px 12px;
   border-radius: 14px;
   border: 1px solid var(--border2);
-  background: rgba(16, 20, 36, 0.90);
+  background: var(--card2);
   color: var(--text);
-  box-shadow: var(--shadow2);
-  backdrop-filter: blur(10px);
+  box-shadow: var(--shadow-elev-2);
+  backdrop-filter: blur(12px);
   font-size: var(--font-size-xs);
   line-height: var(--line-height-normal);
 }
@@ -3009,10 +3009,10 @@ button.cmdPaletteItem:disabled {
   padding: 10px 12px;
   border-radius: var(--radius);
   border: 1px solid var(--border2);
-  background: rgba(16, 20, 36, 0.90);
+  background: var(--card2);
   color: var(--text);
-  box-shadow: var(--shadow2);
-  backdrop-filter: blur(10px);
+  box-shadow: var(--shadow-elev-2);
+  backdrop-filter: blur(12px);
   font-size: var(--font-size-xs);
   line-height: var(--line-height-normal);
   text-align: left;
@@ -3029,10 +3029,6 @@ button.cmdPaletteItem:disabled {
   }
 }
 
-:root[data-theme="light"] .toast {
-  background: rgba(255, 255, 255, 0.92);
-}
-
 .toast::before {
   content: "";
   position: absolute;
@@ -3045,17 +3041,23 @@ button.cmdPaletteItem:disabled {
 
 .toastHead {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: var(--space-2);
 }
 
 .toastTitle {
   font-weight: var(--font-weight-semibold);
+  font-size: var(--font-size-2xs);
+  line-height: var(--line-height-tight);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted2);
 }
 
 .toastBody {
-  color: var(--muted);
+  color: var(--text);
+  font-size: var(--font-size-sm);
   overflow-wrap: anywhere;
   word-break: break-word;
 }
