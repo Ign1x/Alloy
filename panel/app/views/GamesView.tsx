@@ -258,6 +258,12 @@ export default function GamesView() {
   const [historySearchResult, setHistorySearchResult] = useState<any | null>(null);
   const [logSelectStart, setLogSelectStart] = useState<number | null>(null);
   const [logSelectEnd, setLogSelectEnd] = useState<number | null>(null);
+  const [logBookmarksOpen, setLogBookmarksOpen] = useState<boolean>(false);
+  const [logBookmarks, setLogBookmarks] = useState<
+    { id: string; inst: string; view: string; label: string; text: string; createdAtUnix: number; lineIdxHint: number }[]
+  >([]);
+  const [logBookmarksQueryRaw, setLogBookmarksQueryRaw] = useState<string>("");
+  const [logBookmarksQuery, setLogBookmarksQuery] = useState<string>("");
   const [logFindIdx, setLogFindIdx] = useState<number>(0);
   const [logPaused, setLogPaused] = useState<boolean>(false);
   const [logClearAtUnix, setLogClearAtUnix] = useState<number>(0);
@@ -361,6 +367,11 @@ export default function GamesView() {
     const t = window.setTimeout(() => setPlayersQuery(playersQueryRaw), 150);
     return () => window.clearTimeout(t);
   }, [playersQueryRaw]);
+
+  useEffect(() => {
+    const t = window.setTimeout(() => setLogBookmarksQuery(logBookmarksQueryRaw), 150);
+    return () => window.clearTimeout(t);
+  }, [logBookmarksQueryRaw]);
 
   const playersView = useMemo(() => {
     const q = String(playersQuery || "").trim().toLowerCase();
@@ -892,6 +903,82 @@ export default function GamesView() {
     URL.revokeObjectURL(url);
   }
 
+  function deriveBookmarkLabel(text: string) {
+    const s = String(text || "").trim();
+    if (!s) return "";
+    const idx = s.lastIndexOf(": ");
+    const body = idx >= 0 ? s.slice(idx + 2) : s;
+    const oneLine = body.replace(/\s+/g, " ").trim();
+    if (oneLine.length <= 80) return oneLine;
+    return oneLine.slice(0, 80) + "…";
+  }
+
+  function toggleLogBookmark(lineIdx: number, text: string) {
+    const inst = instanceId.trim();
+    if (!inst) return;
+    const line = String(text || "");
+    if (!line) return;
+
+    const list = Array.isArray(logBookmarks) ? logBookmarks : [];
+    const candidates = list
+      .map((b, i) => ({ b, i }))
+      .filter((x) => String(x.b?.text || "") === line);
+
+    if (candidates.length) {
+      let best = candidates[0];
+      let bestDist = Math.abs(Math.round(Number(best.b.lineIdxHint || 0)) - lineIdx);
+      for (const c of candidates) {
+        const dist = Math.abs(Math.round(Number(c.b.lineIdxHint || 0)) - lineIdx);
+        if (dist < bestDist) {
+          best = c;
+          bestDist = dist;
+        }
+      }
+      setLogBookmarks(list.filter((_, i) => i !== best.i));
+      pushToast(t.tr("Bookmark removed", "书签已移除"), "ok");
+      return;
+    }
+
+    const nowUnix = Math.floor(Date.now() / 1000);
+    const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const label = deriveBookmarkLabel(line);
+    const next = [{ id, inst, view: String(logView || "all"), label, text: line.slice(0, 50_000), createdAtUnix: nowUnix, lineIdxHint: lineIdx }, ...list].slice(0, 200);
+    setLogBookmarks(next);
+    pushToast(t.tr("Bookmarked", "已添加书签"), "ok");
+  }
+
+  function findLogLineIndexByText(text: string, hintIdx: number) {
+    const target = String(text || "");
+    if (!target) return -1;
+    const hits: number[] = [];
+    for (let i = 0; i < logLines.length; i++) {
+      if (String(logLines[i]?.text || "") === target) hits.push(i);
+    }
+    if (!hits.length) return -1;
+    if (hits.length === 1) return hits[0];
+    let best = hits[0];
+    let bestDist = Math.abs(best - hintIdx);
+    for (const i of hits) {
+      const dist = Math.abs(i - hintIdx);
+      if (dist < bestDist) {
+        best = i;
+        bestDist = dist;
+      }
+    }
+    return best;
+  }
+
+  function jumpToBookmark(b: { text: string; lineIdxHint: number }) {
+    const idx = findLogLineIndexByText(String(b?.text || ""), Math.max(0, Math.round(Number(b?.lineIdxHint || 0) || 0)));
+    if (idx < 0) {
+      pushToast(t.tr("Bookmark not found in current buffer (try History search).", "当前缓冲区未找到该书签（可尝试“历史搜索”）。"), "error");
+      return;
+    }
+    setLogSelectStart(idx);
+    setLogSelectEnd(idx);
+    scrollToLogLine(idx);
+  }
+
   useEffect(() => {
     if (!autoScroll) return;
     const el = logScrollRef.current;
@@ -997,6 +1084,22 @@ export default function GamesView() {
     return { start, end, count: end - start + 1 };
   }, [logLines.length, logSelectStart, logSelectEnd]);
 
+  const logBookmarkTextSet = useMemo(() => {
+    const set = new Set<string>();
+    for (const b of Array.isArray(logBookmarks) ? logBookmarks : []) {
+      const txt = String((b as any)?.text || "");
+      if (txt) set.add(txt);
+    }
+    return set;
+  }, [logBookmarks]);
+
+  const filteredLogBookmarks = useMemo(() => {
+    const q = String(logBookmarksQuery || "").trim().toLowerCase();
+    const list = Array.isArray(logBookmarks) ? logBookmarks : [];
+    if (!q) return list;
+    return list.filter((b) => `${b.label} ${b.text}`.toLowerCase().includes(q));
+  }, [logBookmarks, logBookmarksQuery]);
+
   useEffect(() => {
     if (!selectedDaemon?.connected) return;
     const inst = instanceId.trim();
@@ -1069,6 +1172,46 @@ export default function GamesView() {
       setCmdHistoryIdx(0);
     }
   }, [instanceId]);
+
+  useEffect(() => {
+    const inst = instanceId.trim();
+    if (!inst) {
+      setLogBookmarks([]);
+      setLogBookmarksQueryRaw("");
+      setLogBookmarksQuery("");
+      return;
+    }
+    try {
+      const raw = localStorage.getItem(`elegantmc_log_bookmarks_v1:${inst}`);
+      const parsed = raw ? JSON.parse(raw) : [];
+      const list = Array.isArray(parsed) ? parsed : [];
+      const cleaned = list
+        .map((b: any) => ({
+          id: String(b?.id || "").trim(),
+          inst,
+          view: String(b?.view || "").trim() || "all",
+          label: String(b?.label || "").trim().slice(0, 120),
+          text: String(b?.text || "").slice(0, 50_000),
+          createdAtUnix: Math.floor(Number(b?.createdAtUnix || b?.created_at_unix || 0)),
+          lineIdxHint: Math.max(0, Math.round(Number(b?.lineIdxHint ?? b?.line_idx_hint ?? 0) || 0)),
+        }))
+        .filter((b: any) => b.id && b.text)
+        .slice(0, 200);
+      setLogBookmarks(cleaned);
+    } catch {
+      setLogBookmarks([]);
+    }
+  }, [instanceId]);
+
+  useEffect(() => {
+    const inst = instanceId.trim();
+    if (!inst) return;
+    try {
+      localStorage.setItem(`elegantmc_log_bookmarks_v1:${inst}`, JSON.stringify((logBookmarks || []).slice(0, 200)));
+    } catch {
+      // ignore
+    }
+  }, [instanceId, logBookmarks]);
 
   function persistCmdHistory(inst: string, list: string[]) {
     try {
@@ -3323,6 +3466,20 @@ export default function GamesView() {
               <Icon name="search" />
               {t.tr("History search…", "历史搜索…")}
             </button>
+            <button
+              type="button"
+              className="iconBtn"
+              onClick={() => {
+                setLogBookmarksQueryRaw("");
+                setLogBookmarksOpen(true);
+              }}
+              disabled={!instanceId.trim()}
+              title={t.tr("Local bookmarks for this instance (stored in browser).", "该实例的本地书签（保存在浏览器）。")}
+            >
+              <Icon name="pin" />
+              {t.tr("Bookmarks", "书签")}
+              {logBookmarks.length ? <span className="badge">{logBookmarks.length}</span> : null}
+            </button>
           </div>
         </div>
         <div className="logScrollWrap">
@@ -3357,6 +3514,7 @@ export default function GamesView() {
                     const displayText = isLong
                       ? `${rawText.slice(0, 4000)} … <${rawText.length} chars> … ${rawText.slice(-3500)}`
                       : rawText;
+                    const isBookmarked = logBookmarkTextSet.has(rawText);
                     return (
                       <span
                         key={`${lineIdx}`}
@@ -3398,6 +3556,18 @@ export default function GamesView() {
                           }}
                         >
                           <Icon name="copy" />
+                        </button>
+                        <button
+                          type="button"
+                          className={`logLineBookmarkBtn ${isBookmarked ? "active" : ""}`.trim()}
+                          title={isBookmarked ? t.tr("Remove bookmark", "移除书签") : t.tr("Bookmark", "添加书签")}
+                          aria-label={isBookmarked ? t.tr("Remove bookmark", "移除书签") : t.tr("Bookmark", "添加书签")}
+                          onClick={(e: any) => {
+                            e.stopPropagation();
+                            toggleLogBookmark(lineIdx, rawText);
+                          }}
+                        >
+                          <Icon name="pin" />
                         </button>
                         <span
                           className="logLineText"
@@ -3601,6 +3771,121 @@ export default function GamesView() {
           </div>
         ) : null}
       </div>
+
+      <ManagedModal
+        id="logs-bookmarks"
+        open={logBookmarksOpen}
+        onOverlayClick={() => setLogBookmarksOpen(false)}
+        modalStyle={{ width: "min(920px, 100%)" }}
+        ariaLabel={t.tr("Log bookmarks", "日志书签")}
+      >
+        <div className="modalHeader">
+          <div>
+            <div style={{ fontWeight: 800 }}>{t.tr("Log bookmarks", "日志书签")}</div>
+            <div className="hint">
+              {t.tr("game", "游戏")}: <code>{instanceId.trim() || "-"}</code> · {t.tr("stored locally", "本地保存")}
+            </div>
+          </div>
+          <button type="button" onClick={() => setLogBookmarksOpen(false)}>
+            {t.tr("Close", "关闭")}
+          </button>
+        </div>
+
+        <div className="row" style={{ gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+          <div className="logSearchBar" style={{ flex: 1, minWidth: 220 }}>
+            <Icon name="search" />
+            <input
+              value={logBookmarksQueryRaw}
+              onChange={(e: any) => setLogBookmarksQueryRaw(e.target.value)}
+              placeholder={t.tr("Search bookmarks…", "搜索书签…")}
+              style={{ width: "100%" }}
+            />
+            {logBookmarksQueryRaw.trim() ? (
+              <button type="button" className="iconBtn iconOnly" title={t.tr("Clear", "清空")} aria-label={t.tr("Clear", "清空")} onClick={() => setLogBookmarksQueryRaw("")}>
+                ×
+              </button>
+            ) : null}
+          </div>
+          <span className="badge">
+            {t.tr("count", "数量")}: {filteredLogBookmarks.length}/{logBookmarks.length}
+          </span>
+          <button
+            type="button"
+            className="dangerBtn"
+            onClick={async () => {
+              if (!logBookmarks.length) return;
+              const ok = await confirmDialog(t.tr("Clear all bookmarks for this instance?", "清空该实例的所有书签？"), {
+                title: t.tr("Clear bookmarks", "清空书签"),
+                confirmLabel: t.tr("Clear", "清空"),
+                cancelLabel: t.tr("Cancel", "取消"),
+                danger: true,
+              });
+              if (!ok) return;
+              setLogBookmarks([]);
+              pushToast(t.tr("Bookmarks cleared", "书签已清空"), "ok");
+            }}
+            disabled={!instanceId.trim() || !logBookmarks.length}
+          >
+            {t.tr("Clear all", "全部清空")}
+          </button>
+        </div>
+
+        {filteredLogBookmarks.length ? (
+          <div className="stack" style={{ marginTop: 12, gap: 10, maxHeight: 560, overflow: "auto" }}>
+            {filteredLogBookmarks.slice(0, 200).map((b) => {
+              const text = String(b.text || "");
+              const preview = text.length > 10_000 ? `${text.slice(0, 5000)}\n… <${text.length} chars> …\n${text.slice(-4500)}` : text;
+              return (
+                <div key={b.id} className="itemCard">
+                  <div className="itemCardHeader" style={{ alignItems: "flex-start" }}>
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div className="row" style={{ gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                        <input
+                          value={b.label}
+                          onChange={(e: any) => {
+                            const next = String(e.target.value || "").slice(0, 120);
+                            setLogBookmarks((prev) => (prev || []).map((x) => (x.id === b.id ? { ...x, label: next } : x)));
+                          }}
+                          placeholder={t.tr("Label (optional)", "标签（可选）")}
+                          style={{ flex: 1, minWidth: 220 }}
+                        />
+                        <span className="badge">{b.view || "all"}</span>
+                        {b.createdAtUnix ? (
+                          <span className="muted">
+                            <TimeAgo unix={b.createdAtUnix} />
+                          </span>
+                        ) : null}
+                      </div>
+                      <pre className="diffFrame" style={{ marginTop: 10, maxHeight: 160, overflow: "auto", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                        {preview || "<empty>"}
+                      </pre>
+                    </div>
+                    <div className="btnGroup" style={{ justifyContent: "flex-end" }}>
+                      <button type="button" onClick={() => jumpToBookmark(b)} disabled={!instanceId.trim()}>
+                        {t.tr("Jump", "跳转")}
+                      </button>
+                      <CopyButton iconOnly text={text} tooltip={t.tr("Copy", "复制")} ariaLabel={t.tr("Copy", "复制")} disabled={!text} />
+                      <button
+                        type="button"
+                        className="dangerBtn iconBtn iconOnly"
+                        title={t.tr("Remove", "移除")}
+                        aria-label={t.tr("Remove", "移除")}
+                        onClick={() => setLogBookmarks((prev) => (prev || []).filter((x) => x.id !== b.id))}
+                      >
+                        <Icon name="trash" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="hint" style={{ marginTop: 12 }}>
+            {t.tr("No bookmarks.", "暂无书签。")}
+          </div>
+        )}
+      </ManagedModal>
 
       <ManagedModal
         id="logs-history-search"

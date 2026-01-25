@@ -28,7 +28,7 @@ WF-20260124-26,P2,logs,done,Log search across history,"Users can only search cur
 WF-20260124-27,P3,logs,done,Structured log filters,"Keyword search is noisy; users want level/module filters.","Add level filters + regex presets for common MC errors/warnings.",ux(logs): filters
 WF-20260124-28,P2,logs,done,Export selected log range,"Sharing logs often needs a small slice, not full file.","Add selection + export to text with timestamp context and copy/download.",ux(logs): export range
 WF-20260124-29,P3,logs,done,Improve log rendering performance,"Very long lines and heavy highlights can cause jank.","Optimize highlight pipeline and cap work per frame.",perf(logs): render perf
-WF-20260124-30,P3,logs,todo,Log bookmarks,"Users revisit the same error lines repeatedly.","Add per-instance local bookmarks with labels and quick jump.",ux(logs): bookmarks
+WF-20260124-30,P3,logs,done,Log bookmarks,"Users revisit the same error lines repeatedly.","Add per-instance local bookmarks with labels and quick jump.",ux(logs): bookmarks
 WF-20260124-31,P2,frp,todo,FRP proxy list UI improvements,"Proxy list is technical and lacks statuses per instance.","Add per-proxy status chips, restart buttons, and last error display.",ux(frp): proxy list
 WF-20260124-32,P2,frp,todo,FRP diagnostics panel,"FRP issues are hard to debug without logs/config view.","Add diagnostics: show generated config, frpc logs tail, and connectivity tests.",feat(frp): diagnostics
 WF-20260124-33,P3,frp,todo,Validate FRP remote port conflicts,"Users accidentally reuse remote ports causing failures.","Add validation against known used ports and warn before start.",ux(frp): port conflict
