@@ -2245,6 +2245,17 @@ pre.codePre {
   box-shadow: inset 0 0 0 1px var(--primary-border);
 }
 
+.logLine.selected {
+  background: rgba(59, 130, 246, 0.10);
+  border-radius: 10px;
+  box-shadow: inset 0 0 0 1px var(--border2);
+}
+
+.logLine.selected.activeMatch {
+  background: rgba(139, 92, 246, 0.16);
+  box-shadow: inset 0 0 0 1px var(--primary-border);
+}
+
 .logLineText {
   display: block;
 }

@@ -254,6 +254,8 @@ export default function GamesView() {
   const [historySearchBefore, setHistorySearchBefore] = useState<number>(0);
   const [historySearchAfter, setHistorySearchAfter] = useState<number>(0);
   const [historySearchResult, setHistorySearchResult] = useState<any | null>(null);
+  const [logSelectStart, setLogSelectStart] = useState<number | null>(null);
+  const [logSelectEnd, setLogSelectEnd] = useState<number | null>(null);
   const [logFindIdx, setLogFindIdx] = useState<number>(0);
   const [logPaused, setLogPaused] = useState<boolean>(false);
   const [logClearAtUnix, setLogClearAtUnix] = useState<number>(0);
@@ -669,6 +671,8 @@ export default function GamesView() {
 
   useEffect(() => {
     setLogClearAtUnix(0);
+    setLogSelectStart(null);
+    setLogSelectEnd(null);
   }, [instanceId, logView]);
 
   const filteredLogs = useMemo(() => {
@@ -846,6 +850,46 @@ export default function GamesView() {
     }
   }
 
+  function buildLogExportText(lines: string[], meta: { inst: string; view: string; start: number; end: number; total: number }) {
+    const nowUnix = Math.floor(Date.now() / 1000);
+    const header = [
+      "# ElegantMC log export",
+      `# instance: ${meta.inst || "-"}`,
+      `# view: ${meta.view || "-"}`,
+      `# range: ${meta.start + 1}-${meta.end + 1} / ${meta.total} (count=${meta.end - meta.start + 1})`,
+      `# exported_at: ${fmtUnix(nowUnix)}`,
+      "",
+    ].join("\n");
+    return header + (lines.join("\n") || "<empty>") + "\n";
+  }
+
+  async function exportLogSelection(mode: "copy" | "download") {
+    const inst = instanceId.trim();
+    if (!inst) return;
+    if (!logSelection) return;
+
+    const start = logSelection.start;
+    const end = logSelection.end;
+    const total = logLines.length;
+    const lines = logLines.slice(start, end + 1).map((l) => String(l?.text || ""));
+    const text = buildLogExportText(lines, { inst, view: String(logView || ""), start, end, total });
+
+    if (mode === "copy") {
+      await copyText(text);
+      return;
+    }
+
+    const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `elegantmc-${inst}-logs-${start + 1}-${end + 1}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
   useEffect(() => {
     if (!autoScroll) return;
     const el = logScrollRef.current;
@@ -940,6 +984,16 @@ export default function GamesView() {
     const end = Math.max(start, Math.min(total, logVirtual.end));
     return `${Math.min(total, start + 1)}-${end} / ${total}`;
   }, [logLines.length, logVirtual.end, logVirtual.start]);
+
+  const logSelection = useMemo(() => {
+    const total = logLines.length;
+    const a = typeof logSelectStart === "number" ? Math.round(Number(logSelectStart)) : NaN;
+    const b = typeof logSelectEnd === "number" ? Math.round(Number(logSelectEnd)) : NaN;
+    if (!Number.isFinite(a) || !Number.isFinite(b) || total <= 0) return null;
+    const start = Math.max(0, Math.min(total - 1, Math.min(a, b)));
+    const end = Math.max(0, Math.min(total - 1, Math.max(a, b)));
+    return { start, end, count: end - start + 1 };
+  }, [logLines.length, logSelectStart, logSelectEnd]);
 
   useEffect(() => {
     if (!selectedDaemon?.connected) return;
@@ -3177,6 +3231,33 @@ export default function GamesView() {
             >
               {t.tr("Clear view", "清空视图")}
             </button>
+            {logSelection ? (
+              <>
+                <span className="badge" title={t.tr("Click a line to select; Shift+Click to range.", "点击某行以选择；Shift+点击以选择范围。")}>
+                  {t.tr("Selected", "已选")}: {logSelection.count}
+                </span>
+                <button type="button" className="iconBtn" onClick={() => exportLogSelection("copy")}>
+                  <Icon name="copy" />
+                  {t.tr("Copy selection", "复制选中")}
+                </button>
+                <button type="button" className="iconBtn" onClick={() => exportLogSelection("download")}>
+                  <Icon name="download" />
+                  {t.tr("Download selection", "下载选中")}
+                </button>
+                <button
+                  type="button"
+                  className="iconBtn iconOnly"
+                  title={t.tr("Clear selection", "清空选择")}
+                  aria-label={t.tr("Clear selection", "清空选择")}
+                  onClick={() => {
+                    setLogSelectStart(null);
+                    setLogSelectEnd(null);
+                  }}
+                >
+                  ×
+                </button>
+              </>
+            ) : null}
             <button
               type="button"
               className="iconBtn"
@@ -3266,15 +3347,47 @@ export default function GamesView() {
                   {logVirtual.visible.map((l, idx) => {
                     const lineIdx = logVirtual.start + idx;
                     const isActive = lineIdx === activeLogMatchLineIdx;
-                    const cls = `logLine ${highlightLogs ? l.level : ""} ${isActive ? "activeMatch" : ""}`.trim();
+                    const isSelected = !!logSelection && lineIdx >= logSelection.start && lineIdx <= logSelection.end;
+                    const cls = `logLine ${highlightLogs ? l.level : ""} ${isSelected ? "selected" : ""} ${isActive ? "activeMatch" : ""}`.trim();
                     return (
-                      <span key={`${lineIdx}`} data-log-idx={lineIdx} className={cls}>
+                      <span
+                        key={`${lineIdx}`}
+                        data-log-idx={lineIdx}
+                        className={cls}
+                        role="button"
+                        tabIndex={0}
+                        title={t.tr("Click to select. Shift+Click to select a range.", "点击以选择。Shift+点击以选择范围。")}
+                        onClick={(e: any) => {
+                          const target = e?.target as any;
+                          if (target && typeof target.closest === "function" && target.closest("button")) return;
+                          if (e.shiftKey && typeof logSelectStart === "number") {
+                            setLogSelectEnd(lineIdx);
+                          } else {
+                            setLogSelectStart(lineIdx);
+                            setLogSelectEnd(lineIdx);
+                          }
+                        }}
+                        onKeyDown={(e: any) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            if (e.shiftKey && typeof logSelectStart === "number") {
+                              setLogSelectEnd(lineIdx);
+                            } else {
+                              setLogSelectStart(lineIdx);
+                              setLogSelectEnd(lineIdx);
+                            }
+                          }
+                        }}
+                      >
                         <button
                           type="button"
                           className="logLineCopyBtn"
                           title={t.tr("Copy line", "复制该行")}
                           aria-label={t.tr("Copy line", "复制该行")}
-                          onClick={() => copyText(l.text)}
+                          onClick={(e: any) => {
+                            e.stopPropagation();
+                            copyText(l.text);
+                          }}
                         >
                           <Icon name="copy" />
                         </button>
