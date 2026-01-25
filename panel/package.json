@@ -8,6 +8,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "next lint",
     "smoke": "node scripts/smoke.mjs",
+    "bundle:audit": "node scripts/bundle-audit.mjs",
     "build": "next build"
   },
   "dependencies": {

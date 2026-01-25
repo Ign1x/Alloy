@@ -8,15 +8,16 @@ import { useEvent } from "./useEvent";
 import { swrPeek, swrRevalidate } from "./swrCache";
 import Icon from "./ui/Icon";
 import CopyButton from "./ui/CopyButton";
-import CodeBlock from "./ui/CodeBlock";
-import EnvHelpButton from "./ui/EnvHelpButton";
 import TimeAgo from "./ui/TimeAgo";
 import StatusBadge from "./ui/StatusBadge";
 import ErrorBoundary from "./ui/ErrorBoundary";
-import DangerZone from "./ui/DangerZone";
 import { ManagedDrawer, ManagedModal, ModalStackProvider } from "./ui/ModalStack";
 import Select from "./ui/Select";
 import Tooltip from "./ui/Tooltip";
+
+const CodeBlock = dynamic(() => import("./ui/CodeBlock"), { ssr: false });
+const EnvHelpButton = dynamic(() => import("./ui/EnvHelpButton"), { ssr: false });
+const DangerZone = dynamic(() => import("./ui/DangerZone"), { ssr: false });
 
 const AdvancedView = dynamic(() => import("./views/AdvancedView"), { ssr: false });
 const FilesView = dynamic(() => import("./views/FilesView"), { ssr: false });

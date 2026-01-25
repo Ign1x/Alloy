@@ -18,6 +18,19 @@ npm run dev
 
 默认监听 `http://0.0.0.0:3000`。
 
+## Bundle size audit
+
+生产构建后可用脚本快速查看最大的 JS chunks（raw/gzip）：
+
+```bash
+npm run build
+npm run bundle:audit
+```
+
+可选：`BUNDLE_AUDIT_TOP=30` 控制输出条数。
+
+参考（以 `npm run build` 输出为准）：当前 `/` 的 First Load JS 约 `170 kB`，最大 chunk 通常是 `static/chunks/app/page-*.js`。
+
 ## 登录/权限（重要）
 
 Panel 使用单管理员密码登录（Cookie 会话）：
