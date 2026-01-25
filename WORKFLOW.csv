@@ -32,7 +32,7 @@ WF-20260124-30,P3,logs,done,Log bookmarks,"Users revisit the same error lines re
 WF-20260124-31,P2,frp,done,FRP proxy list UI improvements,"Proxy list is technical and lacks statuses per instance.","Add per-proxy status chips, restart buttons, and last error display.",ux(frp): proxy list
 WF-20260124-32,P2,frp,done,FRP diagnostics panel,"FRP issues are hard to debug without logs/config view.","Add diagnostics: show generated config, frpc logs tail, and connectivity tests.",feat(frp): diagnostics
 WF-20260124-33,P3,frp,done,Validate FRP remote port conflicts,"Users accidentally reuse remote ports causing failures.","Add validation against known used ports and warn before start.",ux(frp): port conflict
-WF-20260124-34,P3,frp,todo,FRP profile tags,"Many profiles become hard to distinguish.","Add tags/notes for FRP profiles and filter/search.",ux(frp): profile tags
+WF-20260124-34,P3,frp,done,FRP profile tags,"Many profiles become hard to distinguish.","Add tags/notes for FRP profiles and filter/search.",ux(frp): profile tags
 WF-20260124-35,P3,frp,todo,Better latency visualization,"Single latency number is not enough to understand stability.","Add mini sparkline latency history and jitter display.",ui(frp): latency chart
 WF-20260124-36,P1,a11y,todo,Improve chart accessibility,"Charts are visual-only; screen readers get little value.","Add aria descriptions, data tables fallback, and keyboard focus for points.",a11y(panel): charts
 WF-20260124-37,P2,a11y,todo,Reduce motion toggle,"Users with motion sensitivity need a UI toggle beyond OS settings.","Add a preference to disable animations regardless of OS setting.",a11y(panel): reduce motion

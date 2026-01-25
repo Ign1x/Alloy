@@ -134,6 +134,8 @@ type FrpProfile = {
   name: string;
   server_addr: string;
   server_port: number;
+  tags?: string[];
+  note?: string;
   has_token?: boolean;
   token_masked?: string;
   created_at_unix?: number;

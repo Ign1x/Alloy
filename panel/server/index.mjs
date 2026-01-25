@@ -11,6 +11,7 @@ import {
   attachConnection,
   createNode,
   createFrpProfile,
+  updateFrpProfile,
   deleteNode,
   deleteFrpProfile,
   ensureReady,
@@ -2887,6 +2888,8 @@ const server = http.createServer(async (req, res) => {
         server_addr: p.server_addr,
         server_port: p.server_port,
         created_at_unix: p.created_at_unix,
+        tags: Array.isArray(p.tags) ? p.tags : [],
+        note: String(p.note || ""),
         has_token: !!(p.token && String(p.token).trim()),
         token_masked: maskToken(p.token),
         status: statuses.get(p.id) || { checkedAtUnix: 0, online: null, latencyMs: 0, error: "" },
@@ -2911,6 +2914,8 @@ const server = http.createServer(async (req, res) => {
             server_addr: profile.server_addr,
             server_port: profile.server_port,
             created_at_unix: profile.created_at_unix,
+            tags: Array.isArray(profile.tags) ? profile.tags : [],
+            note: String(profile.note || ""),
             has_token: !!(profile.token && String(profile.token).trim()),
             token_masked: maskToken(profile.token),
           },
@@ -2947,6 +2952,30 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { id, status: frpStatusCache.get(id) });
     }
     const mFrp = url.pathname.match(/^\/api\/frp\/profiles\/([^/]+)$/);
+    if (mFrp && req.method === "PATCH") {
+      try {
+        const id = decodeURIComponent(mFrp[1]);
+        const body = await readJsonBody(req);
+        const updated = await updateFrpProfile(id, body);
+        if (!updated) return json(res, 404, { error: "not found" });
+        appendAudit(req, "frp.update_profile", { id });
+        return json(res, 200, {
+          profile: {
+            id: updated.id,
+            name: updated.name,
+            server_addr: updated.server_addr,
+            server_port: updated.server_port,
+            created_at_unix: updated.created_at_unix,
+            tags: Array.isArray(updated.tags) ? updated.tags : [],
+            note: String(updated.note || ""),
+            has_token: !!(updated.token && String(updated.token).trim()),
+            token_masked: maskToken(updated.token),
+          },
+        });
+      } catch (e) {
+        return json(res, 400, { error: String(e?.message || e) });
+      }
+    }
     if (mFrp && req.method === "DELETE") {
       const id = decodeURIComponent(mFrp[1]);
       const ok = await deleteFrpProfile(id);

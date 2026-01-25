@@ -300,11 +300,34 @@ function queueFrpSave() {
   return frpWriteChain;
 }
 
+function normalizeFrpTags(input) {
+  const rawList = Array.isArray(input) ? input : typeof input === "string" ? String(input).split(/[,\s]+/) : [];
+  const out = [];
+  const seen = new Set();
+  for (const raw of rawList) {
+    let t = String(raw || "").trim();
+    if (!t) continue;
+    if (t.length > 24) t = t.slice(0, 24);
+    const k = t.toLowerCase();
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(t);
+    if (out.length >= 12) break;
+  }
+  return out;
+}
+
+function normalizeFrpNote(input) {
+  return String(input ?? "").slice(0, 4000);
+}
+
 function normalizeFrpProfileInput(input) {
   const name = String(input?.name ?? "").trim();
   const serverAddr = String(input?.server_addr ?? "").trim();
   const serverPort = Number(input?.server_port ?? 0);
   const token = String(input?.token ?? "").trim();
+  const tags = normalizeFrpTags(input?.tags);
+  const note = normalizeFrpNote(input?.note);
 
   if (!name) throw new Error("name is required");
   if (name.length > 64) throw new Error("name too long");
@@ -313,7 +336,7 @@ function normalizeFrpProfileInput(input) {
   if (!Number.isFinite(serverPort) || serverPort < 1 || serverPort > 65535) throw new Error("server_port invalid");
   if (token.length > 256) throw new Error("token too long");
 
-  return { name, server_addr: serverAddr, server_port: serverPort, token };
+  return { name, server_addr: serverAddr, server_port: serverPort, token, tags, note };
 }
 
 export async function listFrpProfiles() {
@@ -332,6 +355,25 @@ export async function createFrpProfile(input) {
   state.frpProfiles.push(profile);
   await queueFrpSave();
   return profile;
+}
+
+export async function updateFrpProfile(id, patch) {
+  await ensureFrpLoaded();
+  const idx = state.frpProfiles.findIndex((p) => p && p.id === id);
+  if (idx < 0) return null;
+  const cur = state.frpProfiles[idx] || {};
+  const next = { ...cur };
+
+  if (Object.prototype.hasOwnProperty.call(patch || {}, "tags")) {
+    next.tags = normalizeFrpTags(patch?.tags);
+  }
+  if (Object.prototype.hasOwnProperty.call(patch || {}, "note")) {
+    next.note = normalizeFrpNote(patch?.note);
+  }
+
+  state.frpProfiles[idx] = next;
+  await queueFrpSave();
+  return next;
 }
 
 export async function deleteFrpProfile(id) {
