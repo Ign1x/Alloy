@@ -423,6 +423,17 @@ h3 {
   background: var(--bg0);
 }
 
+:root[data-reduce-motion="1"] {
+  scroll-behavior: auto !important;
+}
+
+:root[data-reduce-motion="1"] *,
+:root[data-reduce-motion="1"] *::before,
+:root[data-reduce-motion="1"] *::after {
+  animation: none !important;
+  transition: none !important;
+}
+
 :root[data-share="1"] .appShell {
   grid-template-columns: 1fr;
   max-width: 980px;

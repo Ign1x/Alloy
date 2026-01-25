@@ -1031,14 +1031,15 @@ export default function HomePage() {
   const [tab, setTab] = useState<Tab>("games");
   const [shareMode, setShareMode] = useState<boolean>(false);
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(false);
-  const [sidebarFooterCollapsed, setSidebarFooterCollapsed] = useState<boolean>(false);
-  const [themeMode, setThemeMode] = useState<ThemeMode>("auto");
-  const [uiDensity, setUiDensity] = useState<UiDensity>("comfortable");
-  const themePrefsReadyRef = useRef<boolean>(false);
-  const [enableAdvanced, setEnableAdvanced] = useState<boolean>(false);
-  const [panelInfo, setPanelInfo] = useState<{ id: string; version: string; revision: string; buildDate: string } | null>(null);
-  const [panelSettings, setPanelSettings] = useState<any | null>(null);
-  const [panelSettingsStatus, setPanelSettingsStatus] = useState<string>("");
+	const [sidebarFooterCollapsed, setSidebarFooterCollapsed] = useState<boolean>(false);
+	const [themeMode, setThemeMode] = useState<ThemeMode>("auto");
+	const [uiDensity, setUiDensity] = useState<UiDensity>("comfortable");
+	const [reduceMotion, setReduceMotion] = useState<boolean>(false);
+	const themePrefsReadyRef = useRef<boolean>(false);
+	const [enableAdvanced, setEnableAdvanced] = useState<boolean>(false);
+	const [panelInfo, setPanelInfo] = useState<{ id: string; version: string; revision: string; buildDate: string } | null>(null);
+	const [panelSettings, setPanelSettings] = useState<any | null>(null);
+	const [panelSettingsStatus, setPanelSettingsStatus] = useState<string>("");
   const [updateInfo, setUpdateInfo] = useState<any | null>(null);
   const [updateStatus, setUpdateStatus] = useState<string>("");
   const [updateBusy, setUpdateBusy] = useState<boolean>(false);
@@ -1655,6 +1656,18 @@ export default function HomePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Reduce motion (disable animations regardless of OS setting)
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("elegantmc_reduce_motion") || "0";
+      if (saved === "1" || saved === "true") setReduceMotion(true);
+      else if (saved === "0" || saved === "false") setReduceMotion(false);
+    } catch {
+      // ignore
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Locale (en/zh)
   useEffect(() => {
     try {
@@ -1727,6 +1740,20 @@ export default function HomePage() {
       // ignore
     }
   }, [uiDensity]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("elegantmc_reduce_motion", reduceMotion ? "1" : "0");
+    } catch {
+      // ignore
+    }
+    try {
+      if (reduceMotion) document.documentElement.dataset.reduceMotion = "1";
+      else delete (document.documentElement.dataset as any).reduceMotion;
+    } catch {
+      // ignore
+    }
+  }, [reduceMotion]);
 
   useEffect(() => {
     try {
@@ -10238,23 +10265,31 @@ export default function HomePage() {
                     </button>
 	                </div>
 	              </div>
-                <div className="row" style={{ marginTop: 8, justifyContent: "space-between" }}>
-                  <span className="muted">{t.tr("Density", "密度")}</span>
-                  <div style={{ width: 170 }}>
-                    <Select
-                      value={uiDensity}
-                      onChange={(v) => setUiDensity(v === "compact" ? "compact" : "comfortable")}
-                      options={[
-                        { value: "comfortable", label: t.tr("Comfortable", "舒适") },
-                        { value: "compact", label: t.tr("Compact", "紧凑") },
-                      ]}
-                    />
-                  </div>
-                </div>
-	            </>
-	          ) : null}
-	          <div className="row" style={{ marginTop: 10, justifyContent: "space-between" }}>
-	            <span className={`badge ${authed === true ? "ok" : ""}`}>{authed === true ? t.tr("admin", "管理员") : t.tr("locked", "未登录")}</span>
+	                <div className="row" style={{ marginTop: 8, justifyContent: "space-between" }}>
+	                  <span className="muted">{t.tr("Density", "密度")}</span>
+	                  <div style={{ width: 170 }}>
+	                    <Select
+	                      value={uiDensity}
+	                      onChange={(v) => setUiDensity(v === "compact" ? "compact" : "comfortable")}
+	                      options={[
+	                        { value: "comfortable", label: t.tr("Comfortable", "舒适") },
+	                        { value: "compact", label: t.tr("Compact", "紧凑") },
+	                      ]}
+	                    />
+	                  </div>
+	                </div>
+	                <div className="row" style={{ marginTop: 8, justifyContent: "space-between" }}>
+	                  <span className="muted">{t.tr("Reduce motion", "减少动画")}</span>
+	                  <div style={{ width: 170, display: "flex", justifyContent: "flex-end" }}>
+	                    <label className="checkRow" style={{ userSelect: "none" }}>
+	                      <input type="checkbox" checked={reduceMotion} onChange={(e) => setReduceMotion(e.target.checked)} /> {t.tr("Enabled", "启用")}
+	                    </label>
+	                  </div>
+	                </div>
+		            </>
+		          ) : null}
+		          <div className="row" style={{ marginTop: 10, justifyContent: "space-between" }}>
+		            <span className={`badge ${authed === true ? "ok" : ""}`}>{authed === true ? t.tr("admin", "管理员") : t.tr("locked", "未登录")}</span>
 	            {authed === true ? (
 	              <button type="button" onClick={logout}>
 	                {t.tr("Logout", "退出")}
