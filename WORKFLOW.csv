@@ -34,7 +34,7 @@ WF-20260124-32,P2,frp,done,FRP diagnostics panel,"FRP issues are hard to debug w
 WF-20260124-33,P3,frp,done,Validate FRP remote port conflicts,"Users accidentally reuse remote ports causing failures.","Add validation against known used ports and warn before start.",ux(frp): port conflict
 WF-20260124-34,P3,frp,done,FRP profile tags,"Many profiles become hard to distinguish.","Add tags/notes for FRP profiles and filter/search.",ux(frp): profile tags
 WF-20260124-35,P3,frp,done,Better latency visualization,"Single latency number is not enough to understand stability.","Add mini sparkline latency history and jitter display.",ui(frp): latency chart
-WF-20260124-36,P1,a11y,todo,Improve chart accessibility,"Charts are visual-only; screen readers get little value.","Add aria descriptions, data tables fallback, and keyboard focus for points.",a11y(panel): charts
+WF-20260124-36,P1,a11y,done,Improve chart accessibility,"Charts are visual-only; screen readers get little value.","Add aria descriptions, data tables fallback, and keyboard focus for points.",a11y(panel): charts
 WF-20260124-37,P2,a11y,todo,Reduce motion toggle,"Users with motion sensitivity need a UI toggle beyond OS settings.","Add a preference to disable animations regardless of OS setting.",a11y(panel): reduce motion
 WF-20260124-38,P2,a11y,todo,High contrast theme audit in tables,"Some table borders/status colors may fail contrast in contrast theme.","Adjust tokens and verify key surfaces meet contrast targets.",a11y(panel): contrast tables
 WF-20260124-39,P3,a11y,todo,Better focus management in drawers,"Focus can land behind overlays; ESC behavior varies.","Ensure focus trap + restore, consistent ESC close, and skip link works in overlays.",a11y(panel): focus overlays

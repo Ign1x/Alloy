@@ -549,25 +549,27 @@ function Sparkline({
 
   const hasValue = points.some((p) => typeof p.v === "number");
 
-  return (
-    <svg
-      width={width}
-      height={height}
-      viewBox={`0 0 ${width} ${height}`}
-      preserveAspectRatio="none"
-      style={{ display: "block", width: "100%", height }}
-    >
+	  return (
+	    <svg
+	      width={width}
+	      height={height}
+	      viewBox={`0 0 ${width} ${height}`}
+	      aria-hidden="true"
+	      focusable={false}
+	      preserveAspectRatio="none"
+	      style={{ display: "block", width: "100%", height }}
+	    >
       {fill && hasValue ? <polyline points={`${pts} ${width},${height} 0,${height}`} fill={fill} stroke="none" /> : null}
       <polyline points={pts} fill="none" stroke={stroke} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
     </svg>
   );
 }
 
-function SparklineWithTooltip({
-  title,
-  values,
-  labels,
-  width,
+	function SparklineWithTooltip({
+	  title,
+	  values,
+	  labels,
+	  width,
   height,
   stroke,
   fill,
@@ -581,57 +583,156 @@ function SparklineWithTooltip({
   stroke: string;
   fill?: string;
   format?: (v: number) => string;
-}) {
-  const points = useMemo(() => {
-    const v = values.slice(-120);
-    const l = labels && labels.length ? labels.slice(-120) : [];
-    return v.map((x, i) => ({
-      v: typeof x === "number" ? clamp(x, 0, 100) : null,
-      label: l.length ? String(l[i] ?? "") : "",
-    }));
-  }, [labels, values]);
+	}) {
+	  const points = useMemo(() => {
+	    const v = values.slice(-120);
+	    const l = labels && labels.length ? labels.slice(-120) : [];
+	    return v.map((x, i) => ({
+	      v: typeof x === "number" ? clamp(x, 0, 100) : null,
+	      label: l.length ? String(l[i] ?? "") : "",
+	    }));
+	  }, [labels, values]);
 
-  const [hoverIdx, setHoverIdx] = useState<number>(-1);
+	  const descId = useRef(`spark-desc-${Math.random().toString(16).slice(2)}`).current;
 
-  const onMove = useCallback(
-    (e: any) => {
-      const el = e.currentTarget as HTMLDivElement;
-      const rect = el.getBoundingClientRect();
-      const x = Math.max(0, Math.min(rect.width, (e.clientX || 0) - rect.left));
-      const n = points.length;
-      if (!n) return setHoverIdx(-1);
-      const idx = n <= 1 ? 0 : Math.round((x / rect.width) * (n - 1));
-      setHoverIdx(Math.max(0, Math.min(n - 1, idx)));
-    },
-    [points.length]
-  );
+	  const [hoverIdx, setHoverIdx] = useState<number>(-1);
 
-  const hover = hoverIdx >= 0 && hoverIdx < points.length ? points[hoverIdx] : null;
-  const fmt = format || ((v: number) => `${v.toFixed(1)}%`);
+	  const onMove = useCallback(
+	    (e: any) => {
+	      const el = e.currentTarget as HTMLDivElement;
+	      const rect = el.getBoundingClientRect();
+	      const x = Math.max(0, Math.min(rect.width, (e.clientX || 0) - rect.left));
+	      const n = points.length;
+	      if (!n) return setHoverIdx(-1);
+	      const idx = n <= 1 ? 0 : Math.round((x / rect.width) * (n - 1));
+	      setHoverIdx(Math.max(0, Math.min(n - 1, idx)));
+	    },
+	    [points.length]
+	  );
 
-  return (
-    <div
-      className="sparkWrap"
-      style={{ width }}
-      onMouseMove={onMove}
-      onMouseLeave={() => setHoverIdx(-1)}
-      onFocus={onMove}
-      onBlur={() => setHoverIdx(-1)}
-      tabIndex={0}
-      aria-label={title}
-    >
-      <Sparkline values={values} labels={labels} width={width} height={height} stroke={stroke} fill={fill} />
-      {hover && (hover.v != null || hover.label) ? (
-        <div className="sparkTip" role="status" aria-live="polite">
-          <div style={{ fontWeight: 700 }}>{title}</div>
-          <div className="hint">
-            {hover.v == null ? "-" : fmt(hover.v)} {hover.label ? `· ${hover.label}` : ""}
-          </div>
-        </div>
-      ) : null}
-    </div>
-  );
-}
+	  const onKeyDown = useCallback(
+	    (e: any) => {
+	      const n = points.length;
+	      if (!n) return;
+	      const key = String(e?.key || "");
+	      if (key === "ArrowLeft") {
+	        e.preventDefault();
+	        setHoverIdx((cur) => {
+	          const base = cur < 0 ? n - 1 : cur;
+	          return Math.max(0, base - 1);
+	        });
+	        return;
+	      }
+	      if (key === "ArrowRight") {
+	        e.preventDefault();
+	        setHoverIdx((cur) => {
+	          const base = cur < 0 ? 0 : cur;
+	          return Math.min(n - 1, base + 1);
+	        });
+	        return;
+	      }
+	      if (key === "Home") {
+	        e.preventDefault();
+	        setHoverIdx(0);
+	        return;
+	      }
+	      if (key === "End") {
+	        e.preventDefault();
+	        setHoverIdx(n - 1);
+	        return;
+	      }
+	      if (key === "PageUp") {
+	        e.preventDefault();
+	        setHoverIdx((cur) => {
+	          const base = cur < 0 ? 0 : cur;
+	          return Math.max(0, base - 10);
+	        });
+	        return;
+	      }
+	      if (key === "PageDown") {
+	        e.preventDefault();
+	        setHoverIdx((cur) => {
+	          const base = cur < 0 ? 0 : cur;
+	          return Math.min(n - 1, base + 10);
+	        });
+	      }
+	    },
+	    [points.length]
+	  );
+
+	  const hover = hoverIdx >= 0 && hoverIdx < points.length ? points[hoverIdx] : null;
+	  const fmt = format || ((v: number) => `${v.toFixed(1)}%`);
+	  const latest = points.length ? points[points.length - 1] : null;
+	  const stats = useMemo(() => {
+	    const nums = points.map((p) => p.v).filter((v): v is number => typeof v === "number" && Number.isFinite(v));
+	    if (!nums.length) return { min: null as number | null, max: null as number | null };
+	    return { min: Math.min(...nums), max: Math.max(...nums) };
+	  }, [points]);
+
+	  return (
+	    <div style={{ width }}>
+	      <div
+	        className="sparkWrap"
+	        style={{ width: "100%" }}
+	        onMouseMove={onMove}
+	        onMouseLeave={() => setHoverIdx(-1)}
+	        onFocus={() => setHoverIdx(points.length ? points.length - 1 : -1)}
+	        onBlur={() => setHoverIdx(-1)}
+	        onKeyDown={onKeyDown}
+	        tabIndex={0}
+	        role="group"
+	        aria-label={`${title} chart`}
+	        aria-describedby={descId}
+	      >
+	        <div id={descId} className="srOnly">
+	          {`${title} chart with ${points.length} points. ` +
+	            `Latest: ${latest?.v == null ? "-" : fmt(latest.v)}${latest?.label ? ` at ${latest.label}` : ""}. ` +
+	            `Min: ${stats.min == null ? "-" : fmt(stats.min)}. Max: ${stats.max == null ? "-" : fmt(stats.max)}. ` +
+	            "Use Left/Right arrow keys to explore points."}
+	        </div>
+	        <Sparkline values={values} labels={labels} width={width} height={height} stroke={stroke} fill={fill} />
+	        {hover && (hover.v != null || hover.label) ? (
+	          <div className="sparkTip" role="status" aria-live="polite">
+	            <div style={{ fontWeight: 700 }}>{title}</div>
+	            <div className="hint">
+	              {hover.v == null ? "-" : fmt(hover.v)} {hover.label ? `· ${hover.label}` : ""}
+	            </div>
+	          </div>
+	        ) : null}
+	      </div>
+
+	      {points.length ? (
+	        <details style={{ marginTop: 10 }}>
+	          <summary className="hint">{`Data table (${title})`}</summary>
+	          <div style={{ marginTop: 8, maxHeight: 240, overflow: "auto" }}>
+	            <table>
+	              <thead>
+	                <tr>
+	                  <th>#</th>
+	                  <th>Label</th>
+	                  <th>Value</th>
+	                </tr>
+	              </thead>
+	              <tbody>
+	                {points.map((p, i) => (
+	                  <tr key={`${title}:${i}`}>
+	                    <td>{i + 1}</td>
+	                    <td>
+	                      <code>{p.label || "-"}</code>
+	                    </td>
+	                    <td>
+	                      <code>{p.v == null ? "-" : fmt(p.v)}</code>
+	                    </td>
+	                  </tr>
+	                ))}
+	              </tbody>
+	            </table>
+	          </div>
+	        </details>
+	      ) : null}
+	    </div>
+	  );
+	}
 
 function isLocalLikeHost(hostname: string) {
   const h = String(hostname || "").trim().toLowerCase();
