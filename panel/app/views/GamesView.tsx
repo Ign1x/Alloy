@@ -1438,6 +1438,31 @@ export default function GamesView() {
             <StatusBadge tone={running ? "ok" : "neutral"}>{running ? t.tr("running", "运行中") : t.tr("stopped", "已停止")}</StatusBadge>
           </div>
 
+          <div className="row" style={{ justifyContent: "center", gap: 8, flexWrap: "wrap" }}>
+            <span className="badge">
+              {t.tr("port", "端口")}: <code>{Math.round(Number(gamePort || 25565))}</code>
+            </span>
+            <CopyButton
+              iconOnly
+              text={`${localHost || "127.0.0.1"}:${Math.round(Number(gamePort || 25565))}`}
+              tooltip={t.tr("Copy address", "复制地址")}
+              ariaLabel={t.tr("Copy address", "复制地址")}
+            />
+            <span className="badge">
+              {t.tr("players", "玩家")}: <code>{playersBusy ? "…" : players.length || "-"}</code>
+            </span>
+            <span className="badge">
+              TPS: <code>{tpsInfo?.tps1 == null ? "-" : tpsInfo.tps1.toFixed(2)}</code>
+            </span>
+            <span className="badge">
+              RAM:{" "}
+              <code>
+                {perf.memLatestBytes == null ? "-" : fmtBytes(perf.memLatestBytes)}
+                {perf.memTotalBytes > 0 ? ` / ${fmtBytes(perf.memTotalBytes)}` : ""}
+              </code>
+            </span>
+          </div>
+
           <div className="btnGroup gamesActionGroup">
             <button className={running ? "" : "primary"} onClick={() => (running ? stopServer() : startServer())} disabled={!canControl}>
               {gameActionBusy ? t.tr("Working...", "处理中...") : running ? t.tr("Stop", "停止") : t.tr("Start", "启动")}
