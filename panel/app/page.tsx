@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
-import { AppCtxProvider } from "./appCtx";
+import { AppProviders } from "./appCtx";
 import { createT, normalizeLocale, type Locale } from "./i18n";
+import { useEvent } from "./useEvent";
 import Icon from "./ui/Icon";
 import CopyButton from "./ui/CopyButton";
 import CodeBlock from "./ui/CodeBlock";
@@ -8726,205 +8727,483 @@ export default function HomePage() {
     return { groups, flat };
   }, [cmdPaletteCommands, cmdPaletteQuery, cmdPaletteRecentIds, t]);
 
-  const appCtxValue = {
-    tab,
-    setTab,
-    shareMode,
-    setShareMode,
-    exitShareView,
-    locale,
-    setLocale,
-    t,
-    authMe,
-    notifications,
-    daemons,
-    daemonsLoadedOnce,
-    selected,
-    setSelected,
-    selectedDaemon,
+  const apiFetchFn = useEvent(apiFetch);
+  const copyTextFn = useEvent(copyText);
+  const confirmDialogFn = useEvent(confirmDialog);
+  const promptDialogFn = useEvent(promptDialog);
+  const openHelpModalFn = useEvent(openHelpModal);
+  const openHelpDocFn = useEvent(openHelpDoc);
+  const openShareViewFn = useEvent(openShareView);
+  const makeDeployComposeYmlFn = useEvent(makeDeployComposeYml);
+  const pushToastFn = useEvent(pushToast);
+  const exitShareViewFn = useEvent(exitShareView);
 
-    // Panel
-    panelInfo,
-    panelSettings,
-    panelSettingsStatus,
-    refreshPanelSettings,
-    savePanelSettings,
-    updateInfo,
-    updateStatus,
-    updateBusy,
-    checkUpdates,
-    loadSchedule,
-    saveScheduleJson,
-    runScheduleTask,
+  const refreshPanelSettingsFn = useEvent(refreshPanelSettings);
+  const savePanelSettingsFn = useEvent(savePanelSettings);
+  const checkUpdatesFn = useEvent(checkUpdates);
+  const loadScheduleFn = useEvent(loadSchedule);
+  const saveScheduleJsonFn = useEvent(saveScheduleJson);
+  const runScheduleTaskFn = useEvent(runScheduleTask);
 
-    // Nodes
-    nodes,
-    setNodes,
-    nodesStatus,
-    setNodesStatus,
-    pinnedDaemonIds,
-    togglePinnedDaemon,
-    openNodeDetails,
-    openAddNodeModal,
-    openAddNodeAndDeploy,
-    openDeployDaemonModal,
-    exportDiagnosticsBundle,
+  const togglePinnedDaemonFn = useEvent(togglePinnedDaemon);
+  const openNodeDetailsFn = useEvent(openNodeDetails);
+  const openAddNodeModalFn = useEvent(openAddNodeModal);
+  const openAddNodeAndDeployFn = useEvent(openAddNodeAndDeploy);
+  const openDeployDaemonModalFn = useEvent(openDeployDaemonModal);
+  const exportDiagnosticsBundleFn = useEvent(exportDiagnosticsBundle);
 
-    // Games
-    serverDirs,
-    serverDirsStatus,
-    refreshServerDirs,
-    instanceTagsById,
-    updateInstanceTags,
-    favoriteInstanceIds,
-    toggleFavoriteInstance,
-    instanceNotesById,
-    updateInstanceNote,
-    instanceMetaById,
-    instanceId,
-	    setInstanceId,
-	    openSettingsModal,
-      openJarUpdateModal,
-	    openInstallModal,
-	    startServer,
-      startServerFromSavedConfig,
-	    stopServer,
-	    restartServer,
-	    deleteServer,
-	    backupServer,
-	    openTrashModal,
-    openDatapackModal,
-    openResourcePackModal,
-    exportInstanceZip,
-    downloadWorldZip,
-    openServerPropertiesEditor,
-    renameInstance,
-    cloneInstance,
-    instanceUsageBytes,
-    instanceUsageStatus,
-    instanceUsageBusy,
-    computeInstanceUsage,
-    instanceMetricsHistory,
-    instanceMetricsStatus,
-    backupZips: restoreCandidates,
-    backupZipsStatus: restoreStatus,
-    refreshBackupZips,
-    backupRetentionKeepLast,
-    saveBackupRetentionKeepLast,
-    pruneBackups,
-    restoreBackupNow,
-    frpOpStatus,
-    serverOpStatus,
-    gameActionBusy,
-    instanceStatus,
-    frpStatus,
-    localHost,
-    gamePort,
-    enableFrp,
-    selectedProfile,
-    frpRemotePort,
-    logView,
-    setLogView,
-    logs,
-    logsLoadedOnce,
-    consoleLine,
-    setConsoleLine,
-    sendConsoleLine,
-    downloadLatestLog,
-    mcLogSearch,
+  const refreshServerDirsFn = useEvent(refreshServerDirs);
+  const updateInstanceTagsFn = useEvent(updateInstanceTags);
+  const toggleFavoriteInstanceFn = useEvent(toggleFavoriteInstance);
+  const updateInstanceNoteFn = useEvent(updateInstanceNote);
+  const openSettingsModalFn = useEvent(openSettingsModal);
+  const openJarUpdateModalFn = useEvent(openJarUpdateModal);
+  const openInstallModalFn = useEvent(openInstallModal);
+  const startServerFn = useEvent(startServer);
+  const startServerFromSavedConfigFn = useEvent(startServerFromSavedConfig);
+  const stopServerFn = useEvent(stopServer);
+  const restartServerFn = useEvent(restartServer);
+  const deleteServerFn = useEvent(deleteServer);
+  const backupServerFn = useEvent(backupServer);
+  const openTrashModalFn = useEvent(openTrashModal);
+  const openDatapackModalFn = useEvent(openDatapackModal);
+  const openResourcePackModalFn = useEvent(openResourcePackModal);
+  const exportInstanceZipFn = useEvent(exportInstanceZip);
+  const downloadWorldZipFn = useEvent(downloadWorldZip);
+  const openServerPropertiesEditorFn = useEvent(openServerPropertiesEditor);
+  const renameInstanceFn = useEvent(renameInstance);
+  const cloneInstanceFn = useEvent(cloneInstance);
+  const computeInstanceUsageFn = useEvent(computeInstanceUsage);
+  const refreshBackupZipsFn = useEvent(refreshBackupZips);
+  const saveBackupRetentionKeepLastFn = useEvent(saveBackupRetentionKeepLast);
+  const pruneBackupsFn = useEvent(pruneBackups);
+  const restoreBackupNowFn = useEvent(restoreBackupNow);
+  const sendConsoleLineFn = useEvent(sendConsoleLine);
+  const downloadLatestLogFn = useEvent(downloadLatestLog);
+  const mcLogSearchFn = useEvent(mcLogSearch);
 
-    // FRP
-    profiles,
-    profilesStatus,
-    setProfilesStatus,
-    refreshProfiles,
-    openAddFrpModal,
-    removeFrpProfile,
-    setEnableFrp,
-    setFrpProfileId,
+  const startFrpProxyNowFn = useEvent(startFrpProxyNow);
+  const restartFrpProxyNowFn = useEvent(restartFrpProxyNow);
+  const stopFrpProxyNowFn = useEvent(stopFrpProxyNow);
+  const readFrpProxyIniNowFn = useEvent(readFrpProxyIniNow);
+  const probeTcpFromDaemonNowFn = useEvent(probeTcpFromDaemonNow);
+  const repairInstanceFn = useEvent(repairInstance);
+  const updateModrinthPackFn = useEvent(updateModrinthPack);
 
-    // Files
-    fsPath,
-    setFsPath,
-    fsBreadcrumbs,
-    fsStatus,
-    fsEntries,
-    fsSelectedFile,
-    fsDirty,
-    setFsSelectedFile,
-	    fsSelectedFileMode,
-	    fsFileText,
-	    setFsFileText,
-    fsPreviewUrl,
-    openEntry,
-    openFileByPath,
-	    fsReadText,
-      fsWriteText,
-      fsZipList,
-      fsUnzipZip,
-      fsDeleteHard,
-	    setServerJarFromFile,
-    saveFile,
-    uploadInputKey,
-    uploadFile,
-    setUploadFile,
-    uploadItems,
-    uploadBusy,
-    uploadSelectedFile,
-    uploadFilesNow,
-    uploadZipAndExtractHere,
-    uploadStatus,
-    retryUploadItem,
-    retryFailedUploads,
-    refreshFsNow,
-	    mkdirFsHere,
-	    createFileHere,
-	    renameFsEntry,
-	    moveFsEntry,
-	    downloadFsEntry,
-	    downloadFsFolderAsZip,
-	    deleteFsEntry,
-	    bulkDeleteFsEntries,
-	    bulkMoveFsEntries,
+  const refreshProfilesFn = useEvent(refreshProfiles);
+  const openAddFrpModalFn = useEvent(openAddFrpModal);
+  const removeFrpProfileFn = useEvent(removeFrpProfile);
 
-	    // Advanced
-	    cmdName,
-	    setCmdName,
-	    cmdArgs,
-	    setCmdArgs,
-	    cmdResult,
-	    runAdvancedCommand,
+  const openEntryFn = useEvent(openEntry);
+  const openFileByPathFn = useEvent(openFileByPath);
+  const fsReadTextFn = useEvent(fsReadText);
+  const fsWriteTextFn = useEvent(fsWriteText);
+  const fsZipListFn = useEvent(fsZipList);
+  const fsUnzipZipFn = useEvent(fsUnzipZip);
+  const fsDeleteHardFn = useEvent(fsDeleteHard);
+  const setServerJarFromFileFn = useEvent(setServerJarFromFile);
+  const saveFileFn = useEvent(saveFile);
+  const uploadFilesNowFn = useEvent(uploadFilesNow);
+  const uploadZipAndExtractHereFn = useEvent(uploadZipAndExtractHere);
+  const retryUploadItemFn = useEvent(retryUploadItem);
+  const retryFailedUploadsFn = useEvent(retryFailedUploads);
+  const refreshFsNowFn = useEvent(refreshFsNow);
+  const mkdirFsHereFn = useEvent(mkdirFsHere);
+  const createFileHereFn = useEvent(createFileHere);
+  const renameFsEntryFn = useEvent(renameFsEntry);
+  const moveFsEntryFn = useEvent(moveFsEntry);
+  const downloadFsEntryFn = useEvent(downloadFsEntry);
+  const downloadFsFolderAsZipFn = useEvent(downloadFsFolderAsZip);
+  const deleteFsEntryFn = useEvent(deleteFsEntry);
+  const bulkDeleteFsEntriesFn = useEvent(bulkDeleteFsEntries);
+  const bulkMoveFsEntriesFn = useEvent(bulkMoveFsEntries);
 
-	    // Helpers
-	    apiFetch,
-	    copyText,
-	    confirmDialog,
-	    promptDialog,
-	    openHelpModal,
-	    openHelpDoc,
-	    openShareView,
-	    makeDeployComposeYml,
-	    maskToken,
-	    pct,
-	    fmtUnix,
-	    fmtTime,
-	    fmtBytes,
-	    joinRelPath,
-	    parentRelPath,
+  const runAdvancedCommandFn = useEvent(runAdvancedCommand);
 
-	      // Game helpers
-		      startFrpProxyNow,
-		      restartFrpProxyNow,
-		      stopFrpProxyNow,
-		      readFrpProxyIniNow,
-		      probeTcpFromDaemonNow,
-		      repairInstance,
-		      updateModrinthPack,
-		  };
+  const i18nCtxValue = useMemo(
+    () => ({ locale, setLocale, t, fmtUnix, fmtTime, fmtBytes }),
+    [locale, setLocale, t, fmtUnix, fmtTime, fmtBytes]
+  );
+
+  const actionsCtxValue = useMemo(
+    () => ({
+      apiFetch: apiFetchFn,
+      copyText: copyTextFn,
+      confirmDialog: confirmDialogFn,
+      promptDialog: promptDialogFn,
+      pushToast: pushToastFn,
+      openHelpModal: openHelpModalFn,
+      openHelpDoc: openHelpDocFn,
+      openShareView: openShareViewFn,
+      makeDeployComposeYml: makeDeployComposeYmlFn,
+      maskToken,
+      pct,
+      joinRelPath,
+      parentRelPath,
+    }),
+    [
+      apiFetchFn,
+      copyTextFn,
+      confirmDialogFn,
+      promptDialogFn,
+      pushToastFn,
+      openHelpModalFn,
+      openHelpDocFn,
+      openShareViewFn,
+      makeDeployComposeYmlFn,
+      maskToken,
+      pct,
+      joinRelPath,
+      parentRelPath,
+    ]
+  );
+
+  const coreCtxValue = useMemo(
+    () => ({
+      tab,
+      setTab,
+      shareMode,
+      setShareMode,
+      exitShareView: exitShareViewFn,
+      authMe,
+      notifications,
+      daemons,
+      daemonsLoadedOnce,
+      selected,
+      setSelected,
+      selectedDaemon,
+    }),
+    [tab, setTab, shareMode, setShareMode, exitShareViewFn, authMe, notifications, daemons, daemonsLoadedOnce, selected, setSelected, selectedDaemon]
+  );
+
+  const panelCtxValue = useMemo(
+    () => ({
+      panelInfo,
+      panelSettings,
+      panelSettingsStatus,
+      refreshPanelSettings: refreshPanelSettingsFn,
+      savePanelSettings: savePanelSettingsFn,
+      updateInfo,
+      updateStatus,
+      updateBusy,
+      checkUpdates: checkUpdatesFn,
+      loadSchedule: loadScheduleFn,
+      saveScheduleJson: saveScheduleJsonFn,
+      runScheduleTask: runScheduleTaskFn,
+    }),
+    [
+      panelInfo,
+      panelSettings,
+      panelSettingsStatus,
+      refreshPanelSettingsFn,
+      savePanelSettingsFn,
+      updateInfo,
+      updateStatus,
+      updateBusy,
+      checkUpdatesFn,
+      loadScheduleFn,
+      saveScheduleJsonFn,
+      runScheduleTaskFn,
+    ]
+  );
+
+  const nodesCtxValue = useMemo(
+    () => ({
+      nodes,
+      setNodes,
+      nodesStatus,
+      setNodesStatus,
+      pinnedDaemonIds,
+      togglePinnedDaemon: togglePinnedDaemonFn,
+      openNodeDetails: openNodeDetailsFn,
+      openAddNodeModal: openAddNodeModalFn,
+      openAddNodeAndDeploy: openAddNodeAndDeployFn,
+      openDeployDaemonModal: openDeployDaemonModalFn,
+      exportDiagnosticsBundle: exportDiagnosticsBundleFn,
+    }),
+    [
+      nodes,
+      setNodes,
+      nodesStatus,
+      setNodesStatus,
+      pinnedDaemonIds,
+      togglePinnedDaemonFn,
+      openNodeDetailsFn,
+      openAddNodeModalFn,
+      openAddNodeAndDeployFn,
+      openDeployDaemonModalFn,
+      exportDiagnosticsBundleFn,
+    ]
+  );
+
+  const gamesCtxValue = useMemo(
+    () => ({
+      serverDirs,
+      serverDirsStatus,
+      refreshServerDirs: refreshServerDirsFn,
+      instanceTagsById,
+      updateInstanceTags: updateInstanceTagsFn,
+      favoriteInstanceIds,
+      toggleFavoriteInstance: toggleFavoriteInstanceFn,
+      instanceNotesById,
+      updateInstanceNote: updateInstanceNoteFn,
+      instanceMetaById,
+      instanceId,
+      setInstanceId,
+      openSettingsModal: openSettingsModalFn,
+      openJarUpdateModal: openJarUpdateModalFn,
+      openInstallModal: openInstallModalFn,
+      startServer: startServerFn,
+      startServerFromSavedConfig: startServerFromSavedConfigFn,
+      stopServer: stopServerFn,
+      restartServer: restartServerFn,
+      deleteServer: deleteServerFn,
+      backupServer: backupServerFn,
+      openTrashModal: openTrashModalFn,
+      openDatapackModal: openDatapackModalFn,
+      openResourcePackModal: openResourcePackModalFn,
+      exportInstanceZip: exportInstanceZipFn,
+      downloadWorldZip: downloadWorldZipFn,
+      openServerPropertiesEditor: openServerPropertiesEditorFn,
+      renameInstance: renameInstanceFn,
+      cloneInstance: cloneInstanceFn,
+      instanceUsageBytes,
+      instanceUsageStatus,
+      instanceUsageBusy,
+      computeInstanceUsage: computeInstanceUsageFn,
+      instanceMetricsHistory,
+      instanceMetricsStatus,
+      backupZips: restoreCandidates,
+      backupZipsStatus: restoreStatus,
+      refreshBackupZips: refreshBackupZipsFn,
+      backupRetentionKeepLast,
+      saveBackupRetentionKeepLast: saveBackupRetentionKeepLastFn,
+      pruneBackups: pruneBackupsFn,
+      restoreBackupNow: restoreBackupNowFn,
+      frpOpStatus,
+      serverOpStatus,
+      gameActionBusy,
+      instanceStatus,
+      frpStatus,
+      localHost,
+      gamePort,
+      enableFrp,
+      selectedProfile,
+      frpRemotePort,
+      logView,
+      setLogView,
+      logs,
+      logsLoadedOnce,
+      consoleLine,
+      setConsoleLine,
+      sendConsoleLine: sendConsoleLineFn,
+      downloadLatestLog: downloadLatestLogFn,
+      mcLogSearch: mcLogSearchFn,
+
+      // Game helpers
+      startFrpProxyNow: startFrpProxyNowFn,
+      restartFrpProxyNow: restartFrpProxyNowFn,
+      stopFrpProxyNow: stopFrpProxyNowFn,
+      readFrpProxyIniNow: readFrpProxyIniNowFn,
+      probeTcpFromDaemonNow: probeTcpFromDaemonNowFn,
+      repairInstance: repairInstanceFn,
+      updateModrinthPack: updateModrinthPackFn,
+    }),
+    [
+      serverDirs,
+      serverDirsStatus,
+      refreshServerDirsFn,
+      instanceTagsById,
+      updateInstanceTagsFn,
+      favoriteInstanceIds,
+      toggleFavoriteInstanceFn,
+      instanceNotesById,
+      updateInstanceNoteFn,
+      instanceMetaById,
+      instanceId,
+      setInstanceId,
+      openSettingsModalFn,
+      openJarUpdateModalFn,
+      openInstallModalFn,
+      startServerFn,
+      startServerFromSavedConfigFn,
+      stopServerFn,
+      restartServerFn,
+      deleteServerFn,
+      backupServerFn,
+      openTrashModalFn,
+      openDatapackModalFn,
+      openResourcePackModalFn,
+      exportInstanceZipFn,
+      downloadWorldZipFn,
+      openServerPropertiesEditorFn,
+      renameInstanceFn,
+      cloneInstanceFn,
+      instanceUsageBytes,
+      instanceUsageStatus,
+      instanceUsageBusy,
+      computeInstanceUsageFn,
+      instanceMetricsHistory,
+      instanceMetricsStatus,
+      restoreCandidates,
+      restoreStatus,
+      refreshBackupZipsFn,
+      backupRetentionKeepLast,
+      saveBackupRetentionKeepLastFn,
+      pruneBackupsFn,
+      restoreBackupNowFn,
+      frpOpStatus,
+      serverOpStatus,
+      gameActionBusy,
+      instanceStatus,
+      frpStatus,
+      localHost,
+      gamePort,
+      enableFrp,
+      selectedProfile,
+      frpRemotePort,
+      logView,
+      setLogView,
+      logs,
+      logsLoadedOnce,
+      consoleLine,
+      setConsoleLine,
+      sendConsoleLineFn,
+      downloadLatestLogFn,
+      mcLogSearchFn,
+      startFrpProxyNowFn,
+      restartFrpProxyNowFn,
+      stopFrpProxyNowFn,
+      readFrpProxyIniNowFn,
+      probeTcpFromDaemonNowFn,
+      repairInstanceFn,
+      updateModrinthPackFn,
+    ]
+  );
+
+  const frpCtxValue = useMemo(
+    () => ({
+      profiles,
+      profilesStatus,
+      setProfilesStatus,
+      refreshProfiles: refreshProfilesFn,
+      openAddFrpModal: openAddFrpModalFn,
+      removeFrpProfile: removeFrpProfileFn,
+      setEnableFrp,
+      setFrpProfileId,
+    }),
+    [profiles, profilesStatus, setProfilesStatus, refreshProfilesFn, openAddFrpModalFn, removeFrpProfileFn, setEnableFrp, setFrpProfileId]
+  );
+
+  const filesCtxValue = useMemo(
+    () => ({
+      fsPath,
+      setFsPath,
+      fsBreadcrumbs,
+      fsStatus,
+      fsEntries,
+      fsSelectedFile,
+      fsDirty,
+      setFsSelectedFile,
+      fsSelectedFileMode,
+      fsFileText,
+      setFsFileText,
+      fsPreviewUrl,
+      openEntry: openEntryFn,
+      openFileByPath: openFileByPathFn,
+      fsReadText: fsReadTextFn,
+      fsWriteText: fsWriteTextFn,
+      fsZipList: fsZipListFn,
+      fsUnzipZip: fsUnzipZipFn,
+      fsDeleteHard: fsDeleteHardFn,
+      setServerJarFromFile: setServerJarFromFileFn,
+      saveFile: saveFileFn,
+      uploadInputKey,
+      uploadFile,
+      setUploadFile,
+      uploadItems,
+      uploadBusy,
+      uploadSelectedFile,
+      uploadFilesNow: uploadFilesNowFn,
+      uploadZipAndExtractHere: uploadZipAndExtractHereFn,
+      uploadStatus,
+      retryUploadItem: retryUploadItemFn,
+      retryFailedUploads: retryFailedUploadsFn,
+      refreshFsNow: refreshFsNowFn,
+      mkdirFsHere: mkdirFsHereFn,
+      createFileHere: createFileHereFn,
+      renameFsEntry: renameFsEntryFn,
+      moveFsEntry: moveFsEntryFn,
+      downloadFsEntry: downloadFsEntryFn,
+      downloadFsFolderAsZip: downloadFsFolderAsZipFn,
+      deleteFsEntry: deleteFsEntryFn,
+      bulkDeleteFsEntries: bulkDeleteFsEntriesFn,
+      bulkMoveFsEntries: bulkMoveFsEntriesFn,
+    }),
+    [
+      fsPath,
+      setFsPath,
+      fsBreadcrumbs,
+      fsStatus,
+      fsEntries,
+      fsSelectedFile,
+      fsDirty,
+      setFsSelectedFile,
+      fsSelectedFileMode,
+      fsFileText,
+      setFsFileText,
+      fsPreviewUrl,
+      openEntryFn,
+      openFileByPathFn,
+      fsReadTextFn,
+      fsWriteTextFn,
+      fsZipListFn,
+      fsUnzipZipFn,
+      fsDeleteHardFn,
+      setServerJarFromFileFn,
+      saveFileFn,
+      uploadInputKey,
+      uploadFile,
+      setUploadFile,
+      uploadItems,
+      uploadBusy,
+      uploadSelectedFile,
+      uploadFilesNowFn,
+      uploadZipAndExtractHereFn,
+      uploadStatus,
+      retryUploadItemFn,
+      retryFailedUploadsFn,
+      refreshFsNowFn,
+      mkdirFsHereFn,
+      createFileHereFn,
+      renameFsEntryFn,
+      moveFsEntryFn,
+      downloadFsEntryFn,
+      downloadFsFolderAsZipFn,
+      deleteFsEntryFn,
+      bulkDeleteFsEntriesFn,
+      bulkMoveFsEntriesFn,
+    ]
+  );
+
+  const advancedCtxValue = useMemo(
+    () => ({ cmdName, setCmdName, cmdArgs, setCmdArgs, cmdResult, runAdvancedCommand: runAdvancedCommandFn }),
+    [cmdName, setCmdName, cmdArgs, setCmdArgs, cmdResult, runAdvancedCommandFn]
+  );
 
   return (
     <ErrorBoundary>
-      <AppCtxProvider value={appCtxValue}>
+      <AppProviders
+        i18n={i18nCtxValue}
+        actions={actionsCtxValue}
+        core={coreCtxValue}
+        panel={panelCtxValue}
+        nodes={nodesCtxValue}
+        games={gamesCtxValue}
+        frp={frpCtxValue}
+        files={filesCtxValue}
+        advanced={advancedCtxValue}
+      >
         <ModalStackProvider>
           <ManagedModal id="auth-login" open={authed !== true} modalStyle={{ width: "min(560px, 100%)" }} ariaLabel={t.tr("Admin Login", "管理员登录")}>
             <div className="modalHeader">
@@ -12682,7 +12961,7 @@ export default function HomePage() {
       </main>
       </div>
       </ModalStackProvider>
-    </AppCtxProvider>
+      </AppProviders>
     </ErrorBoundary>
   );
 }

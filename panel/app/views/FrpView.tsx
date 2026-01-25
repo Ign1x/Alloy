@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { useAppCtx } from "../appCtx";
+import { memo, useEffect, useMemo, useState } from "react";
+import { useAppActions, useAppCore, useAppFrp, useAppI18n } from "../appCtx";
 import Icon from "../ui/Icon";
 import DangerZone from "../ui/DangerZone";
 import TimeAgo from "../ui/TimeAgo";
@@ -28,23 +28,11 @@ function computeJitterMs(values: number[]) {
   return Math.max(0, Math.round(p95 - p50));
 }
 
-export default function FrpView() {
-  const {
-    t,
-    profiles,
-    profilesStatus,
-    refreshProfiles,
-    openAddFrpModal,
-    setEnableFrp,
-    setFrpProfileId,
-    setTab,
-    removeFrpProfile,
-    copyText,
-    setProfilesStatus,
-    apiFetch,
-    confirmDialog,
-    promptDialog,
-  } = useAppCtx();
+function FrpView() {
+  const { t } = useAppI18n();
+  const { apiFetch, copyText, confirmDialog, promptDialog } = useAppActions();
+  const { setTab } = useAppCore();
+  const { profiles, profilesStatus, refreshProfiles, openAddFrpModal, setEnableFrp, setFrpProfileId, removeFrpProfile, setProfilesStatus } = useAppFrp();
 
   const [testingId, setTestingId] = useState<string>("");
   const [savingId, setSavingId] = useState<string>("");
@@ -500,3 +488,5 @@ export default function FrpView() {
     </div>
   );
 }
+
+export default memo(FrpView);

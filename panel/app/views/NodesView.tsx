@@ -1,37 +1,18 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { useAppCtx } from "../appCtx";
+import { memo, useMemo, useState } from "react";
+import { useAppActions, useAppCore, useAppI18n, useAppNodes, useAppPanel } from "../appCtx";
 import Icon from "../ui/Icon";
 import Select from "../ui/Select";
 import TimeAgo from "../ui/TimeAgo";
 import StatusBadge from "../ui/StatusBadge";
 
-export default function NodesView() {
-  const {
-    t,
-    panelInfo,
-    nodes,
-    nodesStatus,
-    setNodesStatus,
-    pinnedDaemonIds,
-    togglePinnedDaemon,
-    apiFetch,
-    setNodes,
-    openNodeDetails,
-    copyText,
-    pct,
-    fmtBytes,
-    setSelected,
-    setTab,
-    openAddNodeModal,
-    openAddNodeAndDeploy,
-    openDeployDaemonModal,
-    exportDiagnosticsBundle,
-    makeDeployComposeYml,
-    confirmDialog,
-    openShareView,
-  } = useAppCtx();
+function NodesView() {
+  const { t, fmtBytes } = useAppI18n();
+  const { apiFetch, copyText, pct, makeDeployComposeYml, confirmDialog, openShareView } = useAppActions();
+  const { setSelected, setTab } = useAppCore();
+  const { panelInfo } = useAppPanel();
+  const { nodes, nodesStatus, setNodesStatus, pinnedDaemonIds, togglePinnedDaemon, setNodes, openNodeDetails, openAddNodeModal, openAddNodeAndDeploy, openDeployDaemonModal, exportDiagnosticsBundle } = useAppNodes();
 
   const [query, setQuery] = useState<string>("");
   const [statusFilter, setStatusFilter] = useState<"all" | "online" | "offline">("all");
@@ -394,3 +375,5 @@ export default function NodesView() {
     </div>
   );
 }
+
+export default memo(NodesView);

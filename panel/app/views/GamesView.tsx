@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useAppCtx } from "../appCtx";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { useAppActions, useAppCore, useAppFiles, useAppGames, useAppI18n } from "../appCtx";
 import CopyButton from "../ui/CopyButton";
 import Icon from "../ui/Icon";
 import { ManagedModal } from "../ui/ModalStack";
@@ -146,9 +146,11 @@ function estimateUsercacheLastSeenUnix(expiresUnix: number | null): number | nul
   return last > 0 ? last : null;
 }
 
-export default function GamesView() {
+function GamesView() {
+  const { t, fmtUnix, fmtTime, fmtBytes } = useAppI18n();
+  const { copyText, pushToast, confirmDialog, openHelpModal, joinRelPath, openShareView } = useAppActions();
+  const { selectedDaemon, setTab, shareMode } = useAppCore();
   const {
-    t,
     serverDirs,
     serverDirsStatus,
     refreshServerDirs,
@@ -161,7 +163,6 @@ export default function GamesView() {
     instanceNotesById,
     updateInstanceNote,
     instanceMetaById,
-    selectedDaemon,
     openSettingsModal,
     openJarUpdateModal,
     openInstallModal,
@@ -185,6 +186,7 @@ export default function GamesView() {
     backupRetentionKeepLast,
     saveBackupRetentionKeepLast,
     pruneBackups,
+    restoreBackupNow,
     frpOpStatus,
     serverOpStatus,
     gameActionBusy,
@@ -192,18 +194,9 @@ export default function GamesView() {
     frpStatus,
     localHost,
     gamePort,
-    copyText,
-    pushToast,
     enableFrp,
     selectedProfile,
     frpRemotePort,
-    setTab,
-    openHelpModal,
-    confirmDialog,
-    fmtUnix,
-    fmtTime,
-    fmtBytes,
-    joinRelPath,
     logView,
     setLogView,
     logs,
@@ -213,17 +206,12 @@ export default function GamesView() {
     sendConsoleLine,
     downloadLatestLog,
     mcLogSearch,
-    setFsPath,
-    openFileByPath,
-    fsReadText,
-    fsWriteText,
     instanceUsageBytes,
     instanceUsageStatus,
     instanceUsageBusy,
     computeInstanceUsage,
     instanceMetricsHistory,
     instanceMetricsStatus,
-    restoreBackupNow,
     startFrpProxyNow,
     restartFrpProxyNow,
     stopFrpProxyNow,
@@ -231,9 +219,8 @@ export default function GamesView() {
     probeTcpFromDaemonNow,
     repairInstance,
     updateModrinthPack,
-    shareMode,
-    openShareView,
-  } = useAppCtx();
+  } = useAppGames();
+  const { setFsPath, openFileByPath, fsReadText, fsWriteText } = useAppFiles();
 
   const running = !!instanceStatus?.running;
   const canControl = !!selectedDaemon?.connected && !!instanceId.trim() && !gameActionBusy;
@@ -4727,3 +4714,5 @@ export default function GamesView() {
     </div>
   );
 }
+
+export default memo(GamesView);

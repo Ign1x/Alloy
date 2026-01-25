@@ -2,7 +2,7 @@
 
 import type { CSSProperties, ReactNode } from "react";
 
-import { useAppCtx } from "../appCtx";
+import { useAppActions, useAppI18n } from "../appCtx";
 import Icon from "./Icon";
 import Tooltip from "./Tooltip";
 
@@ -35,7 +35,8 @@ export default function EnvHelpButton({
   style?: CSSProperties;
   disabled?: boolean;
 }) {
-  const { t, openHelpDoc } = useAppCtx();
+  const { t } = useAppI18n();
+  const { openHelpDoc } = useAppActions();
 
   const envs = (Array.isArray(env) ? env : [env]).map((e) => String(e || "").trim()).filter(Boolean);
   const primary = String(find || envs[0] || "").trim();

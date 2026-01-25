@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useAppCtx } from "../appCtx";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { useAppActions, useAppCore, useAppFiles, useAppGames, useAppI18n } from "../appCtx";
 import CopyButton from "../ui/CopyButton";
 import Icon from "../ui/Icon";
 import { ManagedLightbox, ManagedModal } from "../ui/ModalStack";
@@ -282,16 +282,12 @@ function isImageFileName(name: string) {
   return /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(String(name || "").trim());
 }
 
-export default function FilesView() {
+function FilesView() {
+  const { t, fmtBytes, fmtUnix } = useAppI18n();
+  const { joinRelPath, parentRelPath, copyText, confirmDialog, openHelpModal } = useAppActions();
+  const { daemons, selected, setSelected, setTab, selectedDaemon } = useAppCore();
+  const { instanceId, openTrashModal } = useAppGames();
   const {
-    t,
-    daemons,
-    selected,
-    setSelected,
-    setTab,
-    selectedDaemon,
-    openHelpModal,
-    instanceId,
     fsPath,
     fsBreadcrumbs,
     fsStatus,
@@ -322,10 +318,6 @@ export default function FilesView() {
     uploadStatus,
     retryUploadItem,
     retryFailedUploads,
-    joinRelPath,
-    parentRelPath,
-    fmtBytes,
-    fmtUnix,
     refreshFsNow,
     mkdirFsHere,
     createFileHere,
@@ -336,10 +328,7 @@ export default function FilesView() {
     deleteFsEntry,
     bulkDeleteFsEntries,
     bulkMoveFsEntries,
-    openTrashModal,
-    copyText,
-    confirmDialog,
-  } = useAppCtx();
+  } = useAppFiles();
 
   const openEntryRef = useRef(openEntry);
   useEffect(() => {
@@ -2491,3 +2480,5 @@ export default function FilesView() {
     </div>
   );
 }
+
+export default memo(FilesView);

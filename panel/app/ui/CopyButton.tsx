@@ -3,7 +3,7 @@
 import type { CSSProperties, ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 
-import { useAppCtx } from "../appCtx";
+import { useAppActions, useAppI18n } from "../appCtx";
 import Icon from "./Icon";
 import Tooltip from "./Tooltip";
 
@@ -26,7 +26,8 @@ export default function CopyButton({
   style?: CSSProperties;
   disabled?: boolean;
 }) {
-  const { copyText, t } = useAppCtx();
+  const { t } = useAppI18n();
+  const { copyText } = useAppActions();
   const [copied, setCopied] = useState<boolean>(false);
   const timerRef = useRef<number | null>(null);
 

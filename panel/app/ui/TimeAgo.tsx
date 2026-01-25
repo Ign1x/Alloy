@@ -3,7 +3,7 @@
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 
-import { useAppCtx } from "../appCtx";
+import { useAppI18n } from "../appCtx";
 
 function normalizeLocaleTag(locale: any) {
   return String(locale || "").toLowerCase().startsWith("zh") ? "zh-CN" : "en-US";
@@ -18,7 +18,7 @@ export default function TimeAgo({
   fallback?: ReactNode;
   className?: string;
 }) {
-  const { locale, fmtUnix } = useAppCtx();
+  const { locale, fmtUnix } = useAppI18n();
   const localeTag = normalizeLocaleTag(locale);
 
   const relFmt = useMemo(() => {
@@ -64,4 +64,3 @@ export default function TimeAgo({
     </time>
   );
 }
-

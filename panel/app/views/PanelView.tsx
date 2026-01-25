@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { useAppCtx } from "../appCtx";
+import { memo, useEffect, useMemo, useState } from "react";
+import { useAppActions, useAppCore, useAppGames, useAppI18n, useAppPanel } from "../appCtx";
 import CopyButton from "../ui/CopyButton";
 import EnvHelpButton from "../ui/EnvHelpButton";
 import Field from "../ui/Field";
@@ -9,28 +9,13 @@ import { ManagedModal } from "../ui/ModalStack";
 import Select from "../ui/Select";
 import TimeAgo from "../ui/TimeAgo";
 
-export default function PanelView() {
-  const {
-    t,
-    apiFetch,
-    authMe,
-    notifications,
-    panelSettings,
-    panelSettingsStatus,
-    refreshPanelSettings,
-    savePanelSettings,
-    updateInfo,
-    updateStatus,
-    updateBusy,
-    checkUpdates,
-    selectedDaemon,
-    loadSchedule,
-    saveScheduleJson,
-    runScheduleTask,
-    confirmDialog,
-    fmtUnix,
-    serverDirs,
-  } = useAppCtx();
+function PanelView() {
+  const { t, fmtUnix } = useAppI18n();
+  const { apiFetch, confirmDialog } = useAppActions();
+  const { authMe, notifications, selectedDaemon } = useAppCore();
+  const { serverDirs } = useAppGames();
+  const { panelSettings, panelSettingsStatus, refreshPanelSettings, savePanelSettings, updateInfo, updateStatus, updateBusy, checkUpdates, loadSchedule, saveScheduleJson, runScheduleTask } =
+    useAppPanel();
 
   const [draft, setDraft] = useState<any>(panelSettings || null);
   const [settingsQuery, setSettingsQuery] = useState<string>("");
@@ -2498,3 +2483,5 @@ export default function PanelView() {
     </div>
   );
 }
+
+export default memo(PanelView);

@@ -1,11 +1,15 @@
 "use client";
 
-import { useAppCtx } from "../appCtx";
+import { memo } from "react";
+import { useAppActions, useAppAdvanced, useAppCore, useAppI18n } from "../appCtx";
 import Select from "../ui/Select";
 import TimeAgo from "../ui/TimeAgo";
 
-export default function AdvancedView() {
-  const { t, cmdName, setCmdName, cmdArgs, setCmdArgs, cmdResult, runAdvancedCommand, selectedDaemon, selected, setSelected, daemons, setTab, openHelpModal } = useAppCtx();
+function AdvancedView() {
+  const { t } = useAppI18n();
+  const { openHelpModal } = useAppActions();
+  const { selectedDaemon, selected, setSelected, daemons, setTab } = useAppCore();
+  const { cmdName, setCmdName, cmdArgs, setCmdArgs, cmdResult, runAdvancedCommand } = useAppAdvanced();
 
   if (selectedDaemon && !selectedDaemon.connected) {
     return (
@@ -88,3 +92,5 @@ export default function AdvancedView() {
     </div>
   );
 }
+
+export default memo(AdvancedView);
