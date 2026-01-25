@@ -1340,25 +1340,30 @@ function FilesView() {
             <div className="hint">
               {t.tr("sandbox", "沙箱")}: <code>servers/</code>
             </div>
-            <div className="row" style={{ marginTop: 6 }}>
+            <div className="row breadcrumbsRow">
               {breadcrumbsView.collapsed ? (
                 <>
                   {(breadcrumbsView.head || []).map((c: any, idx: number) => (
-                    <span key={`${c.path}-${idx}`} style={{ minWidth: 0 }}>
-                      {idx ? <span className="muted"> / </span> : null}
+                    <span key={`${c.path}-${idx}`} className="breadcrumbItem">
+                      {idx ? (
+                        <span className="breadcrumbSep" aria-hidden="true">
+                          /
+                        </span>
+                      ) : null}
                       <button
                         type="button"
-                        className="linkBtn"
+                        className="linkBtn breadcrumbBtn"
                         onClick={() => navigateToPath(c.path)}
                         title={c.path ? `servers/${c.path}` : "servers/"}
-                        style={{ maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
                       >
                         {c.label}
                       </button>
                     </span>
                   ))}
-                  <span className="muted"> / </span>
-                  <span style={{ display: "inline-flex", minWidth: 76 }}>
+                  <span className="breadcrumbSep" aria-hidden="true">
+                    /
+                  </span>
+                  <span className="breadcrumbOverflow">
                     <Select
                       value=""
                       onChange={(v) => (v ? navigateToPath(v) : null)}
@@ -1368,14 +1373,15 @@ function FilesView() {
                     />
                   </span>
                   {(breadcrumbsView.tail || []).map((c: any, idx: number) => (
-                    <span key={`${c.path}-tail-${idx}`} style={{ minWidth: 0 }}>
-                      <span className="muted"> / </span>
+                    <span key={`${c.path}-tail-${idx}`} className="breadcrumbItem">
+                      <span className="breadcrumbSep" aria-hidden="true">
+                        /
+                      </span>
                       <button
                         type="button"
-                        className="linkBtn"
+                        className="linkBtn breadcrumbBtn"
                         onClick={() => navigateToPath(c.path)}
                         title={c.path ? `servers/${c.path}` : "servers/"}
-                        style={{ maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
                       >
                         {c.label}
                       </button>
@@ -1384,14 +1390,17 @@ function FilesView() {
                 </>
               ) : (
                 (breadcrumbsView.head || []).map((c: any, idx: number) => (
-                  <span key={`${c.path}-${idx}`} style={{ minWidth: 0 }}>
-                    {idx ? <span className="muted"> / </span> : null}
+                  <span key={`${c.path}-${idx}`} className="breadcrumbItem">
+                    {idx ? (
+                      <span className="breadcrumbSep" aria-hidden="true">
+                        /
+                      </span>
+                    ) : null}
                     <button
                       type="button"
-                      className="linkBtn"
+                      className="linkBtn breadcrumbBtn"
                       onClick={() => navigateToPath(c.path)}
                       title={c.path ? `servers/${c.path}` : "servers/"}
-                      style={{ maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
                     >
                       {c.label}
                     </button>
