@@ -84,6 +84,11 @@
   --code-bg: rgba(0, 0, 0, 0.22);
   --code-border: rgba(255, 255, 255, 0.10);
 
+  --diff-insert-bg: rgba(34, 197, 94, 0.10);
+  --diff-delete-bg: rgba(248, 113, 113, 0.10);
+  --diff-insert-bar: var(--ok-border);
+  --diff-delete-bar: var(--danger-border);
+
   --scroll-thumb: rgba(255, 255, 255, 0.22);
   --scroll-thumb-hover: rgba(255, 255, 255, 0.32);
   --scroll-thumb-active: rgba(255, 255, 255, 0.44);
@@ -131,6 +136,11 @@
 
   --code-bg: rgba(15, 23, 42, 0.06);
   --code-border: rgba(15, 23, 42, 0.12);
+
+  --diff-insert-bg: rgba(34, 197, 94, 0.08);
+  --diff-delete-bg: rgba(239, 68, 68, 0.08);
+  --diff-insert-bar: var(--ok-border);
+  --diff-delete-bar: var(--danger-border);
 
   --scroll-thumb: rgba(15, 23, 42, 0.22);
   --scroll-thumb-hover: rgba(15, 23, 42, 0.32);
@@ -180,6 +190,11 @@
   --code-bg: rgba(0, 0, 0, 0.50);
   --code-border: rgba(255, 255, 255, 0.22);
 
+  --diff-insert-bg: rgba(34, 197, 94, 0.08);
+  --diff-delete-bg: rgba(251, 113, 133, 0.08);
+  --diff-insert-bar: var(--ok-border);
+  --diff-delete-bar: var(--danger-border);
+
   --scroll-thumb: rgba(255, 255, 255, 0.32);
   --scroll-thumb-hover: rgba(255, 255, 255, 0.44);
   --scroll-thumb-active: rgba(255, 255, 255, 0.56);
@@ -224,6 +239,11 @@
     --control-file-bg-hover: rgba(15, 23, 42, 0.07);
     --code-bg: rgba(15, 23, 42, 0.06);
     --code-border: rgba(15, 23, 42, 0.12);
+
+    --diff-insert-bg: rgba(34, 197, 94, 0.08);
+    --diff-delete-bg: rgba(239, 68, 68, 0.08);
+    --diff-insert-bar: var(--ok-border);
+    --diff-delete-bar: var(--danger-border);
     --scroll-thumb: rgba(15, 23, 42, 0.22);
     --scroll-thumb-hover: rgba(15, 23, 42, 0.32);
     --scroll-thumb-active: rgba(15, 23, 42, 0.44);
@@ -2825,11 +2845,21 @@ pre.codePre {
 }
 
 .diffLine.insert {
-  background: rgba(46, 204, 113, 0.10);
+  background: var(--diff-insert-bg);
+  box-shadow: inset 3px 0 0 var(--diff-insert-bar);
 }
 
 .diffLine.delete {
-  background: rgba(248, 113, 113, 0.10);
+  background: var(--diff-delete-bg);
+  box-shadow: inset 3px 0 0 var(--diff-delete-bar);
+}
+
+.diffLine.insert .diffMark {
+  color: var(--ok);
+}
+
+.diffLine.delete .diffMark {
+  color: var(--danger);
 }
 
 .diffNo {
