@@ -239,6 +239,125 @@ function b64DecodeUtf8(b64: string) {
   return new TextDecoder().decode(bytes);
 }
 
+type DiffLine = {
+  type: "equal" | "insert" | "delete";
+  aNo: number | null;
+  bNo: number | null;
+  text: string;
+};
+
+function normalizeNewlines(text: string) {
+  return String(text || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+}
+
+function myersDiff(a: string[], b: string[]) {
+  const n = a.length;
+  const m = b.length;
+  const max = n + m;
+  const offset = max;
+  let v = new Array(2 * max + 1).fill(0);
+  const trace: number[][] = [];
+
+  if (max === 0) {
+    trace.push(v);
+    return { trace, offset };
+  }
+
+  for (let d = 0; d <= max; d++) {
+    const vNext = v.slice();
+    for (let k = -d; k <= d; k += 2) {
+      const kIndex = offset + k;
+      let x: number;
+      if (k === -d || (k !== d && v[kIndex - 1] < v[kIndex + 1])) {
+        x = v[kIndex + 1];
+      } else {
+        x = v[kIndex - 1] + 1;
+      }
+      let y = x - k;
+      while (x < n && y < m && a[x] === b[y]) {
+        x++;
+        y++;
+      }
+      vNext[kIndex] = x;
+      if (x >= n && y >= m) {
+        trace.push(vNext);
+        return { trace, offset };
+      }
+    }
+    trace.push(vNext);
+    v = vNext;
+  }
+  return { trace, offset };
+}
+
+function buildDiffOps(trace: number[][], offset: number, a: string[], b: string[]) {
+  let x = a.length;
+  let y = b.length;
+  const out: { type: "equal" | "insert" | "delete"; line: string }[] = [];
+
+  for (let d = trace.length - 1; d > 0; d--) {
+    const prevV = trace[d - 1];
+    const k = x - y;
+    let prevK: number;
+    if (k === -d || (k !== d && prevV[offset + k - 1] < prevV[offset + k + 1])) {
+      prevK = k + 1;
+    } else {
+      prevK = k - 1;
+    }
+    const prevX = prevV[offset + prevK];
+    const prevY = prevX - prevK;
+
+    while (x > prevX && y > prevY) {
+      out.push({ type: "equal", line: a[x - 1] ?? "" });
+      x--;
+      y--;
+    }
+
+    if (x === prevX) {
+      out.push({ type: "insert", line: b[prevY] ?? "" });
+      y = prevY;
+    } else {
+      out.push({ type: "delete", line: a[prevX] ?? "" });
+      x = prevX;
+    }
+  }
+
+  while (x > 0 && y > 0) {
+    out.push({ type: "equal", line: a[x - 1] ?? "" });
+    x--;
+    y--;
+  }
+
+  return out.reverse();
+}
+
+function computeDiffLines(aText: string, bText: string) {
+  const a = normalizeNewlines(aText).split("\n");
+  const b = normalizeNewlines(bText).split("\n");
+  const { trace, offset } = myersDiff(a, b);
+  const ops = buildDiffOps(trace, offset, a, b);
+
+  const lines: DiffLine[] = [];
+  let aNo = 1;
+  let bNo = 1;
+  for (const op of ops) {
+    if (op.type === "equal") {
+      lines.push({ type: "equal", aNo, bNo, text: op.line });
+      aNo++;
+      bNo++;
+      continue;
+    }
+    if (op.type === "delete") {
+      lines.push({ type: "delete", aNo, bNo: null, text: op.line });
+      aNo++;
+      continue;
+    }
+    lines.push({ type: "insert", aNo: null, bNo, text: op.line });
+    bNo++;
+  }
+  return lines;
+}
+
 function b64EncodeBytes(bytes: Uint8Array) {
   const parts: string[] = [];
   const step = 0x8000;
@@ -728,6 +847,83 @@ function upsertProp(text: string, key: string, value: string) {
   return out.join("\n").replace(/\n+$/, "\n");
 }
 
+type ServerPropsIssue = { kind: "warn" | "danger"; line: number; message: string };
+
+function validateServerPropertiesText(textRaw: string, tr: TrFn): ServerPropsIssue[] {
+  const text = String(textRaw || "");
+  const lines = text.split(/\r?\n/);
+  const issues: ServerPropsIssue[] = [];
+  const seen = new Map<string, number>();
+  const kv: Record<string, string> = {};
+
+  function add(kind: ServerPropsIssue["kind"], line: number, en: string, zh: string) {
+    issues.push({ kind, line, message: tr(en, zh) });
+  }
+
+  for (let i = 0; i < lines.length; i++) {
+    const rawLine = String(lines[i] ?? "");
+    const lineNo = i + 1;
+    const trimmed = rawLine.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+
+    const eq = rawLine.indexOf("=");
+    if (eq < 0) {
+      add("warn", lineNo, "Missing '='", "缺少 '='");
+      continue;
+    }
+
+    const key = rawLine.slice(0, eq).trim();
+    const value = rawLine.slice(eq + 1).trim();
+    if (!key) {
+      add("warn", lineNo, "Empty key before '='", "'=' 前的 key 为空");
+      continue;
+    }
+    if (/[ \t]/.test(key)) add("warn", lineNo, `Key contains whitespace: ${key}`, `key 包含空白：${key}`);
+
+    const prevLine = seen.get(key);
+    if (prevLine != null) add("warn", lineNo, `Duplicate key "${key}" (also on line ${prevLine})`, `重复 key "${key}"（也出现在第 ${prevLine} 行）`);
+    else seen.set(key, lineNo);
+
+    kv[key] = value;
+
+    const lower = value.toLowerCase();
+    const isBoolKey = ["online-mode", "white-list", "enable-rcon", "enable-query"].includes(key);
+    if (isBoolKey && lower !== "true" && lower !== "false") {
+      add("warn", lineNo, `Expected boolean true/false for ${key}`, `${key} 需要 true/false`);
+    }
+    if (key === "server-port") {
+      const p = Math.round(Number(value || 0));
+      if (!Number.isFinite(p) || p < 1 || p > 65535) add("danger", lineNo, "server-port must be 1-65535", "server-port 必须为 1-65535");
+    }
+    if (key === "max-players") {
+      const n = Math.round(Number(value || 0));
+      if (!Number.isFinite(n) || n < 1 || n > 10000) add("warn", lineNo, "max-players looks invalid", "max-players 看起来无效");
+    }
+    if (key === "difficulty") {
+      if (value && !["peaceful", "easy", "normal", "hard"].includes(lower)) add("warn", lineNo, "difficulty should be peaceful/easy/normal/hard", "difficulty 建议为 peaceful/easy/normal/hard");
+    }
+    if (key === "level-name") {
+      if (!value) add("warn", lineNo, "level-name is empty", "level-name 为空");
+      else if (!normalizeRelFilePath(value)) add("warn", lineNo, "level-name should be a safe relative folder name", "level-name 应为安全的相对目录名");
+    }
+  }
+
+  const enableRcon = String(kv["enable-rcon"] || "").trim().toLowerCase() === "true";
+  if (enableRcon) {
+    const pw = String(kv["rcon.password"] || "").trim();
+    if (!pw) {
+      const line = seen.get("enable-rcon") ?? 1;
+      add("danger", line, "enable-rcon=true but rcon.password is empty", "enable-rcon=true 但 rcon.password 为空");
+    }
+  }
+
+  if (text && !text.endsWith("\n")) {
+    issues.push({ kind: "warn", line: lines.length, message: tr("File does not end with a newline", "文件末尾没有换行") });
+  }
+
+  return issues.slice(0, 120);
+}
+
 export default function HomePage() {
   const [tab, setTab] = useState<Tab>("games");
   const [shareMode, setShareMode] = useState<boolean>(false);
@@ -1020,11 +1216,25 @@ export default function HomePage() {
   const [serverPropsOpen, setServerPropsOpen] = useState<boolean>(false);
   const [serverPropsStatus, setServerPropsStatus] = useState<string>("");
   const [serverPropsRaw, setServerPropsRaw] = useState<string>("");
+  const [serverPropsMode, setServerPropsMode] = useState<"simple" | "advanced">("simple");
+  const [serverPropsRawDraft, setServerPropsRawDraft] = useState<string>("");
+  const [serverPropsShowDiff, setServerPropsShowDiff] = useState<boolean>(false);
   const [serverPropsMotd, setServerPropsMotd] = useState<string>("");
   const [serverPropsMaxPlayers, setServerPropsMaxPlayers] = useState<number>(20);
   const [serverPropsOnlineMode, setServerPropsOnlineMode] = useState<boolean>(true);
   const [serverPropsWhitelist, setServerPropsWhitelist] = useState<boolean>(false);
   const [serverPropsSaving, setServerPropsSaving] = useState<boolean>(false);
+  const serverPropsIssues = useMemo(() => {
+    if (serverPropsMode !== "advanced") return [] as ServerPropsIssue[];
+    return validateServerPropertiesText(serverPropsRawDraft, t.tr);
+  }, [serverPropsMode, serverPropsRawDraft, t]);
+
+  const serverPropsDiffLines = useMemo(() => {
+    if (!serverPropsShowDiff) return null as DiffLine[] | null;
+    if (serverPropsRawDraft === serverPropsRaw) return [];
+    const lines = computeDiffLines(serverPropsRaw, serverPropsRawDraft);
+    return lines.length > 20_000 ? null : lines;
+  }, [serverPropsShowDiff, serverPropsRaw, serverPropsRawDraft]);
   const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
   const [settingsSearch, setSettingsSearch] = useState<string>("");
   const [settingsSnapshot, setSettingsSnapshot] = useState<GameSettingsSnapshot | null>(null);
@@ -7649,19 +7859,47 @@ export default function HomePage() {
     const path = joinRelPath(inst, "server.properties");
     setServerPropsOpen(true);
     setServerPropsSaving(false);
+    setServerPropsMode("simple");
+    setServerPropsShowDiff(false);
     setServerPropsStatus(t.tr("Loading...", "加载中..."));
     try {
       const out = await callOkCommand("fs_read", { path }, 10_000);
       const text = b64DecodeUtf8(String(out?.b64 || ""));
       setServerPropsRaw(text);
+      setServerPropsRawDraft(text);
       setServerPropsMotd(getPropValue(text, "motd") ?? "");
       setServerPropsMaxPlayers(Math.max(1, Math.min(1000, Math.round(Number(getPropValue(text, "max-players") ?? "20")) || 20)));
       setServerPropsOnlineMode(String(getPropValue(text, "online-mode") ?? "true").toLowerCase() !== "false");
       setServerPropsWhitelist(String(getPropValue(text, "white-list") ?? "false").toLowerCase() === "true");
       setServerPropsStatus("");
     } catch (e: any) {
+      setServerPropsRaw("");
+      setServerPropsRawDraft("");
+      setServerPropsMotd("");
+      setServerPropsMaxPlayers(20);
+      setServerPropsOnlineMode(true);
+      setServerPropsWhitelist(false);
       setServerPropsStatus(String(e?.message || e));
     }
+  }
+
+  function computeServerPropsNextFromSimple(baseText: string) {
+    const maxPlayers = Math.max(1, Math.min(1000, Math.round(Number(serverPropsMaxPlayers) || 0)));
+    const motd = String(serverPropsMotd || "");
+
+    let next = String(baseText || "");
+    next = upsertProp(next, "motd", motd);
+    next = upsertProp(next, "max-players", String(maxPlayers));
+    next = upsertProp(next, "online-mode", serverPropsOnlineMode ? "true" : "false");
+    next = upsertProp(next, "white-list", serverPropsWhitelist ? "true" : "false");
+    return next;
+  }
+
+  function syncSimpleFieldsFromText(text: string) {
+    setServerPropsMotd(getPropValue(text, "motd") ?? "");
+    setServerPropsMaxPlayers(Math.max(1, Math.min(1000, Math.round(Number(getPropValue(text, "max-players") ?? "20")) || 20)));
+    setServerPropsOnlineMode(String(getPropValue(text, "online-mode") ?? "true").toLowerCase() !== "false");
+    setServerPropsWhitelist(String(getPropValue(text, "white-list") ?? "false").toLowerCase() === "true");
   }
 
   async function saveServerPropertiesEditor() {
@@ -7673,19 +7911,61 @@ export default function HomePage() {
     }
     const path = joinRelPath(inst, "server.properties");
 
-    const maxPlayers = Math.max(1, Math.min(1000, Math.round(Number(serverPropsMaxPlayers) || 0)));
-    const motd = String(serverPropsMotd || "");
+    setServerPropsSaving(true);
+    setServerPropsStatus(t.tr("Saving...", "保存中..."));
+    try {
+      const next = computeServerPropsNextFromSimple(serverPropsRaw);
+      await callOkCommand("fs_write", { path, b64: b64EncodeUtf8(next) }, 10_000);
+      setServerPropsRaw(next);
+      setServerPropsRawDraft(next);
+      setServerPropsShowDiff(false);
+      setServerPropsStatus(t.tr("Saved", "已保存"));
+      setTimeout(() => setServerPropsStatus(""), 900);
+    } catch (e: any) {
+      setServerPropsStatus(String(e?.message || e));
+    } finally {
+      setServerPropsSaving(false);
+    }
+  }
+
+  async function saveServerPropertiesRawEditor() {
+    if (serverPropsSaving) return;
+    const inst = instanceId.trim();
+    if (!inst) {
+      setServerPropsStatus(t.tr("instance_id is required", "instance_id 不能为空"));
+      return;
+    }
+    const path = joinRelPath(inst, "server.properties");
+
+    let next = String(serverPropsRawDraft || "");
+    if (next && !next.endsWith("\n")) next += "\n";
+
+    const issues = validateServerPropertiesText(next, t.tr);
+    if (issues.length) {
+      const danger = issues.some((x) => x.kind === "danger");
+      const ok = await confirmDialog(
+        t.tr(
+          `This file has ${issues.length} warning(s). Save anyway?`,
+          `该文件有 ${issues.length} 条警告，仍然保存？`
+        ),
+        {
+          title: t.tr("Confirm save", "确认保存"),
+          confirmLabel: t.tr("Save", "保存"),
+          cancelLabel: t.tr("Cancel", "取消"),
+          danger,
+        }
+      );
+      if (!ok) return;
+    }
 
     setServerPropsSaving(true);
     setServerPropsStatus(t.tr("Saving...", "保存中..."));
     try {
-      let next = String(serverPropsRaw || "");
-      next = upsertProp(next, "motd", motd);
-      next = upsertProp(next, "max-players", String(maxPlayers));
-      next = upsertProp(next, "online-mode", serverPropsOnlineMode ? "true" : "false");
-      next = upsertProp(next, "white-list", serverPropsWhitelist ? "true" : "false");
       await callOkCommand("fs_write", { path, b64: b64EncodeUtf8(next) }, 10_000);
       setServerPropsRaw(next);
+      setServerPropsRawDraft(next);
+      setServerPropsShowDiff(false);
+      syncSimpleFieldsFromText(next);
       setServerPropsStatus(t.tr("Saved", "已保存"));
       setTimeout(() => setServerPropsStatus(""), 900);
     } catch (e: any) {
@@ -11281,8 +11561,8 @@ export default function HomePage() {
                     </div>
                     <div className="hint">
                       {t.tr(
-                        "Edits common/safe fields only (other lines are preserved as-is).",
-                        "只提供安全/常用字段编辑（其余内容保持原样）。"
+                        "Simple mode edits common/safe fields (other lines preserved). Advanced mode edits the raw file.",
+                        "简易模式只编辑常用/安全字段（其余内容保持原样）；高级模式可编辑原始文件。"
                       )}
                     </div>
                   </div>
@@ -11291,51 +11571,156 @@ export default function HomePage() {
                   </button>
                 </div>
 
-                <div className="grid2" style={{ alignItems: "start" }}>
-                  <div className="field" style={{ gridColumn: "1 / -1" }}>
-                    <label>{t.tr("MOTD", "MOTD")}</label>
-                    <input value={serverPropsMotd} onChange={(e) => setServerPropsMotd(e.target.value)} placeholder="A Minecraft Server" />
-                  </div>
-                  <div className="field">
-                    <label>{t.tr("Max players", "最大玩家数")}</label>
-                    <input
-                      type="number"
-                      value={Number.isFinite(serverPropsMaxPlayers) ? serverPropsMaxPlayers : 20}
-                      onChange={(e) => setServerPropsMaxPlayers(Number(e.target.value))}
-                      min={1}
-                      max={1000}
-                    />
-                  </div>
-                  <div className="field">
-                    <label>{t.tr("Online mode", "在线模式")}</label>
-                    <label className="checkRow">
+                <div className="row" style={{ marginTop: 10, gap: 8, flexWrap: "wrap" }}>
+                  <button
+                    type="button"
+                    className={serverPropsMode === "simple" ? "primary" : ""}
+                    onClick={() => {
+                      if (serverPropsMode !== "simple") {
+                        syncSimpleFieldsFromText(serverPropsRawDraft);
+                        setServerPropsShowDiff(false);
+                        setServerPropsMode("simple");
+                      }
+                    }}
+                    disabled={serverPropsSaving}
+                  >
+                    {t.tr("Simple", "简易")}
+                  </button>
+                  <button
+                    type="button"
+                    className={serverPropsMode === "advanced" ? "primary" : ""}
+                    onClick={() => {
+                      if (serverPropsMode !== "advanced") {
+                        const next = computeServerPropsNextFromSimple(serverPropsRaw);
+                        setServerPropsRawDraft(next);
+                        setServerPropsShowDiff(false);
+                        setServerPropsMode("advanced");
+                      }
+                    }}
+                    disabled={serverPropsSaving}
+                  >
+                    {t.tr("Advanced", "高级")}
+                  </button>
+                  {serverPropsMode === "advanced" ? (
+                    <button
+                      type="button"
+                      className="iconBtn"
+                      onClick={() => setServerPropsShowDiff((v) => !v)}
+                      disabled={serverPropsSaving || serverPropsRawDraft === serverPropsRaw}
+                      title={serverPropsRawDraft === serverPropsRaw ? t.tr("No changes", "没有改动") : undefined}
+                    >
+                      {t.tr("Diff", "Diff")}
+                    </button>
+                  ) : null}
+                </div>
+
+                {serverPropsMode === "simple" ? (
+                  <div className="grid2" style={{ alignItems: "start", marginTop: 10 }}>
+                    <div className="field" style={{ gridColumn: "1 / -1" }}>
+                      <label>{t.tr("MOTD", "MOTD")}</label>
+                      <input value={serverPropsMotd} onChange={(e) => setServerPropsMotd(e.target.value)} placeholder="A Minecraft Server" />
+                    </div>
+                    <div className="field">
+                      <label>{t.tr("Max players", "最大玩家数")}</label>
                       <input
-                        type="checkbox"
-                        checked={serverPropsOnlineMode}
-                        onChange={(e) => setServerPropsOnlineMode(e.target.checked)}
+                        type="number"
+                        value={Number.isFinite(serverPropsMaxPlayers) ? serverPropsMaxPlayers : 20}
+                        onChange={(e) => setServerPropsMaxPlayers(Number(e.target.value))}
+                        min={1}
+                        max={1000}
                       />
-                      online-mode
-                    </label>
-                    <div className="hint">
-                      {t.tr(
-                        "Turning this off enables offline-mode (unsafe; not recommended for public servers).",
-                        "关闭后为离线模式（不安全，不建议公网使用）。"
-                      )}
+                    </div>
+                    <div className="field">
+                      <label>{t.tr("Online mode", "在线模式")}</label>
+                      <label className="checkRow">
+                        <input
+                          type="checkbox"
+                          checked={serverPropsOnlineMode}
+                          onChange={(e) => setServerPropsOnlineMode(e.target.checked)}
+                        />
+                        online-mode
+                      </label>
+                      <div className="hint">
+                        {t.tr(
+                          "Turning this off enables offline-mode (unsafe; not recommended for public servers).",
+                          "关闭后为离线模式（不安全，不建议公网使用）。"
+                        )}
+                      </div>
+                    </div>
+                    <div className="field">
+                      <label>{t.tr("Whitelist", "白名单")}</label>
+                      <label className="checkRow">
+                        <input
+                          type="checkbox"
+                          checked={serverPropsWhitelist}
+                          onChange={(e) => setServerPropsWhitelist(e.target.checked)}
+                        />
+                        white-list
+                      </label>
+                      <div className="hint">{t.tr("When enabled, you must add players to the whitelist in-game.", "开启后需要在服务器内添加白名单玩家。")}</div>
                     </div>
                   </div>
-                  <div className="field">
-                    <label>{t.tr("Whitelist", "白名单")}</label>
-                    <label className="checkRow">
-                      <input
-                        type="checkbox"
-                        checked={serverPropsWhitelist}
-                        onChange={(e) => setServerPropsWhitelist(e.target.checked)}
-                      />
-                      white-list
-                    </label>
-                    <div className="hint">{t.tr("When enabled, you must add players to the whitelist in-game.", "开启后需要在服务器内添加白名单玩家。")}</div>
+                ) : (
+                  <div className="field" style={{ marginTop: 10 }}>
+                    <label>{t.tr("Raw editor", "原始编辑")}</label>
+                    <textarea
+                      value={serverPropsRawDraft}
+                      onChange={(e) => setServerPropsRawDraft(e.target.value)}
+                      rows={14}
+                      style={{
+                        width: "100%",
+                        fontFamily:
+                          'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+                        fontSize: 12,
+                      }}
+                      placeholder={t.tr("Paste/edit full server.properties here.", "在此粘贴/编辑完整的 server.properties 内容。")}
+                    />
+                    <div className="hint" style={{ marginTop: 6 }}>
+                      {t.tr(
+                        "Warnings below are best-effort checks (duplicates, invalid values).",
+                        "下方警告为最佳努力校验（重复 key / 值无效等）。"
+                      )}
+                    </div>
+                    {serverPropsIssues.length ? (
+                      <div className="hint" style={{ marginTop: 8 }}>
+                        {serverPropsIssues.map((w, idx) => (
+                          <div key={idx} style={{ color: w.kind === "danger" ? "var(--danger)" : "var(--warn)" }}>
+                            <code>L{w.line}</code>: {w.message}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="hint" style={{ marginTop: 8, color: "var(--ok)" }}>
+                        {t.tr("No warnings detected.", "未检测到警告。")}
+                      </div>
+                    )}
+
+                    {serverPropsShowDiff ? (
+                      <div style={{ marginTop: 10 }}>
+                        <div className="hint">
+                          {serverPropsDiffLines === null
+                            ? t.tr("Diff too large to render.", "Diff 过大，无法渲染。")
+                            : t.tr(
+                                `Changes: +${(serverPropsDiffLines || []).filter((l) => l.type === "insert").length} / -${(serverPropsDiffLines || []).filter((l) => l.type === "delete").length}`,
+                                `改动：新增 ${(serverPropsDiffLines || []).filter((l) => l.type === "insert").length} 行 / 删除 ${(serverPropsDiffLines || []).filter((l) => l.type === "delete").length} 行`
+                              )}
+                        </div>
+                        {serverPropsDiffLines ? (
+                          <div className="diffFrame" style={{ marginTop: 10 }}>
+                            {serverPropsDiffLines.map((l, idx) => (
+                              <div key={idx} className={`diffLine ${l.type}`}>
+                                <span className="diffNo">{l.aNo ?? ""}</span>
+                                <span className="diffNo">{l.bNo ?? ""}</span>
+                                <span className="diffMark">{l.type === "insert" ? "+" : l.type === "delete" ? "-" : " "}</span>
+                                <span className="diffText">{l.text}</span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
                   </div>
-                </div>
+                )}
 
                 <div className="row" style={{ marginTop: 12, justifyContent: "space-between", alignItems: "center", gap: 10 }}>
                   <div className="btnGroup" style={{ justifyContent: "flex-start" }}>
@@ -11360,7 +11745,7 @@ export default function HomePage() {
                     <button
                       type="button"
                       className="primary"
-                      onClick={saveServerPropertiesEditor}
+                      onClick={serverPropsMode === "advanced" ? saveServerPropertiesRawEditor : saveServerPropertiesEditor}
                       disabled={!selectedDaemon?.connected || !instanceId.trim() || serverPropsSaving}
                     >
                       {t.tr("Save", "保存")}
