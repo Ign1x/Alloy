@@ -12992,17 +12992,17 @@ export default function HomePage() {
             </div>
       </ManagedModal>
 
-      {tab === "nodes" ? (shareMode ? null : <NodesView />) : null}
+      {authed === true && tab === "nodes" ? (shareMode ? null : <NodesView />) : null}
 
-      {tab === "games" ? <GamesView /> : null}
+      {authed === true && tab === "games" ? <GamesView /> : null}
 
-      {tab === "frp" ? <FrpView /> : null}
+      {authed === true && tab === "frp" ? <FrpView /> : null}
 
-      {tab === "files" ? <FilesView /> : null}
+      {authed === true && tab === "files" ? <FilesView /> : null}
 
-      {tab === "panel" ? <PanelView /> : null}
+      {authed === true && tab === "panel" ? <PanelView /> : null}
 
-      {enableAdvanced && tab === "advanced" ? <AdvancedView /> : null}
+      {authed === true && enableAdvanced && tab === "advanced" ? <AdvancedView /> : null}
         </div>
       </main>
       </div>
