@@ -211,9 +211,9 @@ function FrpView() {
                 style={{ width: "100%" }}
               />
               {queryRaw.trim() ? (
-                <button type="button" className="iconBtn iconOnly" title={t.tr("Clear", "清空")} aria-label={t.tr("Clear", "清空")} onClick={() => setQueryRaw("")}>
-                  ×
-                </button>
+	                <button type="button" className="iconBtn iconOnly ghost" title={t.tr("Clear", "清空")} aria-label={t.tr("Clear", "清空")} onClick={() => setQueryRaw("")}>
+	                  ×
+	                </button>
               ) : null}
             </div>
             <button type="button" className="primary iconBtn" onClick={openAddFrpModal}>

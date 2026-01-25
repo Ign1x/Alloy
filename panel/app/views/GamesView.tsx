@@ -3682,9 +3682,9 @@ function GamesView() {
                 }}
               />
               {logQueryRaw.trim() ? (
-                <button type="button" className="iconBtn iconOnly" title={t.tr("Clear", "清空")} aria-label={t.tr("Clear", "清空")} onClick={() => setLogQueryRaw("")}>
-                  ×
-                </button>
+	                <button type="button" className="iconBtn iconOnly ghost" title={t.tr("Clear", "清空")} aria-label={t.tr("Clear", "清空")} onClick={() => setLogQueryRaw("")}>
+	                  ×
+	                </button>
               ) : null}
               {logFilter.mode !== "none" && logFilter.q ? (
                 <>
@@ -4372,9 +4372,9 @@ function GamesView() {
               style={{ width: "100%" }}
             />
             {logBookmarksQueryRaw.trim() ? (
-              <button type="button" className="iconBtn iconOnly" title={t.tr("Clear", "清空")} aria-label={t.tr("Clear", "清空")} onClick={() => setLogBookmarksQueryRaw("")}>
-                ×
-              </button>
+	              <button type="button" className="iconBtn iconOnly ghost" title={t.tr("Clear", "清空")} aria-label={t.tr("Clear", "清空")} onClick={() => setLogBookmarksQueryRaw("")}>
+	                ×
+	              </button>
             ) : null}
           </div>
           <span className="badge">

@@ -1616,22 +1616,34 @@ button.themeCardBtn.selected {
 .logSearchBar {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
-  border-radius: var(--radius);
+  gap: var(--space-2);
+  min-height: var(--control-min-height);
+  padding: 0 var(--control-pad-x);
+  border-radius: var(--radius-control);
   border: 1px solid var(--control-border);
   background: var(--control-bg);
+  box-shadow: 0 0 0 1px var(--control-inset) inset;
+}
+
+.logSearchBar:focus-within {
+  border-color: var(--focus-border);
+  box-shadow: var(--focus-ring);
 }
 
 .logSearchBar input {
+  flex: 1 1 auto;
   border: none;
   background: transparent;
   padding: 0;
-  min-width: 180px;
+  min-width: 0;
 }
 
 .logSearchBar input:focus {
   outline: none;
+}
+
+.logSearchBar input::placeholder {
+  color: var(--muted2);
 }
 
 .field {

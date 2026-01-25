@@ -9540,38 +9540,56 @@ export default function HomePage() {
 	              </button>
 	            </div>
 
-	            <input
-	              ref={cmdPaletteInputRef}
-	              value={cmdPaletteQuery}
-	              onChange={(e) => {
-	                setCmdPaletteQuery(e.target.value);
-	                setCmdPaletteIdx(0);
-	              }}
-	              placeholder={t.tr("Type a command…", "输入命令…")}
-	              autoFocus
-	              onKeyDown={(e) => {
-	                if (e.key === "ArrowDown") {
-	                  e.preventDefault();
-	                  setCmdPaletteIdx((i) => Math.min(Math.max(0, cmdPaletteView.flat.length - 1), i + 1));
-	                  return;
-	                }
-	                if (e.key === "ArrowUp") {
-	                  e.preventDefault();
-	                  setCmdPaletteIdx((i) => Math.max(0, i - 1));
-	                  return;
-	                }
-	                if (e.key === "Enter") {
-	                  const cmd = cmdPaletteView.flat[cmdPaletteIdx] as any;
-	                  if (!cmd || cmd.disabled) return;
-	                  e.preventDefault();
-	                  rememberCmd(cmd.id);
-	                  const p = cmd.run?.();
-	                  if (p && typeof p.then === "function") p.catch(() => null);
-	                }
-	              }}
-	            />
+		            <div className="logSearchBar">
+		              <Icon name="search" />
+		              <input
+		                ref={cmdPaletteInputRef}
+		                value={cmdPaletteQuery}
+		                onChange={(e) => {
+		                  setCmdPaletteQuery(e.target.value);
+		                  setCmdPaletteIdx(0);
+		                }}
+		                placeholder={t.tr("Type a command…", "输入命令…")}
+		                autoFocus
+		                onKeyDown={(e) => {
+		                  if (e.key === "ArrowDown") {
+		                    e.preventDefault();
+		                    setCmdPaletteIdx((i) => Math.min(Math.max(0, cmdPaletteView.flat.length - 1), i + 1));
+		                    return;
+		                  }
+		                  if (e.key === "ArrowUp") {
+		                    e.preventDefault();
+		                    setCmdPaletteIdx((i) => Math.max(0, i - 1));
+		                    return;
+		                  }
+		                  if (e.key === "Enter") {
+		                    const cmd = cmdPaletteView.flat[cmdPaletteIdx] as any;
+		                    if (!cmd || cmd.disabled) return;
+		                    e.preventDefault();
+		                    rememberCmd(cmd.id);
+		                    const p = cmd.run?.();
+		                    if (p && typeof p.then === "function") p.catch(() => null);
+		                  }
+		                }}
+		              />
+		              {cmdPaletteQuery.trim() ? (
+		                <button
+		                  type="button"
+		                  className="iconBtn iconOnly ghost"
+		                  title={t.tr("Clear", "清空")}
+		                  aria-label={t.tr("Clear", "清空")}
+		                  onClick={() => {
+		                    setCmdPaletteQuery("");
+		                    setCmdPaletteIdx(0);
+		                    cmdPaletteInputRef.current?.focus();
+		                  }}
+		                >
+		                  ×
+		                </button>
+		              ) : null}
+		            </div>
 
-	            <div className="cmdPaletteList">
+		            <div className="cmdPaletteList">
 	              {cmdPaletteView.flat.length ? (
                   (() => {
                     let offset = 0;
