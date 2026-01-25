@@ -312,6 +312,16 @@ body {
   }
 }
 
+@supports (scrollbar-gutter: stable) {
+  .virtList,
+  .tableScroll,
+  .modal,
+  .codeFrame,
+  .drawerList {
+    scrollbar-gutter: stable;
+  }
+}
+
 h1,
 h2,
 h3 {
