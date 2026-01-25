@@ -1784,6 +1784,24 @@ button.themeCardBtn.selected {
   gap: 6px;
 }
 
+.settingsSectionTitle {
+  grid-column: 1 / -1;
+  padding-top: var(--space-3);
+  margin-top: var(--space-2);
+  border-top: 1px solid var(--border);
+  font-size: var(--font-size-2xs);
+  line-height: var(--line-height-tight);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted2);
+}
+
+.settingsSectionTitle:first-child {
+  padding-top: 0;
+  margin-top: 0;
+  border-top: none;
+}
+
 .field > label {
   font-size: var(--font-size-xs);
   line-height: var(--line-height-tight);

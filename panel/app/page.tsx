@@ -11882,11 +11882,14 @@ export default function HomePage() {
                   ) : null}
                 </div>
 
-                <div className="grid2" style={{ alignItems: "start" }}>
-                  {showSettingsField("jar path", "jar", "path", "server.jar") ? (
-                    <div className="field">
-                      <label>{t.tr("Jar path (relative)", "Jar 路径（相对）")}</label>
-                      <input value={jarPath} onChange={(e) => setJarPath(e.target.value)} placeholder="server.jar" aria-invalid={!!settingsValidation.jarErr} />
+	                <div className="grid2" style={{ alignItems: "start" }}>
+	                  {showSettingsField("jar path", "jar", "path", "server.jar") || showSettingsField("pick a jar", "jar list", "scan", "refresh") ? (
+	                    <div className="settingsSectionTitle">{t.tr("Jar", "Jar")}</div>
+	                  ) : null}
+	                  {showSettingsField("jar path", "jar", "path", "server.jar") ? (
+	                    <div className="field">
+	                      <label>{t.tr("Jar path (relative)", "Jar 路径（相对）")}</label>
+	                      <input value={jarPath} onChange={(e) => setJarPath(e.target.value)} placeholder="server.jar" aria-invalid={!!settingsValidation.jarErr} />
                       {settingsValidation.jarErr ? (
                         <div className="fieldError">
                           {settingsValidation.jarErr}
@@ -11931,12 +11934,15 @@ export default function HomePage() {
                           "递归扫描 servers/<instance>/ 下的 .jar（跳过 mods/libraries/world 等目录）"
                         )}
                       </div>
-                    </div>
-                  ) : null}
-                  {showSettingsField("java", "jre", "temurin") ? (
-                    <div className="field">
-                      <label>{t.tr("Java (optional)", "Java（可选）")}</label>
-                      <input value={javaPath} onChange={(e) => setJavaPath(e.target.value)} placeholder="java / /opt/jdk21/bin/java" />
+	                    </div>
+	                  ) : null}
+	                  {showSettingsField("java", "jre", "temurin") || showSettingsField("jvm", "args", "aikar", "gc") || showSettingsField("memory", "xms", "xmx") ? (
+	                    <div className="settingsSectionTitle">{t.tr("Runtime", "运行时")}</div>
+	                  ) : null}
+	                  {showSettingsField("java", "jre", "temurin") ? (
+	                    <div className="field">
+	                      <label>{t.tr("Java (optional)", "Java（可选）")}</label>
+	                      <input value={javaPath} onChange={(e) => setJavaPath(e.target.value)} placeholder="java / /opt/jdk21/bin/java" />
                       <div className="hint">{t.tr("Leave blank to let the daemon pick automatically (recommended).", "留空则由 Daemon 自动选择（推荐）")}</div>
                     </div>
                   ) : null}
@@ -12019,12 +12025,13 @@ export default function HomePage() {
                           ))}
                         </div>
                       ) : null}
-                    </div>
-                  ) : null}
-                  {showSettingsField("port", "game port", "25565") ? (
-                    <div className="field">
-                      <label>{t.tr("Port", "端口")}</label>
-                      <input
+	                    </div>
+	                  ) : null}
+	                  {showSettingsField("port", "game port", "25565") ? <div className="settingsSectionTitle">{t.tr("Network", "网络")}</div> : null}
+	                  {showSettingsField("port", "game port", "25565") ? (
+	                    <div className="field">
+	                      <label>{t.tr("Port", "端口")}</label>
+	                      <input
                         type="number"
                         value={Number.isFinite(gamePort) ? gamePort : 25565}
                         onChange={(e) => setGamePort(Number(e.target.value))}
@@ -12039,13 +12046,18 @@ export default function HomePage() {
                       ) : (
                         <div className="hint">{t.tr("Written into server.properties after saving (restart required if running).", "保存后会写入 server.properties（运行中需要重启生效）")}</div>
                       )}
-                    </div>
-                  ) : null}
+	                    </div>
+	                  ) : null}
 
-                  {showSettingsField("frp", "proxy") ? (
-                    <div className="field">
-                      <label>FRP</label>
-                      <label className="checkRow">
+	                  {showSettingsField("frp", "proxy") ||
+	                  showSettingsField("frp remote port", "remote port", "25566") ||
+	                  showSettingsField("frp server", "server addr", "server port") ? (
+	                    <div className="settingsSectionTitle">FRP</div>
+	                  ) : null}
+	                  {showSettingsField("frp", "proxy") ? (
+	                    <div className="field">
+	                      <label>FRP</label>
+	                      <label className="checkRow">
                         <input type="checkbox" checked={enableFrp} onChange={(e) => setEnableFrp(e.target.checked)} />
                         {t.tr("Enable automatically on start.", "启动时自动开启")}
                       </label>
