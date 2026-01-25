@@ -6322,6 +6322,62 @@ export default function HomePage() {
     }
   }
 
+  async function confirmFrpRemotePortConflict(profile: any, remotePortRaw: number, proxyNameRaw: string) {
+    const remotePort = Math.round(Number(remotePortRaw || 0));
+    if (!Number.isFinite(remotePort) || remotePort <= 0) return true; // 0 => server-assigned
+
+    const serverAddrRaw = String(profile?.server_addr || "").trim();
+    if (!serverAddrRaw) return true;
+    const serverAddr = serverAddrRaw.toLowerCase();
+
+    const targetProxyName = String(proxyNameRaw || "").trim();
+    if (!targetProxyName) return true;
+
+    const targetDaemonId = String(selected || "").trim();
+    const hits: Array<{ daemonId: string; proxyName: string; startedUnix: number }> = [];
+
+    for (const d of Array.isArray(daemons) ? daemons : []) {
+      const daemonId = String((d as any)?.id || "").trim();
+      const hb = (d as any)?.heartbeat;
+      const list = Array.isArray(hb?.frp_proxies) ? hb.frp_proxies : [];
+      for (const p of list) {
+        if (!p?.running) continue;
+        const name = String(p?.proxy_name || "").trim();
+        if (!name) continue;
+        const addr = String(p?.remote_addr || "").trim().toLowerCase();
+        const port = Math.round(Number(p?.remote_port || 0));
+        if (!Number.isFinite(port) || port <= 0) continue;
+        if (addr !== serverAddr) continue;
+        if (port !== remotePort) continue;
+        if (daemonId && daemonId === targetDaemonId && name === targetProxyName) continue;
+        hits.push({ daemonId: daemonId || "-", proxyName: name, startedUnix: Math.floor(Number(p?.started_unix || 0)) });
+      }
+    }
+
+    if (!hits.length) return true;
+    hits.sort((a, b) => (a.daemonId + a.proxyName).localeCompare(b.daemonId + b.proxyName));
+
+    const previewLimit = 6;
+    const lines = hits
+      .slice(0, previewLimit)
+      .map((h) => `- ${h.daemonId}/${h.proxyName}${h.startedUnix ? ` (${t.tr("started", "启动")}: ${fmtUnix(h.startedUnix)})` : ""}`)
+      .join("\n");
+    const more = hits.length > previewLimit ? `\n- ... (+${hits.length - previewLimit})` : "";
+
+    return await confirmDialog(
+      t.tr(
+        `Remote Port ${remotePort} may already be used on ${serverAddrRaw}:\n${lines}${more}\n\nStart anyway?`,
+        `Remote Port ${remotePort} 可能已被 ${serverAddrRaw} 占用：\n${lines}${more}\n\n仍要启动吗？`
+      ),
+      {
+        title: t.tr("Remote port conflict", "远程端口冲突"),
+        confirmLabel: t.tr("Start anyway", "仍要启动"),
+        cancelLabel: t.tr("Cancel", "取消"),
+        danger: true,
+      }
+    );
+  }
+
   async function startServer(instanceOverride?: string, override?: StartOverride) {
     if (gameActionBusy) return;
     setGameActionBusy(true);
@@ -6408,6 +6464,11 @@ export default function HomePage() {
         const profile = profiles.find((p) => p.id === pid) || null;
         if (!profile) {
           setFrpOpStatus(t.tr("FRP enabled but no profile selected", "已开启 FRP，但未选择服务器"));
+          return;
+        }
+        const allowPort = await confirmFrpRemotePortConflict(profile, remotePort, inst);
+        if (!allowPort) {
+          setFrpOpStatus(t.tr("Cancelled (remote port conflict)", "已取消（远端端口冲突）"));
           return;
         }
         let token = "";
@@ -6557,13 +6618,18 @@ export default function HomePage() {
           setFrpOpStatus(t.tr("FRP enabled but no profile selected", "已开启 FRP，但未选择服务器"));
           return;
         }
+        const remotePort = Math.round(Number(frpRemotePort ?? 0));
+        const allowPort = await confirmFrpRemotePortConflict(profile, remotePort, inst);
+        if (!allowPort) {
+          setFrpOpStatus(t.tr("Cancelled (remote port conflict)", "已取消（远端端口冲突）"));
+          return;
+        }
         let token = "";
         try {
           token = profile?.has_token ? await fetchFrpProfileToken(profile.id) : "";
         } catch (e: any) {
           throw new Error(`FRP token: ${String(e?.message || e)}`);
         }
-        const remotePort = Math.round(Number(frpRemotePort ?? 0));
         await callOkCommand(
           "frp_start",
           {
@@ -6606,6 +6672,13 @@ export default function HomePage() {
         return;
       }
 
+      const remotePort = Math.round(Number(frpRemotePort ?? 0));
+      const allowPort = await confirmFrpRemotePortConflict(profile, remotePort, inst);
+      if (!allowPort) {
+        setFrpOpStatus(t.tr("Cancelled (remote port conflict)", "已取消（远端端口冲突）"));
+        return;
+      }
+
       let token = "";
       try {
         token = profile?.has_token ? await fetchFrpProfileToken(profile.id) : "";
@@ -6614,7 +6687,6 @@ export default function HomePage() {
       }
 
       const port = Math.round(Number(gamePort || 25565));
-      const remotePort = Math.round(Number(frpRemotePort ?? 0));
 
       await callOkCommand(
         "frp_start",
@@ -6657,6 +6729,13 @@ export default function HomePage() {
         return;
       }
 
+      const remotePort = Math.round(Number(opts?.remotePort ?? frpRemotePort ?? 0));
+      const allowPort = await confirmFrpRemotePortConflict(profile, remotePort, name);
+      if (!allowPort) {
+        setFrpOpStatus(t.tr("Cancelled (remote port conflict)", "已取消（远端端口冲突）"));
+        return;
+      }
+
       let token = "";
       try {
         token = profile?.has_token ? await fetchFrpProfileToken(profile.id) : "";
@@ -6665,7 +6744,6 @@ export default function HomePage() {
       }
 
       const localPort = Math.round(Number(opts?.localPort ?? gamePort ?? 25565));
-      const remotePort = Math.round(Number(opts?.remotePort ?? frpRemotePort ?? 0));
 
       await callOkCommand(
         "frp_start",
