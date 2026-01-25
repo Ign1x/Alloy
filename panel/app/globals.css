@@ -1008,6 +1008,18 @@ button.themeCardBtn.selected {
   color: var(--text);
 }
 
+.statusBanner {
+  padding: 10px 12px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--warn-border);
+  background: rgba(245, 158, 11, 0.10);
+  color: var(--text);
+}
+
+:root[data-theme="light"] .statusBanner {
+  background: rgba(245, 158, 11, 0.08);
+}
+
 .grid2 {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);

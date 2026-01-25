@@ -1066,6 +1066,14 @@ export default function HomePage() {
   }, [pinnedDaemonIds]);
 
   const [error, setError] = useState<string>("");
+  const [panelConn, setPanelConn] = useState<{
+    state: "ok" | "reconnecting" | "shutting_down";
+    sinceUnix: number;
+    nextRetryAtMs: number;
+    attempt: number;
+    detail: string;
+  }>({ state: "ok", sinceUnix: 0, nextRetryAtMs: 0, attempt: 0, detail: "" });
+  const [panelNowMs, setPanelNowMs] = useState<number>(() => Date.now());
   const [uiHost, setUiHost] = useState<string>("");
   const [authed, setAuthed] = useState<boolean | null>(null);
   const [authMe, setAuthMe] = useState<{ via: string; user_id: string; username: string; totp_enabled?: boolean } | null>(null);
@@ -1102,11 +1110,24 @@ export default function HomePage() {
   const num0 = useMemo(() => new Intl.NumberFormat(localeTag, { maximumFractionDigits: 0 }), [localeTag]);
   const num1 = useMemo(() => new Intl.NumberFormat(localeTag, { maximumFractionDigits: 1 }), [localeTag]);
 
+  const panelRetryInSec = useMemo(() => {
+    if (panelConn.state === "ok") return 0;
+    const next = Number(panelConn.nextRetryAtMs || 0);
+    if (!Number.isFinite(next) || next <= 0) return 0;
+    return Math.max(0, Math.ceil((next - panelNowMs) / 1000));
+  }, [panelConn.nextRetryAtMs, panelConn.state, panelNowMs]);
+
   const userInitial = useMemo(() => {
     const name = String(authMe?.username || "").trim();
     if (!name) return "?";
     return name.slice(0, 1).toUpperCase();
   }, [authMe?.username]);
+
+  useEffect(() => {
+    if (panelConn.state === "ok") return;
+    const tmr = window.setInterval(() => setPanelNowMs(Date.now()), 500);
+    return () => window.clearInterval(tmr);
+  }, [panelConn.state]);
 
   const fmtUnix = useCallback(
     (ts?: number | null) => {
@@ -1395,6 +1416,8 @@ export default function HomePage() {
   // Server list (directories under servers/)
   const [serverDirs, setServerDirs] = useState<string[]>([]);
   const [serverDirsStatus, setServerDirsStatus] = useState<string>("");
+  const [serverDirsDaemonId, setServerDirsDaemonId] = useState<string>("");
+  const serverDirsDaemonIdRef = useRef<string>("");
   const [instanceTagsById, setInstanceTagsById] = useState<Record<string, string[]>>({});
   const [favoriteInstanceIds, setFavoriteInstanceIds] = useState<string[]>([]);
   const [instanceNotesById, setInstanceNotesById] = useState<Record<string, string>>({});
@@ -3460,18 +3483,33 @@ export default function HomePage() {
     setToasts((prev) => prev.map((t) => ({ ...t, expiresAtMs: t.expiresAtMs + delta })));
   }
 
-  // Daemon polling
+  // Daemon polling (drives panel reconnect banner)
   useEffect(() => {
     if (authed !== true) return;
     let cancelled = false;
+    let timer: number | null = null;
+    let attempt = 0;
+
+    const schedule = (ms: number) => {
+      if (cancelled) return;
+      timer = window.setTimeout(tick, ms);
+    };
+
     async function tick() {
+      if (cancelled) return;
       try {
         const res = await apiFetch("/api/daemons", { cache: "no-store" });
-        const json = await res.json();
+        const json = await res.json().catch(() => null);
         if (cancelled) return;
-        if (!res.ok) throw new Error(json?.error || t.tr("failed", "失败"));
+        if (!res.ok) {
+          const msg = String(json?.error || t.tr("failed", "失败"));
+          const st = res.status === 503 ? "shutting_down" : "reconnecting";
+          throw Object.assign(new Error(msg), { __panel_state: st });
+        }
+
+        attempt = 0;
         const now = Math.floor(Date.now() / 1000);
-        const list = Array.isArray(json.daemons) ? json.daemons : [];
+        const list = Array.isArray(json?.daemons) ? json.daemons : [];
         setDaemons(list);
         setDaemonsCacheAtUnix(now);
         setDaemonsLoadedOnce(true);
@@ -3481,17 +3519,31 @@ export default function HomePage() {
         } catch {
           // ignore
         }
-        if (!selected && (json.daemons || []).length > 0) setSelected(json.daemons[0].id);
-        setError("");
+        if (!selected && list.length > 0) setSelected(String(list[0]?.id || ""));
+        setPanelConn({ state: "ok", sinceUnix: 0, nextRetryAtMs: 0, attempt: 0, detail: "" });
+        schedule(2000);
       } catch (e: any) {
-        if (!cancelled) setError(String(e?.message || e));
+        if (cancelled) return;
+        attempt += 1;
+        const msg = String(e?.message || e);
+        const nextDelay = Math.min(30_000, 2000 * Math.pow(2, Math.min(4, attempt - 1)));
+        const nextAtMs = Date.now() + nextDelay;
+        const st = e?.__panel_state === "shutting_down" ? "shutting_down" : "reconnecting";
+        setPanelConn((prev) => ({
+          state: st,
+          sinceUnix: prev.sinceUnix > 0 ? prev.sinceUnix : Math.floor(Date.now() / 1000),
+          nextRetryAtMs: nextAtMs,
+          attempt,
+          detail: msg,
+        }));
+        schedule(nextDelay);
       }
     }
+
     tick();
-    const timer = setInterval(tick, 2000);
     return () => {
       cancelled = true;
-      clearInterval(timer);
+      if (timer != null) window.clearTimeout(timer);
     };
   }, [selected, authed]);
 
@@ -3582,11 +3634,16 @@ export default function HomePage() {
           .map((e: any) => String(e.name));
         dirs.sort((a: string, b: string) => a.localeCompare(b));
         setServerDirs(dirs);
+        serverDirsDaemonIdRef.current = String(selected || "").trim();
+        setServerDirsDaemonId(serverDirsDaemonIdRef.current);
         setServerDirsStatus("");
       } catch (e: any) {
         if (cancelled) return;
-        setServerDirs([]);
-        setServerDirsStatus(String(e?.message || e));
+        const msg = String(e?.message || e);
+        setServerDirsStatus(msg);
+        if (serverDirsDaemonIdRef.current && serverDirsDaemonIdRef.current !== String(selected || "").trim()) {
+          setServerDirs([]);
+        }
       }
     }
     if (tab === "games") {
@@ -3605,12 +3662,15 @@ export default function HomePage() {
   // Keep selected game valid when the installed list changes.
   useEffect(() => {
     if (tab !== "games") return;
+    const daemonId = String(selected || "").trim();
+    if (!daemonId) return;
+    if (serverDirsDaemonId !== daemonId) return;
     if (!serverDirs.length) {
       if (instanceId) setInstanceId("");
       return;
     }
     if (!instanceId || !serverDirs.includes(instanceId)) setInstanceId(serverDirs[0]);
-  }, [tab, serverDirs, instanceId]);
+  }, [tab, serverDirs, instanceId, selected, serverDirsDaemonId]);
 
   // Try to prefill server port from server.properties when instance changes.
   useEffect(() => {
@@ -3806,7 +3866,6 @@ export default function HomePage() {
         setNodesStatus("");
       } catch (e: any) {
         if (cancelled) return;
-        setNodes([]);
         setNodesStatus(String(e?.message || e));
       }
     }
@@ -10733,7 +10792,7 @@ export default function HomePage() {
                 ) : authed === true ? (
                   <> · {t.tr("connecting…", "连接中…")}</>
                 ) : null}
-                {authed === true && error && daemonsCacheAtUnix > 0 ? (
+                {authed === true && panelConn.state !== "ok" && daemonsCacheAtUnix > 0 ? (
                   <>
                     {" "}
                     · <span className="badge warn">{t.tr("offline mode", "离线模式")}</span>
@@ -10826,6 +10885,45 @@ export default function HomePage() {
             </div>
 	        </div>
 
+        {authed === true && panelConn.state !== "ok" ? (
+          <div className="statusBanner">
+            <b>
+              {panelConn.state === "shutting_down"
+                ? t.tr("Panel restarting…", "面板正在重启…")
+                : t.tr("Panel disconnected.", "面板连接断开。")}
+            </b>{" "}
+            {panelRetryInSec > 0 ? (
+              <>
+                {t.tr("Retrying in", "将于")} <code>{panelRetryInSec}s</code> {t.tr("…", "重试…")}
+              </>
+            ) : (
+              <span className="muted">{t.tr("Retrying…", "重试中…")}</span>
+            )}
+            {panelConn.sinceUnix > 0 ? (
+              <>
+                {" "}
+                · {t.tr("since", "开始于")}: <code><TimeAgo unix={panelConn.sinceUnix} /></code>
+              </>
+            ) : null}
+            {daemonsCacheAtUnix > 0 ? (
+              <>
+                {" "}
+                · {t.tr("showing cached state from", "当前显示缓存数据，时间")}: <code><TimeAgo unix={daemonsCacheAtUnix} /></code>
+              </>
+            ) : null}
+            {panelConn.detail ? (
+              <span className="muted" style={{ display: "block", marginTop: 6 }}>
+                {t.tr("Detail", "详情")}: <code>{String(panelConn.detail || "").slice(0, 200)}</code>
+              </span>
+            ) : null}
+            <div className="btnGroup" style={{ justifyContent: "flex-end", marginTop: 8 }}>
+              <button type="button" className="iconBtn" onClick={() => window.location.reload()}>
+                <Icon name="refresh" /> {t.tr("Reload", "刷新")}
+              </button>
+            </div>
+          </div>
+        ) : null}
+
         {authed === true && selectedDaemon && !selectedDaemon.connected ? (
           <div className="offlineBanner">
             <b>{t.tr("Daemon offline.", "Daemon 离线。")}</b> {t.tr("last seen", "最后在线")}:
@@ -10864,17 +10962,10 @@ export default function HomePage() {
 	          </div>
 	        ) : null}
 
-	        {authed === true && error && daemons.length && daemonsCacheAtUnix > 0 ? (
-	          <div className="offlineBanner">
-	            <b>{t.tr("Offline mode.", "离线模式。")}</b> {t.tr("Showing cached state from", "正在显示缓存数据，时间")}:{" "}
-	            <code><TimeAgo unix={daemonsCacheAtUnix} /></code>.
-	          </div>
-	        ) : null}
-
-	        <div className="content">
-	          {error ? (
-	            <div className="card danger">
-	              <b>{t.tr("Error:", "错误：")}</b> {error}
+		        <div className="content">
+		          {error ? (
+		            <div className="card danger">
+		              <b>{t.tr("Error:", "错误：")}</b> {error}
             </div>
           ) : null}
 
