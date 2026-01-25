@@ -3642,12 +3642,12 @@ function GamesView() {
                 ]}
               />
             </div>
-            <div className="field" style={{ minWidth: 160 }}>
-              <label>{t.tr("Level", "级别")}</label>
-              <div className="chipRow">
-                <button type="button" className={`chip ${logLevelFilter === "all" ? "active" : ""}`} onClick={() => setLogLevelFilter("all")}>
-                  {t.tr("All", "全部")}
-                </button>
+	            <div className="field" style={{ minWidth: 160 }}>
+	              <label>{t.tr("Level", "级别")}</label>
+	              <div className="chipRow logFilterChips">
+	                <button type="button" className={`chip ${logLevelFilter === "all" ? "active" : ""}`} onClick={() => setLogLevelFilter("all")}>
+	                  {t.tr("All", "全部")}
+	                </button>
                 <button
                   type="button"
                   className={`chip warn ${logLevelFilter === "warn" ? "active" : ""}`}

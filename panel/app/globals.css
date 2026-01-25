@@ -1712,6 +1712,20 @@ button.themeCardBtn.selected {
   flex-wrap: wrap;
 }
 
+@media (max-width: 520px) {
+  .logFilterChips {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    max-width: 100%;
+    padding-bottom: 2px;
+    scrollbar-width: none;
+  }
+
+  .logFilterChips::-webkit-scrollbar {
+    display: none;
+  }
+}
+
 .chip {
   padding: var(--pill-pad-y) var(--pill-pad-x);
   border-radius: 999px;
