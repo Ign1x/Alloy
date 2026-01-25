@@ -77,6 +77,10 @@
   --control-pad-y: 9px;
   --control-pad-x: 12px;
 
+  --pill-pad-y: 5px;
+  --pill-pad-x: 10px;
+  --pill-gap: 6px;
+
   --code-bg: rgba(0, 0, 0, 0.22);
   --code-border: rgba(255, 255, 255, 0.10);
 
@@ -1462,19 +1466,20 @@ button.themeCardBtn.selected {
 
 .chipRow {
   display: flex;
-  gap: 6px;
+  gap: var(--pill-gap);
   align-items: center;
   flex-wrap: wrap;
 }
 
 .chip {
-  padding: 6px 10px;
+  padding: var(--pill-pad-y) var(--pill-pad-x);
   border-radius: 999px;
   border: 1px solid var(--border);
   background: var(--surface);
   color: var(--muted);
   font-size: var(--font-size-xs);
   line-height: var(--line-height-tight);
+  white-space: nowrap;
   cursor: pointer;
 }
 
@@ -1963,13 +1968,15 @@ button.linkBtn:hover {
 .badge {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-2);
-  padding: 4px 10px;
+  gap: var(--pill-gap);
+  padding: var(--pill-pad-y) var(--pill-pad-x);
   border-radius: 999px;
   border: 1px solid var(--border);
   background: var(--surface);
   font-size: var(--font-size-xs);
+  line-height: var(--line-height-tight);
   color: var(--text);
+  white-space: nowrap;
 }
 
 .statusBadgeDot {
@@ -1992,7 +1999,7 @@ button.linkBtn:hover {
 }
 
 .badge.warn {
-  border-color: rgba(251, 191, 36, 0.55);
+  border-color: var(--warn-border);
   background: rgba(251, 191, 36, 0.12);
 }
 
