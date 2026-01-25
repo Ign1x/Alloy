@@ -2,12 +2,15 @@
 
 import { memo, useEffect, useMemo, useState } from "react";
 import { useAppActions, useAppCore, useAppGames, useAppI18n, useAppPanel } from "../appCtx";
+import { swrPeek, swrRevalidate } from "../swrCache";
 import CopyButton from "../ui/CopyButton";
 import EnvHelpButton from "../ui/EnvHelpButton";
 import Field from "../ui/Field";
 import { ManagedModal } from "../ui/ModalStack";
 import Select from "../ui/Select";
 import TimeAgo from "../ui/TimeAgo";
+
+const SWR_TTL_ADMIN_LIST_MS = 20_000;
 
 function PanelView() {
   const { t, fmtUnix } = useAppI18n();
@@ -98,18 +101,29 @@ function PanelView() {
   useEffect(() => {
     let cancelled = false;
     async function loadSessions() {
+      const key = "api:/api/auth/sessions";
+      const peek = swrPeek<any[]>(key, SWR_TTL_ADMIN_LIST_MS);
+      if (peek) {
+        setSessions(Array.isArray(peek.value) ? peek.value : []);
+        setSessionsStatus(peek.stale ? t.tr("Refreshing...", "刷新中...") : "");
+        if (!peek.stale) return;
+      }
+
       setSessionsBusy(true);
-      setSessionsStatus(t.tr("Loading...", "加载中..."));
+      setSessionsStatus(peek ? t.tr("Refreshing...", "刷新中...") : t.tr("Loading...", "加载中..."));
       try {
-        const res = await apiFetch("/api/auth/sessions", { cache: "no-store" });
-        const json = await res.json().catch(() => null);
+        const list = await swrRevalidate<any[]>(key, SWR_TTL_ADMIN_LIST_MS, async () => {
+          const res = await apiFetch("/api/auth/sessions", { cache: "no-store" });
+          const json = await res.json().catch(() => null);
+          if (!res.ok) throw new Error(json?.error || t.tr("failed", "失败"));
+          return Array.isArray(json?.sessions) ? json.sessions : [];
+        });
         if (cancelled) return;
-        if (!res.ok) throw new Error(json?.error || t.tr("failed", "失败"));
-        setSessions(Array.isArray(json?.sessions) ? json.sessions : []);
+        setSessions(list);
         setSessionsStatus("");
       } catch (e: any) {
         if (cancelled) return;
-        setSessions([]);
+        if (!peek) setSessions([]);
         setSessionsStatus(String(e?.message || e));
       } finally {
         if (!cancelled) setSessionsBusy(false);
@@ -124,18 +138,29 @@ function PanelView() {
   useEffect(() => {
     let cancelled = false;
     async function loadUsers() {
+      const key = "api:/api/auth/users";
+      const peek = swrPeek<any[]>(key, SWR_TTL_ADMIN_LIST_MS);
+      if (peek) {
+        setUsers(Array.isArray(peek.value) ? peek.value : []);
+        setUsersStatus(peek.stale ? t.tr("Refreshing...", "刷新中...") : "");
+        if (!peek.stale) return;
+      }
+
       setUsersBusy(true);
-      setUsersStatus(t.tr("Loading...", "加载中..."));
+      setUsersStatus(peek ? t.tr("Refreshing...", "刷新中...") : t.tr("Loading...", "加载中..."));
       try {
-        const res = await apiFetch("/api/auth/users", { cache: "no-store" });
-        const json = await res.json().catch(() => null);
+        const list = await swrRevalidate<any[]>(key, SWR_TTL_ADMIN_LIST_MS, async () => {
+          const res = await apiFetch("/api/auth/users", { cache: "no-store" });
+          const json = await res.json().catch(() => null);
+          if (!res.ok) throw new Error(json?.error || t.tr("failed", "失败"));
+          return Array.isArray(json?.users) ? json.users : [];
+        });
         if (cancelled) return;
-        if (!res.ok) throw new Error(json?.error || t.tr("failed", "失败"));
-        setUsers(Array.isArray(json?.users) ? json.users : []);
+        setUsers(list);
         setUsersStatus("");
       } catch (e: any) {
         if (cancelled) return;
-        setUsers([]);
+        if (!peek) setUsers([]);
         setUsersStatus(String(e?.message || e));
       } finally {
         if (!cancelled) setUsersBusy(false);
@@ -231,10 +256,13 @@ function PanelView() {
     setSessionsBusy(true);
     setSessionsStatus(t.tr("Loading...", "加载中..."));
     try {
-      const res = await apiFetch("/api/auth/sessions", { cache: "no-store" });
-      const json = await res.json().catch(() => null);
-      if (!res.ok) throw new Error(json?.error || t.tr("failed", "失败"));
-      setSessions(Array.isArray(json?.sessions) ? json.sessions : []);
+      const list = await swrRevalidate<any[]>("api:/api/auth/sessions", SWR_TTL_ADMIN_LIST_MS, async () => {
+        const res = await apiFetch("/api/auth/sessions", { cache: "no-store" });
+        const json = await res.json().catch(() => null);
+        if (!res.ok) throw new Error(json?.error || t.tr("failed", "失败"));
+        return Array.isArray(json?.sessions) ? json.sessions : [];
+      });
+      setSessions(list);
       setSessionsStatus("");
     } catch (e: any) {
       setSessions([]);
@@ -302,10 +330,13 @@ function PanelView() {
     setUsersBusy(true);
     setUsersStatus(t.tr("Loading...", "加载中..."));
     try {
-      const res = await apiFetch("/api/auth/users", { cache: "no-store" });
-      const json = await res.json().catch(() => null);
-      if (!res.ok) throw new Error(json?.error || t.tr("failed", "失败"));
-      setUsers(Array.isArray(json?.users) ? json.users : []);
+      const list = await swrRevalidate<any[]>("api:/api/auth/users", SWR_TTL_ADMIN_LIST_MS, async () => {
+        const res = await apiFetch("/api/auth/users", { cache: "no-store" });
+        const json = await res.json().catch(() => null);
+        if (!res.ok) throw new Error(json?.error || t.tr("failed", "失败"));
+        return Array.isArray(json?.users) ? json.users : [];
+      });
+      setUsers(list);
       setUsersStatus("");
     } catch (e: any) {
       setUsers([]);

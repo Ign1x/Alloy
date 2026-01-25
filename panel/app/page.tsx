@@ -5,6 +5,7 @@ import dynamic from "next/dynamic";
 import { AppProviders } from "./appCtx";
 import { createT, normalizeLocale, type Locale } from "./i18n";
 import { useEvent } from "./useEvent";
+import { swrPeek, swrRevalidate } from "./swrCache";
 import Icon from "./ui/Icon";
 import CopyButton from "./ui/CopyButton";
 import CodeBlock from "./ui/CodeBlock";
@@ -43,6 +44,9 @@ type McVersion = {
 const INSTANCE_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const DAEMONS_CACHE_KEY = "elegantmc_daemons_cache_v1";
 const CMD_PALETTE_RECENT_KEY = "elegantmc_cmd_palette_recent_v1";
+const SWR_TTL_PANEL_SETTINGS_MS = 30_000;
+const SWR_TTL_FRP_PROFILES_MS = 20_000;
+const SWR_TTL_FS_LIST_MS = 5_000;
 
 type TrFn = (en: string, zh: string) => string;
 
@@ -2419,17 +2423,30 @@ export default function HomePage() {
     }
   }
 
-  async function refreshPanelSettings() {
-    setPanelSettingsStatus(t.tr("Loading...", "加载中..."));
+  async function refreshPanelSettings(opts: { force?: boolean } = {}) {
+    const key = "api:/api/panel/settings";
+    const peek = swrPeek<any>(key, SWR_TTL_PANEL_SETTINGS_MS);
+    if (peek) {
+      setPanelSettings(peek.value || null);
+      setPanelSettingsStatus(opts.force || peek.stale ? t.tr("Refreshing...", "刷新中...") : "");
+      refreshModpackProviders();
+      if (!opts.force && !peek.stale) return;
+    } else {
+      setPanelSettingsStatus(t.tr("Loading...", "加载中..."));
+    }
+
     try {
-      const res = await apiFetch("/api/panel/settings", { cache: "no-store" });
-      const json = await res.json().catch(() => null);
-      if (!res.ok) throw new Error(json?.error || t.tr("failed", "失败"));
-      setPanelSettings(json?.settings || null);
+      const settings = await swrRevalidate<any>(key, SWR_TTL_PANEL_SETTINGS_MS, async () => {
+        const res = await apiFetch("/api/panel/settings", { cache: "no-store" });
+        const json = await res.json().catch(() => null);
+        if (!res.ok) throw new Error(json?.error || t.tr("failed", "失败"));
+        return json?.settings || null;
+      });
+      setPanelSettings(settings);
       setPanelSettingsStatus("");
       refreshModpackProviders();
     } catch (e: any) {
-      setPanelSettings(null);
+      if (!peek) setPanelSettings(null);
       setPanelSettingsStatus(String(e?.message || e));
     }
   }
@@ -3908,19 +3925,33 @@ export default function HomePage() {
   }, []);
 
   async function refreshProfiles(opts: { force?: boolean } = {}) {
-    setProfilesStatus(t.tr("Loading...", "加载中..."));
+    const key = "api:/api/frp/profiles";
+    const peek = swrPeek<FrpProfile[]>(key, SWR_TTL_FRP_PROFILES_MS);
+    if (peek) {
+      const cached = Array.isArray(peek.value) ? peek.value : [];
+      setProfiles(cached);
+      if (!frpProfileId && cached.length) setFrpProfileId(cached[0].id);
+      if (frpProfileId && cached.length && !cached.find((p) => p.id === frpProfileId)) setFrpProfileId(cached[0]?.id || "");
+      setProfilesStatus(opts.force || peek.stale ? t.tr("Refreshing...", "刷新中...") : "");
+      if (!opts.force && !peek.stale) return;
+    } else {
+      setProfilesStatus(t.tr("Loading...", "加载中..."));
+    }
+
     try {
-      const qs = opts.force ? "?force=1" : "";
-      const res = await apiFetch(`/api/frp/profiles${qs}`, { cache: "no-store" });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json?.error || t.tr("failed", "失败"));
-      const list = (json.profiles || []) as FrpProfile[];
+      const list = await swrRevalidate<FrpProfile[]>(key, SWR_TTL_FRP_PROFILES_MS, async () => {
+        const qs = opts.force ? "?force=1" : "";
+        const res = await apiFetch(`/api/frp/profiles${qs}`, { cache: "no-store" });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json?.error || t.tr("failed", "失败"));
+        return (json.profiles || []) as FrpProfile[];
+      });
       setProfiles(list);
       if (!frpProfileId && list.length) setFrpProfileId(list[0].id);
       if (frpProfileId && !list.find((p) => p.id === frpProfileId)) setFrpProfileId(list[0]?.id || "");
       setProfilesStatus("");
     } catch (e: any) {
-      setProfiles([]);
+      if (!peek) setProfiles([]);
       setProfilesStatus(String(e?.message || e));
     }
   }
@@ -3994,16 +4025,28 @@ export default function HomePage() {
     if (authed !== true) return;
     let cancelled = false;
     async function refresh() {
-      if (!selected) return;
-      setFsStatus(t.tr("Loading...", "加载中..."));
+      const daemonId = String(selected || "").trim();
+      if (!daemonId) return;
+      const key = `cmd:${daemonId}:fs_list:${String(fsPath || "")}`;
+      const peek = swrPeek<any>(key, SWR_TTL_FS_LIST_MS);
+
+      if (peek) {
+        setFsEntries(peek.value?.entries || []);
+        setFsStatus(peek.stale ? t.tr("Refreshing...", "刷新中...") : "");
+        if (!peek.stale) return;
+      } else {
+        setFsStatus(t.tr("Loading...", "加载中..."));
+      }
       try {
-        const payload = await callOkCommand("fs_list", { path: fsPath });
+        const payload = await swrRevalidate<any>(key, SWR_TTL_FS_LIST_MS, async () => {
+          return await callOkCommandForDaemon(daemonId, "fs_list", { path: fsPath });
+        });
         if (cancelled) return;
         setFsEntries(payload.entries || []);
         setFsStatus("");
       } catch (e: any) {
         if (cancelled) return;
-        setFsEntries([]);
+        if (!peek) setFsEntries([]);
         setFsStatus(String(e?.message || e));
       }
     }
@@ -4014,15 +4057,18 @@ export default function HomePage() {
   }, [selected, fsPath, tab]);
 
   async function refreshFsNow(pathOverride?: string) {
-    if (!selected) return;
+    const daemonId = String(selected || "").trim();
+    if (!daemonId) return;
     const p = pathOverride != null ? String(pathOverride) : fsPath;
-    setFsStatus(t.tr("Loading...", "加载中..."));
+    const key = `cmd:${daemonId}:fs_list:${p}`;
+    setFsStatus(fsEntries.length ? t.tr("Refreshing...", "刷新中...") : t.tr("Loading...", "加载中..."));
     try {
-      const payload = await callOkCommand("fs_list", { path: p });
+      const payload = await swrRevalidate<any>(key, SWR_TTL_FS_LIST_MS, async () => {
+        return await callOkCommandForDaemon(daemonId, "fs_list", { path: p });
+      });
       setFsEntries(payload.entries || []);
       setFsStatus("");
     } catch (e: any) {
-      setFsEntries([]);
       setFsStatus(String(e?.message || e));
     }
   }
