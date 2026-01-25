@@ -1296,16 +1296,20 @@ button.themeCardBtn.selected {
 .metricGrid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: var(--space-3);
-  margin-top: var(--space-3);
+  gap: var(--space-2);
+  margin-top: var(--space-2);
 }
 
 .metricCard {
   border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
+  border-radius: var(--radius-control);
+  background: var(--surface2);
   padding: var(--space-3);
   min-width: 0;
+}
+
+:root[data-density="compact"] .metricCard {
+  padding: var(--space-2);
 }
 
 .metricCard.ok {
@@ -1323,10 +1327,11 @@ button.themeCardBtn.selected {
 .metricHead {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   color: var(--muted);
   font-size: var(--font-size-xs);
   line-height: var(--line-height-tight);
+  font-weight: var(--font-weight-semibold);
 }
 
 .metricValue {
@@ -1334,6 +1339,7 @@ button.themeCardBtn.selected {
   font-size: var(--font-size-lg);
   line-height: var(--line-height-tight);
   font-weight: var(--font-weight-bold);
+  font-variant-numeric: tabular-nums;
   letter-spacing: -0.01em;
 }
 
