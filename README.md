@@ -403,3 +403,12 @@ ELEGANTMC_BASE_DIR="$PWD/.elegantmc" \
 
 - Panel 使用 `ELEGANTMC_PANEL_ADMIN_PASSWORD` 做单管理员登录（Cookie 会话）；公网部署务必使用 HTTPS。
 - Daemon 与 Panel 的配对依赖 `daemon_id → token`；token 请当作密钥管理。
+
+### 公网部署加固清单（Checklist）
+
+- [ ] **HTTPS**：用 Nginx/Caddy/Traefik 反代，开启 HTTPS，并确保 WebSocket 可用（`/ws/daemon`）。
+- [ ] **Secure Cookie**：HTTPS 部署务必设置 `ELEGANTMC_PANEL_SECURE_COOKIE=1`；本机 HTTP 测试不要设置。
+- [ ] **强密码**：设置强管理员密码（`ELEGANTMC_PANEL_ADMIN_PASSWORD`），避免弱口令。
+- [ ] **防火墙/安全组**：只开放必要端口（Panel 的 80/443/自定义端口、FRP 的 `bindPort` 与使用的 `remote_port`）；不对公网暴露 Daemon 宿主机的管理端口。
+- [ ] **备份**：定期备份 Panel 数据（节点 token、FRP profiles）与 Daemon 数据（`servers/`、备份文件、配置）；建议异地/对象存储并做保留策略。
+- [ ] **Token 轮换**：定期轮换 `ELEGANTMC_TOKEN`/FRP token；轮换后在 Panel 更新节点映射并重启对应 Daemon（必要时删除旧节点）。
