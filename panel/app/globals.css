@@ -552,6 +552,21 @@ h3 {
   margin: 0 auto;
 }
 
+.nodeDetailsGrid {
+  align-items: start;
+}
+
+.nodeDetailsTableScroll {
+  margin-top: var(--space-2);
+  max-height: 520px;
+  overflow: auto;
+}
+
+.nodeDetailsModal.share .nodeDetailsTableScroll {
+  max-height: none;
+  overflow: visible;
+}
+
 .sidebar {
   height: calc(100vh - 36px);
   position: sticky;

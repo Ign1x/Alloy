@@ -676,7 +676,7 @@ function Sparkline({
 	  }, [points]);
 
 	  return (
-	    <div style={{ width }}>
+	    <div style={{ width: "100%", maxWidth: width }}>
 	      <div
 	        className="sparkWrap"
 	        style={{ width: "100%" }}
@@ -12594,9 +12594,10 @@ export default function HomePage() {
                 )}
 	            </div>
 
+              <div className="modalBody nodeDetailsBody">
 	            {nodeDetailsNode ? (
 	              <>
-	                <div className="grid2" style={{ marginBottom: 12 }}>
+	                <div className="grid2 nodeDetailsGrid">
 	                  <div className="card">
                     <h3>{t.tr("Overview", "概览")}</h3>
                     <div className="row">
@@ -12787,7 +12788,8 @@ export default function HomePage() {
 
 	                <div className="card">
 	                  <h3>{t.tr("Instances", "实例")}</h3>
-	                  <table>
+                    <div className="tableScroll nodeDetailsTableScroll">
+	                  <table className="compact">
 	                    <thead>
 	                      <tr>
 	                        <th>ID</th>
@@ -12855,6 +12857,7 @@ export default function HomePage() {
 	                      ) : null}
 	                    </tbody>
 	                  </table>
+                    </div>
 	                </div>
 
                   {!shareMode ? (
@@ -12884,6 +12887,7 @@ export default function HomePage() {
 	            ) : (
 	              <div className="hint">{t.tr("No data", "暂无数据")}</div>
 	            )}
+              </div>
       </ManagedModal>
 
       <ManagedModal
