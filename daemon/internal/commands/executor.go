@@ -514,6 +514,8 @@ func (e *Executor) Execute(ctx context.Context, cmd protocol.Command) protocol.C
 		return ok(map[string]any{"pong": true})
 	case "net_check_port":
 		return e.netCheckPort(cmd)
+	case "net_probe_tcp":
+		return e.netProbeTCP(cmd)
 	case "mc_templates":
 		return e.mcTemplates()
 	case "mc_detect_jar":
@@ -602,6 +604,8 @@ func (e *Executor) Execute(ctx context.Context, cmd protocol.Command) protocol.C
 		return e.frpStart(ctx, cmd)
 	case "frp_stop":
 		return e.frpStop(ctx, cmd)
+	case "frp_read_ini":
+		return e.frpReadINI(cmd)
 	default:
 		return fail(fmt.Sprintf("unknown command: %s", cmd.Name))
 	}

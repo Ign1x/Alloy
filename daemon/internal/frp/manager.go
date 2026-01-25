@@ -42,6 +42,10 @@ func NewManager(cfg ManagerConfig) *Manager {
 	return &Manager{cfg: cfg, proxies: make(map[string]*proxyProc)}
 }
 
+func (m *Manager) WorkDir() string {
+	return m.cfg.WorkDir
+}
+
 type ProxyConfig struct {
 	Name       string `json:"name"`
 	ServerAddr string `json:"server_addr"`

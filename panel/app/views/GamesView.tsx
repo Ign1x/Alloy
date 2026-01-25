@@ -227,6 +227,8 @@ export default function GamesView() {
     startFrpProxyNow,
     restartFrpProxyNow,
     stopFrpProxyNow,
+    readFrpProxyIniNow,
+    probeTcpFromDaemonNow,
     repairInstance,
     updateModrinthPack,
     shareMode,
@@ -266,6 +268,15 @@ export default function GamesView() {
   >([]);
   const [logBookmarksQueryRaw, setLogBookmarksQueryRaw] = useState<string>("");
   const [logBookmarksQuery, setLogBookmarksQuery] = useState<string>("");
+  const [frpDiagOpen, setFrpDiagOpen] = useState<boolean>(false);
+  const [frpDiagProxyName, setFrpDiagProxyName] = useState<string>("");
+  const [frpDiagRevealToken, setFrpDiagRevealToken] = useState<boolean>(false);
+  const [frpDiagIni, setFrpDiagIni] = useState<string>("");
+  const [frpDiagIniStatus, setFrpDiagIniStatus] = useState<string>("");
+  const [frpDiagIniBusy, setFrpDiagIniBusy] = useState<boolean>(false);
+  const [frpDiagProbeStatus, setFrpDiagProbeStatus] = useState<string>("");
+  const [frpDiagProbeBusy, setFrpDiagProbeBusy] = useState<boolean>(false);
+  const [frpDiagProbeResult, setFrpDiagProbeResult] = useState<any | null>(null);
   const [logFindIdx, setLogFindIdx] = useState<number>(0);
   const [logPaused, setLogPaused] = useState<boolean>(false);
   const [logClearAtUnix, setLogClearAtUnix] = useState<number>(0);
@@ -557,6 +568,42 @@ export default function GamesView() {
     }
     return out;
   }, [logs]);
+
+  const frpDiagProxyOptions = useMemo(() => {
+    const out: Array<{ value: string; label: string }> = [];
+    const seen = new Set<string>();
+    const inst = instanceId.trim();
+    if (inst && !seen.has(inst)) {
+      seen.add(inst);
+      out.push({ value: inst, label: inst });
+    }
+    for (const p of Array.isArray(instanceProxies) ? instanceProxies : []) {
+      const name = String((p as any)?.proxy_name || "").trim();
+      if (!name || seen.has(name)) continue;
+      seen.add(name);
+      out.push({ value: name, label: name });
+    }
+    return out;
+  }, [instanceId, instanceProxies]);
+
+  const frpDiagLogTailText = useMemo(() => {
+    const name = frpDiagProxyName.trim();
+    if (!name) return "";
+    const list = Array.isArray(logs) ? logs : [];
+    const out: string[] = [];
+    for (let i = list.length - 1; i >= 0 && out.length < 200; i--) {
+      const l: any = list[i];
+      if (l?.source !== "frp") continue;
+      if (String(l?.instance || "").trim() !== name) continue;
+      const tsUnix = Number(l?.ts_unix || 0);
+      const ts = Number.isFinite(tsUnix) && tsUnix > 0 ? fmtTime(tsUnix) : "--:--:--";
+      const stream = String(l?.stream || "");
+      const line = String(l?.line || "");
+      out.push(`[${ts}] ${stream}: ${line}`);
+    }
+    out.reverse();
+    return out.join("\n");
+  }, [logs, frpDiagProxyName, fmtTime]);
 
   const perf = useMemo(() => {
     const hist = Array.isArray(instanceMetricsHistory) ? instanceMetricsHistory : [];
@@ -997,6 +1044,58 @@ export default function GamesView() {
     setLogSelectStart(idx);
     setLogSelectEnd(idx);
     scrollToLogLine(idx);
+  }
+
+  async function loadFrpDiagIni(nameRaw: string, revealToken: boolean) {
+    const name = String(nameRaw || "").trim();
+    if (!name) {
+      setFrpDiagIni("");
+      setFrpDiagIniStatus(t.tr("name is required", "name 不能为空"));
+      return;
+    }
+    setFrpDiagIniBusy(true);
+    setFrpDiagIniStatus(t.tr("Loading...", "加载中..."));
+    try {
+      const out = await readFrpProxyIniNow(name, revealToken);
+      const ini = String((out as any)?.ini || "");
+      const truncated = !!(out as any)?.truncated;
+      setFrpDiagIni(ini);
+      setFrpDiagIniStatus(truncated ? t.tr("Truncated", "已截断") : "");
+    } catch (e: any) {
+      setFrpDiagIni("");
+      setFrpDiagIniStatus(String(e?.message || e));
+    } finally {
+      setFrpDiagIniBusy(false);
+    }
+  }
+
+  async function runFrpDiagProbeNow() {
+    const profile = selectedProfile;
+    if (!profile) {
+      setFrpDiagProbeStatus(t.tr("Select an FRP profile first", "请先选择 FRP 配置"));
+      setFrpDiagProbeResult(null);
+      return;
+    }
+    const host = String(profile?.server_addr || "").trim();
+    const port = Math.round(Number(profile?.server_port || 0));
+    if (!host || !Number.isFinite(port) || port < 1 || port > 65535) {
+      setFrpDiagProbeStatus(t.tr("Invalid FRP profile host/port", "FRP 配置的 host/port 无效"));
+      setFrpDiagProbeResult(null);
+      return;
+    }
+    setFrpDiagProbeBusy(true);
+    setFrpDiagProbeStatus(t.tr("Probing from daemon...", "从 daemon 探测中..."));
+    setFrpDiagProbeResult(null);
+    try {
+      const out = await probeTcpFromDaemonNow(host, port, 1800);
+      setFrpDiagProbeResult(out);
+      setFrpDiagProbeStatus("");
+    } catch (e: any) {
+      setFrpDiagProbeResult(null);
+      setFrpDiagProbeStatus(String(e?.message || e));
+    } finally {
+      setFrpDiagProbeBusy(false);
+    }
   }
 
   useEffect(() => {
@@ -2507,6 +2606,26 @@ export default function GamesView() {
                 <Icon name="plus" />
                 {t.tr("Start FRP proxy", "启动 FRP proxy")}
               </button>
+              <button
+                type="button"
+                className="iconBtn"
+                onClick={() => {
+                  const name = instanceId.trim();
+                  setFrpDiagProxyName(name);
+                  setFrpDiagRevealToken(false);
+                  setFrpDiagIni("");
+                  setFrpDiagIniStatus("");
+                  setFrpDiagProbeStatus("");
+                  setFrpDiagProbeResult(null);
+                  setFrpDiagOpen(true);
+                  loadFrpDiagIni(name, false);
+                }}
+                disabled={!instanceId.trim()}
+                title={t.tr("Show FRP config, logs, and connectivity checks.", "查看 FRP 配置、日志与连通性检测。")}
+              >
+                <Icon name="search" />
+                {t.tr("Diagnostics", "诊断")}
+              </button>
             </div>
           </div>
         ) : null}
@@ -3844,6 +3963,176 @@ export default function GamesView() {
           </div>
         ) : null}
       </div>
+
+      <ManagedModal
+        id="frp-diagnostics"
+        open={frpDiagOpen}
+        onOverlayClick={() => setFrpDiagOpen(false)}
+        modalStyle={{ width: "min(980px, 100%)" }}
+        ariaLabel={t.tr("FRP diagnostics", "FRP 诊断")}
+      >
+        <div className="modalHeader">
+          <div>
+            <div style={{ fontWeight: 800 }}>{t.tr("FRP diagnostics", "FRP 诊断")}</div>
+            <div className="hint">
+              {t.tr("game", "游戏")}: <code>{instanceId.trim() || "-"}</code> · {t.tr("daemon", "daemon")}: <code>{selectedDaemon?.id || "-"}</code>
+            </div>
+          </div>
+          <button type="button" onClick={() => setFrpDiagOpen(false)}>
+            {t.tr("Close", "关闭")}
+          </button>
+        </div>
+
+        <div className="grid2" style={{ alignItems: "start" }}>
+          <div className="field">
+            <label>{t.tr("Proxy name", "Proxy 名称")}</label>
+            <Select
+              value={frpDiagProxyName}
+              onChange={(v) => {
+                const name = String(v || "").trim();
+                setFrpDiagProxyName(name);
+                setFrpDiagRevealToken(false);
+                setFrpDiagIni("");
+                setFrpDiagIniStatus("");
+                loadFrpDiagIni(name, false);
+              }}
+              options={frpDiagProxyOptions}
+            />
+            <div className="hint">{t.tr("Reads daemon-generated frpc.ini under frp/<name>/.", "读取 daemon 生成的 frpc.ini（位于 frp/<name>/）。")}</div>
+          </div>
+
+          <div className="field">
+            <label>{t.tr("FRP server", "FRP 服务器")}</label>
+            <code>
+              {selectedProfile ? `${String(selectedProfile.server_addr || "-")}:${Math.round(Number(selectedProfile.server_port || 0)) || "-"}` : "-"}
+            </code>
+            <div className="hint" style={{ marginTop: 6 }}>
+              {t.tr("Panel probe", "Panel 探测")}:{" "}
+              {selectedProfile?.status?.online === true ? (
+                <StatusBadge tone="ok">
+                  {t.tr("online", "在线")} {Math.round(Number(selectedProfile.status.latencyMs || 0))}ms
+                </StatusBadge>
+              ) : selectedProfile?.status?.online === false ? (
+                <StatusBadge tone="danger">{t.tr("offline", "离线")}</StatusBadge>
+              ) : (
+                <StatusBadge tone="neutral">{t.tr("unknown", "未知")}</StatusBadge>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="row" style={{ marginTop: 12, justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+          <div className="hint">{frpDiagIniStatus}</div>
+          <div className="btnGroup" style={{ justifyContent: "flex-end" }}>
+            <button
+              type="button"
+              className="iconBtn"
+              onClick={() => loadFrpDiagIni(frpDiagProxyName, frpDiagRevealToken)}
+              disabled={!selectedDaemon?.connected || !frpDiagProxyName.trim() || frpDiagIniBusy}
+            >
+              <Icon name="refresh" />
+              {t.tr("Reload", "刷新")}
+            </button>
+            {!frpDiagRevealToken ? (
+              <button
+                type="button"
+                onClick={async () => {
+                  const name = frpDiagProxyName.trim();
+                  if (!name) return;
+                  const ok = await confirmDialog(t.tr(`Reveal token in frpc.ini for "${name}"?`, `显示「${name}」的 frpc.ini 中的 token？`), {
+                    title: t.tr("Reveal token", "显示 token"),
+                    confirmLabel: t.tr("Reveal", "显示"),
+                    cancelLabel: t.tr("Cancel", "取消"),
+                  });
+                  if (!ok) return;
+                  setFrpDiagRevealToken(true);
+                  loadFrpDiagIni(name, true);
+                }}
+                disabled={!selectedDaemon?.connected || !frpDiagProxyName.trim() || frpDiagIniBusy}
+              >
+                {t.tr("Reveal token", "显示 token")}
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  const name = frpDiagProxyName.trim();
+                  setFrpDiagRevealToken(false);
+                  loadFrpDiagIni(name, false);
+                }}
+                disabled={!frpDiagProxyName.trim() || frpDiagIniBusy}
+              >
+                {t.tr("Hide token", "隐藏 token")}
+              </button>
+            )}
+            <CopyButton iconOnly text={frpDiagIni} tooltip={t.tr("Copy config", "复制配置")} ariaLabel={t.tr("Copy config", "复制配置")} disabled={!frpDiagIni} />
+          </div>
+        </div>
+
+        <pre className="diffFrame" style={{ marginTop: 10, maxHeight: 320, overflow: "auto", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+          {frpDiagIni || t.tr("<empty>", "<空>")}
+        </pre>
+
+        <div className="row" style={{ marginTop: 12, justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontWeight: 700 }}>{t.tr("Connectivity tests", "连通性检测")}</div>
+            <div className="hint">{t.tr("Probe TCP reachability from daemon to FRP server.", "从 daemon 探测到 FRP 服务器的 TCP 连通性。")}</div>
+          </div>
+          <div className="btnGroup" style={{ justifyContent: "flex-end" }}>
+            <button
+              type="button"
+              className="iconBtn"
+              onClick={runFrpDiagProbeNow}
+              disabled={!selectedDaemon?.connected || !selectedProfile || frpDiagProbeBusy}
+              title={!selectedProfile ? t.tr("Select an FRP profile first", "请先选择 FRP 配置") : undefined}
+            >
+              <Icon name="refresh" />
+              {t.tr("Probe from daemon", "从 daemon 探测")}
+            </button>
+          </div>
+        </div>
+        {frpDiagProbeStatus ? <div className="hint">{frpDiagProbeStatus}</div> : null}
+        {frpDiagProbeResult ? (
+          <div className="hint" style={{ marginTop: 6 }}>
+            {(() => {
+              const online = (frpDiagProbeResult as any)?.online;
+              const latency = Math.round(Number((frpDiagProbeResult as any)?.latency_ms || 0));
+              const err = String((frpDiagProbeResult as any)?.error || "").trim();
+              if (online === true) {
+                return (
+                  <StatusBadge tone="ok">
+                    {t.tr("online", "在线")} {Number.isFinite(latency) ? `${latency}ms` : ""}
+                  </StatusBadge>
+                );
+              }
+              if (online === false) {
+                return (
+                  <StatusBadge tone="danger">
+                    {t.tr("offline", "离线")} {err ? `· ${err}` : ""}
+                  </StatusBadge>
+                );
+              }
+              return <StatusBadge tone="neutral">{t.tr("unknown", "未知")}</StatusBadge>;
+            })()}
+          </div>
+        ) : null}
+
+        <div style={{ marginTop: 12 }}>
+          <div className="row" style={{ justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+            <div style={{ fontWeight: 700, minWidth: 0 }}>{t.tr("frpc logs tail", "frpc 日志尾")}</div>
+            <CopyButton
+              iconOnly
+              text={frpDiagLogTailText}
+              tooltip={t.tr("Copy logs", "复制日志")}
+              ariaLabel={t.tr("Copy logs", "复制日志")}
+              disabled={!frpDiagLogTailText}
+            />
+          </div>
+          <pre className="diffFrame" style={{ marginTop: 10, maxHeight: 260, overflow: "auto", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+            {frpDiagLogTailText || t.tr("<no logs>", "<无日志>")}
+          </pre>
+        </div>
+      </ManagedModal>
 
       <ManagedModal
         id="logs-bookmarks"

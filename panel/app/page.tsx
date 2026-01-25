@@ -6710,6 +6710,21 @@ export default function HomePage() {
     }
   }
 
+  async function readFrpProxyIniNow(proxyName: string, revealToken = false) {
+    const name = String(proxyName || "").trim();
+    if (!name) throw new Error(t.tr("name is required", "name 不能为空"));
+    return await callOkCommand("frp_read_ini", { name, reveal_token: !!revealToken }, 10_000);
+  }
+
+  async function probeTcpFromDaemonNow(hostRaw: string, portRaw: number, timeoutMs = 1200) {
+    const host = String(hostRaw || "").trim();
+    const port = Math.round(Number(portRaw || 0));
+    if (!host) throw new Error(t.tr("host is required", "host 不能为空"));
+    if (!Number.isFinite(port) || port < 1 || port > 65535) throw new Error(t.tr("port invalid (1-65535)", "port 无效 (1-65535)"));
+    const tms = Math.max(100, Math.min(10_000, Math.round(Number(timeoutMs || 0) || 1200)));
+    return await callOkCommand("net_probe_tcp", { host, port, timeout_ms: tms }, Math.max(3000, tms + 800));
+  }
+
   async function repairInstance(instanceOverride?: string) {
     if (gameActionBusy) return;
     setGameActionBusy(true);
@@ -8693,6 +8708,8 @@ export default function HomePage() {
 		      startFrpProxyNow,
 		      restartFrpProxyNow,
 		      stopFrpProxyNow,
+		      readFrpProxyIniNow,
+		      probeTcpFromDaemonNow,
 		      repairInstance,
 		      updateModrinthPack,
 		  };
