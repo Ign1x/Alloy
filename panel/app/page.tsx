@@ -6636,6 +6636,80 @@ export default function HomePage() {
     }
   }
 
+  async function restartFrpProxyNow(nameOverride?: string, opts?: { localPort?: number; remotePort?: number }) {
+    if (gameActionBusy) return;
+    setGameActionBusy(true);
+    setFrpOpStatus("");
+    try {
+      if (!selectedDaemon?.connected) {
+        setFrpOpStatus(t.tr("daemon offline", "daemon 离线"));
+        return;
+      }
+      const name = String(nameOverride ?? instanceId).trim();
+      if (!name) {
+        setFrpOpStatus(t.tr("name is required", "name 不能为空"));
+        return;
+      }
+
+      const profile = profiles.find((p) => p.id === frpProfileId) || null;
+      if (!profile) {
+        setFrpOpStatus(t.tr("No FRP profile selected", "未选择 FRP 配置"));
+        return;
+      }
+
+      let token = "";
+      try {
+        token = profile?.has_token ? await fetchFrpProfileToken(profile.id) : "";
+      } catch (e: any) {
+        throw new Error(`FRP token: ${String(e?.message || e)}`);
+      }
+
+      const localPort = Math.round(Number(opts?.localPort ?? gamePort ?? 25565));
+      const remotePort = Math.round(Number(opts?.remotePort ?? frpRemotePort ?? 0));
+
+      await callOkCommand(
+        "frp_start",
+        {
+          name,
+          server_addr: profile.server_addr,
+          server_port: Number(profile.server_port),
+          token,
+          local_port: Number.isFinite(localPort) ? localPort : Math.round(Number(gamePort || 25565)),
+          remote_port: Number.isFinite(remotePort) ? remotePort : 0,
+        },
+        30_000
+      );
+      setFrpOpStatus(t.tr("FRP restarted", "FRP 已重启"));
+    } catch (e: any) {
+      setFrpOpStatus(String(e?.message || e));
+    } finally {
+      setGameActionBusy(false);
+    }
+  }
+
+  async function stopFrpProxyNow(nameOverride?: string) {
+    if (gameActionBusy) return;
+    setGameActionBusy(true);
+    setFrpOpStatus("");
+    try {
+      if (!selectedDaemon?.connected) {
+        setFrpOpStatus(t.tr("daemon offline", "daemon 离线"));
+        return;
+      }
+      const name = String(nameOverride ?? instanceId).trim();
+      if (!name) {
+        setFrpOpStatus(t.tr("name is required", "name 不能为空"));
+        return;
+      }
+      await callOkCommand("frp_stop", { name }, 30_000);
+      setFrpOpStatus(t.tr("FRP stopped", "FRP 已停止"));
+    } catch (e: any) {
+      setFrpOpStatus(String(e?.message || e));
+    } finally {
+      setGameActionBusy(false);
+    }
+  }
+
   async function repairInstance(instanceOverride?: string) {
     if (gameActionBusy) return;
     setGameActionBusy(true);
@@ -8615,11 +8689,13 @@ export default function HomePage() {
 	    joinRelPath,
 	    parentRelPath,
 
-      // Game helpers
-	      startFrpProxyNow,
-	      repairInstance,
-	      updateModrinthPack,
-	  };
+	      // Game helpers
+		      startFrpProxyNow,
+		      restartFrpProxyNow,
+		      stopFrpProxyNow,
+		      repairInstance,
+		      updateModrinthPack,
+		  };
 
   return (
     <ErrorBoundary>

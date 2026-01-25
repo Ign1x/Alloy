@@ -225,6 +225,8 @@ export default function GamesView() {
     instanceMetricsStatus,
     restoreBackupNow,
     startFrpProxyNow,
+    restartFrpProxyNow,
+    stopFrpProxyNow,
     repairInstance,
     updateModrinthPack,
     shareMode,
@@ -537,6 +539,24 @@ export default function GamesView() {
       return name === inst || name.startsWith(prefix);
     });
   }, [selectedDaemon, instanceId]);
+
+  const frpProxyLastErrByName = useMemo(() => {
+    const out: Record<string, string> = {};
+    const list = Array.isArray(logs) ? logs : [];
+    const maxScan = 5000;
+    let scanned = 0;
+    for (let i = list.length - 1; i >= 0 && scanned < maxScan; i--, scanned++) {
+      const l: any = list[i];
+      if (l?.source !== "frp") continue;
+      if (String(l?.stream || "") !== "stderr") continue;
+      const name = String(l?.instance || "").trim();
+      if (!name || out[name]) continue;
+      const line = String(l?.line || "").trim();
+      if (!line) continue;
+      out[name] = line.slice(0, 2000);
+    }
+    return out;
+  }, [logs]);
 
   const perf = useMemo(() => {
     const hist = Array.isArray(instanceMetricsHistory) ? instanceMetricsHistory : [];
@@ -2495,17 +2515,70 @@ export default function GamesView() {
             <div style={{ marginTop: 10 }}>
               <div className="hint">{t.tr("FRP proxies for this instance:", "该实例的 FRP proxies：")}</div>
               <div className="stack" style={{ gap: 8, marginTop: 6 }}>
-                {instanceProxies.map((p: any) => (
-                  <div key={`${p.proxy_name}-${p.remote_addr}-${p.remote_port}`} className="row" style={{ gap: 10, flexWrap: "wrap" }}>
-                    <span className={`badge ${p.running ? "ok" : ""}`}>{String(p.proxy_name || "-")}</span>
-                    <code>
-                      {p.remote_addr}:{p.remote_port}
-                    </code>
-                    <span className="hint">
-                      {t.tr("started", "启动")}: <TimeAgo unix={p.started_unix} />
-                    </span>
-                  </div>
-                ))}
+                {instanceProxies.map((p: any) => {
+                  const name = String(p?.proxy_name || "").trim() || "-";
+                  const addr = String(p?.remote_addr || "").trim() || "-";
+                  const remotePort = Math.round(Number(p?.remote_port || 0));
+                  const running = !!p?.running;
+                  const lastErr = name !== "-" ? String(frpProxyLastErrByName?.[name] || "").trim() : "";
+                  return (
+                    <div key={`${name}-${addr}-${remotePort}`} className="itemCard">
+                      <div className="itemCardHeader">
+                        <div style={{ minWidth: 0 }}>
+                          <div className="itemTitle">{name}</div>
+                          <div className="itemMeta">
+                            <code>
+                              {addr}:{remotePort > 0 ? remotePort : "-"}
+                            </code>
+                            {" · "}
+                            <span className="hint">
+                              {t.tr("started", "启动")}: <TimeAgo unix={p.started_unix} />
+                            </span>
+                          </div>
+                        </div>
+                        <div className="btnGroup" style={{ justifyContent: "flex-end" }}>
+                          {running ? <StatusBadge tone="ok">{t.tr("running", "运行中")}</StatusBadge> : <StatusBadge tone="neutral">{t.tr("stopped", "已停止")}</StatusBadge>}
+                        </div>
+                      </div>
+
+                      {lastErr ? (
+                        <div className="hint" style={{ color: "var(--danger)" }}>
+                          {t.tr("last error", "最近错误")}: {lastErr}
+                        </div>
+                      ) : null}
+
+                      <div className="itemFooter">
+                        <div className="btnGroup" style={{ justifyContent: "flex-end" }}>
+                          <button
+                            type="button"
+                            className="iconBtn"
+                            onClick={() => restartFrpProxyNow(name, { remotePort: remotePort > 0 ? remotePort : undefined })}
+                            disabled={!selectedDaemon?.connected || !instanceId.trim() || !selectedProfile || gameActionBusy}
+                            title={!selectedProfile ? t.tr("Select an FRP profile first", "请先选择 FRP 配置") : undefined}
+                          >
+                            <Icon name="refresh" />
+                            {t.tr("Restart", "重启")}
+                          </button>
+                          <button
+                            type="button"
+                            className="dangerBtn"
+                            onClick={async () => {
+                              const ok = await confirmDialog(
+                                t.tr(`Stop FRP proxy "${name}"? Players will be disconnected.`, `停止 FRP proxy「${name}」？玩家将断开连接。`),
+                                { title: t.tr("Stop FRP", "停止 FRP"), confirmLabel: t.tr("Stop", "停止"), cancelLabel: t.tr("Cancel", "取消"), danger: true }
+                              );
+                              if (!ok) return;
+                              stopFrpProxyNow(name);
+                            }}
+                            disabled={!selectedDaemon?.connected || !name || gameActionBusy}
+                          >
+                            {t.tr("Stop", "停止")}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           ) : (
