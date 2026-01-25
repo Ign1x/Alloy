@@ -6858,6 +6858,102 @@ export default function HomePage() {
     }
   }
 
+  async function downloadWorldZip() {
+    if (gameActionBusy) return;
+    if (!selectedDaemon?.connected) {
+      setServerOpStatus(t.tr("daemon offline", "daemon 离线"));
+      return;
+    }
+    const inst = instanceId.trim();
+    if (!inst) {
+      setServerOpStatus(t.tr("instance_id is required", "instance_id 不能为空"));
+      return;
+    }
+
+    setGameActionBusy(true);
+    setServerOpStatus(t.tr("Preparing world download...", "准备下载世界中..."));
+    let zipPath = "";
+    try {
+      let levelName = "world";
+      try {
+        const out = await callOkCommand("fs_read", { path: joinRelPath(inst, "server.properties") }, 10_000);
+        const text = b64DecodeUtf8(String(out?.b64 || ""));
+        const raw = String(getPropValue(text, "level-name") ?? "").trim();
+        const norm = normalizeRelFilePath(raw);
+        if (norm) levelName = norm;
+      } catch {
+        // ignore; fallback to "world"
+      }
+
+      if (instanceStatus?.running) {
+        const ok = await confirmDialog(
+          t.tr(
+            `Server is running. World download might be inconsistent.\n\nWe will send 'save-all' and then zip the world folder: ${levelName}`,
+            `服务端正在运行。下载世界可能会不一致。\n\n将先发送 'save-all'，然后打包世界目录：${levelName}`
+          ),
+          { title: t.tr("Download world", "下载世界"), confirmLabel: t.tr("Continue", "继续"), cancelLabel: t.tr("Cancel", "取消") }
+        );
+        if (!ok) return;
+        try {
+          await callOkCommand("mc_console", { instance_id: inst, line: "save-all" }, 10_000);
+        } catch {
+          // ignore
+        }
+      }
+
+      const worldPath = joinRelPath(inst, levelName);
+      const stDir = await callOkCommand("fs_stat", { path: worldPath }, 10_000);
+      if (!stDir?.isDir) {
+        throw new Error(t.tr(`World folder not found: ${worldPath}`, `未找到世界目录：${worldPath}`));
+      }
+
+      setServerOpStatus(t.tr("Zipping world...", "打包世界中..."));
+      const outZip = await callOkCommand("fs_zip", { path: worldPath }, 10 * 60_000);
+      zipPath = String(outZip?.zip_path || "").trim();
+      if (!zipPath) throw new Error(t.tr("zip_path missing", "zip_path 缺失"));
+
+      const st = await callOkCommand("fs_stat", { path: zipPath }, 10_000);
+      const size = Math.max(0, Number(st?.size || 0));
+      const max = 200 * 1024 * 1024;
+      if (size > max) {
+        throw new Error(
+          t.tr(
+            `World zip too large to download in browser (${fmtBytes(size)} > ${fmtBytes(max)}). File: ${zipPath}`,
+            `世界 zip 过大，无法在浏览器中下载（${fmtBytes(size)} > ${fmtBytes(max)}）。文件：${zipPath}`
+          )
+        );
+      }
+
+      setServerOpStatus(t.tr(`Downloading ${zipPath} ...`, `下载中 ${zipPath} ...`));
+      const payload = await callOkCommand("fs_read", { path: zipPath }, 10 * 60_000);
+      const bytes = b64DecodeBytes(String(payload?.b64 || ""));
+      const blob = new Blob([bytes], { type: "application/zip" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const base = levelName.split("/").filter(Boolean).slice(-1)[0] || "world";
+      a.download = `${inst}-${base}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      pushToast(t.tr(`Downloaded: ${a.download}`, `已下载：${a.download}`), "ok");
+      setServerOpStatus(t.tr("Downloaded", "已下载"));
+      setTimeout(() => setServerOpStatus(""), 900);
+    } catch (e: any) {
+      setServerOpStatus(String(e?.message || e));
+    } finally {
+      if (zipPath) {
+        try {
+          await callOkCommand("fs_delete", { path: zipPath }, 60_000);
+        } catch {
+          // ignore
+        }
+      }
+      setGameActionBusy(false);
+    }
+  }
+
   async function refreshRestoreCandidates(inst: string) {
     const id = String(inst || "").trim();
     if (!id) return;
@@ -8002,9 +8098,10 @@ export default function HomePage() {
 	    deleteServer,
 	    backupServer,
 	    openTrashModal,
-	    openDatapackModal,
-	    openResourcePackModal,
+    openDatapackModal,
+    openResourcePackModal,
     exportInstanceZip,
+    downloadWorldZip,
     openServerPropertiesEditor,
     renameInstance,
     cloneInstance,

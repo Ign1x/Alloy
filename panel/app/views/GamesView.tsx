@@ -173,6 +173,7 @@ export default function GamesView() {
     openDatapackModal,
     openResourcePackModal,
     exportInstanceZip,
+    downloadWorldZip,
     openServerPropertiesEditor,
     renameInstance,
     cloneInstance,
@@ -1635,6 +1636,7 @@ export default function GamesView() {
                 else if (v === "resourcepack") openResourcePackModal();
                 else if (v === "trash") openTrashModal();
                 else if (v === "export") exportInstanceZip();
+                else if (v === "downloadWorld") downloadWorldZip();
                 else if (v === "properties") openServerPropertiesEditor();
                 else if (v === "rename") renameInstance();
                 else if (v === "clone") cloneInstance();
@@ -1655,6 +1657,7 @@ export default function GamesView() {
                 { value: "repair", label: t.tr("Repair…", "修复…"), disabled: !canControl },
                 { value: "trash", label: t.tr("Trash…", "回收站…"), disabled: !selectedDaemon?.connected },
                 { value: "export", label: t.tr("Export zip", "导出 zip"), disabled: !selectedDaemon?.connected || !instanceId.trim() },
+                { value: "downloadWorld", label: t.tr("Download world", "下载世界"), disabled: !selectedDaemon?.connected || !instanceId.trim() },
                 { value: "properties", label: "server.properties…", disabled: !canControl },
                 { value: "rename", label: t.tr("Rename…", "重命名…"), disabled: !canControl },
                 { value: "clone", label: t.tr("Clone…", "克隆…"), disabled: !canControl },
