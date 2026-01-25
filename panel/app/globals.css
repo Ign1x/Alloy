@@ -21,7 +21,7 @@
   --font-size-sm: 13px;
   --font-size-md: 14px;
   --font-size-lg: 16px;
-  --font-size-xl: 22px;
+  --font-size-xl: 24px;
 
   --line-height-tight: 1.25;
   --line-height-normal: 1.45;
@@ -333,8 +333,10 @@ h2 {
 
 h3 {
   font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
   line-height: var(--line-height-tight);
   color: var(--muted);
+  letter-spacing: -0.01em;
 }
 
 .muted {
@@ -1000,7 +1002,7 @@ button.themeCardBtn.selected {
   gap: 8px;
   min-width: 0;
   font-weight: var(--font-weight-bold);
-  font-size: var(--font-size-md);
+  font-size: var(--font-size-lg);
   line-height: var(--line-height-tight);
   letter-spacing: -0.01em;
 }
