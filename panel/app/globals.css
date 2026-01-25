@@ -59,6 +59,15 @@
   --radius: 14px;
   --radius-sm: 11px;
 
+  /* Semantic tokens (preferred usage in components). */
+  --radius-control: var(--radius-sm);
+  --radius-surface: var(--radius);
+  --radius-card: var(--radius-lg);
+
+  --shadow-elev-1: var(--shadow2);
+  --shadow-elev-2: var(--shadow);
+  --focus-ring: 0 0 0 4px var(--ring);
+
   --control-bg: rgba(255, 255, 255, 0.05);
   --control-border: rgba(255, 255, 255, 0.16);
   --control-inset: rgba(0, 0, 0, 0.12);
@@ -347,9 +356,9 @@ h3 {
 .card {
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.018)), var(--card);
   border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-card);
   padding: 14px;
-  box-shadow: var(--shadow2);
+  box-shadow: var(--shadow-elev-1);
   backdrop-filter: blur(10px);
 }
 
@@ -1002,7 +1011,7 @@ button.themeCardBtn.selected {
 
 .offlineBanner {
   padding: 10px 12px;
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-card);
   border: 1px solid var(--danger-border);
   background: rgba(248, 113, 113, 0.10);
   color: var(--text);
@@ -1010,7 +1019,7 @@ button.themeCardBtn.selected {
 
 .statusBanner {
   padding: 10px 12px;
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-card);
   border: 1px solid var(--warn-border);
   background: rgba(245, 158, 11, 0.10);
   color: var(--text);
@@ -1088,7 +1097,7 @@ button.themeCardBtn.selected {
 
 .virtList {
   border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-card);
   background: var(--surface);
   overflow: auto;
 }
@@ -1551,7 +1560,7 @@ textarea,
 select,
 button {
   font: inherit;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-control);
   border: 1px solid var(--control-border);
   background: var(--control-bg);
   color: var(--text);
