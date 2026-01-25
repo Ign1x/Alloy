@@ -11,12 +11,13 @@ import Sparkline from "../ui/Sparkline";
 import TimeAgo from "../ui/TimeAgo";
 import StatusBadge from "../ui/StatusBadge";
 
-type RenderLogLine = { text: string; level: "" | "warn" | "error" };
+type RenderLogLine = { text: string; textLower: string; level: "" | "warn" | "error" };
 
 function highlightText(text: string, qLower: string) {
   const q = String(qLower || "").trim().toLowerCase();
   if (!q) return text;
   const t = String(text || "");
+  if (t.length > 12_000) return text;
   const lower = t.toLowerCase();
   const parts: any[] = [];
   let i = 0;
@@ -43,6 +44,7 @@ function highlightRegex(text: string, re: RegExp) {
   if (!re) return text;
   const t = String(text || "");
   if (!t) return text;
+  if (t.length > 12_000) return text;
 
   const flags = re.flags.includes("g") ? re.flags : `${re.flags}g`;
   let rgx: RegExp;
@@ -705,7 +707,7 @@ export default function GamesView() {
 
   const logLines = useMemo<RenderLogLine[]>(() => {
     const list = filteredLogs.length ? filteredLogs.slice(-2000) : [];
-    if (!list.length) return [{ text: "<no logs>", level: "" }];
+    if (!list.length) return [{ text: "<no logs>", textLower: "<no logs>", level: "" }];
     const baseTs =
       logTimeMode === "relative"
         ? (() => {
@@ -731,15 +733,15 @@ export default function GamesView() {
       const isErr = /\b(ERROR|FATAL)\b/.test(upper) || upper.includes("EXCEPTION") || upper.includes("STACKTRACE");
       const isWarn = /\bWARN(ING)?\b/.test(upper);
       const level: RenderLogLine["level"] = isErr ? "error" : isWarn ? "warn" : "";
-      return { text, level };
+      return { text, textLower: text.toLowerCase(), level };
     });
     if (logLevelFilter === "warn") {
       const out = mapped.filter((l) => l.level === "warn");
-      return out.length ? out : [{ text: "<no logs>", level: "" }];
+      return out.length ? out : [{ text: "<no logs>", textLower: "<no logs>", level: "" }];
     }
     if (logLevelFilter === "error") {
       const out = mapped.filter((l) => l.level === "error");
-      return out.length ? out : [{ text: "<no logs>", level: "" }];
+      return out.length ? out : [{ text: "<no logs>", textLower: "<no logs>", level: "" }];
     }
     return mapped;
   }, [filteredLogs, logLevelFilter, logTimeMode]);
@@ -751,7 +753,7 @@ export default function GamesView() {
       if (!q) return [] as number[];
       const out: number[] = [];
       for (let i = 0; i < logLines.length; i++) {
-        if (String(logLines[i]?.text || "").toLowerCase().includes(q)) out.push(i);
+        if (String(logLines[i]?.textLower || "").includes(q)) out.push(i);
       }
       return out;
     }
@@ -3349,6 +3351,12 @@ export default function GamesView() {
                     const isActive = lineIdx === activeLogMatchLineIdx;
                     const isSelected = !!logSelection && lineIdx >= logSelection.start && lineIdx <= logSelection.end;
                     const cls = `logLine ${highlightLogs ? l.level : ""} ${isSelected ? "selected" : ""} ${isActive ? "activeMatch" : ""}`.trim();
+                    const rawText = String(l.text || "");
+                    const maxDisplayLen = 8000;
+                    const isLong = rawText.length > maxDisplayLen;
+                    const displayText = isLong
+                      ? `${rawText.slice(0, 4000)} … <${rawText.length} chars> … ${rawText.slice(-3500)}`
+                      : rawText;
                     return (
                       <span
                         key={`${lineIdx}`}
@@ -3394,12 +3402,17 @@ export default function GamesView() {
                         <span
                           className="logLineText"
                           style={{ whiteSpace: wrapLogs ? "pre-wrap" : "pre", wordBreak: wrapLogs ? "break-word" : "normal" }}
+                          title={
+                            isLong
+                              ? t.tr("Long line truncated for performance. Use Copy line to copy full.", "超长日志为性能已截断显示。可用“复制该行”获取完整内容。")
+                              : undefined
+                          }
                         >
-                          {logFilter.mode === "text" && logFilter.q
-                            ? highlightText(l.text, logFilter.q)
-                            : logFilter.mode === "regex" && logFilter.re
-                              ? highlightRegex(l.text, logFilter.re)
-                              : l.text}
+                          {highlightLogs && logFilter.mode === "text" && logFilter.q
+                            ? highlightText(displayText, logFilter.q)
+                            : highlightLogs && logFilter.mode === "regex" && logFilter.re
+                              ? highlightRegex(displayText, logFilter.re)
+                              : displayText}
                         </span>
                       </span>
                     );
