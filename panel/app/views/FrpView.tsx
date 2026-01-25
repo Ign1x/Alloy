@@ -253,7 +253,7 @@ function FrpView() {
               const draft = (metaDraftById || {})[p.id] || { tagsRaw: tags.join(", "), note };
               const dirty = String(draft.tagsRaw || "").trim() !== tags.join(", ") || String(draft.note || "") !== note;
               return (
-                <div key={p.id} className="itemCard">
+                <div key={p.id} className="itemCard frpCard">
                   <div className="itemCardHeader">
                     <div style={{ minWidth: 0 }}>
                       <div className="itemTitle">{p.name}</div>
@@ -378,8 +378,8 @@ function FrpView() {
                     </button>
                   </div>
 
-                  <div className="itemFooter">
-                    <div className="btnGroup" style={{ justifyContent: "flex-start" }}>
+                  <div className="itemFooter frpCardFooter">
+                    <div className="btnGroup frpCardActions">
                       <button
                         type="button"
                         onClick={() => {

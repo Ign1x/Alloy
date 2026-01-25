@@ -1534,6 +1534,18 @@ button.themeCardBtn.selected {
   border-top: 1px solid var(--border);
 }
 
+.frpCard .itemCardHeader {
+  align-items: center;
+}
+
+.frpCardFooter {
+  justify-content: flex-end;
+}
+
+.frpCardActions {
+  justify-content: flex-end;
+}
+
 .btnGroup {
   display: flex;
   gap: var(--space-2);
