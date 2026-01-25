@@ -259,7 +259,7 @@ body {
   background: var(--card2);
   color: var(--text);
   text-decoration: none;
-  box-shadow: var(--shadow2);
+  box-shadow: var(--shadow-elev-1);
   transform: translateY(-200%);
   transition: transform 0.15s ease;
 }
@@ -267,7 +267,7 @@ body {
 .skipLink:focus {
   transform: translateY(0);
   outline: none;
-  box-shadow: 0 0 0 4px var(--ring), var(--shadow2);
+  box-shadow: var(--focus-ring), var(--shadow-elev-1);
 }
 
 @media (pointer: fine) {
@@ -389,7 +389,7 @@ h3 {
 .dangerZoneSummary:focus-visible {
   outline: none;
   border-radius: var(--radius);
-  box-shadow: 0 0 0 4px var(--ring);
+  box-shadow: var(--focus-ring);
 }
 
 .dangerZoneSummary::-webkit-details-marker {
@@ -1115,8 +1115,7 @@ button.themeCardBtn.selected {
 }
 
 .virtRow:focus-visible {
-  outline: 2px solid var(--primary-border);
-  outline-offset: -2px;
+  box-shadow: var(--focus-ring);
 }
 
 .virtRow.active {
@@ -1265,6 +1264,12 @@ button.themeCardBtn.selected {
   flex-direction: column;
   gap: var(--space-2);
   min-width: 0;
+}
+
+.itemCard[role="button"]:focus-visible {
+  outline: none;
+  border-color: var(--focus-border);
+  box-shadow: var(--focus-ring);
 }
 
 .sessionCard.current {
@@ -1634,7 +1639,7 @@ select optgroup {
 .uiSelectButton:focus {
   outline: none;
   border-color: var(--focus-border);
-  box-shadow: 0 0 0 4px var(--ring);
+  box-shadow: var(--focus-ring);
 }
 
 .uiSelectValue {
@@ -1717,20 +1722,20 @@ textarea:focus,
 select:focus {
   outline: none;
   border-color: var(--focus-border);
-  box-shadow: 0 0 0 4px var(--ring);
+  box-shadow: var(--focus-ring);
 }
 
 button:focus-visible,
 .uiSelectButton:focus-visible {
   outline: none;
   border-color: var(--focus-border);
-  box-shadow: 0 0 0 4px var(--ring);
+  box-shadow: var(--focus-ring);
 }
 
 button.linkBtn:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 4px var(--ring);
-  border-radius: 10px;
+  box-shadow: var(--focus-ring);
+  border-radius: var(--radius-control);
 }
 
 button {
@@ -1811,7 +1816,7 @@ button.iconOnly {
 }
 
 .sparkWrap:focus-visible {
-  box-shadow: 0 0 0 4px var(--ring);
+  box-shadow: var(--focus-ring);
 }
 
 .sparkTip {
@@ -2231,6 +2236,11 @@ pre.codePre {
   border: 1px solid var(--control-border);
   background: var(--control-bg);
   overflow: hidden;
+}
+
+.editorFrame:focus-within {
+  border-color: var(--focus-border);
+  box-shadow: var(--focus-ring);
 }
 
 .editorGutter {
