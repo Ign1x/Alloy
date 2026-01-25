@@ -1855,6 +1855,16 @@ button.iconOnly {
   vertical-align: -0.12em;
 }
 
+button.iconBtn .ico {
+  width: 16px;
+  height: 16px;
+}
+
+button.iconBtn.iconOnly .ico {
+  width: 18px;
+  height: 18px;
+}
+
 .uiTooltipWrap {
   position: relative;
   display: inline-flex;
