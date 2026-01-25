@@ -2711,13 +2711,16 @@ function GamesView() {
             <Icon name="link" /> {t.tr("Share view", "分享视图")}
           </button>
         </div>
-        <div className="row" style={{ justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+        <div className="row socketRow">
           <code
-            className="clickCopy"
+            className="clickCopy socketCode"
             role="button"
             tabIndex={0}
-            title={t.tr("Click to copy", "点击复制")}
-            style={{ fontSize: 14, padding: "6px 10px" }}
+            title={
+              instanceId.trim()
+                ? `${socketText} · ${t.tr("Click to copy", "点击复制")}`
+                : "-"
+            }
             onClick={() => (instanceId.trim() ? copyText(socketText) : null)}
             onKeyDown={(e) => {
               if (!instanceId.trim()) return;
@@ -2729,7 +2732,7 @@ function GamesView() {
           >
             {instanceId.trim() ? socketText : "-"}
           </code>
-          <CopyButton text={socketText} disabled={!instanceId.trim()} />
+          <CopyButton text={socketText} className="socketCopyBtn" disabled={!instanceId.trim()} />
         </div>
         <div className="hint" style={{ marginTop: 8 }}>
           <span>
