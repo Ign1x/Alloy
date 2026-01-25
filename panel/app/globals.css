@@ -1530,7 +1530,9 @@ button.themeCardBtn.selected {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: var(--space-3);
+  row-gap: var(--space-2);
+  flex-wrap: wrap;
   padding: 10px 12px;
   margin: 10px 0 12px;
   border: 1px solid var(--border);
@@ -1545,6 +1547,21 @@ button.themeCardBtn.selected {
   align-items: center;
   gap: 8px;
   min-width: 0;
+  flex: 1 1 220px;
+}
+
+.gamesStickyMetrics {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--pill-gap);
+  flex-wrap: wrap;
+  flex: 1 1 360px;
+  min-width: 0;
+}
+
+.gamesActionGroup {
+  flex: 1 1 220px;
 }
 
 .gamesStickyTitle {

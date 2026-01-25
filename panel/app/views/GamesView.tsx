@@ -2108,11 +2108,11 @@ function GamesView() {
             <StatusBadge tone={running ? "ok" : "neutral"}>{running ? t.tr("running", "运行中") : t.tr("stopped", "已停止")}</StatusBadge>
           </div>
 
-          <div className="row" style={{ justifyContent: "center", gap: 8, flexWrap: "wrap" }}>
-            <span className="badge">
-              {t.tr("port", "端口")}: <code>{Math.round(Number(gamePort || 25565))}</code>
-            </span>
-            <CopyButton
+	          <div className="gamesStickyMetrics">
+	            <span className="badge">
+	              {t.tr("port", "端口")}: <code>{Math.round(Number(gamePort || 25565))}</code>
+	            </span>
+	            <CopyButton
               iconOnly
               text={`${localHost || "127.0.0.1"}:${Math.round(Number(gamePort || 25565))}`}
               tooltip={t.tr("Copy address", "复制地址")}
