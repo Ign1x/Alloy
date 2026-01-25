@@ -369,7 +369,7 @@ h3 {
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.018)), var(--card);
   border: 1px solid var(--border);
   border-radius: var(--radius-card);
-  padding: 14px;
+  padding: var(--space-4);
   box-shadow: var(--shadow-elev-1);
   backdrop-filter: blur(10px);
 }
@@ -1229,15 +1229,15 @@ button.themeCardBtn.selected {
 .metricGrid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-  margin-top: 10px;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
 }
 
 .metricCard {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--surface);
-  padding: 10px 12px;
+  padding: var(--space-3);
   min-width: 0;
 }
 
