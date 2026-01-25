@@ -1258,6 +1258,75 @@ button.themeCardBtn.selected {
   text-overflow: ellipsis;
 }
 
+.nodeRowSub {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.nodeRowSub .virtRowMetaText {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.nodeRowMetrics {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.nodeMetricPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-size: var(--font-size-2xs);
+  line-height: var(--line-height-tight);
+}
+
+:root[data-density="compact"] .nodeMetricPill {
+  padding: 2px 7px;
+}
+
+.nodeMetricPill.ok {
+  border-color: var(--ok-border);
+  background: rgba(52, 211, 153, 0.10);
+}
+
+.nodeMetricPill.warn {
+  border-color: var(--warn-border);
+  background: rgba(251, 191, 36, 0.10);
+}
+
+.nodeMetricPill.bad {
+  border-color: var(--danger-border);
+  background: rgba(248, 113, 113, 0.10);
+}
+
+.nodeMetricLabel {
+  color: var(--muted2);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.nodeMetricValue {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 520px) {
+  .nodeRowMetrics {
+    display: none;
+  }
+}
+
 .virtRowActions {
   display: flex;
   align-items: center;

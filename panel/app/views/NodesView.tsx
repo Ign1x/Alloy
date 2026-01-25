@@ -213,6 +213,9 @@ function NodesView() {
                 const instances = Array.isArray(hb?.instances) ? hb.instances : [];
                 const memPct = mem?.total_bytes ? pct(mem.used_bytes, mem.total_bytes) : null;
                 const diskPct = disk?.total_bytes ? pct(disk.used_bytes, disk.total_bytes) : null;
+                const cpuKind = cpu == null ? "" : cpu >= 90 ? "bad" : cpu >= 70 ? "warn" : "ok";
+                const memKind = memPct == null ? "" : memPct >= 90 ? "bad" : memPct >= 75 ? "warn" : "ok";
+                const diskKind = diskPct == null ? "" : diskPct >= 92 ? "bad" : diskPct >= 80 ? "warn" : "ok";
                 const isPinned = pinnedSet.has(String(n?.id || ""));
                 const daemonVer = String(n?.hello?.version || "").trim();
                 const panelVer = String(panelInfo?.version || "").trim();
@@ -267,13 +270,30 @@ function NodesView() {
                         ) : null}
                         {isPinned ? <span className="badge">{t.tr("pinned", "已置顶")}</span> : null}
                       </div>
-                      <div className="virtRowSub" title={line}>
+                      <div className="virtRowSub nodeRowSub" title={line}>
                         <span className="virtRowMetaText">
                           {t.tr("last", "最近")}: <TimeAgo unix={n.lastSeenUnix} /> · {t.tr("instances", "实例")}: {instances.length}
                           {daemonVer ? ` · v${daemonVer}` : ""}
-                          {cpu == null ? "" : ` · CPU ${cpu.toFixed(0)}%`}
-                          {memPct == null ? "" : ` · MEM ${memPct.toFixed(0)}%`}
-                          {diskPct == null ? "" : ` · DISK ${diskPct.toFixed(0)}%`}
+                        </span>
+                        <span className="nodeRowMetrics" aria-hidden="true">
+                          {cpu == null ? null : (
+                            <span className={["nodeMetricPill", cpuKind].filter(Boolean).join(" ")}>
+                              <span className="nodeMetricLabel">CPU</span>
+                              <span className="nodeMetricValue">{cpu.toFixed(0)}%</span>
+                            </span>
+                          )}
+                          {memPct == null ? null : (
+                            <span className={["nodeMetricPill", memKind].filter(Boolean).join(" ")}>
+                              <span className="nodeMetricLabel">MEM</span>
+                              <span className="nodeMetricValue">{memPct.toFixed(0)}%</span>
+                            </span>
+                          )}
+                          {diskPct == null ? null : (
+                            <span className={["nodeMetricPill", diskKind].filter(Boolean).join(" ")}>
+                              <span className="nodeMetricLabel">DISK</span>
+                              <span className="nodeMetricValue">{diskPct.toFixed(0)}%</span>
+                            </span>
+                          )}
                         </span>
                       </div>
                     </div>
