@@ -1099,20 +1099,24 @@ button.themeCardBtn.selected {
   min-width: 0;
 }
 
-.offlineBanner {
-  padding: 10px 12px;
+.offlineBanner,
+.statusBanner {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
   border-radius: var(--radius-card);
-  border: 1px solid var(--danger-border);
-  background: rgba(248, 113, 113, 0.10);
   color: var(--text);
 }
 
+.offlineBanner {
+  border: 1px solid var(--danger-border);
+  background: rgba(248, 113, 113, 0.10);
+}
+
 .statusBanner {
-  padding: 10px 12px;
-  border-radius: var(--radius-card);
   border: 1px solid var(--warn-border);
   background: rgba(245, 158, 11, 0.10);
-  color: var(--text);
 }
 
 :root[data-theme="light"] .statusBanner {
