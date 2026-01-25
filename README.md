@@ -290,10 +290,114 @@ ELEGANTMC_BASE_DIR="$PWD/.elegantmc" \
 
 ## Troubleshooting
 
+### 先看日志（最有效）
+
+- Docker：`docker compose ps`、`docker compose logs panel`、`docker compose logs daemon`
+- 非 Docker：直接看 Panel / Daemon 的 stdout
+
+### Nodes 一直 offline（Daemon 连不上 Panel）
+
+**症状**
+
+- Panel 的 **Nodes** 中节点一直显示 `offline`
+- Daemon 日志出现 `dial tcp` / `ws handshake` / `401` / `token` 等错误
+
+**常见原因**
+
+- `ELEGANTMC_PANEL_WS_URL` 配错（端口、路径、`ws://` vs `wss://`）。正确格式：`ws(s)://<host>[:port]/ws/daemon`
+- `daemon_id / token` 不匹配：Daemon 环境变量里的 token 和 Panel **Nodes → Add** 生成的不一致
+- 反向代理未正确转发 WebSocket（缺少 `Upgrade` / `Connection`）
+- 云厂商安全组/防火墙拦截了 Panel 对外端口（80/443/自定义端口）
+
+**排查/修复**
+
+- 先确认 Panel 在 Daemon 所在机器可以访问：`curl -I https://<your-panel-domain>/`
+- 确认 WS 地址：`wss://<your-panel-domain>/ws/daemon`（有 HTTPS）或 `ws://<ip>:<port>/ws/daemon`（仅内网/本机）
+- 确认 token：建议先在 Panel 删除该节点后重新 **Add**，再把最新 token 写回 Daemon 环境变量并重启 Daemon
+- 使用反代时，确保 WebSocket 转发已开启（例如 Nginx 需要 `proxy_set_header Upgrade $http_upgrade;` 等）
+
+### 登录后立刻掉线 / 一直提示未登录
+
+**症状**
+
+- 登录成功后又跳回登录页，或请求一直 `401`
+
+**常见原因**
+
+- 通过 HTTPS 访问 Panel，但没有开启 `ELEGANTMC_PANEL_SECURE_COOKIE=1`（或反过来：用 HTTP 却开启了 Secure Cookie）
+- 域名/反向代理导致 Cookie 域不一致（例如同时用 IP 和域名访问）
+
+**排查/修复**
+
+- HTTPS 部署：设置 `ELEGANTMC_PANEL_SECURE_COOKIE=1`，并统一用域名访问
+- 本机 HTTP 测试：不要设置 `ELEGANTMC_PANEL_SECURE_COOKIE=1`
+
+### MC 客户端连不上（超时/拒绝连接）
+
+**症状**
+
+- Panel 显示已启动，但客户端连接超时 / `Connection refused`
+
+**常见原因**
+
+- 游戏端口没对外开放（防火墙/安全组）
+- Docker 部署时端口未映射到宿主机，或端口被占用
+- 在 Daemon 里设置了自定义 `Game Port`，但宿主机未开放该端口
+
+**排查/修复**
+
+- Docker：确认 `docker-compose.yml` 的端口映射覆盖你配置的端口（默认 `25565-25600`）
+- VPS/物理机：开放对应端口（TCP）并确认无冲突
+- 多网卡/容器网络：配置 `ELEGANTMC_PREFERRED_CONNECT_ADDRS` 让 Panel 展示你希望别人连接的地址
+
+### Files 操作失败（Permission denied / 无法写入）
+
+**症状**
+
+- 上传/删除/保存文件报权限错误，或实例目录无法创建
+
+**常见原因**
+
+- `ELEGANTMC_BASE_DIR` 指向了无写权限目录
+- 绑定挂载（bind mount）的目录 owner/权限不匹配（Docker 容器内用户无法写）
+
+**排查/修复**
+
+- 把 `ELEGANTMC_BASE_DIR` 改到可写目录，或调整目录权限（例如 `chown -R` 到运行用户）
+- 优先使用 Docker volume（比 bind mount 更少权限坑）
+
+### FRP 连接失败 / Socket 不显示公网地址
+
+**症状**
+
+- FRP 状态显示错误、`frpc` 日志提示 `connection refused` / `authentication failed`
+- 朋友无法用公网地址连接
+
+**常见原因**
+
+- `frps` 地址/端口/token 配错，或 `bindPort` 未对外开放
+- `remote_port` 未开放、被占用、或被防火墙拦截
+
+**排查/修复**
+
+- 在 VPS 开放 `bindPort` 以及你使用的 `remote_port`（TCP）
+- 确认 `frps` 配置与 Panel 中保存一致（尤其是 token）
+- 在 Games 页面查看 FRP 相关日志，必要时换一个 `FRP Remote Port`
+
+### Java 版本不匹配（启动报错）
+
 - `UnsupportedClassVersionError (class file version 65)`：需要 Java 21。
   - Docker：已内置 Java 21；
   - 非 Docker：安装 Java 21 并设置 `ELEGANTMC_JAVA_CANDIDATES`，或在 `mc_start` 里传 `java_path`。
-- Vanilla 下载失败（国内）：设置 `ELEGANTMC_MOJANG_META_BASE_URL` / `ELEGANTMC_MOJANG_DATA_BASE_URL` 为国内镜像（如 BMCLAPI）。
+
+### 下载失败/很慢（国内网络）
+
+- Vanilla 下载失败：设置 `ELEGANTMC_MOJANG_META_BASE_URL` / `ELEGANTMC_MOJANG_DATA_BASE_URL` 为国内镜像（如 BMCLAPI）。
+- Modrinth/CurseForge：可设置 `ELEGANTMC_MODRINTH_BASE_URL` / `ELEGANTMC_CURSEFORGE_BASE_URL`；CurseForge 搜索需要 `ELEGANTMC_CURSEFORGE_API_KEY`。
+
+### Panel/Daemon 版本不一致（界面提示 version mismatch）
+
+- 同时升级/回滚 Panel 和 Daemon，确保版本一致（除非 `panel=dev`）。
 
 ## 安全注意事项（必读）
 
