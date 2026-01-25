@@ -2773,6 +2773,9 @@ button.logTopPill:hover {
 }
 
 .modalHeader {
+  position: sticky;
+  top: 0;
+  z-index: 1;
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
@@ -2780,6 +2783,8 @@ button.logTopPill:hover {
   padding: 6px 6px 12px 6px;
   border-bottom: 1px solid var(--border);
   margin-bottom: 12px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02)), var(--card2);
+  backdrop-filter: blur(12px);
 }
 
 .modalBody {
@@ -2790,12 +2795,19 @@ button.logTopPill:hover {
 }
 
 .modalFooter {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
   display: flex;
   justify-content: flex-end;
+  align-items: center;
   gap: var(--space-2);
   padding: 12px 6px 6px 6px;
   border-top: 1px solid var(--border);
   margin-top: 12px;
+  flex-wrap: wrap;
+  background: linear-gradient(0deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02)), var(--card2);
+  backdrop-filter: blur(12px);
 }
 
 .drawerOverlay {
