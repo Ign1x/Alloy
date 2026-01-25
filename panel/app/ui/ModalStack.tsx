@@ -40,11 +40,7 @@ function isFocusable(el: HTMLElement) {
 
 function focusFirstIn(root: HTMLElement | null) {
   if (!root) return;
-  const candidates = Array.from(
-    root.querySelectorAll<HTMLElement>(
-      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-    )
-  );
+  const candidates = listFocusableIn(root);
   for (const el of candidates) {
     if (!isFocusable(el)) continue;
     try {
@@ -58,6 +54,66 @@ function focusFirstIn(root: HTMLElement | null) {
     root.focus();
   } catch {
     // ignore
+  }
+}
+
+function listFocusableIn(root: HTMLElement) {
+  const candidates = Array.from(
+    root.querySelectorAll<HTMLElement>('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')
+  );
+  return candidates.filter((el) => isFocusable(el));
+}
+
+function focusLastIn(root: HTMLElement | null) {
+  if (!root) return;
+  const candidates = listFocusableIn(root);
+  for (let i = candidates.length - 1; i >= 0; i--) {
+    try {
+      candidates[i]!.focus();
+      return;
+    } catch {
+      // ignore
+    }
+  }
+  try {
+    root.focus();
+  } catch {
+    // ignore
+  }
+}
+
+function trapTabKey(e: any, root: HTMLElement | null) {
+  if (!root) return;
+  if (e.key !== "Tab") return;
+
+  const focusables = listFocusableIn(root);
+  const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+
+  if (!focusables.length) {
+    e.preventDefault();
+    try {
+      root.focus();
+    } catch {
+      // ignore
+    }
+    return;
+  }
+
+  const first = focusables[0]!;
+  const last = focusables[focusables.length - 1]!;
+  const idx = active ? focusables.indexOf(active) : -1;
+  const shift = !!e.shiftKey;
+
+  if (shift) {
+    if (idx <= 0) {
+      e.preventDefault();
+      focusLastIn(root);
+    }
+    return;
+  }
+  if (idx < 0 || idx === focusables.length - 1) {
+    e.preventDefault();
+    focusFirstIn(root);
   }
 }
 
@@ -196,6 +252,7 @@ export function ManagedModal({
   children: ReactNode;
 }) {
   const dialogRef = useRef<HTMLDivElement | null>(null);
+  const { isTop } = useModalStack();
   const { zIndex } = useRegisterOverlay({ id, open, kind: "modal", dialogRef, lockScroll });
   if (!open) return null;
   return (
@@ -209,6 +266,17 @@ export function ManagedModal({
         aria-label={ariaLabel}
         tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e: any) => {
+          if (!isTop(id)) return;
+          if (e.key === "Escape") {
+            if (!onOverlayClick) return;
+            e.preventDefault();
+            e.stopPropagation();
+            onOverlayClick(e);
+            return;
+          }
+          trapTabKey(e, dialogRef.current);
+        }}
       >
         {children}
       </div>
@@ -240,6 +308,7 @@ export function ManagedDrawer({
   children: ReactNode;
 }) {
   const dialogRef = useRef<HTMLDivElement | null>(null);
+  const { isTop } = useModalStack();
   const { zIndex } = useRegisterOverlay({ id, open, kind: "drawer", dialogRef, lockScroll });
   if (!open) return null;
   return (
@@ -253,6 +322,17 @@ export function ManagedDrawer({
         aria-label={ariaLabel}
         tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e: any) => {
+          if (!isTop(id)) return;
+          if (e.key === "Escape") {
+            if (!onOverlayClick) return;
+            e.preventDefault();
+            e.stopPropagation();
+            onOverlayClick(e);
+            return;
+          }
+          trapTabKey(e, dialogRef.current);
+        }}
       >
         {children}
       </div>
@@ -284,6 +364,7 @@ export function ManagedLightbox({
   children: ReactNode;
 }) {
   const dialogRef = useRef<HTMLDivElement | null>(null);
+  const { isTop } = useModalStack();
   const { zIndex } = useRegisterOverlay({ id, open, kind: "lightbox", dialogRef, lockScroll });
   if (!open) return null;
   return (
@@ -297,6 +378,17 @@ export function ManagedLightbox({
         aria-label={ariaLabel}
         tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e: any) => {
+          if (!isTop(id)) return;
+          if (e.key === "Escape") {
+            if (!onOverlayClick) return;
+            e.preventDefault();
+            e.stopPropagation();
+            onOverlayClick(e);
+            return;
+          }
+          trapTabKey(e, dialogRef.current);
+        }}
       >
         {children}
       </div>
