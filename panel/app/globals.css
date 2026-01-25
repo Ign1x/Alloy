@@ -641,6 +641,18 @@ button.navItem.active {
   color: var(--text);
 }
 
+button.navItem.active::after {
+  content: "";
+  position: absolute;
+  left: 6px;
+  top: 8px;
+  bottom: 8px;
+  width: 4px;
+  border-radius: 999px;
+  background: var(--primary);
+  box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.18);
+}
+
 button.navItem .badge {
   padding: 3px 8px;
   font-size: var(--font-size-2xs);
