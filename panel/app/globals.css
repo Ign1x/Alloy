@@ -3730,6 +3730,34 @@ button.linkBtn.breadcrumbBtn:hover {
   min-width: 76px;
 }
 
+.dropzone {
+  margin-top: 10px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  padding: 10px;
+  background: transparent;
+  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+}
+
+.dropzone:hover:not(.disabled) {
+  border-color: var(--border2);
+  background: var(--surface);
+}
+
+.dropzone.dragOver {
+  border-color: var(--ok);
+  background: rgba(34, 197, 94, 0.10);
+  box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.14);
+}
+
+:root[data-theme="light"] .dropzone.dragOver {
+  background: rgba(34, 197, 94, 0.08);
+}
+
+.dropzone.disabled {
+  opacity: 0.65;
+}
+
 :root[data-theme="contrast"] th {
   background: var(--surface2);
   color: var(--muted);

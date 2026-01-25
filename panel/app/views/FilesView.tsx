@@ -1474,19 +1474,16 @@ function FilesView() {
       </div>
 
       <div
-        style={{
-          marginTop: 10,
-          border: dragOver ? "2px dashed var(--ok)" : "1px dashed var(--border)",
-          borderRadius: 12,
-          padding: 10,
-          background: dragOver ? "rgba(46, 204, 113, 0.08)" : "transparent",
-        }}
+        className={["dropzone", dragOver ? "dragOver" : "", uploadBusy || !selected ? "disabled" : ""].filter(Boolean).join(" ")}
+        aria-disabled={uploadBusy || !selected}
         onDragEnter={(e) => {
           e.preventDefault();
+          if (uploadBusy || !selected) return;
           setDragOver(true);
         }}
         onDragOver={(e) => {
           e.preventDefault();
+          if (uploadBusy || !selected) return;
           setDragOver(true);
         }}
         onDragLeave={(e) => {
@@ -1496,6 +1493,7 @@ function FilesView() {
         onDrop={(e) => {
           e.preventDefault();
           setDragOver(false);
+          if (uploadBusy || !selected) return;
           const files = e.dataTransfer?.files;
           if (files && files.length) uploadFilesNow(files);
         }}
@@ -1505,7 +1503,7 @@ function FilesView() {
             key={uploadInputKey}
             type="file"
             multiple
-            disabled={uploadBusy}
+            disabled={uploadBusy || !selected}
             onChange={(e: any) => {
               const list = Array.from(e.target.files || []);
               if (!list.length) {
