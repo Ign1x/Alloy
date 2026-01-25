@@ -12596,8 +12596,8 @@ export default function HomePage() {
 	                    <button
 	                      type="button"
 	                      className="iconBtn iconOnly"
-	                      title={t.tr("Copy token", "复制 token")}
-	                      aria-label={t.tr("Copy token", "复制 token")}
+	                      title={t.tr(`Copy token for node ${createdNode.id}`, `复制节点 ${createdNode.id} 的 token`)}
+	                      aria-label={t.tr(`Copy token for node ${createdNode.id}`, `复制节点 ${createdNode.id} 的 token`)}
 	                      onClick={async () => {
 	                        await copyText(createdNode.token);
 	                        setNodesStatus(t.tr("Copied", "已复制"));

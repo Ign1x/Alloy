@@ -2081,8 +2081,20 @@ export default function GamesView() {
             <button
               type="button"
               className="iconBtn iconOnly"
-              title={favoriteSet.has(instanceId.trim()) ? t.tr("Unfavorite", "取消收藏") : t.tr("Favorite", "收藏")}
-              aria-label={favoriteSet.has(instanceId.trim()) ? t.tr("Unfavorite", "取消收藏") : t.tr("Favorite", "收藏")}
+              title={
+                instanceId.trim()
+                  ? favoriteSet.has(instanceId.trim())
+                    ? t.tr(`Unfavorite instance ${instanceId.trim()}`, `取消收藏实例 ${instanceId.trim()}`)
+                    : t.tr(`Favorite instance ${instanceId.trim()}`, `收藏实例 ${instanceId.trim()}`)
+                  : t.tr("Favorite", "收藏")
+              }
+              aria-label={
+                instanceId.trim()
+                  ? favoriteSet.has(instanceId.trim())
+                    ? t.tr(`Unfavorite instance ${instanceId.trim()}`, `取消收藏实例 ${instanceId.trim()}`)
+                    : t.tr(`Favorite instance ${instanceId.trim()}`, `收藏实例 ${instanceId.trim()}`)
+                  : t.tr("Favorite", "收藏")
+              }
               onClick={() => toggleFavoriteInstance(instanceId.trim())}
               disabled={!instanceId.trim()}
             >
@@ -3284,8 +3296,12 @@ export default function GamesView() {
                   </tr>
                 </thead>
                 <tbody>
-                  {whitelistEntries.map((p) => (
-                    <tr key={`${p.uuid}-${p.name}`}>
+                  {whitelistEntries.map((p) => {
+                    const entryLabel = p.name && p.uuid ? `${p.name} (${p.uuid})` : p.name || p.uuid || "-";
+                    const copyLabel = t.tr(`Copy whitelist entry ${entryLabel}`, `复制白名单条目 ${entryLabel}`);
+                    const removeLabel = t.tr(`Remove whitelist entry ${entryLabel}`, `移除白名单条目 ${entryLabel}`);
+                    return (
+                      <tr key={`${p.uuid}-${p.name}`}>
                       <td>
                         <code>{p.name || "-"}</code>
                       </td>
@@ -3294,12 +3310,12 @@ export default function GamesView() {
                       </td>
                       <td style={{ textAlign: "right" }}>
                         <div className="btnGroup">
-                          <CopyButton iconOnly text={String(p.uuid || p.name || "")} />
+                          <CopyButton iconOnly text={String(p.uuid || p.name || "")} tooltip={copyLabel} ariaLabel={copyLabel} />
                           <button
                             type="button"
                             className="dangerBtn iconBtn iconOnly"
-                            title={t.tr("Remove", "移除")}
-                            aria-label={t.tr("Remove", "移除")}
+                            title={removeLabel}
+                            aria-label={removeLabel}
                             onClick={() => {
                               setWhitelistEntries((prev) => (prev || []).filter((x) => !(x.uuid === p.uuid && x.name === p.name)));
                               setWhitelistDirty(true);
@@ -3310,7 +3326,8 @@ export default function GamesView() {
                         </div>
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             ) : (
@@ -3376,8 +3393,12 @@ export default function GamesView() {
                   </tr>
                 </thead>
                 <tbody>
-                  {opsEntries.map((p) => (
-                    <tr key={`${p.uuid}-${p.name}`}>
+                  {opsEntries.map((p) => {
+                    const entryLabel = p.name && p.uuid ? `${p.name} (${p.uuid})` : p.name || p.uuid || "-";
+                    const copyLabel = t.tr(`Copy op entry ${entryLabel}`, `复制 OP 条目 ${entryLabel}`);
+                    const removeLabel = t.tr(`Remove op entry ${entryLabel}`, `移除 OP 条目 ${entryLabel}`);
+                    return (
+                      <tr key={`${p.uuid}-${p.name}`}>
                       <td>
                         <code>{p.name || "-"}</code>
                       </td>
@@ -3390,12 +3411,12 @@ export default function GamesView() {
                       <td className="muted">{p.bypassesPlayerLimit ? t.tr("yes", "是") : t.tr("no", "否")}</td>
                       <td style={{ textAlign: "right" }}>
                         <div className="btnGroup">
-                          <CopyButton iconOnly text={String(p.uuid || p.name || "")} />
+                          <CopyButton iconOnly text={String(p.uuid || p.name || "")} tooltip={copyLabel} ariaLabel={copyLabel} />
                           <button
                             type="button"
                             className="dangerBtn iconBtn iconOnly"
-                            title={t.tr("Remove", "移除")}
-                            aria-label={t.tr("Remove", "移除")}
+                            title={removeLabel}
+                            aria-label={removeLabel}
                             onClick={() => {
                               setOpsEntries((prev) => (prev || []).filter((x) => !(x.uuid === p.uuid && x.name === p.name)));
                               setOpsDirty(true);
@@ -3406,7 +3427,8 @@ export default function GamesView() {
                         </div>
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             ) : (
@@ -3697,6 +3719,10 @@ export default function GamesView() {
                 <pre style={{ margin: 0 }}>
                   {logVirtual.visible.map((l, idx) => {
                     const lineIdx = logVirtual.start + idx;
+                    const lineNo = lineIdx + 1;
+                    const inst = instanceId.trim();
+                    const instSuffixEn = inst ? ` (${inst})` : "";
+                    const instSuffixZh = inst ? `（实例 ${inst}）` : "";
                     const isActive = lineIdx === activeLogMatchLineIdx;
                     const isSelected = !!logSelection && lineIdx >= logSelection.start && lineIdx <= logSelection.end;
                     const cls = `logLine ${highlightLogs ? l.level : ""} ${isSelected ? "selected" : ""} ${isActive ? "activeMatch" : ""}`.trim();
@@ -3740,8 +3766,8 @@ export default function GamesView() {
                         <button
                           type="button"
                           className="logLineCopyBtn"
-                          title={t.tr("Copy line", "复制该行")}
-                          aria-label={t.tr("Copy line", "复制该行")}
+                          title={t.tr(`Copy line ${lineNo}${instSuffixEn}`, `复制第 ${lineNo} 行${instSuffixZh}`)}
+                          aria-label={t.tr(`Copy line ${lineNo}${instSuffixEn}`, `复制第 ${lineNo} 行${instSuffixZh}`)}
                           onClick={(e: any) => {
                             e.stopPropagation();
                             copyText(l.text);
@@ -3752,8 +3778,16 @@ export default function GamesView() {
                         <button
                           type="button"
                           className={`logLineBookmarkBtn ${isBookmarked ? "active" : ""}`.trim()}
-                          title={isBookmarked ? t.tr("Remove bookmark", "移除书签") : t.tr("Bookmark", "添加书签")}
-                          aria-label={isBookmarked ? t.tr("Remove bookmark", "移除书签") : t.tr("Bookmark", "添加书签")}
+                          title={
+                            isBookmarked
+                              ? t.tr(`Remove bookmark from line ${lineNo}${instSuffixEn}`, `移除第 ${lineNo} 行书签${instSuffixZh}`)
+                              : t.tr(`Bookmark line ${lineNo}${instSuffixEn}`, `为第 ${lineNo} 行添加书签${instSuffixZh}`)
+                          }
+                          aria-label={
+                            isBookmarked
+                              ? t.tr(`Remove bookmark from line ${lineNo}${instSuffixEn}`, `移除第 ${lineNo} 行书签${instSuffixZh}`)
+                              : t.tr(`Bookmark line ${lineNo}${instSuffixEn}`, `为第 ${lineNo} 行添加书签${instSuffixZh}`)
+                          }
                           onClick={(e: any) => {
                             e.stopPropagation();
                             toggleLogBookmark(lineIdx, rawText);
@@ -4197,6 +4231,14 @@ export default function GamesView() {
             {filteredLogBookmarks.slice(0, 200).map((b) => {
               const text = String(b.text || "");
               const preview = text.length > 10_000 ? `${text.slice(0, 5000)}\n… <${text.length} chars> …\n${text.slice(-4500)}` : text;
+              const lineNo = Math.max(0, Math.round(Number(b.lineIdxHint || 0) || 0)) + 1;
+              const label = String(b.label || "").trim();
+              const copyLabel = label
+                ? t.tr(`Copy bookmark #${lineNo}: ${label}`, `复制书签 #${lineNo}：${label}`)
+                : t.tr(`Copy bookmark #${lineNo}`, `复制书签 #${lineNo}`);
+              const removeLabel = label
+                ? t.tr(`Remove bookmark #${lineNo}: ${label}`, `移除书签 #${lineNo}：${label}`)
+                : t.tr(`Remove bookmark #${lineNo}`, `移除书签 #${lineNo}`);
               return (
                 <div key={b.id} className="itemCard">
                   <div className="itemCardHeader" style={{ alignItems: "flex-start" }}>
@@ -4226,12 +4268,12 @@ export default function GamesView() {
                       <button type="button" onClick={() => jumpToBookmark(b)} disabled={!instanceId.trim()}>
                         {t.tr("Jump", "跳转")}
                       </button>
-                      <CopyButton iconOnly text={text} tooltip={t.tr("Copy", "复制")} ariaLabel={t.tr("Copy", "复制")} disabled={!text} />
+                      <CopyButton iconOnly text={text} tooltip={copyLabel} ariaLabel={copyLabel} disabled={!text} />
                       <button
                         type="button"
                         className="dangerBtn iconBtn iconOnly"
-                        title={t.tr("Remove", "移除")}
-                        aria-label={t.tr("Remove", "移除")}
+                        title={removeLabel}
+                        aria-label={removeLabel}
                         onClick={() => setLogBookmarks((prev) => (prev || []).filter((x) => x.id !== b.id))}
                       >
                         <Icon name="trash" />

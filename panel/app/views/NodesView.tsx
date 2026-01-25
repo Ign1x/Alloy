@@ -163,6 +163,7 @@ export default function NodesView() {
 	              const daemonVer = String(n?.hello?.version || "").trim();
 	              const panelVer = String(panelInfo?.version || "").trim();
 	              const verMismatch = !!daemonVer && !!panelVer && daemonVer !== panelVer && panelVer !== "dev";
+                const nodeId = String(n?.id || "");
 	              return (
 	                <div key={n.id} className="itemCard" style={{ opacity: n.connected ? 1 : 0.78 }}>
 	                  <div className="itemCardHeader">
@@ -177,10 +178,14 @@ export default function NodesView() {
 	                      <button
 	                        type="button"
 	                        className="iconBtn iconOnly"
-	                        title={isPinned ? t.tr("Unpin node", "取消置顶") : t.tr("Pin node", "置顶节点")}
-	                        aria-label={isPinned ? t.tr("Unpin node", "取消置顶") : t.tr("Pin node", "置顶节点")}
+	                        title={
+                            isPinned ? t.tr(`Unpin node ${nodeId}`, `取消置顶节点 ${nodeId}`) : t.tr(`Pin node ${nodeId}`, `置顶节点 ${nodeId}`)
+                          }
+	                        aria-label={
+                            isPinned ? t.tr(`Unpin node ${nodeId}`, `取消置顶节点 ${nodeId}`) : t.tr(`Pin node ${nodeId}`, `置顶节点 ${nodeId}`)
+                          }
 	                        aria-pressed={isPinned}
-	                        onClick={() => togglePinnedDaemon(String(n?.id || ""))}
+	                        onClick={() => togglePinnedDaemon(nodeId)}
 	                      >
 	                        <Icon name="pin" />
 	                      </button>
@@ -240,8 +245,8 @@ export default function NodesView() {
                       <button
                         type="button"
                         className="iconBtn iconOnly"
-                        title={t.tr("Copy token", "复制 token")}
-                        aria-label={t.tr("Copy token", "复制 token")}
+                        title={t.tr(`Copy token for node ${nodeId}`, `复制节点 ${nodeId} 的 token`)}
+                        aria-label={t.tr(`Copy token for node ${nodeId}`, `复制节点 ${nodeId} 的 token`)}
                         onClick={async () => {
                           const ok = await confirmDialog(t.tr(`Reveal and copy token for node ${n.id}?`, `显示并复制节点 ${n.id} 的 token？`), {
                             title: t.tr("Reveal Token", "显示 Token"),
