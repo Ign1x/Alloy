@@ -1636,6 +1636,75 @@ button.themeCardBtn.selected {
   flex-wrap: wrap;
 }
 
+.installStepper {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+
+.installStep {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: var(--pill-pad-y) var(--pill-pad-x);
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted);
+  font-size: var(--font-size-xs);
+  line-height: var(--line-height-tight);
+  white-space: nowrap;
+}
+
+.installStep.active {
+  border-color: var(--primary-border);
+  background: var(--ring);
+  color: var(--text);
+}
+
+.installStep.done {
+  border-color: var(--ok-border);
+  background: rgba(34, 197, 94, 0.10);
+  color: var(--text);
+}
+
+.installStepIndex {
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  font-size: var(--font-size-2xs);
+  font-weight: var(--font-weight-bold);
+  line-height: var(--line-height-tight);
+}
+
+.installStep.active .installStepIndex {
+  border-color: var(--primary-border);
+  background: var(--primary);
+  color: rgba(255, 255, 255, 0.96);
+}
+
+:root[data-theme="contrast"] .installStep.active .installStepIndex {
+  color: rgba(0, 0, 0, 0.92);
+}
+
+.installStep.done .installStepIndex {
+  border-color: var(--ok-border);
+  background: var(--ok);
+  color: rgba(0, 0, 0, 0.88);
+}
+
+.installStep:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .chipRow {
   display: flex;
   gap: var(--pill-gap);

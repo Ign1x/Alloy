@@ -11007,11 +11007,38 @@ export default function HomePage() {
 	                  </button>
 	                </div>
 
-                <div className="row" style={{ marginTop: 6 }}>
-                  <span className={`badge ${installStep === 1 ? "ok" : ""}`}>1 {t.tr("Basic", "基础")}</span>
-                  <span className={`badge ${installStep === 2 ? "ok" : ""}`}>2 {t.tr("Runtime", "运行时")}</span>
-                  <span className={`badge ${installStep === 3 ? "ok" : ""}`}>3 FRP</span>
-                </div>
+	                <div className="installStepper" aria-label={t.tr("Steps", "步骤")}>
+	                  <button
+	                    type="button"
+	                    className={`installStep ${installStep === 1 ? "active" : installStep > 1 ? "done" : ""}`.trim()}
+	                    aria-current={installStep === 1 ? "step" : undefined}
+	                    onClick={() => setInstallStep(1)}
+	                    disabled={installRunning}
+	                  >
+	                    <span className="installStepIndex">1</span>
+	                    {t.tr("Basic", "基础")}
+	                  </button>
+	                  <button
+	                    type="button"
+	                    className={`installStep ${installStep === 2 ? "active" : installStep > 2 ? "done" : ""}`.trim()}
+	                    aria-current={installStep === 2 ? "step" : undefined}
+	                    onClick={() => setInstallStep(2)}
+	                    disabled={installRunning || (installStep < 2 && !installWizardStep1Ok)}
+	                  >
+	                    <span className="installStepIndex">2</span>
+	                    {t.tr("Runtime", "运行时")}
+	                  </button>
+	                  <button
+	                    type="button"
+	                    className={`installStep ${installStep === 3 ? "active" : ""}`.trim()}
+	                    aria-current={installStep === 3 ? "step" : undefined}
+	                    onClick={() => setInstallStep(3)}
+	                    disabled={installRunning || (installStep < 3 && !installWizardStep2Ok)}
+	                  >
+	                    <span className="installStepIndex">3</span>
+	                    FRP
+	                  </button>
+	                </div>
 
                 <div className="grid2" style={{ alignItems: "start", marginTop: 10 }}>
                   {installStep === 1 ? (
