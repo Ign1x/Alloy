@@ -1700,6 +1700,13 @@ function FilesView() {
                   ? fileListVirtual.visible.map((e: any, idx: number) => (
                       <tr
                         key={`${fileListVirtual.start + idx}-${e.name}-${e.isDir ? "d" : "f"}`}
+                        className={[
+                          "fileRow",
+                          e.isDir ? "dir" : "file",
+                          selectedSet.has(String(e?.name || "").trim()) ? "selected" : "",
+                        ]
+                          .filter(Boolean)
+                          .join(" ")}
                         onContextMenu={(ev) => {
                           ev.preventDefault();
                           setCtxMenu({ x: ev.clientX, y: ev.clientY, entry: e });
@@ -1713,12 +1720,25 @@ function FilesView() {
                             aria-label={t.tr("Select", "选择")}
                           />
                         </td>
-                        <td>
-                          <button type="button" onClick={() => openEntry(e)} className="linkBtn">
-                            {e.name}
-                          </button>
+                        <td className="fileNameCell">
+                          <div className="fileNameWrap">
+                            <span className={`fileKindIcon ${e.isDir ? "dir" : "file"}`} aria-hidden="true">
+                              <Icon name={e.isDir ? "folder" : "file"} />
+                            </span>
+                            <button type="button" onClick={() => openEntry(e)} className="linkBtn fileNameLink" title={String(e.name || "")}>
+                              {e.name}
+                            </button>
+                          </div>
                         </td>
-                        <td>{e.isDir ? "dir" : "file"}</td>
+                        <td>
+                          <span className={`fileTypeBadge ${e.isDir ? "dir" : "file"}`}>
+                            {e.isDir
+                              ? "DIR"
+                              : String(e?.name || "").trim().includes(".")
+                                ? String(e.name).trim().split(".").pop()?.slice(0, 8)?.toUpperCase() || "FILE"
+                                : "FILE"}
+                          </span>
+                        </td>
                         <td>{e.isDir ? "-" : fmtBytes(Number(e.size || 0))}</td>
                         <td><TimeAgo unix={Number(e.mtime_unix || 0)} /></td>
                         <td style={{ textAlign: "right" }}>

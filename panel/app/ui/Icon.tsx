@@ -6,6 +6,8 @@ export type IconName =
   | "copy"
   | "download"
   | "trash"
+  | "file"
+  | "folder"
   | "settings"
   | "search"
   | "menu"
@@ -101,6 +103,34 @@ export default function Icon({ name, size = 14 }: { name: IconName; size?: numbe
             stroke="currentColor"
             strokeWidth="2"
             strokeLinecap="round"
+          />
+        </svg>
+      );
+    case "file":
+      return (
+        <svg {...common}>
+          <path
+            d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinejoin="round"
+          />
+          <path
+            d="M14 2v6h6"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinejoin="round"
+          />
+        </svg>
+      );
+    case "folder":
+      return (
+        <svg {...common}>
+          <path
+            d="M3 7a2 2 0 0 1 2-2h5l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinejoin="round"
           />
         </svg>
       );

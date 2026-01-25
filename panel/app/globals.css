@@ -3581,6 +3581,90 @@ tr:hover td {
   background: var(--surface2);
 }
 
+.fileRow td {
+  vertical-align: middle;
+}
+
+.fileRow.selected td {
+  background: rgba(139, 92, 246, 0.10);
+}
+
+.fileRow.selected:hover td {
+  background: rgba(139, 92, 246, 0.14);
+}
+
+:root[data-theme="light"] .fileRow.selected td {
+  background: rgba(139, 92, 246, 0.08);
+}
+
+:root[data-theme="light"] .fileRow.selected:hover td {
+  background: rgba(139, 92, 246, 0.12);
+}
+
+.fileNameCell {
+  min-width: 0;
+}
+
+.fileNameWrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.fileKindIcon {
+  width: 30px;
+  height: 30px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+
+.fileKindIcon.dir {
+  border-color: var(--primary-border);
+  background: rgba(139, 92, 246, 0.10);
+}
+
+button.linkBtn.fileNameLink {
+  color: var(--text);
+  text-decoration: none;
+  font-weight: var(--font-weight-semibold);
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+button.linkBtn.fileNameLink:hover {
+  color: var(--text);
+  text-decoration: underline;
+}
+
+.fileTypeBadge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted);
+  font-size: var(--font-size-2xs);
+  line-height: var(--line-height-tight);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.fileTypeBadge.dir {
+  border-color: var(--primary-border);
+  background: rgba(139, 92, 246, 0.10);
+  color: var(--text);
+}
+
 :root[data-theme="contrast"] th {
   background: var(--surface2);
   color: var(--muted);
