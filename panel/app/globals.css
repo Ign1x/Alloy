@@ -1546,6 +1546,49 @@ button.themeCardBtn.selected {
   justify-content: flex-end;
 }
 
+.frpStatusRow {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.frpChipLabel {
+  color: var(--muted2);
+  font-size: var(--font-size-2xs);
+  line-height: var(--line-height-tight);
+}
+
+.frpLatencyChip {
+  border-color: var(--ok-border);
+  background: rgba(34, 197, 94, 0.10);
+}
+
+:root[data-theme="light"] .frpLatencyChip {
+  background: rgba(34, 197, 94, 0.08);
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) .frpLatencyChip {
+    background: rgba(34, 197, 94, 0.08);
+  }
+}
+
+.frpLatencyRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.frpLatencySpark {
+  flex: 1 1 auto;
+  min-width: 160px;
+}
+
 .btnGroup {
   display: flex;
   gap: var(--space-2);

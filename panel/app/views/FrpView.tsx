@@ -264,9 +264,13 @@ function FrpView() {
                       </div>
                     </div>
                     {online === true ? (
-                      <StatusBadge tone="ok">
-                        {t.tr("online", "在线")} {latency}ms
-                      </StatusBadge>
+                      <div className="frpStatusRow">
+                        <StatusBadge tone="ok">{t.tr("online", "在线")}</StatusBadge>
+                        <span className="metricChip frpLatencyChip" aria-label={`${t.tr("Latency", "延迟")}: ${latency}ms`}>
+                          <span className="frpChipLabel">{t.tr("Latency", "延迟")}</span>
+                          <span className="metricChipValue">{latency}ms</span>
+                        </span>
+                      </div>
                     ) : online === false ? (
                       <StatusBadge tone="danger">{t.tr("offline", "离线")}</StatusBadge>
                     ) : (
@@ -280,10 +284,13 @@ function FrpView() {
                   {p.status?.error && online === false ? <div className="hint">{p.status.error}</div> : null}
 
                   {hist.length ? (
-                    <div className="row" style={{ gap: 10, flexWrap: "wrap", alignItems: "center", marginTop: 8 }}>
-                      <Sparkline values={histValues} width={180} height={30} min={0} max={sparkMax} windowSize={60} />
-                      <span className="hint">
-                        {t.tr("jitter", "抖动")}: <code>{jitterMs ? `${jitterMs}ms` : "-"}</code>
+                    <div className="frpLatencyRow">
+                      <div className="frpLatencySpark">
+                        <Sparkline values={histValues} width={220} height={34} min={0} max={sparkMax} windowSize={60} />
+                      </div>
+                      <span className="metricChip frpJitterChip">
+                        <span className="frpChipLabel">{t.tr("jitter", "抖动")}</span>
+                        <span className="metricChipValue">{jitterMs ? `${jitterMs}ms` : "-"}</span>
                       </span>
                     </div>
                   ) : null}
