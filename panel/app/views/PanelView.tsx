@@ -22,6 +22,7 @@ function PanelView() {
 
   const [draft, setDraft] = useState<any>(panelSettings || null);
   const [settingsQuery, setSettingsQuery] = useState<string>("");
+  const [activeTocId, setActiveTocId] = useState<string>("panel-updates");
   const [scheduleText, setScheduleText] = useState<string>("");
   const [scheduleStatus, setScheduleStatus] = useState<string>("");
   const [schedulePath, setSchedulePath] = useState<string>("");
@@ -714,6 +715,19 @@ function PanelView() {
   const q = settingsQuery.trim().toLowerCase();
   const show = (...terms: string[]) => !q || terms.some((t) => String(t || "").toLowerCase().includes(q));
 
+  const showBrandSettings =
+    show("brand name", "brand", "title", "sidebar") ||
+    show("brand tagline", "tagline") ||
+    show("logo", "logo url", "icon");
+  const showCfSettings = show("curseforge", "api key", "cf_");
+  const showDefaultsSettings =
+    show("default version", "version") ||
+    show("default game port", "port", "25565") ||
+    show("default memory", "memory", "xms", "xmx") ||
+    show("eula", "accept eula") ||
+    show("frp", "default frp") ||
+    show("frp remote port", "remote port", "25566");
+
   const filteredApiTokens = useMemo(() => {
     const q = apiTokenQuery.trim().toLowerCase();
     if (!q) return apiTokens;
@@ -1060,19 +1074,45 @@ function PanelView() {
     return out || t.tr("Unknown device", "未知设备");
   }
 
-  const toc = [
-    { id: "panel-updates", label: t.tr("Updates", "更新") },
-    { id: "panel-settings", label: t.tr("Panel", "面板") },
-    { id: "panel-security-headers", label: t.tr("Security Headers", "安全响应头") },
-    { id: "panel-users", label: t.tr("Users", "用户") },
-    { id: "panel-tokens", label: t.tr("API Tokens", "API Tokens") },
-    { id: "panel-tasks", label: t.tr("Tasks", "任务") },
-    { id: "panel-sessions", label: t.tr("Sessions", "会话") },
-    { id: "panel-activity", label: t.tr("Activity", "活动") },
-    { id: "panel-audit", label: t.tr("Audit Log", "审计日志") },
-  ];
+  const toc = useMemo(
+    () => [
+      { id: "panel-updates", label: t.tr("Updates", "更新") },
+      { id: "panel-settings", label: t.tr("Panel", "面板") },
+      { id: "panel-security-headers", label: t.tr("Security Headers", "安全响应头") },
+      { id: "panel-users", label: t.tr("Users", "用户") },
+      { id: "panel-tokens", label: t.tr("API Tokens", "API Tokens") },
+      { id: "panel-tasks", label: t.tr("Tasks", "任务") },
+      { id: "panel-sessions", label: t.tr("Sessions", "会话") },
+      { id: "panel-activity", label: t.tr("Activity", "活动") },
+      { id: "panel-audit", label: t.tr("Audit Log", "审计日志") },
+    ],
+    [t]
+  );
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (typeof IntersectionObserver === "undefined") return;
+    const els = toc
+      .map((x) => document.getElementById(x.id))
+      .filter((x): x is HTMLElement => !!x);
+    if (!els.length) return;
+
+    const obs = new IntersectionObserver(
+      (entries) => {
+        const best = entries
+          .filter((e) => e.isIntersecting)
+          .sort((a, b) => (b.intersectionRatio || 0) - (a.intersectionRatio || 0))[0];
+        if (best?.target instanceof HTMLElement) setActiveTocId(best.target.id);
+      },
+      { root: null, threshold: [0.01, 0.1, 0.25], rootMargin: "-20% 0px -70% 0px" }
+    );
+
+    for (const el of els) obs.observe(el);
+    return () => obs.disconnect();
+  }, [toc]);
 
   function scrollToPanelSection(id: string) {
+    setActiveTocId(id);
     try {
       document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
     } catch {
@@ -1087,7 +1127,13 @@ function PanelView() {
           <div className="hint">{t.tr("On this page", "本页导航")}</div>
           <div className="panelTocNav">
             {toc.map((x) => (
-              <button key={x.id} type="button" className="ghost" style={{ justifyContent: "flex-start", width: "100%" }} onClick={() => scrollToPanelSection(x.id)}>
+              <button
+                key={x.id}
+                type="button"
+                className={["ghost", "panelTocBtn", x.id === activeTocId ? "active" : ""].filter(Boolean).join(" ")}
+                onClick={() => scrollToPanelSection(x.id)}
+                aria-current={x.id === activeTocId ? "location" : undefined}
+              >
                 {x.label}
               </button>
             ))}
@@ -1196,7 +1242,8 @@ function PanelView() {
           </div>
         ) : (
           <>
-            <div className="grid2" style={{ alignItems: "start" }}>
+            <div className="grid2 panelSettingsGrid">
+              {showBrandSettings ? <div className="settingsSectionTitle">{t.tr("Brand", "品牌")}</div> : null}
               {show("brand name", "brand", "title", "sidebar") ? (
                 <Field
                   label={t.tr("Brand Name", "品牌名称")}
@@ -1223,6 +1270,7 @@ function PanelView() {
                 </Field>
               ) : null}
 
+              {showCfSettings ? <div className="settingsSectionTitle">{t.tr("CurseForge", "CurseForge")}</div> : null}
               {show("curseforge", "api key", "cf_") ? (
                 <Field
                   label={
@@ -1247,6 +1295,7 @@ function PanelView() {
                 </Field>
               ) : null}
 
+              {showDefaultsSettings ? <div className="settingsSectionTitle">{t.tr("Defaults", "默认值")}</div> : null}
               {show("default version", "version") ? (
                 <Field label={t.tr("Default Version", "默认版本")}>
                   <input
