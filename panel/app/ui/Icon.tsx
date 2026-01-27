@@ -4,6 +4,7 @@ export type IconName =
   | "plus"
   | "refresh"
   | "copy"
+  | "check"
   | "download"
   | "trash"
   | "file"
@@ -12,6 +13,7 @@ export type IconName =
   | "search"
   | "menu"
   | "bell"
+  | "clock"
   | "link"
   | "help"
   | "more"
@@ -75,6 +77,18 @@ export default function Icon({ name, size = 14 }: { name: IconName; size?: numbe
           />
           <path
             d="M6 16H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      );
+    case "check":
+      return (
+        <svg {...common}>
+          <path
+            d="M20 6L9 17l-5-5"
             stroke="currentColor"
             strokeWidth="2"
             strokeLinecap="round"
@@ -222,6 +236,13 @@ export default function Icon({ name, size = 14 }: { name: IconName; size?: numbe
             strokeLinecap="round"
             strokeLinejoin="round"
           />
+        </svg>
+      );
+    case "clock":
+      return (
+        <svg {...common}>
+          <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" />
+          <path d="M12 7v5l3 2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       );
     case "link":

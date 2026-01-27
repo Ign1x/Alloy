@@ -11,8 +11,9 @@ export default function Sparkline({
   values,
   width = 140,
   height = 30,
-  stroke = "rgba(147, 197, 253, 0.95)",
-  fill = "rgba(147, 197, 253, 0.14)",
+  // Default to theme tokens (works for all themes).
+  stroke = "var(--primary)",
+  fill = "var(--primary-soft-bg)",
   min = 0,
   max = 100,
   windowSize = 60,
@@ -69,4 +70,3 @@ export default function Sparkline({
     </svg>
   );
 }
-

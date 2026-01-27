@@ -58,7 +58,7 @@ export default function CopyButton({
         }}
         disabled={!canCopy}
       >
-        <Icon name="copy" />
+        <Icon name={copied ? "check" : "copy"} />
         {iconOnly ? null : label ?? t.tr("Copy", "复制")}
       </button>
     </Tooltip>

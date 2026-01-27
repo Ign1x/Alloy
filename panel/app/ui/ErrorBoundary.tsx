@@ -99,13 +99,9 @@ export default class ErrorBoundary extends React.Component<Props, State> {
             <b>{this.tr("Error:", "错误：")}</b> {msg}
           </div>
 
-          <details style={{ marginTop: 12 }}>
-            <summary className="hint" style={{ cursor: "pointer" }}>
-              {this.tr("Details", "详情")}
-            </summary>
-            <pre style={{ marginTop: 8, padding: 12, borderRadius: 12, border: "1px solid var(--border)", overflow: "auto", maxHeight: 420 }}>
-              {details}
-            </pre>
+          <details className="uiDetails" style={{ marginTop: 12 }}>
+            <summary>{this.tr("Details", "详情")}</summary>
+            <pre className="errorStack">{details}</pre>
           </details>
         </div>
       </div>
