@@ -1688,14 +1688,14 @@ function FilesView() {
               </thead>
               <tbody>
                 {entriesLoading
-                  ? Array.from({ length: 10 }).map((_, i) => (
-                      <tr key={i}>
-                        <td colSpan={6}>
-                          <div className="skeleton" style={{ minHeight: 34, borderRadius: 12 }} />
-                        </td>
-                      </tr>
-                    ))
-                  : null}
+	                  ? Array.from({ length: 10 }).map((_, i) => (
+	                      <tr key={i}>
+	                        <td colSpan={6}>
+	                          <div className="skeleton" style={{ minHeight: 34 }} />
+	                        </td>
+	                      </tr>
+	                    ))
+	                  : null}
                 {!entriesLoading && fileListVirtual.enabled && fileListVirtual.topPad > 0 ? (
                   <tr>
                     <td colSpan={6} style={{ padding: 0, border: "none" }}>

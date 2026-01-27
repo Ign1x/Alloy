@@ -1880,11 +1880,11 @@ function GamesView() {
             ) : null}
           </div>
 
-          <div className="grid2" style={{ marginTop: 12, alignItems: "start" }}>
+          <div className="grid2 mt-3 items-start">
             <div className="cardSub">
               <h3>{t.tr("Connect", "连接")}</h3>
               <code className="shareSocket">{inst ? socketText : "-"}</code>
-              <div className="hint" style={{ marginTop: 8 }}>
+              <div className="hint mt-2">
                 {frpStatus?.running && frpStatus.remote_port ? (
                   <>
                     FRP: <code>{frpStatus.remote_addr}:{frpStatus.remote_port}</code>
@@ -1896,7 +1896,7 @@ function GamesView() {
                 )}
               </div>
               {enableFrp ? (
-                <div className="hint" style={{ marginTop: 8 }}>
+                <div className="hint mt-2">
                   {t.tr("desired", "期望")}:{" "}
                   {selectedProfile ? (
                     <>
@@ -1963,7 +1963,7 @@ function GamesView() {
     return (
       <div className="card">
         <div className="toolbar">
-          <div className="toolbarLeft" style={{ alignItems: "center" }}>
+          <div className="toolbarLeft items-center">
             <div>
               <h2>{t.tr("Game", "游戏")}</h2>
               <div className="hint">
@@ -2012,13 +2012,13 @@ function GamesView() {
           <div className="toolbarLeft">
             <div className="field" style={{ flex: 1, minWidth: 260 }}>
               <label>{t.tr("Game", "游戏")}</label>
-              {gamesLoading ? (
-                <div className="stack" style={{ gap: 10 }}>
-                  <div className="skeleton" style={{ minHeight: 44, borderRadius: 12 }} />
-                  <div className="skeleton" style={{ minHeight: 36, borderRadius: 12 }} />
-                  <div className="skeleton" style={{ minHeight: 36, borderRadius: 12 }} />
-                </div>
-              ) : (
+	              {gamesLoading ? (
+	                <div className="stack" style={{ gap: 10 }}>
+	                  <div className="skeleton" style={{ minHeight: 44 }} />
+	                  <div className="skeleton" style={{ minHeight: 36 }} />
+	                  <div className="skeleton" style={{ minHeight: 36 }} />
+	                </div>
+	              ) : (
                 <>
                   <Select
                     value={instanceId}
@@ -2215,7 +2215,7 @@ function GamesView() {
         </div>
 
         {!gamesLoading && !serverDirs.length ? (
-          <div className="emptyState" style={{ marginTop: 12 }}>
+          <div className="emptyState mt-3">
             <div style={{ fontWeight: 800 }}>{t.tr("No games installed yet.", "暂无已安装游戏。")}</div>
             <div className="hint" style={{ marginTop: 6 }}>
               {t.tr("Install a Vanilla/Paper server or a modpack to get started.", "安装 Vanilla/Paper 或整合包以开始使用。")}
@@ -2230,9 +2230,9 @@ function GamesView() {
         ) : null}
 
         {!gamesLoading && serverDirs.length ? (
-          <div style={{ marginTop: 12 }}>
+          <div className="mt-3">
             <div className="row" style={{ justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 10 }}>
-              <h3 style={{ margin: 0 }}>{t.tr("Instances", "实例")}</h3>
+              <h3 className="m-0">{t.tr("Instances", "实例")}</h3>
               <span className="muted">
                 {t.tr("shown", "显示")}: {sortedServerDirs.length}
               </span>
@@ -2383,7 +2383,7 @@ function GamesView() {
                       }}
                     >
                       <div className="itemCardHeader">
-                        <div style={{ minWidth: 0 }}>
+                        <div className="min-w-0">
                           <div className="itemTitle" style={{ display: "flex", gap: 8, alignItems: "center" }}>
                             <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{id}</span>
                             {favoriteSet.has(id) ? <span className="badge">★</span> : null}
@@ -2457,7 +2457,7 @@ function GamesView() {
         ) : null}
 
         {frpOpStatus || serverOpStatus ? (
-          <div className="hint" style={{ marginTop: 8 }}>
+          <div className="hint mt-2">
             {frpOpStatus ? <span style={{ marginRight: 10 }}>FRP: {frpOpStatus}</span> : null}
             {serverOpStatus ? <span>MC: {serverOpStatus}</span> : null}
           </div>
@@ -2653,7 +2653,7 @@ function GamesView() {
 
           <div className="kv">
             <div className="k">{t.tr("Notes", "备注")}</div>
-            <div className="v" style={{ width: "100%" }}>
+            <div className="v w-full">
               <textarea
                 value={noteDraft}
                 onChange={(e: any) => setNoteDraft(e.target.value)}
@@ -2701,7 +2701,7 @@ function GamesView() {
 
       <div className="card">
         <div className="row" style={{ justifyContent: "space-between", alignItems: "center", gap: 10 }}>
-          <h2 style={{ margin: 0 }}>{t.tr("Connect", "连接")}</h2>
+          <h2 className="m-0">{t.tr("Connect", "连接")}</h2>
           <button
             type="button"
             className="iconBtn"
@@ -2734,7 +2734,7 @@ function GamesView() {
           </code>
           <CopyButton text={socketText} className="socketCopyBtn" disabled={!instanceId.trim()} />
         </div>
-        <div className="hint" style={{ marginTop: 8 }}>
+        <div className="hint mt-2">
           <span>
             {t.tr("desired", "期望")}:{" "}
             {enableFrp ? (
@@ -2843,7 +2843,7 @@ function GamesView() {
                   return (
                     <div key={`${name}-${addr}-${remotePort}`} className="itemCard">
                       <div className="itemCardHeader">
-                        <div style={{ minWidth: 0 }}>
+                        <div className="min-w-0">
                           <div className="itemTitle">{name}</div>
                           <div className="itemMeta">
                             <code>
@@ -2855,7 +2855,7 @@ function GamesView() {
                             </span>
                           </div>
                         </div>
-                        <div className="btnGroup" style={{ justifyContent: "flex-end" }}>
+                        <div className="btnGroup justify-end">
                           {running ? <StatusBadge tone="ok">{t.tr("running", "运行中")}</StatusBadge> : <StatusBadge tone="neutral">{t.tr("stopped", "已停止")}</StatusBadge>}
                         </div>
                       </div>
@@ -2867,7 +2867,7 @@ function GamesView() {
                       ) : null}
 
                       <div className="itemFooter">
-                        <div className="btnGroup" style={{ justifyContent: "flex-end" }}>
+                        <div className="btnGroup justify-end">
                           <button
                             type="button"
                             className="iconBtn"
@@ -2901,7 +2901,7 @@ function GamesView() {
               </div>
             </div>
           ) : (
-            <div className="hint" style={{ marginTop: 8 }}>
+            <div className="hint mt-2">
               {t.tr("FRP proxies", "FRP proxies")}: -
             </div>
           )
@@ -2910,7 +2910,7 @@ function GamesView() {
 
       <div className="card">
         <div className="toolbar">
-          <div className="toolbarLeft" style={{ alignItems: "center" }}>
+          <div className="toolbarLeft items-center">
             <div>
               <h2>{t.tr("Performance", "性能")}</h2>
               <div className="hint">
@@ -2984,8 +2984,8 @@ function GamesView() {
                 values={perf.memPctValues}
                 width={220}
                 height={36}
-                stroke="rgba(34, 197, 94, 0.95)"
-                fill="rgba(34, 197, 94, 0.14)"
+                stroke="var(--ok)"
+                fill="var(--ok-soft-bg)"
               />
             </div>
             <div style={{ minWidth: 220 }}>
@@ -3012,7 +3012,7 @@ function GamesView() {
 
       <div className="card">
         <div className="toolbar">
-          <div className="toolbarLeft" style={{ alignItems: "center" }}>
+          <div className="toolbarLeft items-center">
             <div>
               <h2>{t.tr("Backups", "备份")}</h2>
               <div className="hint">
@@ -3107,7 +3107,7 @@ function GamesView() {
               <div className="hint">
                 {t.tr("showing", "显示")} {Math.min(15, backupZips.length)} / {backupZips.length}
               </div>
-              <table style={{ marginTop: 10 }}>
+	              <table className="striped" style={{ marginTop: 10 }}>
                 <thead>
                   <tr>
                     <th style={{ width: 180 }}>{t.tr("Time", "时间")}</th>
@@ -3151,7 +3151,7 @@ function GamesView() {
                           {comment || <span className="muted">-</span>}
                         </td>
                         <td style={{ textAlign: "right" }}>
-                          <div className="btnGroup" style={{ justifyContent: "flex-end" }}>
+                          <div className="btnGroup justify-end">
                             <CopyButton iconOnly text={path} tooltip={t.tr("Copy path", "复制路径")} ariaLabel={t.tr("Copy path", "复制路径")} />
                             <button
                               type="button"
@@ -3251,7 +3251,7 @@ function GamesView() {
 
       <div className="card">
         <div className="toolbar">
-          <div className="toolbarLeft" style={{ alignItems: "center" }}>
+          <div className="toolbarLeft items-center">
             <div>
               <h2>{t.tr("Players", "玩家")}</h2>
               <div className="hint">
@@ -3265,7 +3265,7 @@ function GamesView() {
               </div>
             </div>
           </div>
-          <div className="toolbarRight" style={{ alignItems: "center" }}>
+          <div className="toolbarRight items-center">
             <div className="btnGroup" style={{ justifyContent: "flex-start" }}>
               <button type="button" className={accessTab === "players" ? "primary" : ""} onClick={() => setAccessTab("players")} disabled={!instanceId.trim()}>
                 {t.tr("Players", "玩家")}
@@ -3376,7 +3376,7 @@ function GamesView() {
               </div>
             </div>
             {playersView.length ? (
-              <table style={{ marginTop: 10 }}>
+	              <table className="striped" style={{ marginTop: 10 }}>
                 <thead>
                   <tr>
                     <th>{t.tr("Name", "名称")}</th>
@@ -3475,7 +3475,7 @@ function GamesView() {
               </div>
             ) : null}
             {whitelistEntries.length ? (
-              <table style={{ marginTop: 10 }}>
+	              <table className="striped" style={{ marginTop: 10 }}>
                 <thead>
                   <tr>
                     <th>{t.tr("Name", "名称")}</th>
@@ -3570,7 +3570,7 @@ function GamesView() {
               </div>
             ) : null}
             {opsEntries.length ? (
-              <table style={{ marginTop: 10 }}>
+	              <table className="striped" style={{ marginTop: 10 }}>
                 <thead>
                   <tr>
                     <th>{t.tr("Name", "名称")}</th>
@@ -3895,13 +3895,13 @@ function GamesView() {
               setLogNearBottom(remaining <= 64);
             }}
           >
-            {logsLoading ? (
-              <div className="stack" style={{ padding: 12, gap: 10 }}>
-                {Array.from({ length: 14 }).map((_, i) => (
-                  <div key={i} className="skeleton" style={{ minHeight: 18, borderRadius: 10 }} />
-                ))}
-              </div>
-            ) : (
+	            {logsLoading ? (
+	              <div className="stack" style={{ padding: 12, gap: 10 }}>
+	                {Array.from({ length: 14 }).map((_, i) => (
+	                  <div key={i} className="skeleton" style={{ minHeight: 18 }} />
+	                ))}
+	              </div>
+	            ) : (
               <>
                 <div style={{ height: logVirtual.topPad }} />
                 <pre style={{ margin: 0 }}>
@@ -4098,7 +4098,7 @@ function GamesView() {
           </button>
         </div>
 
-        <div className="row" style={{ marginTop: 12 }}>
+        <div className="row mt-3">
           <input
             ref={consoleInputRef}
             value={consoleLine}
@@ -4135,9 +4135,9 @@ function GamesView() {
         </div>
 
         {cmdCapture || cmdOutputs.length ? (
-          <div className="itemCard" style={{ marginTop: 12 }}>
+          <div className="itemCard mt-3">
             <div className="itemCardHeader">
-              <div style={{ minWidth: 0 }}>
+              <div className="min-w-0">
                 <div className="itemTitle">{t.tr("Command output", "命令输出")}</div>
                 <div className="itemMeta">
                   {cmdCapture ? (
@@ -4205,7 +4205,7 @@ function GamesView() {
           </button>
         </div>
 
-        <div className="grid2" style={{ alignItems: "start" }}>
+        <div className="grid2 items-start">
           <div className="field">
             <label>{t.tr("Proxy name", "Proxy 名称")}</label>
             <Select
@@ -4245,7 +4245,7 @@ function GamesView() {
 
         <div className="row" style={{ marginTop: 12, justifyContent: "space-between", alignItems: "center", gap: 10 }}>
           <div className="hint">{frpDiagIniStatus}</div>
-          <div className="btnGroup" style={{ justifyContent: "flex-end" }}>
+          <div className="btnGroup justify-end">
             <button
               type="button"
               className="iconBtn"
@@ -4296,11 +4296,11 @@ function GamesView() {
         </pre>
 
         <div className="row" style={{ marginTop: 12, justifyContent: "space-between", alignItems: "center", gap: 10 }}>
-          <div style={{ minWidth: 0 }}>
+          <div className="min-w-0">
             <div style={{ fontWeight: 700 }}>{t.tr("Connectivity tests", "连通性检测")}</div>
             <div className="hint">{t.tr("Probe TCP reachability from daemon to FRP server.", "从 daemon 探测到 FRP 服务器的 TCP 连通性。")}</div>
           </div>
-          <div className="btnGroup" style={{ justifyContent: "flex-end" }}>
+          <div className="btnGroup justify-end">
             <button
               type="button"
               className="iconBtn"
@@ -4339,7 +4339,7 @@ function GamesView() {
           </div>
         ) : null}
 
-        <div style={{ marginTop: 12 }}>
+        <div className="mt-3">
           <div className="row" style={{ justifyContent: "space-between", alignItems: "center", gap: 10 }}>
             <div style={{ fontWeight: 700, minWidth: 0 }}>{t.tr("frpc logs tail", "frpc 日志尾")}</div>
             <CopyButton
@@ -4452,7 +4452,7 @@ function GamesView() {
                         {preview || "<empty>"}
                       </pre>
                     </div>
-                    <div className="btnGroup" style={{ justifyContent: "flex-end" }}>
+                    <div className="btnGroup justify-end">
                       <button type="button" onClick={() => jumpToBookmark(b)} disabled={!instanceId.trim()}>
                         {t.tr("Jump", "跳转")}
                       </button>
@@ -4498,7 +4498,7 @@ function GamesView() {
           </button>
         </div>
 
-        <div className="grid2" style={{ alignItems: "start" }}>
+        <div className="grid2 items-start">
           <div className="field" style={{ gridColumn: "1 / -1" }}>
             <label>{t.tr("Query", "查询")}</label>
             <input
@@ -4569,7 +4569,7 @@ function GamesView() {
 
         <div className="row" style={{ marginTop: 12, justifyContent: "space-between", alignItems: "center", gap: 10 }}>
           <div className="hint">{historySearchStatus}</div>
-          <div className="btnGroup" style={{ justifyContent: "flex-end" }}>
+          <div className="btnGroup justify-end">
             <button type="button" onClick={() => setHistorySearchOpen(false)} disabled={historySearchBusy}>
               {t.tr("Cancel", "取消")}
             </button>
@@ -4585,7 +4585,7 @@ function GamesView() {
         </div>
 
         {historySearchResult ? (
-          <div style={{ marginTop: 12 }}>
+          <div className="mt-3">
             <div className="hint">
               {t.tr("matches", "匹配")}:{" "}
               <code>{Array.isArray(historySearchResult?.matches) ? historySearchResult.matches.length : 0}</code>
@@ -4616,7 +4616,7 @@ function GamesView() {
                   return (
                     <div key={`${path}:${lineNo}:${idx}`} className="itemCard">
                       <div className="itemCardHeader" style={{ alignItems: "flex-start" }}>
-                        <div style={{ minWidth: 0 }}>
+                        <div className="min-w-0">
                           <div className="itemTitle" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                             <code style={{ maxWidth: 520, overflow: "hidden", textOverflow: "ellipsis" }}>{title}</code>
                             <span className="badge">{lineLabel}</span>
@@ -4648,7 +4648,7 @@ function GamesView() {
                             </pre>
                           ) : null}
                         </div>
-                        <div className="btnGroup" style={{ justifyContent: "flex-end" }}>
+                        <div className="btnGroup justify-end">
                           <CopyButton iconOnly text={text} tooltip={t.tr("Copy line", "复制该行")} ariaLabel={t.tr("Copy line", "复制该行")} disabled={!text} />
                           <button
                             type="button"
@@ -4698,7 +4698,7 @@ function GamesView() {
               </button>
             </div>
 
-            <div className="grid2" style={{ alignItems: "start" }}>
+            <div className="grid2 items-start">
               <div className="field">
                 <label>{t.tr("Format", "格式")}</label>
                 <Select
@@ -4742,7 +4742,7 @@ function GamesView() {
 
             <div className="row" style={{ marginTop: 12, justifyContent: "space-between", alignItems: "center", gap: 10 }}>
               <div className="hint">{gameActionBusy ? t.tr("working…", "处理中…") : ""}</div>
-              <div className="btnGroup" style={{ justifyContent: "flex-end" }}>
+              <div className="btnGroup justify-end">
                 <button type="button" onClick={() => setBackupNewOpen(false)} disabled={gameActionBusy}>
                   {t.tr("Cancel", "取消")}
                 </button>
@@ -4791,7 +4791,7 @@ function GamesView() {
           </button>
         </div>
 
-        <div className="grid2" style={{ alignItems: "start" }}>
+        <div className="grid2 items-start">
           <div className="field">
             <label>{t.tr("Keep last", "保留最近")}</label>
             <input
@@ -4860,7 +4860,7 @@ function GamesView() {
 
         <div className="row" style={{ marginTop: 12, justifyContent: "space-between", alignItems: "center", gap: 10 }}>
           <div className="hint">{serverOpStatus ? serverOpStatus : ""}</div>
-          <div className="btnGroup" style={{ justifyContent: "flex-end" }}>
+          <div className="btnGroup justify-end">
             <button type="button" onClick={() => setBackupRetentionOpen(false)} disabled={gameActionBusy}>
               {t.tr("Cancel", "取消")}
             </button>

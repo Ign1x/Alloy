@@ -1512,11 +1512,11 @@ function PanelView() {
           </button>
         </div>
 
-        {users.length ? (
-          <table style={{ marginTop: 12 }}>
-            <thead>
-              <tr>
-                <th>{t.tr("Username", "用户名")}</th>
+	        {users.length ? (
+	          <table className="striped" style={{ marginTop: 12 }}>
+	            <thead>
+	              <tr>
+	                <th>{t.tr("Username", "用户名")}</th>
                 <th>{t.tr("2FA", "2FA")}</th>
                 <th>{t.tr("Created", "创建")}</th>
                 <th>{t.tr("Updated", "更新")}</th>
@@ -1919,79 +1919,81 @@ function PanelView() {
           disabled={!selectedDaemon?.connected}
         />
 
-        {parsedSchedule.ok && Array.isArray((parsedSchedule as any).schedule?.tasks) ? (
-          <div style={{ marginTop: 12 }}>
-	            <h3>{t.tr("Tasks", "任务")}</h3>
-	            <table>
-	              <thead>
-	                <tr>
-	                  <th>{t.tr("ID", "ID")}</th>
-	                  <th>{t.tr("Type", "类型")}</th>
-	                  <th>{t.tr("Instance", "实例")}</th>
-	                  <th>{t.tr("Every", "间隔")}</th>
-	                  <th>{t.tr("At", "时间")}</th>
-	                  <th>{t.tr("Next run", "下次运行")}</th>
-	                  <th>{t.tr("Last run", "上次运行")}</th>
-	                  <th>{t.tr("Error", "错误")}</th>
-	                  <th />
-	                </tr>
-	              </thead>
-              <tbody>
-                {((parsedSchedule as any).schedule?.tasks || []).map((t: any) => (
-                  <tr key={String(t.id || t.instance_id || t.type || "")}>
-                    <td>
-                      <code>{String(t.id || "-")}</code>
-                    </td>
-                    <td>{String(t.type || "-")}</td>
-                    <td>
-                      <code>{String(t.instance_id || "-")}</code>
-	                    </td>
-	                    <td>{t.every_sec ? `${Number(t.every_sec)}s` : "-"}</td>
-	                    <td>{t.at_unix ? <TimeAgo unix={Number(t.at_unix)} /> : "-"}</td>
-	                    <td>{nextRunLabel(t)}</td>
-	                    <td>{t.last_run_unix ? <TimeAgo unix={Number(t.last_run_unix)} /> : "-"}</td>
-	                    <td style={{ maxWidth: 260, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-	                      {String(t.last_error || "")}
-	                    </td>
-                    <td style={{ textAlign: "right" }}>
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          const id = String(t.id || "").trim();
-                          if (!id) return;
-                          const ok = await confirmDialog(t.tr(`Run task "${id}" now?`, `立即运行任务「${id}」？`), {
-                            title: t.tr("Run Task", "运行任务"),
-                            confirmLabel: t.tr("Run", "运行"),
-                            cancelLabel: t.tr("Cancel", "取消"),
-                            danger: ["restart", "stop", "prune_logs"].includes(String(t.type || "").toLowerCase()),
-                          });
-                          if (!ok) return;
-                          setScheduleBusy(true);
-                          setScheduleStatus(t.tr(`Running ${id} ...`, `正在运行 ${id} ...`));
-                          try {
-                            await runScheduleTask(id);
-                            await fetchSchedule();
-                            setScheduleStatus(t.tr("Done", "完成"));
-                            window.setTimeout(() => setScheduleStatus(""), 900);
-                          } catch (e: any) {
-                            setScheduleStatus(String(e?.message || e));
-                          } finally {
-                            setScheduleBusy(false);
-                          }
-                        }}
-                        disabled={!selectedDaemon?.connected || scheduleBusy}
-                      >
-                        {t.tr("Run now", "立即运行")}
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            <div className="hint" style={{ marginTop: 8 }}>
-              {t.tr(
-                "Note: Scheduler runs on the daemon (polls schedule.json). Save updates the file; Run now triggers a single task immediately.",
-                "提示：Scheduler 运行在 Daemon 上（轮询 schedule.json）。Save 会更新文件；Run now 立即触发单个任务。"
+	        {parsedSchedule.ok && Array.isArray((parsedSchedule as any).schedule?.tasks) ? (
+	          <div style={{ marginTop: 12 }}>
+		            <h3>{t.tr("Tasks", "任务")}</h3>
+		            <div className="tableScroll" style={{ marginTop: 10, maxHeight: 420, overflow: "auto" }}>
+		              <table className="compact striped">
+		                <thead>
+		                  <tr>
+		                    <th>{t.tr("ID", "ID")}</th>
+		                    <th>{t.tr("Type", "类型")}</th>
+		                    <th>{t.tr("Instance", "实例")}</th>
+		                    <th>{t.tr("Every", "间隔")}</th>
+		                    <th>{t.tr("At", "时间")}</th>
+		                    <th>{t.tr("Next run", "下次运行")}</th>
+		                    <th>{t.tr("Last run", "上次运行")}</th>
+		                    <th>{t.tr("Error", "错误")}</th>
+		                    <th />
+		                  </tr>
+		                </thead>
+		                <tbody>
+		                  {((parsedSchedule as any).schedule?.tasks || []).map((t: any) => (
+		                    <tr key={String(t.id || t.instance_id || t.type || "")}>
+		                      <td>
+		                        <code>{String(t.id || "-")}</code>
+		                      </td>
+		                      <td>{String(t.type || "-")}</td>
+		                      <td>
+		                        <code>{String(t.instance_id || "-")}</code>
+		                      </td>
+		                      <td>{t.every_sec ? `${Number(t.every_sec)}s` : "-"}</td>
+		                      <td>{t.at_unix ? <TimeAgo unix={Number(t.at_unix)} /> : "-"}</td>
+		                      <td>{nextRunLabel(t)}</td>
+		                      <td>{t.last_run_unix ? <TimeAgo unix={Number(t.last_run_unix)} /> : "-"}</td>
+		                      <td style={{ maxWidth: 260, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+		                        {String(t.last_error || "")}
+		                      </td>
+		                      <td style={{ textAlign: "right" }}>
+		                        <button
+		                          type="button"
+		                          onClick={async () => {
+		                            const id = String(t.id || "").trim();
+		                            if (!id) return;
+		                            const ok = await confirmDialog(t.tr(`Run task "${id}" now?`, `立即运行任务「${id}」？`), {
+		                              title: t.tr("Run Task", "运行任务"),
+		                              confirmLabel: t.tr("Run", "运行"),
+		                              cancelLabel: t.tr("Cancel", "取消"),
+		                              danger: ["restart", "stop", "prune_logs"].includes(String(t.type || "").toLowerCase()),
+		                            });
+		                            if (!ok) return;
+		                            setScheduleBusy(true);
+		                            setScheduleStatus(t.tr(`Running ${id} ...`, `正在运行 ${id} ...`));
+		                            try {
+		                              await runScheduleTask(id);
+		                              await fetchSchedule();
+		                              setScheduleStatus(t.tr("Done", "完成"));
+		                              window.setTimeout(() => setScheduleStatus(""), 900);
+		                            } catch (e: any) {
+		                              setScheduleStatus(String(e?.message || e));
+		                            } finally {
+		                              setScheduleBusy(false);
+		                            }
+		                          }}
+		                          disabled={!selectedDaemon?.connected || scheduleBusy}
+		                        >
+		                          {t.tr("Run now", "立即运行")}
+		                        </button>
+		                      </td>
+		                    </tr>
+		                  ))}
+		                </tbody>
+		              </table>
+		            </div>
+	            <div className="hint" style={{ marginTop: 8 }}>
+	              {t.tr(
+	                "Note: Scheduler runs on the daemon (polls schedule.json). Save updates the file; Run now triggers a single task immediately.",
+	                "提示：Scheduler 运行在 Daemon 上（轮询 schedule.json）。Save 会更新文件；Run now 立即触发单个任务。"
               )}
             </div>
           </div>
@@ -2219,11 +2221,11 @@ function PanelView() {
           </div>
 
           {activityItems.length ? (
-            <div className="tableScroll" style={{ marginTop: 12, maxHeight: 520, overflow: "auto" }}>
-              <table className="compact">
-                <thead>
-                  <tr>
-                    <th>{t.tr("Time", "时间")}</th>
+	            <div className="tableScroll" style={{ marginTop: 12, maxHeight: 520, overflow: "auto" }}>
+	              <table className="compact striped">
+	                <thead>
+	                  <tr>
+	                    <th>{t.tr("Time", "时间")}</th>
                     <th>{t.tr("Source", "来源")}</th>
                     <th>{t.tr("Summary", "摘要")}</th>
                     <th>{t.tr("Detail", "详情")}</th>
@@ -2358,11 +2360,11 @@ function PanelView() {
         </div>
 
         {auditEntries.length ? (
-          <div className="tableScroll" style={{ marginTop: 12, maxHeight: 520, overflow: "auto" }}>
-            <table className="compact">
-              <thead>
-                <tr>
-                  <th>{t.tr("Time", "时间")}</th>
+	          <div className="tableScroll" style={{ marginTop: 12, maxHeight: 520, overflow: "auto" }}>
+	            <table className="compact striped">
+	              <thead>
+	                <tr>
+	                  <th>{t.tr("Time", "时间")}</th>
                   <th>{t.tr("Action", "动作")}</th>
                   <th>{t.tr("User", "用户")}</th>
                   <th>{t.tr("Auth", "认证")}</th>
