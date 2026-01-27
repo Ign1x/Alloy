@@ -528,7 +528,7 @@ function Sparkline({
   labels,
   width = 120,
   height = 28,
-  stroke = "rgba(147, 197, 253, 0.95)",
+  stroke = "var(--primary)",
   fill,
 }: {
   values: Array<number | null | undefined>;
@@ -675,8 +675,8 @@ function Sparkline({
 	    return { min: Math.min(...nums), max: Math.max(...nums) };
 	  }, [points]);
 
-	  return (
-	    <div style={{ width: "100%", maxWidth: width }}>
+		  return (
+		    <div style={{ width: "100%", maxWidth: width }}>
 	      <div
 	        className="sparkWrap"
 	        style={{ width: "100%" }}
@@ -707,15 +707,15 @@ function Sparkline({
 	        ) : null}
 	      </div>
 
-	      {points.length ? (
-	        <details style={{ marginTop: 10 }}>
-	          <summary className="hint">{`Data table (${title})`}</summary>
-	          <div style={{ marginTop: 8, maxHeight: 240, overflow: "auto" }}>
-	            <table>
-	              <thead>
-	                <tr>
-	                  <th>#</th>
-	                  <th>Label</th>
+		      {points.length ? (
+		        <details className="uiDetails mt-10px">
+		          <summary>{`Data table (${title})`}</summary>
+		          <div style={{ maxHeight: 240, overflow: "auto" }}>
+		            <table className="compact striped">
+		              <thead>
+		                <tr>
+		                  <th>#</th>
+		                  <th>Label</th>
 	                  <th>Value</th>
 	                </tr>
 	              </thead>
@@ -1242,15 +1242,16 @@ export default function HomePage() {
   const [undoTrashBusy, setUndoTrashBusy] = useState<boolean>(false);
 
   // Command palette (Ctrl+K / /)
-  const [cmdPaletteOpen, setCmdPaletteOpen] = useState<boolean>(false);
-  const [cmdPaletteQuery, setCmdPaletteQuery] = useState<string>("");
-  const [cmdPaletteIdx, setCmdPaletteIdx] = useState<number>(0);
-  const [cmdPaletteRecentIds, setCmdPaletteRecentIds] = useState<string[]>([]);
-  const cmdPaletteInputRef = useRef<HTMLInputElement | null>(null);
-  const [shortcutsOpen, setShortcutsOpen] = useState<boolean>(false);
-  const [changelogOpen, setChangelogOpen] = useState<boolean>(false);
-  const [changelogStatus, setChangelogStatus] = useState<string>("");
-  const [changelogText, setChangelogText] = useState<string>("");
+	  const [cmdPaletteOpen, setCmdPaletteOpen] = useState<boolean>(false);
+	  const [cmdPaletteQuery, setCmdPaletteQuery] = useState<string>("");
+	  const [cmdPaletteIdx, setCmdPaletteIdx] = useState<number>(0);
+	  const [cmdPaletteRecentIds, setCmdPaletteRecentIds] = useState<string[]>([]);
+	  const cmdPaletteInputRef = useRef<HTMLInputElement | null>(null);
+	  const cmdPaletteListRef = useRef<HTMLDivElement | null>(null);
+	  const [shortcutsOpen, setShortcutsOpen] = useState<boolean>(false);
+	  const [changelogOpen, setChangelogOpen] = useState<boolean>(false);
+	  const [changelogStatus, setChangelogStatus] = useState<string>("");
+	  const [changelogText, setChangelogText] = useState<string>("");
   const [helpOpen, setHelpOpen] = useState<boolean>(false);
   const [helpDoc, setHelpDoc] = useState<string>("");
   const [helpDocTitle, setHelpDocTitle] = useState<string>("");
@@ -8795,10 +8796,19 @@ export default function HomePage() {
     });
   }, []);
 
-  const cmdPaletteView = useMemo(() => {
-    type CmdItem = (typeof cmdPaletteCommands)[number];
-    const rawQ = cmdPaletteQuery.trim().toLowerCase();
-    const filtered = !rawQ
+  const clearCmdRecents = useCallback(() => {
+    setCmdPaletteRecentIds([]);
+    try {
+      localStorage.removeItem(CMD_PALETTE_RECENT_KEY);
+    } catch {
+      // ignore
+    }
+  }, []);
+
+	  const cmdPaletteView = useMemo(() => {
+	    type CmdItem = (typeof cmdPaletteCommands)[number];
+	    const rawQ = cmdPaletteQuery.trim().toLowerCase();
+	    const filtered = !rawQ
       ? cmdPaletteCommands
       : cmdPaletteCommands
           .map((c) => {
@@ -8841,15 +8851,28 @@ export default function HomePage() {
       if (rest.length) groups.push({ title, items: rest });
     }
 
-    const flat = groups.flatMap((g) => g.items);
-    return { groups, flat };
-  }, [cmdPaletteCommands, cmdPaletteQuery, cmdPaletteRecentIds, t]);
+	    const flat = groups.flatMap((g) => g.items);
+	    return { groups, flat };
+	  }, [cmdPaletteCommands, cmdPaletteQuery, cmdPaletteRecentIds, t]);
 
-  const apiFetchFn = useEvent(apiFetch);
-  const copyTextFn = useEvent(copyText);
-  const confirmDialogFn = useEvent(confirmDialog);
-  const promptDialogFn = useEvent(promptDialog);
-  const openHelpModalFn = useEvent(openHelpModal);
+	  useEffect(() => {
+	    if (!cmdPaletteOpen) return;
+	    const list = cmdPaletteListRef.current;
+	    if (!list) return;
+	    const el = list.querySelector<HTMLElement>(`[data-cmd-idx="${cmdPaletteIdx}"]`);
+	    if (!el) return;
+	    try {
+	      el.scrollIntoView({ block: "nearest" });
+	    } catch {
+	      // ignore
+	    }
+	  }, [cmdPaletteIdx, cmdPaletteOpen, cmdPaletteQuery, cmdPaletteView.flat.length]);
+
+	  const apiFetchFn = useEvent(apiFetch);
+	  const copyTextFn = useEvent(copyText);
+	  const confirmDialogFn = useEvent(confirmDialog);
+	  const promptDialogFn = useEvent(promptDialog);
+	  const openHelpModalFn = useEvent(openHelpModal);
   const openHelpDocFn = useEvent(openHelpDoc);
   const openShareViewFn = useEvent(openShareView);
   const makeDeployComposeYmlFn = useEvent(makeDeployComposeYml);
@@ -9414,11 +9437,11 @@ export default function HomePage() {
               </button>
             </div>
             <div className="modalBody">
-              <div className="hint" style={{ whiteSpace: "pre-wrap" }}>
+	            <div className="hint pre-wrap">
                 {confirmMessage}
               </div>
                   {confirmTextRequired ? (
-                    <div className="field" style={{ marginTop: 12 }}>
+	                  <div className="field mt-3">
                       <label>{t.tr("Type to confirm", "输入以确认")}</label>
                       <input
                         ref={confirmInputRef}
@@ -9474,7 +9497,7 @@ export default function HomePage() {
             >
               <div className="modalBody">
                 {promptMessage ? (
-                  <div className="hint" style={{ whiteSpace: "pre-wrap" }}>
+	                  <div className="hint pre-wrap">
                     {promptMessage}
                   </div>
                 ) : null}
@@ -9537,14 +9560,16 @@ export default function HomePage() {
             modalStyle={{ width: "min(720px, 100%)" }}
             ariaLabel={t.tr("Command Palette", "命令面板")}
           >
-            <div className="modalHeader">
+	            <div className="modalHeader">
 	              <div>
 	                <div style={{ fontWeight: 800 }}>{t.tr("Command Palette", "命令面板")}</div>
 	                <div className="hint">
-	                  <code>Ctrl+K</code> {t.tr("(or", "（或")} <code>⌘K</code>) · <code>/</code> {t.tr("opens search", "打开搜索")}
+	                  <kbd className="kbd">Ctrl+K</kbd> {t.tr("(or", "（或")} <kbd className="kbd">⌘K</kbd>) · <kbd className="kbd">/</kbd>{" "}
+                    {t.tr("opens search", "打开搜索")}
 	                </div>
                   <div className="hint">
-                    <code>↑</code>/<code>↓</code> {t.tr("navigate", "选择")} · <code>Enter</code> {t.tr("run", "执行")} · <code>Esc</code> {t.tr("close", "关闭")}
+                    <kbd className="kbd">↑</kbd>/<kbd className="kbd">↓</kbd> {t.tr("navigate", "选择")} · <kbd className="kbd">Enter</kbd>{" "}
+                    {t.tr("run", "执行")} · <kbd className="kbd">Esc</kbd> {t.tr("close", "关闭")}
                   </div>
 	              </div>
 	              <button type="button" onClick={() => setCmdPaletteOpen(false)}>
@@ -9601,45 +9626,117 @@ export default function HomePage() {
 		              ) : null}
 		            </div>
 
-		            <div className="cmdPaletteList">
-	              {cmdPaletteView.flat.length ? (
-                  (() => {
-                    let offset = 0;
-                    return cmdPaletteView.groups.map((g) => {
-                      const start = offset;
-                      offset += g.items.length;
-                      return (
-                        <div key={g.title} className="cmdPaletteGroup">
-                          <div className="cmdPaletteGroupTitle">{g.title}</div>
-                          {g.items.map((c: any, idx: number) => {
-                            const flatIdx = start + idx;
-                            return (
-                              <button
-                                key={c.id}
-                                type="button"
-                                className={`cmdPaletteItem ${flatIdx === cmdPaletteIdx ? "active" : ""}`}
-                                disabled={!!c.disabled}
-                                onMouseEnter={() => setCmdPaletteIdx(flatIdx)}
-                                onClick={() => {
-                                  if (c.disabled) return;
-                                  rememberCmd(c.id);
+			            <div className="cmdPaletteList" ref={cmdPaletteListRef}>
+		              {cmdPaletteView.flat.length ? (
+	                  (() => {
+	                    let offset = 0;
+	                    const recentTitle = t.tr("Recent", "最近");
+	                    const resultsTitle = t.tr("Results", "结果");
+	                    const navTitle = t.tr("Navigation", "导航");
+	                    const daemonsTitle = t.tr("Daemons", "Daemon");
+	                    const instancesTitle = t.tr("Instances", "实例");
+	                    const gameTitle = t.tr("Game", "游戏");
+	                    const otherTitle = t.tr("Other", "其他");
+	                    return cmdPaletteView.groups.map((g) => {
+	                      const isRecent = g.title === recentTitle;
+	                      const groupIcon = (() => {
+	                        if (g.title === recentTitle) return "clock";
+	                        if (g.title === resultsTitle) return "search";
+	                        if (g.title === navTitle) return "menu";
+	                        if (g.title === daemonsTitle) return "cpu";
+	                        if (g.title === instancesTitle) return "folder";
+	                        if (g.title === gameTitle) return "settings";
+	                        if (g.title === otherTitle) return "more";
+	                        return null;
+	                      })();
+	                      const start = offset;
+	                      offset += g.items.length;
+	                      return (
+	                        <div key={g.title} className={`cmdPaletteGroup ${isRecent ? "recent" : ""}`.trim()}>
+	                          <div className="cmdPaletteGroupHeader">
+	                            <div className="cmdPaletteGroupTitle">
+	                              {groupIcon ? (
+	                                <span className="cmdPaletteGroupIcon" aria-hidden="true">
+	                                  <Icon name={groupIcon as any} size={14} />
+	                                </span>
+	                              ) : null}
+	                              <span className="cmdPaletteGroupLabel">{g.title}</span>
+	                              <span className="cmdPaletteGroupCount" aria-hidden="true">
+	                                {g.items.length}
+	                              </span>
+	                            </div>
+	                            {isRecent ? (
+	                              <div className="cmdPaletteGroupMeta">
+	                                <span className="cmdPaletteGroupHint">
+	                                  <kbd className="kbd">Enter</kbd> {t.tr("run", "执行")}
+	                                </span>
+	                                <button
+	                                  type="button"
+	                                  className="ghost cmdPaletteGroupAction"
+	                                  onClick={() => {
+	                                    clearCmdRecents();
+	                                    setCmdPaletteIdx(0);
+	                                    cmdPaletteInputRef.current?.focus();
+	                                  }}
+	                                  title={t.tr("Clear recent", "清空最近")}
+	                                >
+	                                  {t.tr("Clear", "清空")}
+	                                </button>
+	                              </div>
+	                            ) : null}
+	                          </div>
+	                          {g.items.map((c: any, idx: number) => {
+	                            const flatIdx = start + idx;
+                            const iconName = (() => {
+                              const id = String(c?.id || "");
+                              if (id.startsWith("tab:")) return "menu";
+                              if (id.startsWith("switch:daemon:")) return "cpu";
+                              if (id.startsWith("switch:instance:")) return "folder";
+                              if (id === "game:install") return "download";
+                              if (id === "game:settings") return "settings";
+                              if (id === "game:files" || id === "game:backups") return "folder";
+                              if (id === "game:backup") return "download";
+                              if (id.startsWith("game:")) return "refresh";
+                              return "more";
+                            })();
+	                            return (
+	                              <button
+	                                key={c.id}
+	                                type="button"
+	                                className={`cmdPaletteItem ${flatIdx === cmdPaletteIdx ? "active" : ""}`}
+	                                data-cmd-idx={flatIdx}
+	                                disabled={!!c.disabled}
+	                                onMouseEnter={() => setCmdPaletteIdx(flatIdx)}
+	                                onClick={() => {
+	                                  if (c.disabled) return;
+	                                  rememberCmd(c.id);
                                   const p = c.run?.();
                                   if (p && typeof p.then === "function") p.catch(() => null);
                                 }}
                               >
-                                <div className="cmdPaletteTitle">{c.title}</div>
-                                {c.hint ? <div className="hint">{c.hint}</div> : null}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      );
+                                <span className="cmdPaletteItemIcon" aria-hidden="true">
+                                  <Icon name={iconName as any} size={16} />
+                                </span>
+	                                <div className="cmdPaletteItemText">
+	                                  <div className="cmdPaletteTitle">{c.title}</div>
+	                                  {c.hint ? <div className="cmdPaletteHint">{c.hint}</div> : null}
+	                                </div>
+	                                {!c.disabled && flatIdx === cmdPaletteIdx ? (
+	                                  <span className="cmdPaletteItemKeyHint" aria-hidden="true">
+	                                    <kbd className="kbd">Enter</kbd>
+	                                  </span>
+	                                ) : null}
+	                              </button>
+	                            );
+	                          })}
+	                        </div>
+	                      );
                     });
                   })()
                 ) : (
 	                <div className="emptyState">
                     <div style={{ fontWeight: 800 }}>{t.tr("No matching commands", "没有匹配的命令")}</div>
-                    <div className="hint" style={{ marginTop: 6 }}>
+	                  <div className="hint mt-6px">
                       {t.tr("Try a different keyword, or press Esc to close.", "请换个关键词，或按 Esc 关闭。")}
                     </div>
                   </div>
@@ -9654,61 +9751,92 @@ export default function HomePage() {
             modalStyle={{ width: "min(720px, 100%)" }}
             ariaLabel={t.tr("Keyboard Shortcuts", "键盘快捷键")}
           >
-            <div className="modalHeader">
-	              <div>
-	                <div style={{ fontWeight: 800 }}>{t.tr("Keyboard Shortcuts", "键盘快捷键")}</div>
-	                <div className="hint">
-	                  {t.tr("Press ", "按下 ")}
-	                  <code>?</code>
-	                  {t.tr(" to toggle this dialog", " 可开关此对话框")}
-	                </div>
-	              </div>
-	              <button type="button" onClick={() => setShortcutsOpen(false)}>
-	                {t.tr("Close", "关闭")}
-	              </button>
-	            </div>
+		            <div className="modalHeader">
+			              <div>
+				                <div style={{ fontWeight: 800 }}>{t.tr("Keyboard Shortcuts", "键盘快捷键")}</div>
+				                <div className="hint">
+				                  {t.tr("Press ", "按下 ")}
+				                  <kbd className="kbd">?</kbd>
+				                  {t.tr(" to toggle this dialog", " 可开关此对话框")}
+				                </div>
+			              </div>
+			              <button type="button" onClick={() => setShortcutsOpen(false)}>
+				                {t.tr("Close", "关闭")}
+			              </button>
+		            </div>
 
-	            <table>
-	              <thead>
-	                <tr>
-	                  <th style={{ width: 170 }}>{t.tr("Keys", "按键")}</th>
-	                  <th>{t.tr("Action", "操作")}</th>
-	                </tr>
-	              </thead>
-	              <tbody>
-	                <tr>
-	                  <td>
-	                    <code>Ctrl+K</code> / <code>⌘K</code>
-	                  </td>
-	                  <td>{t.tr("Toggle Command Palette", "打开/关闭命令面板")}</td>
-	                </tr>
-	                <tr>
-	                  <td>
-	                    <code>/</code>
-	                  </td>
-	                  <td>{t.tr("Open Command Palette", "打开命令面板")}</td>
-	                </tr>
-	                <tr>
-	                  <td>
-	                    <code>Esc</code>
-	                  </td>
-	                  <td>{t.tr("Close dialogs / sidebar", "关闭对话框 / 侧边栏")}</td>
-	                </tr>
-	                <tr>
-	                  <td>
-	                    <code>Enter</code>
-	                  </td>
-	                  <td>{t.tr("Confirm dialog (when focused outside inputs)", "确认对话框（焦点不在输入框时）")}</td>
-	                </tr>
-	                <tr>
-	                  <td>
-	                    <code>↑</code> / <code>↓</code>
-	                  </td>
-	                  <td>{t.tr("Navigate menus (Select / Command Palette)", "菜单导航（下拉框 / 命令面板）")}</td>
-	                </tr>
-	              </tbody>
-	            </table>
-          </ManagedModal>
+		            <div className="shortcutsGrid">
+		              <div className="shortcutsSection">
+		                <div className="shortcutsSectionTitle">{t.tr("Global", "全局")}</div>
+		                <div className="shortcutsList">
+		                  <div className="shortcutRow">
+		                    <div className="shortcutKeys">
+		                      <kbd className="kbd">Ctrl</kbd>
+		                      <span className="shortcutKeyJoin">+</span>
+		                      <kbd className="kbd">K</kbd>
+		                      <span className="shortcutKeysAlt">/</span>
+		                      <kbd className="kbd">⌘</kbd>
+		                      <span className="shortcutKeyJoin">+</span>
+		                      <kbd className="kbd">K</kbd>
+		                    </div>
+		                    <div className="shortcutAction">{t.tr("Toggle Command Palette", "打开/关闭命令面板")}</div>
+		                  </div>
+		                  <div className="shortcutRow">
+		                    <div className="shortcutKeys">
+		                      <kbd className="kbd">/</kbd>
+		                    </div>
+		                    <div className="shortcutAction">{t.tr("Open Command Palette", "打开命令面板")}</div>
+		                  </div>
+		                  <div className="shortcutRow">
+		                    <div className="shortcutKeys">
+		                      <kbd className="kbd">?</kbd>
+		                    </div>
+		                    <div className="shortcutAction">{t.tr("Toggle this dialog", "打开/关闭此对话框")}</div>
+		                  </div>
+		                </div>
+		              </div>
+
+		              <div className="shortcutsSection">
+		                <div className="shortcutsSectionTitle">{t.tr("Overlays", "浮层")}</div>
+		                <div className="shortcutsList">
+		                  <div className="shortcutRow">
+		                    <div className="shortcutKeys">
+		                      <kbd className="kbd">Esc</kbd>
+		                    </div>
+		                    <div className="shortcutAction">{t.tr("Close dialogs / menus / sidebar", "关闭对话框 / 菜单 / 侧边栏")}</div>
+		                  </div>
+		                  <div className="shortcutRow">
+		                    <div className="shortcutKeys">
+		                      <kbd className="kbd">Enter</kbd>
+		                    </div>
+		                    <div className="shortcutAction">
+		                      {t.tr("Confirm dialog (when focused outside inputs)", "确认对话框（焦点不在输入框时）")}
+		                    </div>
+		                  </div>
+		                </div>
+		              </div>
+
+		              <div className="shortcutsSection">
+		                <div className="shortcutsSectionTitle">{t.tr("Lists", "列表")}</div>
+		                <div className="shortcutsList">
+		                  <div className="shortcutRow">
+		                    <div className="shortcutKeys">
+		                      <kbd className="kbd">↑</kbd>
+		                      <span className="shortcutKeysAlt">/</span>
+		                      <kbd className="kbd">↓</kbd>
+		                    </div>
+		                    <div className="shortcutAction">{t.tr("Navigate menus (Select / Command Palette)", "菜单导航（下拉框 / 命令面板）")}</div>
+		                  </div>
+		                  <div className="shortcutRow">
+		                    <div className="shortcutKeys">
+		                      <kbd className="kbd">Enter</kbd>
+		                    </div>
+		                    <div className="shortcutAction">{t.tr("Run selected command (Command Palette)", "执行选中命令（命令面板）")}</div>
+		                  </div>
+		                </div>
+		              </div>
+		            </div>
+	          </ManagedModal>
 
           <ManagedModal
             id="changelog"
@@ -9748,7 +9876,7 @@ export default function HomePage() {
 	              </button>
 	            </div>
 
-	            <div className="grid2" style={{ alignItems: "start" }}>
+	            <div className="grid2 items-start">
 	              <div style={{ minWidth: 0 }}>
                   <h3>{t.tr("Quickstart", "快速开始")}</h3>
                   <div className="hint">
@@ -9801,7 +9929,7 @@ export default function HomePage() {
                     </button>
                   </div>
 
-                  <h3 style={{ marginTop: 12 }}>{t.tr("Shortcuts", "快捷键")}</h3>
+	                  <h3 className="mt-3">{t.tr("Shortcuts", "快捷键")}</h3>
                   <div className="hint">
                     <div>
                       <code>Ctrl+K</code> / <code>⌘K</code> — {t.tr("Command Palette", "命令面板")}
@@ -9840,7 +9968,7 @@ export default function HomePage() {
 	                  <div className="hint">{t.tr("No help for this page yet.", "此页面暂无帮助信息。")}</div>
 	                )}
 
-	                <h3 style={{ marginTop: 12 }}>{t.tr("Docs", "文档")}</h3>
+	                <h3 className="mt-3">{t.tr("Docs", "文档")}</h3>
 	                <div className="btnGroup" style={{ justifyContent: "flex-start" }}>
 	                  <button type="button" className={helpDoc === "readme" ? "primary" : ""} onClick={() => loadHelpDoc("readme")}>
 	                    README
@@ -9910,10 +10038,10 @@ export default function HomePage() {
                     <div className="row" style={{ justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "nowrap" }}>
                       <div style={{ fontWeight: 800, minWidth: 0 }}>{t.tr("Auto (System)", "自动（系统）")}</div>
                       {themeMode === "auto" ? <span className="badge ok">{t.tr("Current", "当前")}</span> : null}
-                    </div>
-                    <div className="hint" style={{ marginTop: 6 }}>
-                      {t.tr("Matches your OS theme preference.", "跟随系统主题偏好。")}
-                    </div>
+	                    </div>
+	                    <div className="hint mt-6px">
+	                      {t.tr("Matches your OS theme preference.", "跟随系统主题偏好。")}
+	                    </div>
                     <div className="themePreviewAuto" aria-hidden="true">
                       <div className="themePreview themePreviewSmall" data-theme="dark">
                         <div className="themePreviewSurface">
@@ -9955,10 +10083,10 @@ export default function HomePage() {
                     <div className="row" style={{ justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "nowrap" }}>
                       <div style={{ fontWeight: 800, minWidth: 0 }}>{t.tr("Dark", "深色")}</div>
                       {themeMode === "dark" ? <span className="badge ok">{t.tr("Current", "当前")}</span> : null}
-                    </div>
-                    <div className="hint" style={{ marginTop: 6 }}>
-                      {t.tr("Optimized for low-light and long sessions.", "适合低光环境与长时间使用。")}
-                    </div>
+	                    </div>
+	                    <div className="hint mt-6px">
+	                      {t.tr("Optimized for low-light and long sessions.", "适合低光环境与长时间使用。")}
+	                    </div>
                     <div className="themePreview" data-theme="dark" aria-hidden="true">
                       <div className="themePreviewSurface">
                         <div className="themePreviewRow">
@@ -9986,10 +10114,10 @@ export default function HomePage() {
                     <div className="row" style={{ justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "nowrap" }}>
                       <div style={{ fontWeight: 800, minWidth: 0 }}>{t.tr("Light", "浅色")}</div>
                       {themeMode === "light" ? <span className="badge ok">{t.tr("Current", "当前")}</span> : null}
-                    </div>
-                    <div className="hint" style={{ marginTop: 6 }}>
-                      {t.tr("Optimized for daylight and print-like readability.", "适合强光环境与类纸阅读。")}
-                    </div>
+	                    </div>
+	                    <div className="hint mt-6px">
+	                      {t.tr("Optimized for daylight and print-like readability.", "适合强光环境与类纸阅读。")}
+	                    </div>
                     <div className="themePreview" data-theme="light" aria-hidden="true">
                       <div className="themePreviewSurface">
                         <div className="themePreviewRow">
@@ -10017,10 +10145,10 @@ export default function HomePage() {
                     <div className="row" style={{ justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "nowrap" }}>
                       <div style={{ fontWeight: 800, minWidth: 0 }}>{t.tr("High Contrast", "高对比度")}</div>
                       {themeMode === "contrast" ? <span className="badge ok">{t.tr("Current", "当前")}</span> : null}
-                    </div>
-                    <div className="hint" style={{ marginTop: 6 }}>
-                      {t.tr("Higher contrast for accessibility and clarity.", "更高对比度，增强可访问性与清晰度。")}
-                    </div>
+	                    </div>
+	                    <div className="hint mt-6px">
+	                      {t.tr("Higher contrast for accessibility and clarity.", "更高对比度，增强可访问性与清晰度。")}
+	                    </div>
                     <div className="themePreview" data-theme="contrast" aria-hidden="true">
                       <div className="themePreviewSurface">
                         <div className="themePreviewRow">
@@ -10064,14 +10192,14 @@ export default function HomePage() {
 
 	            <div className="modalBody">
 	              {onboardingStep === 0 ? (
-	                <div className="grid2" style={{ alignItems: "start" }}>
+	                <div className="grid2 items-start">
 	                  <div className="cardSub">
 	                    <div style={{ fontWeight: 800 }}>{t.tr("Status", "状态")}</div>
 	                    <div className="hint" style={{ marginTop: 8 }}>
 	                      {t.tr("Nodes", "节点")}: <code>{String(nodes.length || 0)}</code> ·{" "}
 	                      {t.tr("Online", "在线")}: <code>{String(daemons.filter((d) => d.connected).length)}</code>
 	                    </div>
-	                    <div className="hint" style={{ marginTop: 6 }}>
+	                    <div className="hint mt-6px">
 	                      {t.tr("Instances", "实例")}: <code>{String(serverDirs.length || 0)}</code> ·{" "}
 	                      {t.tr("FRP servers", "FRP 服务器")}: <code>{String(profiles.length || 0)}</code>
 	                    </div>
@@ -10086,7 +10214,7 @@ export default function HomePage() {
 	                  </div>
 	                </div>
 	              ) : onboardingStep === 1 ? (
-	                <div className="grid2" style={{ alignItems: "start" }}>
+	                <div className="grid2 items-start">
 	                  <div className="cardSub">
 	                    <div style={{ fontWeight: 800 }}>{t.tr("Nodes", "节点")}</div>
 	                    <div className="hint" style={{ marginTop: 8 }}>
@@ -10124,7 +10252,7 @@ export default function HomePage() {
 	                  </div>
 	                </div>
 	              ) : onboardingStep === 2 ? (
-	                <div className="grid2" style={{ alignItems: "start" }}>
+	                <div className="grid2 items-start">
 	                  <div className="cardSub">
 	                    <div style={{ fontWeight: 800 }}>{t.tr("Install a server", "安装服务器")}</div>
 	                    <div className="hint" style={{ marginTop: 8 }}>
@@ -10162,7 +10290,7 @@ export default function HomePage() {
 	                  </div>
 	                </div>
 	              ) : (
-	                <div className="grid2" style={{ alignItems: "start" }}>
+	                <div className="grid2 items-start">
 	                  <div className="cardSub">
 	                    <div style={{ fontWeight: 800 }}>{t.tr("Optional: FRP", "可选：FRP")}</div>
 	                    <div className="hint" style={{ marginTop: 8 }}>
@@ -10423,24 +10551,24 @@ export default function HomePage() {
 	                  {t.tr("Recent actions & errors (stored locally).", "最近的操作与错误（仅保存在本地浏览器）。")}
 	                </div>
 	              </div>
-	              <div className="btnGroup" style={{ justifyContent: "flex-end" }}>
-	                <button
-	                  type="button"
-	                  className="iconBtn iconOnly"
-	                  aria-label={t.tr("Clear", "清空")}
-	                  title={t.tr("Clear", "清空")}
-	                  onClick={() => setNotifications([])}
-	                  disabled={!notifications.length}
+		              <div className="btnGroup" style={{ justifyContent: "flex-end" }}>
+		                <button
+		                  type="button"
+		                  className="iconBtn iconOnly ghost"
+		                  aria-label={t.tr("Clear", "清空")}
+		                  title={t.tr("Clear", "清空")}
+		                  onClick={() => setNotifications([])}
+		                  disabled={!notifications.length}
 	                >
 	                  <Icon name="trash" />
 	                </button>
-	                <button
-	                  type="button"
-	                  className="iconBtn iconOnly"
-	                  aria-label={t.tr("Close", "关闭")}
-	                  title={t.tr("Close", "关闭")}
-	                  onClick={() => setNotificationsOpen(false)}
-	                >
+		                <button
+		                  type="button"
+		                  className="iconBtn iconOnly ghost"
+		                  aria-label={t.tr("Close", "关闭")}
+		                  title={t.tr("Close", "关闭")}
+		                  onClick={() => setNotificationsOpen(false)}
+		                >
 	                  ×
 	                </button>
 	              </div>
@@ -10566,13 +10694,13 @@ export default function HomePage() {
 			              <button type="button" className="linkBtn" onClick={undoLastTrash} disabled={undoTrashBusy}>
 			                {undoTrashBusy ? t.tr("Restoring...", "恢复中...") : t.tr("Undo", "撤销")}
 			              </button>
-			              <button
-			                type="button"
-			                className="iconBtn iconOnly"
-			                aria-label={t.tr("Dismiss", "关闭")}
-			                title={t.tr("Dismiss", "关闭")}
-			                onClick={() => setUndoTrash(null)}
-			                disabled={undoTrashBusy}
+				              <button
+				                type="button"
+				                className="iconBtn iconOnly ghost"
+				                aria-label={t.tr("Dismiss", "关闭")}
+				                title={t.tr("Dismiss", "关闭")}
+				                onClick={() => setUndoTrash(null)}
+				                disabled={undoTrashBusy}
 			              >
 			                ×
 			              </button>
@@ -10867,12 +10995,12 @@ export default function HomePage() {
 	                <label>{t.tr("Daemon", "节点")}</label>
 	                <div className="row" style={{ alignItems: "center", gap: 10, flexWrap: "nowrap" }}>
 	                  <div style={{ flex: 1 }}>
-	                    {authed === true && !daemonsLoadedOnce ? (
-                      <div className="skeleton" style={{ minHeight: 44, borderRadius: 12 }} />
-                    ) : (
-	                      <Select
-	                        value={selected}
-	                        onChange={(v) => setSelected(v)}
+		                    {authed === true && !daemonsLoadedOnce ? (
+	                      <div className="skeleton" style={{ minHeight: 44 }} />
+	                    ) : (
+		                      <Select
+		                        value={selected}
+		                        onChange={(v) => setSelected(v)}
 	                        disabled={authed !== true}
 	                        options={daemonSelectOptions}
 	                      />
@@ -11199,10 +11327,10 @@ export default function HomePage() {
 			                          </>
 			                        )}
 			                      </div>
-			                      {cfResolveStatus ? <div className="hint">{cfResolveStatus}</div> : null}
-			                      <div className="field" style={{ marginTop: 10 }}>
-			                        <label>{t.tr("Filename (optional)", "文件名（可选）")}</label>
-			                        <input
+				                      {cfResolveStatus ? <div className="hint">{cfResolveStatus}</div> : null}
+				                      <div className="field mt-10px">
+				                        <label>{t.tr("Filename (optional)", "文件名（可选）")}</label>
+				                        <input
 			                          value={installForm.remoteFileName}
 			                          onChange={(e) => setInstallForm((f) => ({ ...f, remoteFileName: e.target.value }))}
 			                          placeholder="modpack.zip"
@@ -11281,15 +11409,15 @@ export default function HomePage() {
 			                        </div>
 			                      )}
 
-			                      {marketResults.length ? (
-			                        <div className="cardGrid" style={{ marginTop: 10 }}>
-			                          {marketResults.slice(0, 12).map((p: any) => (
-			                            <div
+				                      {marketResults.length ? (
+				                        <div className="cardGrid mt-10px">
+				                          {marketResults.slice(0, 12).map((p: any) => (
+				                            <div
 			                              key={`${p.provider || installForm.kind}-${p.id}`}
 			                              className="itemCard"
 			                              style={{
 			                                cursor: "pointer",
-			                                borderColor: marketSelected?.id === p.id ? "rgba(139, 92, 246, 0.65)" : undefined,
+					                                borderColor: marketSelected?.id === p.id ? "var(--focus-border)" : undefined,
 			                              }}
 			                              onClick={() => selectMarketPack(p)}
 			                            >
@@ -11300,7 +11428,7 @@ export default function HomePage() {
 			                                </div>
 			                                <span className="badge">{p.provider || installForm.kind}</span>
 			                              </div>
-			                              <div className="row" style={{ gap: 8 }}>
+				                              <div className="row gap-2">
 			                                <span className="badge">
 			                                  {typeof p.downloads === "number"
 			                                    ? `${p.downloads} ${t.tr("downloads", "下载")}`
@@ -11315,8 +11443,8 @@ export default function HomePage() {
 			                        </div>
 			                      ) : null}
 
-			                      {marketSelected ? (
-			                        <div className="card" style={{ marginTop: 12 }}>
+				                      {marketSelected ? (
+				                        <div className="card mt-3">
 			                          <div className="row" style={{ justifyContent: "space-between", gap: 10 }}>
 			                            <div style={{ minWidth: 0 }}>
 			                              <div style={{ fontWeight: 760 }}>{marketSelected.title || marketSelected.name || marketSelected.id}</div>
@@ -11325,11 +11453,11 @@ export default function HomePage() {
 			                            <span className="badge ok">{t.tr("selected", "已选择")}</span>
 			                          </div>
 
-			                          {installForm.kind === "modrinth" ? (
-			                            <>
-			                              <div className="field" style={{ marginTop: 10 }}>
-			                                <label>{t.tr("Version", "版本")}</label>
-			                                <Select
+				                          {installForm.kind === "modrinth" ? (
+				                            <>
+				                              <div className="field mt-10px">
+				                                <label>{t.tr("Version", "版本")}</label>
+				                                <Select
 			                                  value={marketSelectedVersionId}
 			                                  onChange={(v) => pickModrinthVersion(v)}
 			                                  disabled={!marketVersions.length}
@@ -11346,11 +11474,11 @@ export default function HomePage() {
 			                                </div>
 			                              </div>
 			                            </>
-			                          ) : (
-			                            <>
-			                              <div className="field" style={{ marginTop: 10 }}>
-			                                <label>{t.tr("File", "文件")}</label>
-			                                <Select
+				                          ) : (
+				                            <>
+				                              <div className="field mt-10px">
+				                                <label>{t.tr("File", "文件")}</label>
+				                                <Select
 			                                  value={marketSelectedVersionId}
 			                                  onChange={(v) => pickCurseForgeFile(v)}
 			                                  disabled={!marketVersions.length}
@@ -11688,13 +11816,13 @@ export default function HomePage() {
 	                  </div>
 	                </div>
 
-                  {installProgress && installProgress.total > 0 ? (
-                    <div className="itemCard" style={{ marginTop: 12 }}>
+	                  {installProgress && installProgress.total > 0 ? (
+	                    <div className="itemCard mt-3">
                       <div className="hint">
                         {installProgress.phase} · {installProgress.done}/{installProgress.total}
                       </div>
                       {installProgress.currentFile ? (
-                        <div className="hint" style={{ marginTop: 6 }}>
+	                    <div className="hint mt-6px">
                           <span className="muted">{t.tr("file", "文件")}:</span> <code>{installProgress.currentFile}</code>
                         </div>
                       ) : null}
@@ -11702,7 +11830,7 @@ export default function HomePage() {
                     </div>
                   ) : null}
 
-	                <h3 style={{ marginTop: 12 }}>{t.tr("Install Logs", "安装日志")}</h3>
+	                <h3 className="mt-3">{t.tr("Install Logs", "安装日志")}</h3>
 	                <CodeBlock
 	                  text={
 	                    logs
@@ -11750,7 +11878,7 @@ export default function HomePage() {
                   </button>
                 </div>
 
-                <div className="grid2" style={{ alignItems: "start" }}>
+                <div className="grid2 items-start">
                   <div className="field">
                     <label>{t.tr("World folder", "世界目录")}</label>
                     <input value={datapackWorld} onChange={(e) => setDatapackWorld(e.target.value)} placeholder="world" />
@@ -11763,7 +11891,7 @@ export default function HomePage() {
                   </div>
                 </div>
 
-                <div className="field" style={{ marginTop: 10 }}>
+                <div className="field mt-10px">
                   <label>{t.tr("Or upload a zip", "或上传 zip")}</label>
                   <input
                     key={datapackInputKey}
@@ -11895,7 +12023,7 @@ export default function HomePage() {
                   ) : null}
                 </div>
 
-	                <div className="grid2" style={{ alignItems: "start" }}>
+	                <div className="grid2 items-start">
 	                  {showSettingsField("jar path", "jar", "path", "server.jar") || showSettingsField("pick a jar", "jar list", "scan", "refresh") ? (
 	                    <div className="settingsSectionTitle">{t.tr("Jar", "Jar")}</div>
 	                  ) : null}
@@ -11983,10 +12111,10 @@ export default function HomePage() {
                         rows={3}
                         style={{ width: "100%", marginTop: 8 }}
                       />
-                      <div className="hint" style={{ marginTop: 6 }}>
+	                    <div className="hint mt-6px">
                         {t.tr("These args are placed before -jar. Xms/Xmx are added automatically.", "这些参数会放在 -jar 前。Xms/Xmx 会自动追加。")}
                       </div>
-                      <div className="hint" style={{ marginTop: 6 }}>
+	                    <div className="hint mt-6px">
                         {t.tr("Resulting JVM args:", "最终 JVM 参数：")}
                       </div>
                       <pre style={{ marginTop: 6, maxHeight: 160, overflow: "auto" }}>
@@ -12022,17 +12150,17 @@ export default function HomePage() {
                           {t.tr("Xms = Xmx", "Xms = Xmx")}
                         </button>
                       </div>
-                      <div className="hint" style={{ marginTop: 6 }}>
-                        {t.tr("node memory", "节点内存")}: <code>{memoryInfo.totalBytes > 0 ? fmtBytes(memoryInfo.totalBytes) : "-"}</code>
-                        {" · "}
+	                      <div className="hint mt-6px">
+	                        {t.tr("node memory", "节点内存")}: <code>{memoryInfo.totalBytes > 0 ? fmtBytes(memoryInfo.totalBytes) : "-"}</code>
+	                        {" · "}
                         Xms: <code>{memoryInfo.xmsBytes != null ? fmtBytes(memoryInfo.xmsBytes) : String(xms || "").trim() || "-"}</code>
                         {" · "}
                         Xmx: <code>{memoryInfo.xmxBytes != null ? fmtBytes(memoryInfo.xmxBytes) : String(xmx || "").trim() || "-"}</code>
                       </div>
                       {memoryInfo.warnings.length ? (
-                        <div className="hint" style={{ marginTop: 6 }}>
-                          {memoryInfo.warnings.map((w, i) => (
-                            <div key={i} style={{ color: w.kind === "danger" ? "var(--danger)" : "var(--warn)" }}>
+	                        <div className="hint mt-6px">
+	                          {memoryInfo.warnings.map((w, i) => (
+	                            <div key={i} style={{ color: w.kind === "danger" ? "var(--danger)" : "var(--warn)" }}>
                               {w.text}
                             </div>
                           ))}
@@ -12115,7 +12243,7 @@ export default function HomePage() {
                   ) : null}
                 </div>
 
-                <div className="row" style={{ marginTop: 12 }}>
+	                <div className="row mt-3">
                   <button
                     className="primary"
                     type="button"
@@ -12153,7 +12281,7 @@ export default function HomePage() {
                   </button>
                 </div>
 
-                <div className="grid2" style={{ alignItems: "start" }}>
+                <div className="grid2 items-start">
                   <div className="field">
                     <label>{t.tr("Server type", "服务端类型")}</label>
                     <Select
@@ -12231,7 +12359,7 @@ export default function HomePage() {
                     </button>
                   </div>
                 </div>
-                <div className="hint" style={{ marginTop: 10 }}>
+                <div className="hint mt-10px">
                   {t.tr(
                     "Tip: use 'Repair…' after updating if the jar path is wrong, then restart.",
                     "提示：更新后如果 jar 路径不对，可用“修复…”自动识别 jar，再重启。"
@@ -12324,11 +12452,11 @@ export default function HomePage() {
                   </div>
                 </div>
 
-                {trashItems.length ? (
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>{t.tr("Original", "原始路径")}</th>
+	                {trashItems.length ? (
+	                  <table className="striped">
+	                    <thead>
+	                      <tr>
+	                        <th>{t.tr("Original", "原始路径")}</th>
                         <th>{t.tr("Deleted", "删除时间")}</th>
                         <th>{t.tr("Trash path", "回收站路径")}</th>
                         <th />
@@ -12487,7 +12615,7 @@ export default function HomePage() {
                     </div>
                   </div>
                 ) : (
-                  <div className="field" style={{ marginTop: 10 }}>
+                  <div className="field mt-10px">
                     <label>{t.tr("Raw editor", "原始编辑")}</label>
                     <textarea
                       value={serverPropsRawDraft}
@@ -12501,9 +12629,9 @@ export default function HomePage() {
                       }}
                       placeholder={t.tr("Paste/edit full server.properties here.", "在此粘贴/编辑完整的 server.properties 内容。")}
                     />
-                    <div className="hint" style={{ marginTop: 6 }}>
-                      {t.tr(
-                        "Warnings below are best-effort checks (duplicates, invalid values).",
+	                    <div className="hint mt-6px">
+	                      {t.tr(
+	                        "Warnings below are best-effort checks (duplicates, invalid values).",
                         "下方警告为最佳努力校验（重复 key / 值无效等）。"
                       )}
                     </div>
@@ -12521,8 +12649,8 @@ export default function HomePage() {
                       </div>
                     )}
 
-                    {serverPropsShowDiff ? (
-                      <div style={{ marginTop: 10 }}>
+	                {serverPropsShowDiff ? (
+	                  <div className="mt-10px">
                         <div className="hint">
                           {serverPropsDiffLines === null
                             ? t.tr("Diff too large to render.", "Diff 过大，无法渲染。")
@@ -12531,8 +12659,8 @@ export default function HomePage() {
                                 `改动：新增 ${(serverPropsDiffLines || []).filter((l) => l.type === "insert").length} 行 / 删除 ${(serverPropsDiffLines || []).filter((l) => l.type === "delete").length} 行`
                               )}
                         </div>
-                        {serverPropsDiffLines ? (
-                          <div className="diffFrame" style={{ marginTop: 10 }}>
+	                      {serverPropsDiffLines ? (
+	                        <div className="diffFrame mt-10px">
                             {serverPropsDiffLines.map((l, idx) => (
                               <div key={idx} className={`diffLine ${l.type}`}>
                                 <span className="diffNo">{l.aNo ?? ""}</span>
@@ -12708,19 +12836,19 @@ export default function HomePage() {
 	                    ) : null}
 	                  </div>
 
-	                    <div className="card">
-	                    <h3>{t.tr("Charts", "图表")}</h3>
+		                    <div className="card">
+		                    <h3>{t.tr("Charts", "图表")}</h3>
                       <div className="row" style={{ gap: 8, marginTop: 6, flexWrap: "wrap" }}>
                         <span className="badge">
-                          <span style={{ width: 10, height: 10, borderRadius: 999, background: "rgba(147, 197, 253, 0.95)" }} />
+		                        <span style={{ width: 10, height: 10, borderRadius: 999, background: "var(--primary)" }} />
                           CPU
                         </span>
                         <span className="badge">
-                          <span style={{ width: 10, height: 10, borderRadius: 999, background: "rgba(34, 197, 94, 0.9)" }} />
+		                        <span style={{ width: 10, height: 10, borderRadius: 999, background: "var(--ok)" }} />
                           MEM
                         </span>
                         <span className="badge">
-                          <span style={{ width: 10, height: 10, borderRadius: 999, background: "rgba(251, 191, 36, 0.95)" }} />
+		                        <span style={{ width: 10, height: 10, borderRadius: 999, background: "var(--warn)" }} />
                           DISK
                         </span>
                       </div>
@@ -12769,31 +12897,31 @@ export default function HomePage() {
                         labels={nodeDetailsHistory.map((p: any) => fmtTime(p?.ts_unix))}
 	                      width={520}
 	                      height={80}
-	                      stroke="rgba(147, 197, 253, 0.95)"
+	                      stroke="var(--primary)"
                         format={(v) => `${v.toFixed(1)}%`}
 	                    />
-	                    <div className="hint" style={{ marginTop: 10 }}>
-	                      MEM% · {t.tr("latest", "最新")}: {nodeDetailsHistoryMeta.memLatest == null ? "-" : `${nodeDetailsHistoryMeta.memLatest.toFixed(0)}%`}
-	                    </div>
+		                    <div className="hint mt-10px">
+		                      MEM% · {t.tr("latest", "最新")}: {nodeDetailsHistoryMeta.memLatest == null ? "-" : `${nodeDetailsHistoryMeta.memLatest.toFixed(0)}%`}
+		                    </div>
 	                    <SparklineWithTooltip
                         title="MEM"
 	                      values={nodeDetailsHistory.map((p: any) => p?.mem_percent)}
                         labels={nodeDetailsHistory.map((p: any) => fmtTime(p?.ts_unix))}
 	                      width={520}
 	                      height={80}
-	                      stroke="rgba(34, 197, 94, 0.9)"
+	                      stroke="var(--ok)"
                         format={(v) => `${v.toFixed(0)}%`}
 	                    />
-	                    <div className="hint" style={{ marginTop: 10 }}>
-	                      DISK% · {t.tr("latest", "最新")}: {nodeDetailsHistoryMeta.diskLatest == null ? "-" : `${nodeDetailsHistoryMeta.diskLatest.toFixed(0)}%`}
-	                    </div>
+		                    <div className="hint mt-10px">
+		                      DISK% · {t.tr("latest", "最新")}: {nodeDetailsHistoryMeta.diskLatest == null ? "-" : `${nodeDetailsHistoryMeta.diskLatest.toFixed(0)}%`}
+		                    </div>
 	                    <SparklineWithTooltip
                         title="DISK"
 	                      values={nodeDetailsHistory.map((p: any) => p?.disk_percent)}
                         labels={nodeDetailsHistory.map((p: any) => fmtTime(p?.ts_unix))}
 	                      width={520}
 	                      height={80}
-	                      stroke="rgba(251, 191, 36, 0.95)"
+	                      stroke="var(--warn)"
                         format={(v) => `${v.toFixed(0)}%`}
 	                    />
 	                  </div>
@@ -12801,11 +12929,11 @@ export default function HomePage() {
 
 	                <div className="card">
 	                  <h3>{t.tr("Instances", "实例")}</h3>
-                    <div className="tableScroll nodeDetailsTableScroll">
-	                  <table className="compact">
-	                    <thead>
-	                      <tr>
-	                        <th>ID</th>
+	                    <div className="tableScroll nodeDetailsTableScroll">
+		                  <table className="compact striped">
+		                    <thead>
+		                      <tr>
+		                        <th>ID</th>
 	                        <th>{t.tr("Status", "状态")}</th>
 	                        <th>{t.tr("Size", "大小")}</th>
                           {!shareMode ? <th /> : null}
@@ -12931,7 +13059,7 @@ export default function HomePage() {
               </button>
             </div>
 
-	            <div className="grid2" style={{ alignItems: "start" }}>
+	            <div className="grid2 items-start">
 	              <div className="field" style={{ gridColumn: "1 / -1" }}>
 	                <label>
 	                  <span className="row" style={{ justifyContent: "space-between", gap: 10, flexWrap: "nowrap" }}>
@@ -13018,7 +13146,7 @@ export default function HomePage() {
               </button>
             </div>
 
-	            <div className="grid2" style={{ alignItems: "start" }}>
+	            <div className="grid2 items-start">
 	              <div className="field">
 	                <label>
 	                  <span className="row" style={{ justifyContent: "space-between", gap: 10, flexWrap: "nowrap" }}>
@@ -13079,7 +13207,7 @@ export default function HomePage() {
             </div>
 
 	            {createdNode ? (
-	              <div className="card" style={{ marginTop: 12 }}>
+	              <div className="card mt-3">
 	                <h3>{t.tr("Token", "Token")}</h3>
 	                <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
 	                  <code>{createdNode.token}</code>
@@ -13128,7 +13256,7 @@ export default function HomePage() {
               </button>
             </div>
 
-            <div className="grid2" style={{ alignItems: "start" }}>
+            <div className="grid2 items-start">
               <div className={["field", addFrpShowErrors && addFrpNameErr ? "hasError" : ""].filter(Boolean).join(" ")}>
                 <label>{t.tr("Name", "名称")}</label>
                 <input
