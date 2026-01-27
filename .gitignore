@@ -24,3 +24,7 @@
 ## Local runtime data
 .elegantmc-panel/
 .elegantmc/
+
+## Local Docker Compose (do not commit)
+docker-compose.override.yml
+docker-compose.local.yml
