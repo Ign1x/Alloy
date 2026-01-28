@@ -5024,6 +5024,19 @@ export default function HomePage() {
     return await callOkCommand("fs_stat", { path: p }, timeoutMs);
   }
 
+  async function fsDuEntry(pathRaw: string, opts: { ttlSec?: number; force?: boolean } = {}, timeoutMs = 60_000) {
+    const p = String(pathRaw || "")
+      .replace(/\\+/g, "/")
+      .replace(/\/+/g, "/")
+      .replace(/^\/+/, "")
+      .replace(/\/+$/, "");
+    if (!p) throw new Error(t.tr("path is required", "path 不能为空"));
+    if (!selected) throw new Error(t.tr("Select a daemon first", "请先选择 Daemon"));
+    const ttlSec = typeof opts.ttlSec === "number" ? opts.ttlSec : 60;
+    const force = !!opts.force;
+    return await callOkCommand("fs_du", { path: p, ttl_sec: ttlSec, force }, timeoutMs);
+  }
+
   async function fsWriteText(pathRaw: string, textRaw: string, timeoutMs = 30_000) {
     const p = String(pathRaw || "")
       .replace(/\\+/g, "/")
@@ -8950,6 +8963,7 @@ export default function HomePage() {
   const openFileByPathFn = useEvent(openFileByPath);
   const fsReadTextFn = useEvent(fsReadText);
   const fsStatEntryFn = useEvent(fsStatEntry);
+  const fsDuEntryFn = useEvent(fsDuEntry);
   const fsWriteTextFn = useEvent(fsWriteText);
   const fsZipListFn = useEvent(fsZipList);
   const fsUnzipZipFn = useEvent(fsUnzipZip);
@@ -9266,6 +9280,7 @@ export default function HomePage() {
       openFileByPath: openFileByPathFn,
       fsReadText: fsReadTextFn,
       fsStatEntry: fsStatEntryFn,
+      fsDuEntry: fsDuEntryFn,
       fsWriteText: fsWriteTextFn,
       fsZipList: fsZipListFn,
       fsUnzipZip: fsUnzipZipFn,
@@ -9311,6 +9326,7 @@ export default function HomePage() {
       openFileByPathFn,
       fsReadTextFn,
       fsStatEntryFn,
+      fsDuEntryFn,
       fsWriteTextFn,
       fsZipListFn,
       fsUnzipZipFn,

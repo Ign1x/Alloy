@@ -305,6 +305,7 @@ function FilesView() {
     openFileByPath,
     fsReadText,
     fsStatEntry,
+    fsDuEntry,
     fsZipList,
     fsUnzipZip,
     fsDeleteHard,
@@ -395,6 +396,9 @@ function FilesView() {
   const [entryDetailsStatus, setEntryDetailsStatus] = useState<string>("");
   const [entryDetailsPath, setEntryDetailsPath] = useState<string>("");
   const [entryDetails, setEntryDetails] = useState<any>(null);
+  const [entryDuBusy, setEntryDuBusy] = useState<boolean>(false);
+  const [entryDuStatus, setEntryDuStatus] = useState<string>("");
+  const [entryDu, setEntryDu] = useState<any>(null);
 
   useEffect(() => {
     const t = window.setTimeout(() => setQuery(queryRaw), 160);
@@ -1126,6 +1130,9 @@ function FilesView() {
     setEntryDetailsStatus(t.tr("Loading...", "加载中..."));
     setEntryDetailsPath(rel);
     setEntryDetails(null);
+    setEntryDuBusy(false);
+    setEntryDuStatus("");
+    setEntryDu(null);
     try {
       const st = await fsStatEntry(rel);
       setEntryDetails(st);
@@ -1134,6 +1141,25 @@ function FilesView() {
       setEntryDetailsStatus(String(e?.message || e));
     } finally {
       setEntryDetailsBusy(false);
+    }
+  }
+
+  async function computeEntryDuNow(force: boolean) {
+    const rel = String(entryDetailsPath || "").trim();
+    if (!rel) return;
+    setEntryDuBusy(true);
+    setEntryDuStatus(t.tr("Computing...", "计算中..."));
+    setEntryDu(null);
+    try {
+      const out = await fsDuEntry(rel, { ttlSec: 60, force: !!force });
+      setEntryDu(out);
+      if (out?.cached) setEntryDuStatus(t.tr("Cached result", "使用缓存结果"));
+      else setEntryDuStatus(t.tr("Computed", "已计算"));
+      window.setTimeout(() => setEntryDuStatus(""), 1200);
+    } catch (e: any) {
+      setEntryDuStatus(String(e?.message || e));
+    } finally {
+      setEntryDuBusy(false);
     }
   }
 
@@ -2357,6 +2383,59 @@ function FilesView() {
               </tr>
             </tbody>
           </table>
+        ) : null}
+
+        {entryDetails?.isDir ? (
+          <>
+            <div className="row" style={{ marginTop: 12, justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+              <span className="muted">{t.tr("Folder disk usage", "文件夹占用")}</span>
+              <div className="btnGroup" style={{ justifyContent: "flex-end" }}>
+                <button type="button" onClick={() => computeEntryDuNow(false)} disabled={entryDuBusy}>
+                  {t.tr("Compute", "计算")}
+                </button>
+                <button type="button" onClick={() => computeEntryDuNow(true)} disabled={entryDuBusy}>
+                  {t.tr("Force", "强制")}
+                </button>
+              </div>
+            </div>
+
+            {entryDuStatus ? (
+              <div className="hint" style={{ marginTop: 8 }}>
+                {entryDuStatus}
+              </div>
+            ) : null}
+
+            {entryDu ? (
+              <table className="compact striped" style={{ marginTop: 10 }}>
+                <tbody>
+                  <tr>
+                    <td className="muted">{t.tr("Size", "大小")}</td>
+                    <td>
+                      <code>{fmtBytes(Number(entryDu?.bytes || 0))}</code>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td className="muted">{t.tr("Entries", "条目")}</td>
+                    <td>
+                      <code>{String(entryDu?.entries ?? "")}</code>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td className="muted">{t.tr("cached", "cached")}</td>
+                    <td>
+                      <code>{String(!!entryDu?.cached)}</code>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td className="muted">{t.tr("computed at", "computed at")}</td>
+                    <td>
+                      <code>{fmtUnix(Number(entryDu?.computed_at_unix || 0))}</code>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            ) : null}
+          </>
         ) : null}
       </ManagedModal>
 

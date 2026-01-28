@@ -127,3 +127,5 @@ WF-20260128-04,P2,panel-ui,done,page.tsx inline-style reduction,"page.tsx relies
 WF-20260128-05,P3,panel-ui,done,Views inline-style reduction,"Views still contain repeated inline styles that can be expressed via shared utilities.","Reduce safe inline styles in GamesView/PanelView/FilesView using existing utilities.",ui(panel): 视图内联样式清理
 
 WF-20260128-06,P2,files,done,Entry details modal (fs_stat),"Users need quick access to file metadata (mode/mtime/size) without leaving the Panel.","Files view provides a Details action that shows fs_stat (path/type/size/mtime/mode) for the selected entry.",feat(files): entry details
+
+WF-20260128-07,P2,files,done,Folder disk usage in Details,"Directory entry size from stat is misleading; users need true recursive folder size.","Entry Details modal can compute and show fs_du bytes/entries (cached) with Compute/Force actions.",feat(files): folder disk usage
