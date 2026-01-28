@@ -4443,6 +4443,68 @@ export default function HomePage() {
     }
   }
 
+  async function downloadFsSelectionAsZip(entries: any[]) {
+    const list = (Array.isArray(entries) ? entries : [])
+      .map((e) => String(e?.name || "").trim())
+      .filter((n) => n && n !== "." && n !== "..");
+
+    // Keep current behavior for 0/1 selection.
+    if (list.length < 2) {
+      const e = Array.isArray(entries) ? entries[0] : null;
+      if (!e) return;
+      if (e?.isDir) await downloadFsFolderAsZip(e);
+      else await downloadFsEntry(e);
+      return;
+    }
+
+    const baseDir = String(fsPath || "").trim();
+    setFsStatus(t.tr(`Zipping ${list.length} item(s) ...`, `打包中：${list.length} 个...`));
+
+    let zipPath = "";
+    try {
+      const out = await callOkCommand("fs_zip", { base_dir: baseDir, paths: list }, 10 * 60_000);
+      zipPath = String(out?.zip_path || "").trim();
+      if (!zipPath) throw new Error(t.tr("zip_path missing", "zip_path 缺失"));
+
+      const st = await callOkCommand("fs_stat", { path: zipPath }, 10_000);
+      const size = Math.max(0, Number(st?.size || 0));
+      const max = 50 * 1024 * 1024;
+      if (size > max) {
+        throw new Error(
+          t.tr(
+            `Zip too large to download in browser (${fmtBytes(size)} > ${fmtBytes(max)}). File: ${zipPath}`,
+            `Zip 过大，无法在浏览器中下载（${fmtBytes(size)} > ${fmtBytes(max)}）。文件：${zipPath}`
+          )
+        );
+      }
+
+      setFsStatus(t.tr(`Downloading ${zipPath} ...`, `下载中 ${zipPath} ...`));
+      const payload = await callOkCommand("fs_read", { path: zipPath }, 5 * 60_000);
+      const bytes = b64DecodeBytes(String(payload?.b64 || ""));
+      const blob = new Blob([bytes], { type: "application/zip" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = zipPath.split("/").pop() || "selection.zip";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      setFsStatus("");
+      pushToast(t.tr(`Downloaded: ${a.download}`, `已下载：${a.download}`), "ok");
+    } catch (e: any) {
+      setFsStatus(String(e?.message || e));
+    } finally {
+      if (zipPath) {
+        try {
+          await callOkCommand("fs_delete", { path: zipPath }, 60_000);
+        } catch {
+          // ignore
+        }
+      }
+    }
+  }
+
 		  async function deleteFsEntry(entry: any) {
 		    const name = String(entry?.name || "");
 		    if (!name) return;
@@ -9089,6 +9151,7 @@ export default function HomePage() {
   const moveFsEntryFn = useEvent(moveFsEntry);
   const downloadFsEntryFn = useEvent(downloadFsEntry);
   const downloadFsFolderAsZipFn = useEvent(downloadFsFolderAsZip);
+  const downloadFsSelectionAsZipFn = useEvent(downloadFsSelectionAsZip);
   const deleteFsEntryFn = useEvent(deleteFsEntry);
   const bulkDeleteFsEntriesFn = useEvent(bulkDeleteFsEntries);
   const bulkMoveFsEntriesFn = useEvent(bulkMoveFsEntries);
@@ -9419,6 +9482,7 @@ export default function HomePage() {
       moveFsEntry: moveFsEntryFn,
       downloadFsEntry: downloadFsEntryFn,
       downloadFsFolderAsZip: downloadFsFolderAsZipFn,
+      downloadFsSelectionAsZip: downloadFsSelectionAsZipFn,
       deleteFsEntry: deleteFsEntryFn,
       bulkDeleteFsEntries: bulkDeleteFsEntriesFn,
       bulkMoveFsEntries: bulkMoveFsEntriesFn,
@@ -9467,6 +9531,7 @@ export default function HomePage() {
       moveFsEntryFn,
       downloadFsEntryFn,
       downloadFsFolderAsZipFn,
+      downloadFsSelectionAsZipFn,
       deleteFsEntryFn,
       bulkDeleteFsEntriesFn,
       bulkMoveFsEntriesFn,

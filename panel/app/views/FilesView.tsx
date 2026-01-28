@@ -404,6 +404,7 @@ function FilesView() {
     moveFsEntry,
     downloadFsEntry,
     downloadFsFolderAsZip,
+    downloadFsSelectionAsZip,
     deleteFsEntry,
     bulkDeleteFsEntries,
     bulkMoveFsEntries,
@@ -1301,6 +1302,10 @@ function FilesView() {
     }
   }
 
+  async function downloadSelectedAsZipNow() {
+    await downloadFsSelectionAsZip(selectedEntries);
+  }
+
   function openFsSearchModalNow() {
     setFsSearchOpen(true);
     setFsSearchStatus("");
@@ -1975,6 +1980,10 @@ function FilesView() {
                 <button type="button" className="iconBtn" onClick={downloadSelectedNow} disabled={!selectedEntries.length}>
                   <Icon name="download" />
                   {t.tr("Download", "下载")}
+                </button>
+                <button type="button" className="iconBtn" onClick={downloadSelectedAsZipNow} disabled={selectedEntries.length < 2}>
+                  <Icon name="download" />
+                  {t.tr("Download as zip", "打包下载")}
                 </button>
                 <button type="button" onClick={bulkMoveSelectedNow} disabled={!selectedEntries.length}>
                   {t.tr("Move", "移动")}

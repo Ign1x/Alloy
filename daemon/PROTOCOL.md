@@ -285,6 +285,43 @@ Daemon 主动连接 Panel 的 WebSocket：
   - `entries_visited`: 遍历到的条目数
   - `truncated`: 是否因限额/取消而提前结束
 
+### `fs_zip`
+
+将目录或「多选条目」打包为 zip（输出到 `servers/_exports/` 下或自定义 `zip_path`）：
+
+- 目录模式 args:
+  - `path`: 必填（相对 `servers/` 根；必须是目录）
+  - `zip_path`: 可选（自定义 zip 相对路径；需在 `servers/` 下）
+- 多选模式 args:
+  - `base_dir`: 可选（路径基准目录，相对 `servers/` 根；默认 `.`）
+  - `paths`: 必填（相对 `base_dir` 的路径数组；可包含文件/目录）
+  - `zip_path`: 可选（自定义 zip 相对路径；需在 `servers/` 下）
+- output:
+  - 目录模式：`{ "path": "...", "zip_path": "_exports/<name>-<ts>.zip", "files": 123 }`
+  - 多选模式：`{ "base_dir": "...", "paths": ["..."], "zip_path": "_exports/<name>-<ts>.zip", "files": 123 }`
+
+安全限制：拒绝对 `servers/` 根目录本身打包；拒绝 symlink；拒绝任何逃逸沙箱的路径。
+
+### `fs_zip_list`
+
+列出 zip 文件内容（用于预览解压目标）：
+
+- args:
+  - `zip_path`: 必填（相对 `servers/` 根）
+  - `strip_top_level`: 可选（默认 true；若 zip 内只有一个顶级目录则去掉该前缀）
+- output: `{ "entries": [...], "files": 12, "total_bytes": 1234, "top_level_dir": "...", "strip_prefix": "..." }`
+
+### `fs_unzip`
+
+解压 zip 到目标目录（拒绝 symlink 与路径逃逸；支持可选去掉单一顶级目录前缀）：
+
+- args:
+  - `zip_path`: 必填（相对 `servers/` 根）
+  - `dest_dir`: 必填（相对 `servers/` 根；不得为 `servers/` 根）
+  - `strip_top_level`: 可选（默认 true）
+  - `instance_id`: 可选（用于日志归属；默认等于 `dest_dir`）
+- output: `{ "zip_path": "...", "dest_dir": "...", "files": 123, "dirs": 45, "strip_prefix": "..." }`
+
 ### `fs_delete`
 
 删除文件/目录（递归），路径必须在 `servers` 根目录下：

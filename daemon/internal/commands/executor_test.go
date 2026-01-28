@@ -466,6 +466,114 @@ func TestExecutor_FSZipList_Basic(t *testing.T) {
 	}
 }
 
+func TestExecutor_FSZip_SelectionMode_Basic(t *testing.T) {
+	ex, fs, serversRoot := newTestExecutor(t)
+	ctx := context.Background()
+
+	instDir := filepath.Join(serversRoot, "server1")
+	if err := os.MkdirAll(filepath.Join(instDir, "sub"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(instDir, "a.txt"), []byte("a"), 0o644); err != nil {
+		t.Fatalf("write a.txt: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(instDir, "sub", "b.txt"), []byte("bb"), 0o644); err != nil {
+		t.Fatalf("write b.txt: %v", err)
+	}
+
+	res := ex.Execute(ctx, protocol.Command{
+		Name: "fs_zip",
+		Args: map[string]any{
+			"base_dir": "server1",
+			"paths":    []string{"a.txt", "sub"},
+		},
+	})
+	if !res.OK {
+		t.Fatalf("fs_zip failed: %s", res.Error)
+	}
+	zipRel, _ := res.Output["zip_path"].(string)
+	if zipRel == "" {
+		t.Fatalf("expected zip_path")
+	}
+	if !strings.HasPrefix(zipRel, "_exports/") {
+		t.Fatalf("zip_path=%q", zipRel)
+	}
+	if files, _ := res.Output["files"].(int); files != 2 {
+		t.Fatalf("files=%d", files)
+	}
+
+	zipAbs, err := fs.Resolve(zipRel)
+	if err != nil {
+		t.Fatalf("resolve zip: %v", err)
+	}
+	zr, err := zip.OpenReader(zipAbs)
+	if err != nil {
+		t.Fatalf("open zip: %v", err)
+	}
+	defer zr.Close()
+
+	got := map[string]bool{}
+	for _, f := range zr.File {
+		if f == nil || f.FileInfo().IsDir() {
+			continue
+		}
+		got[strings.ReplaceAll(f.Name, "\\", "/")] = true
+	}
+	if !got["a.txt"] || !got["sub/b.txt"] {
+		t.Fatalf("zip entries=%v", got)
+	}
+}
+
+func TestExecutor_FSZip_SelectionMode_RejectsTraversal(t *testing.T) {
+	ex, _, _ := newTestExecutor(t)
+	ctx := context.Background()
+
+	res := ex.Execute(ctx, protocol.Command{
+		Name: "fs_zip",
+		Args: map[string]any{
+			"base_dir": "server1",
+			"paths":    []string{"../oops"},
+		},
+	})
+	if res.OK {
+		t.Fatalf("expected failure")
+	}
+	if strings.TrimSpace(res.Error) == "" {
+		t.Fatalf("expected error")
+	}
+}
+
+func TestExecutor_FSZip_SelectionMode_RejectsSymlink(t *testing.T) {
+	ex, _, serversRoot := newTestExecutor(t)
+	ctx := context.Background()
+
+	instDir := filepath.Join(serversRoot, "server1")
+	if err := os.MkdirAll(instDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(instDir, "a.txt"), []byte("a"), 0o644); err != nil {
+		t.Fatalf("write a.txt: %v", err)
+	}
+	if err := os.Symlink("a.txt", filepath.Join(instDir, "link")); err != nil {
+		// Not all environments support creating symlinks.
+		t.Skipf("symlink not supported: %v", err)
+	}
+
+	res := ex.Execute(ctx, protocol.Command{
+		Name: "fs_zip",
+		Args: map[string]any{
+			"base_dir": "server1",
+			"paths":    []string{"link"},
+		},
+	})
+	if res.OK {
+		t.Fatalf("expected failure")
+	}
+	if strings.TrimSpace(res.Error) == "" {
+		t.Fatalf("expected error")
+	}
+}
+
 func TestExecutor_MCBackupRestore_Roundtrip(t *testing.T) {
 	ex, _, serversRoot := newTestExecutor(t)
 	ctx := context.Background()
