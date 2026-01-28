@@ -215,6 +215,9 @@ type StartPreflightData = {
   jar: string;
   port: number;
   javaPath: string;
+  xms: string;
+  xmx: string;
+  jvmArgs: string[];
 
   diskFreeBytes: number;
   diskTotalBytes: number;
@@ -227,6 +230,11 @@ type StartPreflightData = {
 
   eulaAccepted: boolean | null;
   eulaError: string;
+
+  resolvedJava: string;
+  startArgv: string[];
+  startCmdPosix: string;
+  startCmdError: string;
 
   checkedAtMs: number;
 };
@@ -3397,10 +3405,58 @@ export default function HomePage() {
     return "badge";
   }
 
-  async function collectStartPreflight(inst: string, jar: string, port: number, javaPath: string): Promise<StartPreflightData> {
+  async function collectStartPreflight(
+    inst: string,
+    jar: string,
+    port: number,
+    javaPath: string,
+    xms: string,
+    xmx: string,
+    jvmArgs: string[]
+  ): Promise<StartPreflightData> {
     const disk = (selectedDaemon as any)?.heartbeat?.disk || {};
     const diskFreeBytes = Number((disk as any)?.free_bytes || 0);
     const diskTotalBytes = Number((disk as any)?.total_bytes || 0);
+
+    // Resolve start command (best-effort).
+    let resolvedJava = "";
+    let startArgv: string[] = [];
+    let startCmdPosix = "";
+    let startCmdError = "";
+
+    // Java requirement (best-effort). Prefer mc_resolve_start output, fallback to mc_required_java.
+    let requiredJavaMajor = 0;
+    let requiredJavaError = "";
+
+    try {
+      const res = await callOkCommand(
+        "mc_resolve_start",
+        {
+          instance_id: inst,
+          jar_path: jar,
+          java_path: javaPath,
+          xms,
+          xmx,
+          jvm_args: jvmArgs,
+        },
+        30_000
+      );
+      resolvedJava = String(res?.java || "");
+      startArgv = Array.isArray(res?.argv) ? res.argv : [];
+      startCmdPosix = String(res?.cmd_posix || "");
+      requiredJavaMajor = Math.round(Number(res?.required_java_major || 0));
+    } catch (e: any) {
+      startCmdError = String(e?.message || e);
+    }
+
+    if (requiredJavaMajor <= 0) {
+      try {
+        const r = await callOkCommand("mc_required_java", { instance_id: inst, jar_path: jar }, 30_000);
+        requiredJavaMajor = Math.round(Number(r?.required_java_major || 0));
+      } catch (e: any) {
+        requiredJavaError = String(e?.message || e);
+      }
+    }
 
     // Port probe (best-effort).
     let portAvailable: boolean | null = null;
@@ -3418,16 +3474,6 @@ export default function HomePage() {
     } catch (e: any) {
       portAvailable = null;
       portError = String(e?.message || e);
-    }
-
-    // Java requirement (best-effort).
-    let requiredJavaMajor = 0;
-    let requiredJavaError = "";
-    try {
-      const r = await callOkCommand("mc_required_java", { instance_id: inst, jar_path: jar }, 30_000);
-      requiredJavaMajor = Math.round(Number(r?.required_java_major || 0));
-    } catch (e: any) {
-      requiredJavaError = String(e?.message || e);
     }
 
     // EULA check (best-effort).
@@ -3450,6 +3496,9 @@ export default function HomePage() {
       jar,
       port,
       javaPath,
+      xms,
+      xmx,
+      jvmArgs,
       diskFreeBytes,
       diskTotalBytes,
       portAvailable,
@@ -3458,11 +3507,23 @@ export default function HomePage() {
       requiredJavaError,
       eulaAccepted,
       eulaError,
+      resolvedJava,
+      startArgv,
+      startCmdPosix,
+      startCmdError,
       checkedAtMs: Date.now(),
     };
   }
 
-  async function startPreflightDialog(inst: string, jar: string, port: number, javaPath: string) {
+  async function startPreflightDialog(
+    inst: string,
+    jar: string,
+    port: number,
+    javaPath: string,
+    xms: string,
+    xmx: string,
+    jvmArgs: string[]
+  ) {
     const cleanInst = String(inst || "").trim();
     if (!cleanInst) return false;
 
@@ -3476,6 +3537,9 @@ export default function HomePage() {
         jar: String(jar || ""),
         port: Math.round(Number(port || 0)),
         javaPath: String(javaPath || "").trim(),
+        xms,
+        xmx,
+        jvmArgs,
         diskFreeBytes: 0,
         diskTotalBytes: 0,
         portAvailable: null,
@@ -3484,13 +3548,17 @@ export default function HomePage() {
         requiredJavaError: "",
         eulaAccepted: null,
         eulaError: "",
+        resolvedJava: "",
+        startArgv: [],
+        startCmdPosix: "",
+        startCmdError: "",
         checkedAtMs: Date.now(),
       });
 
       const runId = ++startPreflightRunRef.current;
       (async () => {
         try {
-          const data = await collectStartPreflight(cleanInst, jar, port, javaPath);
+          const data = await collectStartPreflight(cleanInst, jar, port, javaPath, xms, xmx, jvmArgs);
           if (startPreflightRunRef.current !== runId) return;
           setStartPreflightData(data);
           setStartPreflightStatus("");
@@ -7413,7 +7481,7 @@ export default function HomePage() {
       const remotePort = Math.round(Number(override?.frpRemotePort ?? frpRemotePort ?? 0));
 
       // Preflight: show a checklist with actionable fixes before starting.
-      const okPreflight = await startPreflightDialog(inst, jar, port, java);
+      const okPreflight = await startPreflightDialog(inst, jar, port, java, xmsVal, xmxVal, jvmArgsVal);
       if (!okPreflight) {
         setServerOpStatus(t.tr("Cancelled", "已取消"));
         return;
@@ -10415,6 +10483,9 @@ export default function HomePage() {
                   const jar = String(d?.jar || "").trim();
                   const port = Math.round(Number(d?.port || 0));
                   const javaPath = String(d?.javaPath || "").trim();
+                  const xms = String(d?.xms || "");
+                  const xmx = String(d?.xmx || "");
+                  const jvmArgs = Array.isArray(d?.jvmArgs) ? d!.jvmArgs : [];
 
                   const diskFreeBytes = Math.round(Number(d?.diskFreeBytes || 0));
                   const diskTotalBytes = Math.round(Number(d?.diskTotalBytes || 0));
@@ -10438,8 +10509,29 @@ export default function HomePage() {
                           <code>{inst || "-"}</code>
                           {jar ? <span className="badge">jar: <code>{jar}</code></span> : null}
                           {Number.isFinite(port) && port > 0 ? <span className="badge">port: <code>{port}</code></span> : null}
-                          {javaPath ? <span className="badge">java: <code>{javaPath}</code></span> : <span className="badge">java: {t.tr("auto", "自动")}</span>}
+                          {d?.resolvedJava ? (
+                            <span className="badge">
+                              java: <code>{d.resolvedJava}</code>
+                            </span>
+                          ) : javaPath ? (
+                            <span className="badge">
+                              java: <code>{javaPath}</code>
+                            </span>
+                          ) : (
+                            <span className="badge">java: {t.tr("auto", "自动")}</span>
+                          )}
                         </div>
+                      </div>
+
+                      <div className="field" style={{ gridColumn: "1 / -1" }}>
+                        <label>{t.tr("Command Preview", "命令预览")}</label>
+                        <CodeBlock
+                          text={d?.startCmdError ? `Error: ${d.startCmdError}` : d?.startCmdPosix || t.tr("Resolving...", "解析中...")}
+                          maxHeight={140}
+                          showLineNumbersToggle={false}
+                          showWrapToggle
+                          initialWrap
+                        />
                       </div>
 
                       <div className="field" style={{ gridColumn: "1 / -1" }}>
@@ -10473,7 +10565,7 @@ export default function HomePage() {
                                 try {
                                   setServerOpStatus(t.tr("Writing eula.txt ...", "写入 eula.txt ..."));
                                   await ensureEulaAccepted(inst);
-                                  const next = await collectStartPreflight(inst, jar, port, javaPath);
+                                  const next = await collectStartPreflight(inst, jar, port, javaPath, xms, xmx, jvmArgs);
                                   setStartPreflightData(next);
                                   setServerOpStatus("");
                                 } catch (e: any) {
@@ -10587,7 +10679,7 @@ export default function HomePage() {
                                 setStartPreflightBusy(true);
                                 setStartPreflightStatus(t.tr("Checking...", "检查中..."));
                                 try {
-                                  const next = await collectStartPreflight(inst, jar, port, javaPath);
+                                  const next = await collectStartPreflight(inst, jar, port, javaPath, xms, xmx, jvmArgs);
                                   setStartPreflightData(next);
                                   setStartPreflightStatus("");
                                 } catch (e: any) {

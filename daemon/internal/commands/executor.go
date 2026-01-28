@@ -596,6 +596,8 @@ func (e *Executor) Execute(ctx context.Context, cmd protocol.Command) protocol.C
 		return e.mcInstallVanilla(ctx, cmd)
 	case "mc_install_paper":
 		return e.mcInstallPaper(ctx, cmd)
+	case "mc_resolve_start":
+		return e.mcResolveStart(ctx, cmd)
 	case "mc_start":
 		return e.mcStart(ctx, cmd)
 	case "mc_restart":
@@ -1167,6 +1169,41 @@ func (e *Executor) mcStart(ctx context.Context, cmd protocol.Command) protocol.C
 		return fail(err.Error())
 	}
 	return ok(map[string]any{"instance_id": instanceID})
+}
+
+func (e *Executor) mcResolveStart(ctx context.Context, cmd protocol.Command) protocol.CommandResult {
+	instanceID, _ := asString(cmd.Args["instance_id"])
+	jarPath, _ := asString(cmd.Args["jar_path"])
+	javaPath, _ := asString(cmd.Args["java_path"])
+	xms, _ := asString(cmd.Args["xms"])
+	xmx, _ := asString(cmd.Args["xmx"])
+	jvmArgs, _ := asStringSlice(cmd.Args["jvm_args"])
+	if err := validateInstanceID(instanceID); err != nil {
+		return fail(err.Error())
+	}
+
+	res, err := e.deps.MC.ResolveStart(ctx, mc.StartOptions{
+		InstanceID: instanceID,
+		JarPath:    jarPath,
+		JavaPath:   javaPath,
+		Xms:        xms,
+		Xmx:        xmx,
+		JvmArgs:    jvmArgs,
+	})
+	if err != nil {
+		return fail(err.Error())
+	}
+	return ok(map[string]any{
+		"instance_id":         instanceID,
+		"java":                res.Java,
+		"java_source":         res.JavaSource,
+		"java_major":          res.JavaMajor,
+		"required_java_major": res.RequiredJavaMajor,
+		"jar_path":            res.JarRel,
+		"jar_abs":             res.JarAbs,
+		"argv":                res.Argv,
+		"cmd_posix":           res.CmdPosix,
+	})
 }
 
 func (e *Executor) mcRestart(ctx context.Context, cmd protocol.Command) protocol.CommandResult {

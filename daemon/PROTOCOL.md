@@ -389,6 +389,21 @@ Daemon 主动连接 Panel 的 WebSocket：
   - `jar_path`: `server.jar`（相对 `servers/<instance_id>/`）
   - `java_path`: 可选。指定要使用的 `java` 可执行路径/命令名；不填则 Daemon 自动从 jar 推断最低 Java 并在候选列表中选择
   - `xms` / `xmx`: 例如 `1G` / `2G`
+  - `jvm_args`: 可选。额外 JVM args（数组），例如 `[-Dfoo=bar, -XX:+UseG1GC]`
+
+### `mc_resolve_start`
+
+预览 `mc_start` 将使用的启动命令（不会实际启动进程）：
+
+- args: 同 `mc_start`
+- output:
+  - `java`: 解析后的 `java` 可执行（路径或命令名）
+  - `java_source`: `explicit|default|candidates|temurin-auto`
+  - `java_major`: 已探测到的 Java major（可能为 0）
+  - `required_java_major`: 从 jar 推断的最低 Java major（失败时回退为 8）
+  - `jar_abs`: jar 的绝对路径（Daemon 侧解析）
+  - `argv`: 完整 argv 数组（含 argv[0]=java）
+  - `cmd_posix`: 适用于 sh/bash/zsh 的单行命令字符串（copy/paste 用）
 
 ### `mc_stop`
 

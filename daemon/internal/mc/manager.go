@@ -77,6 +77,22 @@ type Status struct {
 	LastExitSignal    string
 }
 
+// ResolvedStart describes the exact command Daemon would use for mc_start,
+// without actually starting the process.
+type ResolvedStart struct {
+	InstanceID         string
+	InstanceDir        string
+	JarRel             string
+	JarAbs             string
+	Java               string
+	JavaSource         string
+	JavaMajor          int
+	RequiredJavaMajor  int
+	Args               []string
+	Argv               []string
+	CmdPosix           string
+}
+
 func NewManager(cfg ManagerConfig) *Manager {
 	var rt *JavaRuntimeManager
 	if cfg.JavaAutoDownload {
@@ -126,6 +142,52 @@ func (m *Manager) Start(ctx context.Context, opt StartOptions, logSink func(inst
 	m.mu.Unlock()
 
 	return inst.start(ctx, m.cfg.ServersFS, opt, logSink, m.cfg.Log, m.java, m.javaRuntime)
+}
+
+// ResolveStart computes the final java executable and argv for starting an instance.
+// It does not reserve ports, write files, or start processes.
+func (m *Manager) ResolveStart(ctx context.Context, opt StartOptions) (ResolvedStart, error) {
+	if strings.TrimSpace(opt.InstanceID) == "" {
+		return ResolvedStart{}, errors.New("instance_id is required")
+	}
+	if strings.TrimSpace(opt.JarPath) == "" {
+		return ResolvedStart{}, errors.New("jar_path is required")
+	}
+	if m.cfg.ServersFS == nil {
+		return ResolvedStart{}, errors.New("servers filesystem not configured")
+	}
+
+	instanceDir, err := m.cfg.ServersFS.Resolve(filepath.Join(opt.InstanceID))
+	if err != nil {
+		return ResolvedStart{}, err
+	}
+	jarAbs, err := m.cfg.ServersFS.Resolve(filepath.Join(opt.InstanceID, opt.JarPath))
+	if err != nil {
+		return ResolvedStart{}, err
+	}
+	if _, err := os.Stat(jarAbs); err != nil {
+		return ResolvedStart{}, fmt.Errorf("jar not found: %w", err)
+	}
+
+	java, javaSource, javaMajor, requiredMajor, args, err := prepareStartCommand(ctx, jarAbs, opt, nil, m.cfg.Log, m.java, m.javaRuntime)
+	if err != nil {
+		return ResolvedStart{}, err
+	}
+	argv := append([]string{java}, args...)
+
+	return ResolvedStart{
+		InstanceID:        opt.InstanceID,
+		InstanceDir:       instanceDir,
+		JarRel:            opt.JarPath,
+		JarAbs:            jarAbs,
+		Java:              java,
+		JavaSource:        javaSource,
+		JavaMajor:         javaMajor,
+		RequiredJavaMajor: requiredMajor,
+		Args:              args,
+		Argv:              argv,
+		CmdPosix:          posixShellJoin(argv),
+	}, nil
 }
 
 func (m *Manager) Stop(ctx context.Context, instanceID string) error {
@@ -247,109 +309,13 @@ func (inst *Instance) start(ctx context.Context, fs *sandbox.FS, opt StartOption
 		}
 	}
 
-	java := opt.JavaPath
-	javaSource := "explicit"
-	requiredMajor, err := requiredJavaMajorFromJar(jarAbs)
-	detectedMajor := err == nil
+	java, _, selectedMajor, requiredMajor, args, err := prepareStartCommand(ctx, jarAbs, opt, logSink, logger, javaSel, javaRuntime)
 	if err != nil {
-		requiredMajor = 8
-		if logger != nil {
-			logger.Printf("mc: unable to detect required java from jar (instance=%s): %v", opt.InstanceID, err)
-		}
-	}
-	if requiredMajor < 8 {
-		requiredMajor = 8
-	}
-
-	var selectedMajor int
-	if java == "" {
-		if javaSel == nil {
-			java = "java"
-			javaSource = "default"
-		} else {
-			javaSource = "candidates"
-			var selErr error
-			java, selectedMajor, selErr = javaSel.Select(ctx, requiredMajor)
-			if selErr != nil {
-				if detectedMajor && javaRuntime != nil {
-					if logSink != nil {
-						logSink(inst.ID, "stdout", fmt.Sprintf("[elegantmc] ensuring Temurin JRE %d (auto)", requiredMajor))
-					}
-					if ensuredJava, ensuredMajor, err := javaRuntime.EnsureTemurinJRE(ctx, requiredMajor); err == nil {
-						java = ensuredJava
-						selectedMajor = ensuredMajor
-						javaSource = "temurin-auto"
-						selErr = nil
-					} else {
-						if logger != nil {
-							logger.Printf("mc: java auto-download failed (major=%d): %v", requiredMajor, err)
-						}
-						if logSink != nil {
-							logSink(inst.ID, "stdout", fmt.Sprintf("[elegantmc] java auto-download failed (major=%d): %v", requiredMajor, err))
-						}
-					}
-				}
-				if selErr != nil {
-					return selErr
-				}
-			}
-			if detectedMajor && javaRuntime != nil && selectedMajor > 0 && selectedMajor < requiredMajor {
-				if logSink != nil {
-					logSink(inst.ID, "stdout", fmt.Sprintf("[elegantmc] ensuring Temurin JRE %d (auto)", requiredMajor))
-				}
-				if ensuredJava, ensuredMajor, err := javaRuntime.EnsureTemurinJRE(ctx, requiredMajor); err == nil {
-					java = ensuredJava
-					selectedMajor = ensuredMajor
-					javaSource = "temurin-auto"
-				} else {
-					if logger != nil {
-						logger.Printf("mc: java auto-download failed (major=%d): %v", requiredMajor, err)
-					}
-					if logSink != nil {
-						logSink(inst.ID, "stdout", fmt.Sprintf("[elegantmc] java auto-download failed (major=%d): %v", requiredMajor, err))
-					}
-				}
-			}
-		}
-	} else {
-		if maj, err := probeJavaMajor(ctx, java); err == nil {
-			selectedMajor = maj
-		}
+		return err
 	}
 
 	inst.requiredJavaMajor = requiredMajor
 	inst.javaMajor = selectedMajor
-
-	if logSink != nil {
-		msg := fmt.Sprintf("[elegantmc] java=%s", java)
-		if selectedMajor > 0 {
-			msg += fmt.Sprintf(" (major %d)", selectedMajor)
-		}
-		if requiredMajor > 0 {
-			msg += fmt.Sprintf(", required>=%d", requiredMajor)
-		}
-		if strings.TrimSpace(javaSource) != "" {
-			msg += fmt.Sprintf(", source=%s", javaSource)
-		}
-		logSink(inst.ID, "stdout", msg)
-	}
-
-	var args []string
-	for _, a := range opt.JvmArgs {
-		a = strings.TrimSpace(a)
-		if a == "" {
-			continue
-		}
-		args = append(args, a)
-	}
-	if opt.Xms != "" {
-		args = append(args, "-Xms"+opt.Xms)
-	}
-	if opt.Xmx != "" {
-		args = append(args, "-Xmx"+opt.Xmx)
-	}
-	args = append(args, "-jar", jarAbs, "nogui")
-	args = append(args, opt.ExtraArgs...)
 
 	cmd := exec.CommandContext(ctx, java, args...)
 	cmd.Dir = instanceDir
@@ -427,6 +393,147 @@ func (inst *Instance) start(ctx context.Context, fs *sandbox.FS, opt StartOption
 
 	startedOk = true
 	return nil
+}
+
+func prepareStartCommand(
+	ctx context.Context,
+	jarAbs string,
+	opt StartOptions,
+	logSink func(instanceID, stream, line string),
+	logger *log.Logger,
+	javaSel *javaSelector,
+	javaRuntime *JavaRuntimeManager,
+) (java string, javaSource string, selectedMajor int, requiredMajor int, args []string, err error) {
+	java = opt.JavaPath
+	javaSource = "explicit"
+	requiredMajor, err = requiredJavaMajorFromJar(jarAbs)
+	detectedMajor := err == nil
+	if err != nil {
+		requiredMajor = 8
+		if logger != nil {
+			logger.Printf("mc: unable to detect required java from jar (instance=%s): %v", opt.InstanceID, err)
+		}
+	}
+	if requiredMajor < 8 {
+		requiredMajor = 8
+	}
+
+	if java == "" {
+		if javaSel == nil {
+			java = "java"
+			javaSource = "default"
+		} else {
+			javaSource = "candidates"
+			var selErr error
+			java, selectedMajor, selErr = javaSel.Select(ctx, requiredMajor)
+			if selErr != nil {
+				if detectedMajor && javaRuntime != nil {
+					if logSink != nil {
+						logSink(opt.InstanceID, "stdout", fmt.Sprintf("[elegantmc] ensuring Temurin JRE %d (auto)", requiredMajor))
+					}
+					if ensuredJava, ensuredMajor, err := javaRuntime.EnsureTemurinJRE(ctx, requiredMajor); err == nil {
+						java = ensuredJava
+						selectedMajor = ensuredMajor
+						javaSource = "temurin-auto"
+						selErr = nil
+					} else {
+						if logger != nil {
+							logger.Printf("mc: java auto-download failed (major=%d): %v", requiredMajor, err)
+						}
+						if logSink != nil {
+							logSink(opt.InstanceID, "stdout", fmt.Sprintf("[elegantmc] java auto-download failed (major=%d): %v", requiredMajor, err))
+						}
+					}
+				}
+				if selErr != nil {
+					return "", "", 0, 0, nil, selErr
+				}
+			}
+			if detectedMajor && javaRuntime != nil && selectedMajor > 0 && selectedMajor < requiredMajor {
+				if logSink != nil {
+					logSink(opt.InstanceID, "stdout", fmt.Sprintf("[elegantmc] ensuring Temurin JRE %d (auto)", requiredMajor))
+				}
+				if ensuredJava, ensuredMajor, err := javaRuntime.EnsureTemurinJRE(ctx, requiredMajor); err == nil {
+					java = ensuredJava
+					selectedMajor = ensuredMajor
+					javaSource = "temurin-auto"
+				} else {
+					if logger != nil {
+						logger.Printf("mc: java auto-download failed (major=%d): %v", requiredMajor, err)
+					}
+					if logSink != nil {
+						logSink(opt.InstanceID, "stdout", fmt.Sprintf("[elegantmc] java auto-download failed (major=%d): %v", requiredMajor, err))
+					}
+				}
+			}
+		}
+	} else {
+		if maj, err := probeJavaMajor(ctx, java); err == nil {
+			selectedMajor = maj
+		}
+	}
+
+	if logSink != nil {
+		msg := fmt.Sprintf("[elegantmc] java=%s", java)
+		if selectedMajor > 0 {
+			msg += fmt.Sprintf(" (major %d)", selectedMajor)
+		}
+		if requiredMajor > 0 {
+			msg += fmt.Sprintf(", required>=%d", requiredMajor)
+		}
+		if strings.TrimSpace(javaSource) != "" {
+			msg += fmt.Sprintf(", source=%s", javaSource)
+		}
+		logSink(opt.InstanceID, "stdout", msg)
+	}
+
+	for _, a := range opt.JvmArgs {
+		a = strings.TrimSpace(a)
+		if a == "" {
+			continue
+		}
+		args = append(args, a)
+	}
+	if opt.Xms != "" {
+		args = append(args, "-Xms"+opt.Xms)
+	}
+	if opt.Xmx != "" {
+		args = append(args, "-Xmx"+opt.Xmx)
+	}
+	args = append(args, "-jar", jarAbs, "nogui")
+	args = append(args, opt.ExtraArgs...)
+	return java, javaSource, selectedMajor, requiredMajor, args, nil
+}
+
+func posixShellJoin(argv []string) string {
+	if len(argv) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(argv))
+	for _, a := range argv {
+		parts = append(parts, posixShellEscape(a))
+	}
+	return strings.Join(parts, " ")
+}
+
+func posixShellEscape(s string) string {
+	// Safe enough for copy/paste into sh/bash/zsh. Not intended for Windows shells.
+	if s == "" {
+		return "''"
+	}
+	needQuotes := false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c <= 0x20 || c == '\\' || c == '"' || c == '\'' || c == '$' || c == '`' || c == '!' || c == '|' || c == '&' || c == ';' || c == '<' || c == '>' || c == '(' || c == ')' || c == '{' || c == '}' || c == '[' || c == ']' || c == '*' || c == '?' {
+			needQuotes = true
+			break
+		}
+	}
+	if !needQuotes {
+		return s
+	}
+	// Single-quote and escape embedded quotes: ' -> '\''
+	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
 }
 
 func (inst *Instance) stop(ctx context.Context, logger *log.Logger) error {
