@@ -3,7 +3,9 @@ package commands
 import (
 	"archive/zip"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"os"
 	"path/filepath"
 	"strings"
@@ -174,6 +176,38 @@ func TestExecutor_FSStat_File(t *testing.T) {
 	}
 	if mode, _ := statRes.Output["mode"].(string); strings.TrimSpace(mode) == "" {
 		t.Fatalf("expected mode string")
+	}
+}
+
+func TestExecutor_FSHash_SHA256(t *testing.T) {
+	ex, _, _ := newTestExecutor(t)
+	ctx := context.Background()
+
+	want := []byte("hello world\n")
+	writeRes := ex.Execute(ctx, protocol.Command{
+		Name: "fs_write",
+		Args: map[string]any{
+			"path": "server1/a.txt",
+			"b64":  base64.StdEncoding.EncodeToString(want),
+		},
+	})
+	if !writeRes.OK {
+		t.Fatalf("fs_write failed: %s", writeRes.Error)
+	}
+
+	h := sha256.Sum256(want)
+	wantHex := hex.EncodeToString(h[:])
+
+	hashRes := ex.Execute(ctx, protocol.Command{
+		Name: "fs_hash",
+		Args: map[string]any{"path": "server1/a.txt"},
+	})
+	if !hashRes.OK {
+		t.Fatalf("fs_hash failed: %s", hashRes.Error)
+	}
+	gotHex, _ := hashRes.Output["sha256"].(string)
+	if gotHex != wantHex {
+		t.Fatalf("unexpected sha256: got=%q want=%q", gotHex, wantHex)
 	}
 }
 

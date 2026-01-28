@@ -548,6 +548,8 @@ func (e *Executor) Execute(ctx context.Context, cmd protocol.Command) protocol.C
 		return e.fsList(cmd)
 	case "fs_stat":
 		return e.fsStat(cmd)
+	case "fs_hash":
+		return e.fsHash(ctx, cmd)
 	case "fs_du":
 		return e.fsDu(ctx, cmd)
 	case "fs_delete":

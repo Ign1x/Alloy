@@ -306,6 +306,7 @@ function FilesView() {
     fsReadText,
     fsStatEntry,
     fsDuEntry,
+    fsHashEntry,
     fsZipList,
     fsUnzipZip,
     fsDeleteHard,
@@ -399,6 +400,9 @@ function FilesView() {
   const [entryDuBusy, setEntryDuBusy] = useState<boolean>(false);
   const [entryDuStatus, setEntryDuStatus] = useState<string>("");
   const [entryDu, setEntryDu] = useState<any>(null);
+  const [entryHashBusy, setEntryHashBusy] = useState<boolean>(false);
+  const [entryHashStatus, setEntryHashStatus] = useState<string>("");
+  const [entryHash, setEntryHash] = useState<any>(null);
 
   useEffect(() => {
     const t = window.setTimeout(() => setQuery(queryRaw), 160);
@@ -1133,6 +1137,9 @@ function FilesView() {
     setEntryDuBusy(false);
     setEntryDuStatus("");
     setEntryDu(null);
+    setEntryHashBusy(false);
+    setEntryHashStatus("");
+    setEntryHash(null);
     try {
       const st = await fsStatEntry(rel);
       setEntryDetails(st);
@@ -1141,6 +1148,24 @@ function FilesView() {
       setEntryDetailsStatus(String(e?.message || e));
     } finally {
       setEntryDetailsBusy(false);
+    }
+  }
+
+  async function computeEntryHashNow() {
+    const rel = String(entryDetailsPath || "").trim();
+    if (!rel) return;
+    setEntryHashBusy(true);
+    setEntryHashStatus(t.tr("Computing...", "计算中..."));
+    setEntryHash(null);
+    try {
+      const out = await fsHashEntry(rel, { maxBytes: 512 * 1024 * 1024 }, 60_000);
+      setEntryHash(out);
+      setEntryHashStatus(t.tr("Computed", "已计算"));
+      window.setTimeout(() => setEntryHashStatus(""), 1200);
+    } catch (e: any) {
+      setEntryHashStatus(String(e?.message || e));
+    } finally {
+      setEntryHashBusy(false);
     }
   }
 
@@ -2383,6 +2408,55 @@ function FilesView() {
               </tr>
             </tbody>
           </table>
+        ) : null}
+
+        {entryDetails && !entryDetails?.isDir ? (
+          <>
+            <div className="row" style={{ marginTop: 12, justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+              <span className="muted">
+                {t.tr("SHA256", "SHA256")} <span className="hint">({t.tr("max 512MiB", "最大 512MiB")})</span>
+              </span>
+              <div className="btnGroup" style={{ justifyContent: "flex-end" }}>
+                <button type="button" onClick={computeEntryHashNow} disabled={entryHashBusy}>
+                  {t.tr("Compute", "计算")}
+                </button>
+              </div>
+            </div>
+
+            {entryHashStatus ? (
+              <div className="hint" style={{ marginTop: 8 }}>
+                {entryHashStatus}
+              </div>
+            ) : null}
+
+            {entryHash?.sha256 ? (
+              <table className="compact striped" style={{ marginTop: 10 }}>
+                <tbody>
+                  <tr>
+                    <td className="muted">sha256</td>
+                    <td>
+                      <div className="row" style={{ justifyContent: "space-between", gap: 10, alignItems: "center" }}>
+                        <code style={{ wordBreak: "break-all" }}>{String(entryHash?.sha256 || "")}</code>
+                        <CopyButton
+                          iconOnly
+                          text={String(entryHash?.sha256 || "")}
+                          tooltip={t.tr("Copy", "复制")}
+                          ariaLabel={t.tr("Copy", "复制")}
+                          disabled={!entryHash?.sha256}
+                        />
+                      </div>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td className="muted">{t.tr("Bytes", "字节")}</td>
+                    <td>
+                      <code>{fmtBytes(Number(entryHash?.bytes || 0))}</code>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            ) : null}
+          </>
         ) : null}
 
         {entryDetails?.isDir ? (
