@@ -5096,6 +5096,52 @@ export default function HomePage() {
     return await callOkCommand("fs_hash", { path: p, ...(typeof maxBytes === "number" ? { max_bytes: maxBytes } : {}) }, timeoutMs);
   }
 
+  async function fsSearchEntries(
+    pathRaw: string,
+    args: {
+      pattern?: string;
+      query?: string;
+      regex?: boolean;
+      caseSensitive?: boolean;
+      recursive?: boolean;
+      includeBinary?: boolean;
+      maxFiles?: number;
+      maxMatches?: number;
+      contextBefore?: number;
+      contextAfter?: number;
+      maxBytesPerFile?: number;
+      maxBytesTotal?: number;
+    } = {},
+    timeoutMs = 60_000
+  ) {
+    const p = String(pathRaw || "")
+      .replace(/\\+/g, "/")
+      .replace(/\/+/g, "/")
+      .replace(/^\/+/, "")
+      .replace(/\/+$/, "");
+    if (!selected) throw new Error(t.tr("Select a daemon first", "请先选择 Daemon"));
+
+    const pattern = String(args.pattern || "").trim() || "**/*";
+    const query = String(args.query || "");
+    const payload: any = {
+      path: p,
+      pattern,
+      query,
+      regex: !!args.regex,
+      case_sensitive: !!args.caseSensitive,
+      recursive: args.recursive !== false,
+      include_binary: !!args.includeBinary,
+    };
+    if (typeof args.maxFiles === "number") payload.max_files = Math.floor(args.maxFiles);
+    if (typeof args.maxMatches === "number") payload.max_matches = Math.floor(args.maxMatches);
+    if (typeof args.contextBefore === "number") payload.context_before = Math.floor(args.contextBefore);
+    if (typeof args.contextAfter === "number") payload.context_after = Math.floor(args.contextAfter);
+    if (typeof args.maxBytesPerFile === "number") payload.max_bytes_per_file = Math.floor(args.maxBytesPerFile);
+    if (typeof args.maxBytesTotal === "number") payload.max_bytes_total = Math.floor(args.maxBytesTotal);
+
+    return await callOkCommand("fs_search", payload, timeoutMs);
+  }
+
   async function fsWriteText(pathRaw: string, textRaw: string, timeoutMs = 30_000) {
     const p = String(pathRaw || "")
       .replace(/\\+/g, "/")
@@ -9025,6 +9071,7 @@ export default function HomePage() {
   const fsStatEntryFn = useEvent(fsStatEntry);
   const fsDuEntryFn = useEvent(fsDuEntry);
   const fsHashEntryFn = useEvent(fsHashEntry);
+  const fsSearchEntriesFn = useEvent(fsSearchEntries);
   const fsWriteTextFn = useEvent(fsWriteText);
   const fsZipListFn = useEvent(fsZipList);
   const fsUnzipZipFn = useEvent(fsUnzipZip);
@@ -9347,6 +9394,7 @@ export default function HomePage() {
       fsStatEntry: fsStatEntryFn,
       fsDuEntry: fsDuEntryFn,
       fsHashEntry: fsHashEntryFn,
+      fsSearchEntries: fsSearchEntriesFn,
       fsWriteText: fsWriteTextFn,
       fsZipList: fsZipListFn,
       fsUnzipZip: fsUnzipZipFn,
@@ -9394,6 +9442,7 @@ export default function HomePage() {
       fsStatEntryFn,
       fsDuEntryFn,
       fsHashEntryFn,
+      fsSearchEntriesFn,
       fsWriteTextFn,
       fsZipListFn,
       fsUnzipZipFn,

@@ -252,6 +252,39 @@ Daemon 主动连接 Panel 的 WebSocket：
 
 - args: `{ "path": "server1" }`
 
+### `fs_hash`
+
+计算文件 SHA256（仅限 `servers/` 沙箱内）：
+
+- args:
+  - `path`: 目标文件路径（相对 `servers/` 根）
+  - `max_bytes`: 可选。最大读取字节数（默认 512MiB；硬上限 2GiB）
+- output: `{ "path": "...", "bytes": 123, "sha256": "...", "max_bytes": 536870912 }`
+
+### `fs_search`
+
+在 `servers/` 沙箱内查找文件（glob + 可选内容搜索）：
+
+- args:
+  - `path`: 搜索根目录（相对 `servers/`；空 = `servers/` 根）
+  - `pattern`: glob（默认 `**/*`；支持 `*`、`?`、`[]`、`**`）
+  - `query`: 内容查询（可选；空则只返回匹配到的文件列表）
+  - `regex`: 可选（true 则把 `query` 当作正则）
+  - `case_sensitive`: 可选（默认 false）
+  - `recursive`: 可选（默认 true）
+  - `include_binary`: 可选（默认 false；false 时会跳过常见二进制扩展名，并做 NULL byte 检测）
+  - `max_files`: 可选（默认 60，最大 1000）
+  - `max_matches`: 可选（默认 200，最大 5000）
+  - `context_before` / `context_after`: 可选（0-20）
+  - `max_bytes_per_file`: 可选（默认 2MiB，最大 20MiB）
+  - `max_bytes_total`: 可选（默认 8MiB，最大 200MiB）
+- output:
+  - `files`: 匹配到的文件列表（含 size/mtime/matches/skipped_binary/truncated 等）
+  - `matches`: 内容匹配结果（含 path/line_no/text/before/after）
+  - `bytes_scanned`: 实际扫描字节数
+  - `entries_visited`: 遍历到的条目数
+  - `truncated`: 是否因限额/取消而提前结束
+
 ### `fs_delete`
 
 删除文件/目录（递归），路径必须在 `servers` 根目录下：

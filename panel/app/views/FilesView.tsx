@@ -30,6 +30,80 @@ function normalizeNewlines(text: string) {
   return String(text || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
 }
 
+function highlightText(text: string, qLower: string) {
+  const q = String(qLower || "").trim().toLowerCase();
+  if (!q) return text;
+  const t = String(text || "");
+  if (t.length > 12_000) return text;
+  const lower = t.toLowerCase();
+  const parts: any[] = [];
+  let i = 0;
+  let hits = 0;
+  const maxHits = 32;
+  while (i < t.length && hits < maxHits) {
+    const at = lower.indexOf(q, i);
+    if (at < 0) break;
+    if (at > i) parts.push(t.slice(i, at));
+    parts.push(
+      <mark key={`m-${hits}`} className="logMark">
+        {t.slice(at, at + q.length)}
+      </mark>
+    );
+    hits += 1;
+    i = at + q.length;
+  }
+  if (!parts.length) return text;
+  if (i < t.length) parts.push(t.slice(i));
+  return parts;
+}
+
+function highlightRegex(text: string, re: RegExp) {
+  if (!re) return text;
+  const t = String(text || "");
+  if (!t) return text;
+  if (t.length > 12_000) return text;
+
+  const flags = re.flags.includes("g") ? re.flags : `${re.flags}g`;
+  let rgx: RegExp;
+  try {
+    rgx = new RegExp(re.source, flags);
+  } catch {
+    return text;
+  }
+
+  const parts: any[] = [];
+  let last = 0;
+  let hits = 0;
+  const maxHits = 32;
+  while (hits < maxHits) {
+    const m = rgx.exec(t);
+    if (!m) break;
+    const at = typeof m.index === "number" ? m.index : -1;
+    const match = String(m[0] || "");
+    if (at < 0) break;
+    const end = at + match.length;
+    if (end <= at) {
+      rgx.lastIndex = at + 1;
+      continue;
+    }
+    if (at > last) parts.push(t.slice(last, at));
+    parts.push(
+      <mark key={`m-${hits}`} className="logMark">
+        {t.slice(at, end)}
+      </mark>
+    );
+    hits += 1;
+    last = end;
+  }
+  if (!parts.length) return text;
+  if (last < t.length) parts.push(t.slice(last));
+  return parts;
+}
+
+function escapeRegExp(s: string) {
+  return String(s || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function myersDiff(a: string[], b: string[]) {
   const n = a.length;
   const m = b.length;
@@ -307,6 +381,7 @@ function FilesView() {
     fsStatEntry,
     fsDuEntry,
     fsHashEntry,
+    fsSearchEntries,
     fsZipList,
     fsUnzipZip,
     fsDeleteHard,
@@ -403,6 +478,34 @@ function FilesView() {
   const [entryHashBusy, setEntryHashBusy] = useState<boolean>(false);
   const [entryHashStatus, setEntryHashStatus] = useState<string>("");
   const [entryHash, setEntryHash] = useState<any>(null);
+
+  const [fsSearchOpen, setFsSearchOpen] = useState<boolean>(false);
+  const [fsSearchBusy, setFsSearchBusy] = useState<boolean>(false);
+  const [fsSearchStatus, setFsSearchStatus] = useState<string>("");
+  const [fsSearchRoot, setFsSearchRoot] = useState<string>("");
+  const [fsSearchPattern, setFsSearchPattern] = useState<string>("**/*");
+  const [fsSearchQuery, setFsSearchQuery] = useState<string>("");
+  const [fsSearchRegex, setFsSearchRegex] = useState<boolean>(false);
+  const [fsSearchCaseSensitive, setFsSearchCaseSensitive] = useState<boolean>(false);
+  const [fsSearchRecursive, setFsSearchRecursive] = useState<boolean>(true);
+  const [fsSearchIncludeBinary, setFsSearchIncludeBinary] = useState<boolean>(false);
+  const [fsSearchMaxFiles, setFsSearchMaxFiles] = useState<number>(60);
+  const [fsSearchMaxMatches, setFsSearchMaxMatches] = useState<number>(200);
+  const [fsSearchBefore, setFsSearchBefore] = useState<number>(0);
+  const [fsSearchAfter, setFsSearchAfter] = useState<number>(0);
+  const [fsSearchMaxBytesPerFile, setFsSearchMaxBytesPerFile] = useState<number>(2 * 1024 * 1024);
+  const [fsSearchMaxBytesTotal, setFsSearchMaxBytesTotal] = useState<number>(8 * 1024 * 1024);
+  const [fsSearchResult, setFsSearchResult] = useState<any>(null);
+  const pendingJumpRef = useRef<
+    | null
+    | {
+        path: string;
+        lineNo: number;
+        query: string;
+        regex: boolean;
+        caseSensitive: boolean;
+      }
+  >(null);
 
   useEffect(() => {
     const t = window.setTimeout(() => setQuery(queryRaw), 160);
@@ -749,6 +852,29 @@ function FilesView() {
     return highlightToHtml(String(fsFileText || ""), highlightKind);
   }, [fsFileText, highlightEligible, highlightKind, showHighlight]);
 
+  const fsSearchFilter = useMemo(() => {
+    const q = String(fsSearchQuery || "").trim();
+    if (!q) return { mode: "none" as const, qLower: "", re: null as RegExp | null, error: "" };
+    if (fsSearchRegex) {
+      try {
+        const flags = fsSearchCaseSensitive ? "" : "i";
+        const re = new RegExp(q, flags);
+        return { mode: "regex" as const, qLower: "", re, error: "" };
+      } catch (e: any) {
+        return { mode: "regex" as const, qLower: "", re: null as RegExp | null, error: String(e?.message || e) };
+      }
+    }
+    if (fsSearchCaseSensitive) {
+      try {
+        const re = new RegExp(escapeRegExp(q), "g");
+        return { mode: "regex" as const, qLower: "", re, error: "" };
+      } catch (e: any) {
+        return { mode: "text" as const, qLower: q.toLowerCase(), re: null as RegExp | null, error: String(e?.message || e) };
+      }
+    }
+    return { mode: "text" as const, qLower: q.toLowerCase(), re: null as RegExp | null, error: "" };
+  }, [fsSearchQuery, fsSearchRegex, fsSearchCaseSensitive]);
+
   const lineNumbers = useMemo(() => {
     if (!showLineNumbers || !fsSelectedFile || fsSelectedFileMode !== "text") return "";
     const src = String(fsFileText || "");
@@ -791,6 +917,57 @@ function FilesView() {
       // ignore
     }
   }
+
+  function focusEditorRange(start: number, end: number) {
+    const el = editorRef.current;
+    if (!el) return;
+    try {
+      el.focus();
+      el.setSelectionRange(start, end);
+    } catch {
+      // ignore
+    }
+  }
+
+  function posFromLine(text: string, lineNo: number) {
+    const n = Math.max(1, Math.floor(Number(lineNo || 1)));
+    if (n <= 1) return 0;
+    const src = String(text || "");
+    let line = 1;
+    for (let i = 0; i < src.length; i++) {
+      if (src.charCodeAt(i) === 10) {
+        line += 1;
+        if (line === n) return i + 1;
+      }
+    }
+    return 0;
+  }
+
+  useEffect(() => {
+    const pj = pendingJumpRef.current;
+    if (!pj) return;
+    if (String(fsSelectedFile || "") !== String(pj.path || "")) return;
+    if (fsSelectedFileMode !== "text") {
+      pendingJumpRef.current = null;
+      return;
+    }
+    const lineNo = Math.max(1, Math.floor(Number(pj.lineNo || 1)));
+    const text = String(fsFileText || "");
+    const pos = posFromLine(text, lineNo);
+    const q = String(pj.query || "");
+    if (q && !pj.regex) {
+      const lineEnd = text.indexOf("\n", pos);
+      const lineText = text.slice(pos, lineEnd >= 0 ? lineEnd : text.length);
+      const at = pj.caseSensitive ? lineText.indexOf(q) : lineText.toLowerCase().indexOf(q.toLowerCase());
+      if (at >= 0) {
+        focusEditorRange(pos + at, pos + at + q.length);
+        pendingJumpRef.current = null;
+        return;
+      }
+    }
+    focusEditorAt(pos);
+    pendingJumpRef.current = null;
+  }, [fsSelectedFile, fsSelectedFileMode, fsFileText]);
 
   function findNext(backward: boolean) {
     const el = editorRef.current;
@@ -1122,6 +1299,74 @@ function FilesView() {
       if (e.isDir) await downloadFsFolderAsZip(e);
       else await downloadFsEntry(e);
     }
+  }
+
+  function openFsSearchModalNow() {
+    setFsSearchOpen(true);
+    setFsSearchStatus("");
+    setFsSearchResult(null);
+    setFsSearchRoot((prev) => (String(prev || "").trim() ? prev : fsPath));
+    setFsSearchPattern((prev) => (String(prev || "").trim() ? prev : "**/*"));
+  }
+
+  async function runFsSearchNow() {
+    if (!selectedDaemon?.connected) {
+      setFsSearchStatus(t.tr("daemon offline", "daemon 离线"));
+      return;
+    }
+    const root = String(fsSearchRoot || fsPath || "")
+      .replace(/\\+/g, "/")
+      .replace(/\/+/g, "/")
+      .replace(/^\/+/, "")
+      .replace(/\/+$/, "");
+    const pattern = String(fsSearchPattern || "").trim() || "**/*";
+    const query = String(fsSearchQuery || "").trim();
+    setFsSearchBusy(true);
+    setFsSearchStatus(t.tr("Searching...", "搜索中..."));
+    setFsSearchResult(null);
+    try {
+      const out = await fsSearchEntries(
+        root,
+        {
+          pattern,
+          query,
+          regex: fsSearchRegex,
+          caseSensitive: fsSearchCaseSensitive,
+          recursive: fsSearchRecursive,
+          includeBinary: fsSearchIncludeBinary,
+          maxFiles: fsSearchMaxFiles,
+          maxMatches: fsSearchMaxMatches,
+          contextBefore: fsSearchBefore,
+          contextAfter: fsSearchAfter,
+          maxBytesPerFile: fsSearchMaxBytesPerFile,
+          maxBytesTotal: fsSearchMaxBytesTotal,
+        },
+        120_000
+      );
+      setFsSearchResult(out);
+      setFsSearchStatus("");
+    } catch (e: any) {
+      setFsSearchStatus(String(e?.message || e));
+    } finally {
+      setFsSearchBusy(false);
+    }
+  }
+
+  async function openFsSearchHitNow(path: string, lineNo: number) {
+    const p = String(path || "").trim();
+    if (!p) return;
+    pendingJumpRef.current = {
+      path: p,
+      lineNo: Math.max(1, Math.floor(Number(lineNo || 1))),
+      query: String(fsSearchQuery || ""),
+      regex: !!fsSearchRegex,
+      caseSensitive: !!fsSearchCaseSensitive,
+    };
+    window.setTimeout(() => {
+      if (pendingJumpRef.current?.path === p) pendingJumpRef.current = null;
+    }, 10_000);
+    await openFileByPath(p);
+    setFsSearchOpen(false);
   }
 
   async function openEntryDetails(entry: any) {
@@ -1512,6 +1757,10 @@ function FilesView() {
             />
           </div>
 	          <input value={queryRaw} onChange={(e: any) => setQueryRaw(e.target.value)} placeholder={t.tr("Search entries…", "搜索条目…")} style={{ width: 220 }} />
+	          <button type="button" className="iconBtn" onClick={openFsSearchModalNow} disabled={!selected}>
+	            <Icon name="search" />
+	            {t.tr("Find", "查找")}
+	          </button>
           <button type="button" onClick={() => refreshFsNow()} disabled={!selected}>
             {t.tr("Refresh", "刷新")}
           </button>
@@ -2342,6 +2591,313 @@ function FilesView() {
           <div className="hint">{t.tr("Tip: binary/large files are download-only.", "提示：二进制/大文件为 download-only（可用 Download 下载）。")}</div>
         </div>
       </div>
+
+      <ManagedModal
+        id="files-find-in-files"
+        open={fsSearchOpen}
+        onOverlayClick={() => (!fsSearchBusy ? setFsSearchOpen(false) : null)}
+        modalStyle={{ width: "min(980px, 100%)" }}
+        ariaLabel={t.tr("Find in files", "文件搜索")}
+      >
+        <div className="modalHeader">
+          <div>
+            <div style={{ fontWeight: 800 }}>{t.tr("Find in files", "文件搜索")}</div>
+            <div className="hint">
+              {t.tr("root", "根目录")}: <code>{(fsSearchRoot || fsPath || "").trim() ? `servers/${(fsSearchRoot || fsPath || "").trim()}` : "servers/"}</code>
+            </div>
+          </div>
+          <button type="button" onClick={() => setFsSearchOpen(false)} disabled={fsSearchBusy}>
+            {t.tr("Close", "关闭")}
+          </button>
+        </div>
+
+        <div className="grid2 items-start">
+          <div className="field" style={{ gridColumn: "1 / -1" }}>
+            <label>{t.tr("Root", "根目录")}</label>
+            <div className="row" style={{ gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+              <input
+                value={fsSearchRoot}
+                onChange={(e) => setFsSearchRoot(String(e.target.value || ""))}
+                placeholder={t.tr("e.g. server1 (empty = servers/)", "例如 server1（留空 = servers/）")}
+                onKeyDown={(e: any) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    runFsSearchNow();
+                  }
+                }}
+                style={{ flex: 1, minWidth: 280 }}
+              />
+              <button type="button" onClick={() => setFsSearchRoot(fsPath)} disabled={!selected}>
+                {t.tr("Use current", "使用当前")}
+              </button>
+            </div>
+          </div>
+
+          <div className="field" style={{ gridColumn: "1 / -1" }}>
+            <label>{t.tr("File pattern", "文件匹配")}</label>
+            <input
+              value={fsSearchPattern}
+              onChange={(e) => setFsSearchPattern(String(e.target.value || ""))}
+              placeholder={t.tr("e.g. **/*.properties or *.yml", "例如 **/*.properties 或 *.yml")}
+              onKeyDown={(e: any) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  runFsSearchNow();
+                }
+              }}
+            />
+            <div className="hint">{t.tr("Supports * ? [] and ** (globstar)", "支持 * ? [] 与 **（globstar）")}</div>
+          </div>
+
+          <div className="field" style={{ gridColumn: "1 / -1" }}>
+            <label>{t.tr("Content query (optional)", "内容查询（可选）")}</label>
+            <input
+              value={fsSearchQuery}
+              onChange={(e) => setFsSearchQuery(String(e.target.value || ""))}
+              placeholder={t.tr("empty = name-only search", "留空 = 仅按文件名/路径匹配")}
+              onKeyDown={(e: any) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  runFsSearchNow();
+                }
+              }}
+            />
+            <div className="row" style={{ marginTop: 8, gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+              <label className="checkRow" style={{ userSelect: "none" }}>
+                <input type="checkbox" checked={fsSearchRegex} onChange={(e) => setFsSearchRegex(e.target.checked)} /> {t.tr("Regex", "正则")}
+              </label>
+              <label className="checkRow" style={{ userSelect: "none" }}>
+                <input type="checkbox" checked={fsSearchCaseSensitive} onChange={(e) => setFsSearchCaseSensitive(e.target.checked)} />{" "}
+                {t.tr("Case sensitive", "区分大小写")}
+              </label>
+              <label className="checkRow" style={{ userSelect: "none" }}>
+                <input type="checkbox" checked={fsSearchRecursive} onChange={(e) => setFsSearchRecursive(e.target.checked)} /> {t.tr("Recursive", "递归")}
+              </label>
+              <label className="checkRow" style={{ userSelect: "none" }}>
+                <input type="checkbox" checked={fsSearchIncludeBinary} onChange={(e) => setFsSearchIncludeBinary(e.target.checked)} />{" "}
+                {t.tr("Include binary", "包含二进制")}
+              </label>
+              {fsSearchRegex && fsSearchFilter.error ? (
+                <span className="badge" title={fsSearchFilter.error}>
+                  {t.tr("regex error", "正则错误")}
+                </span>
+              ) : null}
+            </div>
+          </div>
+
+          <div className="field">
+            <label>{t.tr("Max files", "最多文件")}</label>
+            <input
+              type="number"
+              value={Number.isFinite(fsSearchMaxFiles) ? fsSearchMaxFiles : 60}
+              onChange={(e) => setFsSearchMaxFiles(Math.max(1, Math.min(1000, Math.round(Number(e.target.value) || 60))))}
+              min={1}
+              max={1000}
+            />
+          </div>
+          <div className="field">
+            <label>{t.tr("Max matches", "最多匹配")}</label>
+            <input
+              type="number"
+              value={Number.isFinite(fsSearchMaxMatches) ? fsSearchMaxMatches : 200}
+              onChange={(e) => setFsSearchMaxMatches(Math.max(1, Math.min(5000, Math.round(Number(e.target.value) || 200))))}
+              min={1}
+              max={5000}
+            />
+          </div>
+          <div className="field">
+            <label>{t.tr("Context before", "前置上下文")}</label>
+            <input
+              type="number"
+              value={Number.isFinite(fsSearchBefore) ? fsSearchBefore : 0}
+              onChange={(e) => setFsSearchBefore(Math.max(0, Math.min(20, Math.round(Number(e.target.value) || 0))))}
+              min={0}
+              max={20}
+            />
+          </div>
+          <div className="field">
+            <label>{t.tr("Context after", "后置上下文")}</label>
+            <input
+              type="number"
+              value={Number.isFinite(fsSearchAfter) ? fsSearchAfter : 0}
+              onChange={(e) => setFsSearchAfter(Math.max(0, Math.min(20, Math.round(Number(e.target.value) || 0))))}
+              min={0}
+              max={20}
+            />
+          </div>
+
+          <div className="field" style={{ gridColumn: "1 / -1" }}>
+            <details className="uiDetails" style={{ marginTop: 6 }}>
+              <summary>{t.tr("Advanced limits", "高级限制")}</summary>
+              <div className="grid2 items-start" style={{ marginTop: 10 }}>
+                <div className="field">
+                  <label>{t.tr("Max bytes per file", "单文件最大扫描字节")}</label>
+                  <input
+                    type="number"
+                    value={Number.isFinite(fsSearchMaxBytesPerFile) ? fsSearchMaxBytesPerFile : 2 * 1024 * 1024}
+                    onChange={(e) => setFsSearchMaxBytesPerFile(Math.max(64 * 1024, Math.min(20 * 1024 * 1024, Math.round(Number(e.target.value) || 0))))}
+                    min={64 * 1024}
+                    max={20 * 1024 * 1024}
+                  />
+                  <div className="hint">{t.tr("Default: 2MiB", "默认：2MiB")}</div>
+                </div>
+                <div className="field">
+                  <label>{t.tr("Max bytes total", "总扫描字节上限")}</label>
+                  <input
+                    type="number"
+                    value={Number.isFinite(fsSearchMaxBytesTotal) ? fsSearchMaxBytesTotal : 8 * 1024 * 1024}
+                    onChange={(e) => setFsSearchMaxBytesTotal(Math.max(256 * 1024, Math.min(200 * 1024 * 1024, Math.round(Number(e.target.value) || 0))))}
+                    min={256 * 1024}
+                    max={200 * 1024 * 1024}
+                  />
+                  <div className="hint">{t.tr("Default: 8MiB", "默认：8MiB")}</div>
+                </div>
+              </div>
+            </details>
+          </div>
+        </div>
+
+        <div className="row" style={{ marginTop: 12, justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+          <div className="hint">{fsSearchStatus}</div>
+          <div className="btnGroup justify-end">
+            <button type="button" onClick={() => setFsSearchOpen(false)} disabled={fsSearchBusy}>
+              {t.tr("Cancel", "取消")}
+            </button>
+            <button type="button" className="primary" onClick={runFsSearchNow} disabled={!selectedDaemon?.connected || fsSearchBusy || !String(fsSearchPattern || "").trim()}>
+              {fsSearchBusy ? t.tr("Searching...", "搜索中...") : t.tr("Search", "搜索")}
+            </button>
+          </div>
+        </div>
+
+        {fsSearchResult ? (
+          <div className="mt-3">
+            <div className="hint">
+              {t.tr("matches", "匹配")}: <code>{Array.isArray(fsSearchResult?.matches) ? fsSearchResult.matches.length : 0}</code>
+              {" · "}
+              {t.tr("files", "文件")}: <code>{Array.isArray(fsSearchResult?.files) ? fsSearchResult.files.length : 0}</code>
+              {typeof fsSearchResult?.bytes_scanned === "number" ? (
+                <>
+                  {" · "}
+                  {t.tr("scanned", "扫描")}: <code>{fmtBytes(Number(fsSearchResult.bytes_scanned || 0))}</code>
+                </>
+              ) : null}
+              {fsSearchResult?.truncated ? (
+                <>
+                  {" · "}
+                  <span className="badge warn">{t.tr("truncated", "已截断")}</span>
+                </>
+              ) : null}
+            </div>
+
+            {String(fsSearchQuery || "").trim() ? (
+              Array.isArray(fsSearchResult?.matches) && fsSearchResult.matches.length ? (
+                <div className="stack" style={{ marginTop: 10, gap: 10, maxHeight: 520, overflow: "auto" }}>
+                  {fsSearchResult.matches.slice(0, 500).map((m: any, idx: number) => {
+                    const file = String(m?.file || "").trim();
+                    const path = String(m?.path || "").trim();
+                    const lineNo = Math.max(0, Math.round(Number(m?.line_no || 0) || 0));
+                    const before = Array.isArray(m?.before) ? m.before.map((s: any) => String(s || "")) : [];
+                    const after = Array.isArray(m?.after) ? m.after.map((s: any) => String(s || "")) : [];
+                    const text = String(m?.text || "");
+                    const mtimeUnix = Math.floor(Number(m?.file_mtime_unix || 0));
+                    const title = file ? file : path ? path.split("/").pop() : t.tr("<unknown>", "<未知>");
+                    const lineLabel = lineNo ? `L${lineNo}` : "-";
+                    return (
+                      <div key={`${path}:${lineNo}:${idx}`} className="itemCard">
+                        <div className="itemCardHeader" style={{ alignItems: "flex-start" }}>
+                          <div className="min-w-0">
+                            <div className="itemTitle" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                              <code style={{ maxWidth: 520, overflow: "hidden", textOverflow: "ellipsis" }}>{title}</code>
+                              <span className="badge">{lineLabel}</span>
+                              {mtimeUnix > 0 ? (
+                                <span className="muted">
+                                  <TimeAgo unix={mtimeUnix} />
+                                </span>
+                              ) : null}
+                            </div>
+                            <div className="itemMeta" style={{ marginTop: 6 }}>
+                              <span className="logLineText">
+                                {fsSearchFilter.mode === "text" && fsSearchFilter.qLower
+                                  ? highlightText(text, fsSearchFilter.qLower)
+                                  : fsSearchFilter.mode === "regex" && fsSearchFilter.re
+                                    ? highlightRegex(text, fsSearchFilter.re)
+                                    : text}
+                              </span>
+                            </div>
+                            {before.length || after.length ? (
+                              <pre className="diffFrame" style={{ marginTop: 10, maxHeight: 200, overflow: "auto", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                                {[
+                                  ...(before.length ? before.map((l: string) => `  ${l}`) : []),
+                                  `> ${text}`,
+                                  ...(after.length ? after.map((l: string) => `  ${l}`) : []),
+                                ].join("\n")}
+                              </pre>
+                            ) : null}
+                          </div>
+                          <div className="btnGroup justify-end">
+                            <CopyButton iconOnly text={text} tooltip={t.tr("Copy line", "复制该行")} ariaLabel={t.tr("Copy line", "复制该行")} disabled={!text} />
+                            <button type="button" className="iconBtn" onClick={() => openFsSearchHitNow(path, lineNo)} disabled={!path}>
+                              {t.tr("Open", "打开")}
+                            </button>
+                          </div>
+                        </div>
+                        <div className="itemCardBody" style={{ display: "none" }} />
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="hint" style={{ marginTop: 10 }}>
+                  {fsSearchStatus || t.tr("No matches.", "没有匹配。")}
+                </div>
+              )
+            ) : Array.isArray(fsSearchResult?.files) && fsSearchResult.files.length ? (
+              <div className="stack" style={{ marginTop: 10, gap: 10, maxHeight: 520, overflow: "auto" }}>
+                {fsSearchResult.files.slice(0, 500).map((f: any, idx: number) => {
+                  const path = String(f?.path || "").trim();
+                  const name = String(f?.name || "").trim();
+                  const mtimeUnix = Math.floor(Number(f?.mtime_unix || 0));
+                  const bytes = Number(f?.size_bytes || 0);
+                  const matches = Math.floor(Number(f?.matches || 0));
+                  const truncated = !!f?.truncated;
+                  const skippedBinary = !!f?.skipped_binary;
+                  return (
+                    <div key={`${path || name}-${idx}`} className="itemCard">
+                      <div className="itemCardHeader" style={{ alignItems: "flex-start" }}>
+                        <div className="min-w-0">
+                          <div className="itemTitle" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                            <code style={{ maxWidth: 620, overflow: "hidden", textOverflow: "ellipsis" }}>{path || name || t.tr("<unknown>", "<未知>")}</code>
+                            {bytes >= 0 ? <span className="badge">{fmtBytes(bytes)}</span> : null}
+                            {matches ? <span className="badge">{t.tr("hits", "命中")}: {matches}</span> : null}
+                            {skippedBinary ? <span className="badge">{t.tr("binary", "二进制")}</span> : null}
+                            {truncated ? <span className="badge warn">{t.tr("truncated", "已截断")}</span> : null}
+                            {mtimeUnix > 0 ? (
+                              <span className="muted">
+                                <TimeAgo unix={mtimeUnix} />
+                              </span>
+                            ) : null}
+                          </div>
+                        </div>
+                        <div className="btnGroup justify-end">
+                          <CopyButton iconOnly text={path} tooltip={t.tr("Copy path", "复制路径")} ariaLabel={t.tr("Copy path", "复制路径")} disabled={!path} />
+                          <button type="button" className="iconBtn" onClick={() => openFsSearchHitNow(path, 1)} disabled={!path}>
+                            {t.tr("Open", "打开")}
+                          </button>
+                        </div>
+                      </div>
+                      <div className="itemCardBody" style={{ display: "none" }} />
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="hint" style={{ marginTop: 10 }}>
+                {fsSearchStatus || t.tr("No files.", "没有文件。")}
+              </div>
+            )}
+          </div>
+        ) : null}
+      </ManagedModal>
 
       <ManagedModal
         id="files-entry-details"

@@ -36,9 +36,9 @@ func newTestExecutor(t *testing.T) (*Executor, *sandbox.FS, string) {
 		Log:      nil,
 	})
 	mcMgr := mc.NewManager(mc.ManagerConfig{
-		ServersFS:       fs,
-		Log:             nil,
-		JavaCandidates:  []string{"java"},
+		ServersFS:        fs,
+		Log:              nil,
+		JavaCandidates:   []string{"java"},
 		JavaAutoDownload: false,
 	})
 
@@ -211,6 +211,125 @@ func TestExecutor_FSHash_SHA256(t *testing.T) {
 	}
 }
 
+func TestExecutor_FSSearch_Content(t *testing.T) {
+	ex, _, _ := newTestExecutor(t)
+	ctx := context.Background()
+
+	write := func(p string, b []byte) {
+		res := ex.Execute(ctx, protocol.Command{
+			Name: "fs_write",
+			Args: map[string]any{
+				"path": p,
+				"b64":  base64.StdEncoding.EncodeToString(b),
+			},
+		})
+		if !res.OK {
+			t.Fatalf("fs_write failed: %s", res.Error)
+		}
+	}
+
+	write("server1/a.txt", []byte("hello world\nfoo\n"))
+	write("server1/sub/b.txt", []byte("nothing\nhello again\n"))
+	write("server1/c.yml", []byte("hello: yaml\n"))
+
+	res := ex.Execute(ctx, protocol.Command{
+		Name: "fs_search",
+		Args: map[string]any{
+			"path":           "server1",
+			"pattern":        "*.txt",
+			"query":          "hello",
+			"regex":          false,
+			"case_sensitive": false,
+			"recursive":      true,
+			"max_files":      50,
+			"max_matches":    50,
+			"context_before": 1,
+			"context_after":  1,
+		},
+	})
+	if !res.OK {
+		t.Fatalf("fs_search failed: %s", res.Error)
+	}
+
+	rawMatches := res.Output["matches"]
+	var matches []map[string]any
+	switch v := rawMatches.(type) {
+	case []map[string]any:
+		matches = v
+	case []any:
+		for _, it := range v {
+			m, ok := it.(map[string]any)
+			if ok {
+				matches = append(matches, m)
+			}
+		}
+	default:
+		t.Fatalf("unexpected matches type: %T", rawMatches)
+	}
+	if len(matches) != 2 {
+		t.Fatalf("unexpected matches len: got=%d", len(matches))
+	}
+
+	paths := make(map[string]bool)
+	for _, m := range matches {
+		p, _ := m["path"].(string)
+		paths[p] = true
+	}
+	if !paths["server1/a.txt"] || !paths["server1/sub/b.txt"] {
+		t.Fatalf("unexpected match paths: %#v", paths)
+	}
+}
+
+func TestExecutor_FSSearch_NameOnly(t *testing.T) {
+	ex, _, _ := newTestExecutor(t)
+	ctx := context.Background()
+
+	res := ex.Execute(ctx, protocol.Command{
+		Name: "fs_write",
+		Args: map[string]any{
+			"path": "server1/a.txt",
+			"b64":  base64.StdEncoding.EncodeToString([]byte("hello\n")),
+		},
+	})
+	if !res.OK {
+		t.Fatalf("fs_write failed: %s", res.Error)
+	}
+
+	searchRes := ex.Execute(ctx, protocol.Command{
+		Name: "fs_search",
+		Args: map[string]any{
+			"path":      "server1",
+			"pattern":   "*.txt",
+			"query":     "",
+			"recursive": true,
+		},
+	})
+	if !searchRes.OK {
+		t.Fatalf("fs_search failed: %s", searchRes.Error)
+	}
+	rawFiles := searchRes.Output["files"]
+	var files []map[string]any
+	switch v := rawFiles.(type) {
+	case []map[string]any:
+		files = v
+	case []any:
+		for _, it := range v {
+			m, ok := it.(map[string]any)
+			if ok {
+				files = append(files, m)
+			}
+		}
+	default:
+		t.Fatalf("unexpected files type: %T", rawFiles)
+	}
+	if len(files) != 1 {
+		t.Fatalf("unexpected files len: got=%d", len(files))
+	}
+	if p, _ := files[0]["path"].(string); p != "server1/a.txt" {
+		t.Fatalf("unexpected file path: %q", p)
+	}
+}
+
 func TestExecutor_FSRead_RejectsEscape(t *testing.T) {
 	ex, _, _ := newTestExecutor(t)
 	ctx := context.Background()
@@ -366,9 +485,9 @@ func TestExecutor_MCBackupRestore_Roundtrip(t *testing.T) {
 	backupRes := ex.Execute(ctx, protocol.Command{
 		Name: "mc_backup",
 		Args: map[string]any{
-			"instance_id":  "server1",
-			"backup_name":  "b1.zip",
-			"stop":         false,
+			"instance_id": "server1",
+			"backup_name": "b1.zip",
+			"stop":        false,
 		},
 	})
 	if !backupRes.OK {
