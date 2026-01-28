@@ -79,6 +79,17 @@ func main() {
 			MC:        mcMgr,
 			Log:       logger,
 		}).Run(ctx)
+
+		// Per-instance backup schedule (stored in servers/<instance>/.elegantmc.json)
+		go scheduler.NewInstanceBackupScheduler(scheduler.InstanceBackupSchedulerConfig{
+			Enabled:     true,
+			PollEvery:   time.Duration(cfg.SchedulePollSec) * time.Second,
+			MaxInstances: 200,
+		}, scheduler.InstanceBackupSchedulerDeps{
+			ServersFS: rootFS,
+			MC:        mcMgr,
+			Log:       logger,
+		}).Run(ctx)
 	}
 
 	client := wsclient.New(wsclient.Config{

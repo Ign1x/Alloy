@@ -170,6 +170,12 @@ type GameSettingsSnapshot = {
   enableFrp: boolean;
   frpProfileId: string;
   frpRemotePort: number;
+
+  // Per-instance scheduled backups (stored in servers/<instance>/.elegantmc.json)
+  backupScheduleEnabled: boolean;
+  backupScheduleEverySec: number;
+  backupScheduleStop: boolean;
+  backupScheduleFormat: "tar.gz" | "zip";
 };
 
 type InstallForm = {
@@ -1352,6 +1358,14 @@ export default function HomePage() {
   const [restoreCandidates, setRestoreCandidates] = useState<string[]>([]);
   const [restoreZipPath, setRestoreZipPath] = useState<string>("");
   const [backupRetentionKeepLast, setBackupRetentionKeepLast] = useState<number>(0);
+
+  // Per-instance scheduled backups (stored in servers/<instance>/.elegantmc.json)
+  const [backupScheduleEnabled, setBackupScheduleEnabled] = useState<boolean>(false);
+  const [backupScheduleEverySec, setBackupScheduleEverySec] = useState<number>(86400);
+  const [backupScheduleStop, setBackupScheduleStop] = useState<boolean>(true);
+  const [backupScheduleFormat, setBackupScheduleFormat] = useState<"tar.gz" | "zip">("tar.gz");
+  const [backupScheduleStatus, setBackupScheduleStatus] = useState<any | null>(null);
+
   const [trashOpen, setTrashOpen] = useState<boolean>(false);
   const [trashStatus, setTrashStatus] = useState<string>("");
   const [trashItems, setTrashItems] = useState<any[]>([]);
@@ -1577,9 +1591,18 @@ export default function HomePage() {
     const jarErr = jar ? "" : t.tr("jar_path is required", "jar_path 不能为空");
     const portErr = validatePortUI(gamePort, { allowZero: false }, t.tr);
     const frpRemoteErr = validatePortUI(frpRemotePort, { allowZero: true }, t.tr);
-    const ok = !jarErr && !portErr && !frpRemoteErr;
-    return { jarErr, portErr, frpRemoteErr, ok };
-  }, [jarPath, gamePort, frpRemotePort, t]);
+
+    const backupScheduleErr = (() => {
+      if (!backupScheduleEnabled) return "";
+      const sec = Math.round(Number(backupScheduleEverySec || 0));
+      if (!Number.isFinite(sec)) return t.tr("backup schedule interval must be a number", "定时备份间隔必须是数字");
+      if (sec < 3600) return t.tr("backup schedule interval must be >= 1 hour", "定时备份间隔必须 >= 1 小时");
+      return "";
+    })();
+
+    const ok = !jarErr && !portErr && !frpRemoteErr && !backupScheduleErr;
+    return { jarErr, portErr, frpRemoteErr, backupScheduleErr, ok };
+  }, [jarPath, gamePort, frpRemotePort, backupScheduleEnabled, backupScheduleEverySec, t]);
 
   const jvmArgsComputed = useMemo(() => computeJvmArgs(jvmArgsPreset, jvmArgsExtra), [jvmArgsPreset, jvmArgsExtra]);
 
@@ -3178,6 +3201,23 @@ export default function HomePage() {
     const retentionNum = Math.round(Number(retentionRaw ?? NaN));
     const retentionKeepLast = Number.isFinite(retentionNum) ? Math.max(0, Math.min(1000, retentionNum)) : null;
 
+    // Scheduled backups (stored under backup_schedule)
+    const scheduleEnabled = !!(cfg?.backup_schedule?.enabled ?? (cfg as any)?.backupScheduleEnabled ?? backupScheduleEnabled);
+    const scheduleEverySecRaw = cfg?.backup_schedule?.every_sec ?? (cfg as any)?.backupScheduleEverySec ?? backupScheduleEverySec;
+    const scheduleEverySecNum = Math.round(Number(scheduleEverySecRaw ?? 0));
+    let scheduleEverySec = Number.isFinite(scheduleEverySecNum) ? scheduleEverySecNum : 0;
+    if (scheduleEverySec < 0) scheduleEverySec = 0;
+    if (scheduleEnabled && scheduleEverySec <= 0) scheduleEverySec = 86400;
+    scheduleEverySec = Math.max(0, Math.min(86400*365, scheduleEverySec));
+
+    const scheduleStopRaw = cfg?.backup_schedule?.stop ?? (cfg as any)?.backupScheduleStop ?? backupScheduleStop;
+    const scheduleStop = typeof scheduleStopRaw === "boolean" ? scheduleStopRaw : true;
+
+    const scheduleFormatRaw = cfg?.backup_schedule?.format ?? (cfg as any)?.backupScheduleFormat ?? backupScheduleFormat;
+    let scheduleFormat = String(scheduleFormatRaw || "").trim().toLowerCase();
+    if (scheduleFormat === "tgz") scheduleFormat = "tar.gz";
+    if (scheduleFormat !== "zip" && scheduleFormat !== "tar.gz") scheduleFormat = "tar.gz";
+
     const preset = normalizeJvmPreset(cfg?.jvm_args_preset ?? cfg?.jvmArgsPreset ?? jvmArgsPreset);
     const extraText = String(cfg?.jvm_args_extra ?? cfg?.jvmArgsExtra ?? jvmArgsExtra ?? "");
     const jvmArgs =
@@ -3199,6 +3239,29 @@ export default function HomePage() {
       ...(retentionKeepLast != null ? { backup_retention_keep_last: retentionKeepLast } : {}),
       updated_at_unix: Math.floor(Date.now() / 1000),
     };
+
+    // Keep schedule config stable in .elegantmc.json so users can toggle without losing settings.
+    if (scheduleEnabled || (prev as any)?.backup_schedule) {
+      payload.backup_schedule = {
+        ...(typeof (prev as any)?.backup_schedule === "object" && !Array.isArray((prev as any)?.backup_schedule) ? (prev as any).backup_schedule : {}),
+        enabled: scheduleEnabled,
+        ...(scheduleEverySec > 0 ? { every_sec: scheduleEverySec } : {}),
+        stop: scheduleStop,
+        format: scheduleFormat,
+      };
+
+      // When enabling the schedule, anchor last_run_unix to now to avoid an immediate run.
+      const prevEnabled = !!((prev as any)?.backup_schedule && (prev as any)?.backup_schedule?.enabled);
+      if (scheduleEnabled && !prevEnabled) {
+        const nowUnix = Math.floor(Date.now() / 1000);
+        const prevStatus = (prev as any)?.backup_schedule_status;
+        const nextStatus: any =
+          prevStatus && typeof prevStatus === "object" && !Array.isArray(prevStatus) ? { ...prevStatus } : {};
+        nextStatus.last_run_unix = nowUnix;
+        nextStatus.last_error = "";
+        payload.backup_schedule_status = nextStatus;
+      }
+    }
     if (typeof cfg?.server_kind === "string") payload.server_kind = String(cfg.server_kind).trim();
     if (typeof cfg?.server_version === "string") payload.server_version = String(cfg.server_version).trim();
     if (cfg?.server_build != null && Number.isFinite(Number(cfg.server_build))) payload.server_build = Math.round(Number(cfg.server_build));
@@ -3969,6 +4032,28 @@ export default function HomePage() {
           setBackupRetentionKeepLast(0);
         }
 
+        // Scheduled backups (optional)
+        const schedRaw = (c as any)?.backup_schedule;
+        if (schedRaw && typeof schedRaw === "object" && !Array.isArray(schedRaw)) {
+          const s: any = schedRaw;
+          if (typeof s.enabled === "boolean") setBackupScheduleEnabled(!!s.enabled);
+
+          const everyRaw = Math.round(Number(s.every_sec ?? 0));
+          if (Number.isFinite(everyRaw) && everyRaw > 0) setBackupScheduleEverySec(Math.max(60, Math.min(86400 * 365, everyRaw)));
+          else if (s.enabled === true) setBackupScheduleEverySec(86400);
+
+          if (typeof s.stop === "boolean") setBackupScheduleStop(!!s.stop);
+
+          const fmtRaw = String(s.format || "").trim().toLowerCase();
+          const fmt = fmtRaw === "tgz" ? "tar.gz" : fmtRaw;
+          if (fmt === "zip" || fmt === "tar.gz") setBackupScheduleFormat(fmt);
+          else if (s.enabled === true) setBackupScheduleFormat("tar.gz");
+        }
+
+        const schedStatusRaw = (c as any)?.backup_schedule_status;
+        if (schedStatusRaw && typeof schedStatusRaw === "object" && !Array.isArray(schedStatusRaw)) setBackupScheduleStatus(schedStatusRaw);
+        else setBackupScheduleStatus(null);
+
         const nowUnix = Math.floor(Date.now() / 1000);
         const kind = typeof c.server_kind === "string" ? String(c.server_kind || "").trim() : "";
         const ver = typeof c.server_version === "string" ? String(c.server_version || "").trim() : "";
@@ -4078,6 +4163,12 @@ export default function HomePage() {
     setInstanceUsageStatus("");
     setInstanceUsageBusy(false);
     setBackupRetentionKeepLast(0);
+
+    setBackupScheduleEnabled(false);
+    setBackupScheduleEverySec(86400);
+    setBackupScheduleStop(true);
+    setBackupScheduleFormat("tar.gz");
+    setBackupScheduleStatus(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [instanceId]);
 
@@ -7108,7 +7199,12 @@ export default function HomePage() {
       enableFrp,
       frpProfileId,
       frpRemotePort,
-    });
+
+	      backupScheduleEnabled,
+	      backupScheduleEverySec,
+	      backupScheduleStop,
+	      backupScheduleFormat,
+	    });
     setSettingsSearch("");
 	    setSettingsOpen(true);
 	    setServerOpStatus("");
@@ -7126,7 +7222,12 @@ export default function HomePage() {
       setEnableFrp(settingsSnapshot.enableFrp);
       setFrpProfileId(settingsSnapshot.frpProfileId);
       setFrpRemotePort(settingsSnapshot.frpRemotePort);
-    }
+
+	      setBackupScheduleEnabled(!!settingsSnapshot.backupScheduleEnabled);
+	      setBackupScheduleEverySec(Math.max(0, Math.round(Number(settingsSnapshot.backupScheduleEverySec || 0) || 0)));
+	      setBackupScheduleStop(!!settingsSnapshot.backupScheduleStop);
+	      setBackupScheduleFormat(settingsSnapshot.backupScheduleFormat === "zip" ? "zip" : "tar.gz");
+	    }
     setSettingsOpen(false);
     setSettingsSnapshot(null);
     setServerOpStatus("");
@@ -7158,6 +7259,35 @@ export default function HomePage() {
         if (Boolean(snap.enableFrp) !== Boolean(enableFrp)) changed.push(`FRP: ${snap.enableFrp ? t.tr("on", "开启") : t.tr("off", "关闭")} → ${enableFrp ? t.tr("on", "开启") : t.tr("off", "关闭")}`);
         if (String(snap.frpProfileId || "") !== String(frpProfileId || "")) changed.push(`${t.tr("FRP server", "FRP 服务器")}: ${profileLabel(snap.frpProfileId)} → ${profileLabel(frpProfileId)}`);
         if (Number(snap.frpRemotePort) !== Number(frpRemotePort)) changed.push(`${t.tr("FRP remote port", "FRP 远端端口")}: ${snap.frpRemotePort} → ${frpRemotePort}`);
+
+        const fmtEvery = (secRaw: any) => {
+          const sec = Math.max(0, Math.round(Number(secRaw || 0) || 0));
+          if (!sec) return "-";
+          if (sec % 86400 === 0) return `${sec / 86400}d`;
+          if (sec % 3600 === 0) return `${sec / 3600}h`;
+          if (sec % 60 === 0) return `${sec / 60}m`;
+          return `${sec}s`;
+        };
+        const schedLabel = (s: GameSettingsSnapshot) => {
+          if (!s.backupScheduleEnabled) return t.tr("off", "关闭");
+          const fmt = s.backupScheduleFormat === "zip" ? "zip" : "tar.gz";
+          return `${t.tr("on", "开启")} · ${t.tr("every", "每")}${fmtEvery(s.backupScheduleEverySec)} · ${s.backupScheduleStop ? t.tr("stop", "停服") : t.tr("no stop", "不停服")} · ${fmt}`;
+        };
+
+        const schedChanged =
+          Boolean(snap.backupScheduleEnabled) !== Boolean(backupScheduleEnabled) ||
+          Number(snap.backupScheduleEverySec) !== Number(backupScheduleEverySec) ||
+          Boolean(snap.backupScheduleStop) !== Boolean(backupScheduleStop) ||
+          String(snap.backupScheduleFormat || "") !== String(backupScheduleFormat || "");
+        if (schedChanged) {
+          changed.push(`${t.tr("Scheduled backups", "定时备份")}: ${schedLabel(snap)} → ${schedLabel({
+            ...snap,
+            backupScheduleEnabled,
+            backupScheduleEverySec,
+            backupScheduleStop,
+            backupScheduleFormat,
+          })}`);
+        }
 
         if (changed.length) {
           const msg = `${t.tr("Review changes:", "请确认以下更改：")}\n` + changed.map((s) => `- ${s}`).join("\n");
@@ -13143,6 +13273,128 @@ export default function HomePage() {
                           label: `${p.name} (${p.server_addr}:${p.server_port})`,
                         }))}
                       />
+                    </div>
+                  ) : null}
+
+                  {showSettingsField("backup", "scheduled", "schedule", "retention", "定时", "备份") ? (
+                    <div className="settingsSectionTitle">{t.tr("Backups", "备份")}</div>
+                  ) : null}
+
+                  {showSettingsField("backup", "scheduled", "schedule", "定时", "备份") ? (
+                    <div className="field" style={{ gridColumn: "1 / -1" }}>
+                      <label>{t.tr("Scheduled backups", "定时备份")}</label>
+                      <label className="checkRow">
+                        <input type="checkbox" checked={backupScheduleEnabled} onChange={(e) => setBackupScheduleEnabled(e.target.checked)} />
+                        {t.tr("Enable scheduled backups", "启用定时备份")}
+                      </label>
+
+                      <div className="row" style={{ gap: 10, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
+                        <div className="row" style={{ gap: 8, alignItems: "center" }}>
+                          <span className="muted">{t.tr("Every", "每")}</span>
+                          <input
+                            type="number"
+                            value={Math.max(1, Math.round(Number(backupScheduleEverySec || 0) / 3600) || 24)}
+                            onChange={(e) => {
+                              const h = Math.round(Number(e.target.value || 0));
+                              if (!Number.isFinite(h)) return;
+                              setBackupScheduleEverySec(Math.max(3600, Math.min(86400 * 365, h * 3600)));
+                            }}
+                            min={1}
+                            max={24 * 365}
+                            disabled={!backupScheduleEnabled}
+                            style={{ width: 120 }}
+                          />
+                          <span className="muted">{t.tr("hours", "小时")}</span>
+                        </div>
+
+                        <div style={{ width: 200 }}>
+                          <Select
+                            value={backupScheduleFormat}
+                            onChange={(v) => setBackupScheduleFormat(v === "zip" ? "zip" : "tar.gz")}
+                            disabled={!backupScheduleEnabled}
+                            options={[
+                              { value: "tar.gz", label: "tar.gz" },
+                              { value: "zip", label: "zip" },
+                            ]}
+                          />
+                        </div>
+                      </div>
+
+                      <label className="checkRow" style={{ marginTop: 8 }}>
+                        <input
+                          type="checkbox"
+                          checked={backupScheduleStop}
+                          onChange={(e) => setBackupScheduleStop(e.target.checked)}
+                          disabled={!backupScheduleEnabled}
+                        />
+                        {t.tr("Stop server before backup (safer)", "备份前停止服务端（更安全）")}
+                      </label>
+
+                      {settingsValidation.backupScheduleErr ? <div className="fieldError">{settingsValidation.backupScheduleErr}</div> : null}
+                      <div className="hint mt-6px">
+                        {t.tr(
+                          "Daemon will create backups under servers/_backups/<instance>/ and update status in .elegantmc.json.",
+                          "Daemon 会在 servers/_backups/<instance>/ 下生成备份，并把状态写回 .elegantmc.json。"
+                        )}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {showSettingsField("backup status", "schedule", "status", "状态", "备份") ? (
+                    <div className="field" style={{ gridColumn: "1 / -1" }}>
+                      <label>{t.tr("Backup schedule status", "定时备份状态")}</label>
+                      {(() => {
+                        const st: any = backupScheduleStatus && typeof backupScheduleStatus === "object" ? backupScheduleStatus : null;
+                        const lastRunUnix = Math.floor(Number(st?.last_run_unix || 0));
+                        const lastSuccessUnix = Math.floor(Number(st?.last_success_unix || 0));
+                        const lastFinishedUnix = Math.floor(Number(st?.last_finished_unix || 0));
+                        const err = String(st?.last_error || "").trim();
+                        const lastPath = String(st?.last_backup_path || "").trim();
+                        const every = Math.max(3600, Math.round(Number(backupScheduleEverySec || 0) || 0));
+                        const nextRunUnix = backupScheduleEnabled && lastRunUnix > 0 ? lastRunUnix + every : 0;
+
+                        return (
+                          <div className="grid2 items-start">
+                            <div className="hint">
+                              {t.tr("Last run", "上次运行")}: <TimeAgo unix={lastRunUnix || null} />
+                              {lastFinishedUnix > 0 ? (
+                                <>
+                                  {" · "}
+                                  {t.tr("finished", "完成")}: <TimeAgo unix={lastFinishedUnix || null} />
+                                </>
+                              ) : null}
+                              {lastSuccessUnix > 0 ? (
+                                <>
+                                  {" · "}
+                                  {t.tr("success", "成功")}: <TimeAgo unix={lastSuccessUnix || null} />
+                                </>
+                              ) : null}
+                              {nextRunUnix > 0 ? (
+                                <>
+                                  {" · "}
+                                  {t.tr("next", "下次")}: <TimeAgo unix={nextRunUnix || null} />
+                                </>
+                              ) : null}
+                            </div>
+
+                            <div className="hint">
+                              {err ? (
+                                <span style={{ color: "var(--danger)" }}>
+                                  {t.tr("Last error", "上次错误")}: {err}
+                                </span>
+                              ) : (
+                                <span className="muted">{t.tr("No errors", "暂无错误")}</span>
+                              )}
+                            </div>
+
+                            {lastPath ? (
+                              <div className="hint" style={{ gridColumn: "1 / -1" }}>
+                                {t.tr("Last backup", "最近备份")}: <code>{lastPath}</code> <CopyButton text={lastPath} />
+                              </div>
+                            ) : null}
+                          </div>
+                        );
+                      })()}
                     </div>
                   ) : null}
                 </div>
