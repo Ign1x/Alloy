@@ -329,6 +329,36 @@ Daemon 主动连接 Panel 的 WebSocket：
 - args: `{ "path": "server1/plugins/SomePlugin.jar" }`
 - output: `{ "path": "...", "deleted": true, "is_dir": false }`
 
+### `fs_trash`
+
+将文件/目录移入回收站（`servers/_trash/`），用于可恢复删除：
+
+- args: `{ "path": "server1/plugins/SomePlugin.jar" }`
+- output: `{ "path": "...", "trash_id": "20260128-123456-ab12cd34", "trash_path": "_trash/<id>", "payload_path": "_trash/<id>/<basename>", "is_dir": false }`
+
+### `fs_trash_list`
+
+列出回收站条目（按删除时间倒序）：
+
+- args: `{ "limit": 200 }`（可选；1-500，默认 200）
+- output: `{ "items": [ { "trash_id": "...", "trash_path": "_trash/...", "original_path": "...", "payload_path": "...", "deleted_at_unix": 1730000000, "is_dir": false } ] }`
+
+### `fs_trash_restore`
+
+恢复回收站条目到原路径（若原路径已存在则失败）：
+
+- args:
+  - `{ "trash_id": "..." }` 或 `{ "trash_path": "_trash/<id>" }`
+- output: `{ "restored": true, "trash_path": "_trash/<id>", "original_path": "..." }`
+
+### `fs_trash_delete`
+
+永久删除回收站条目（不可恢复）：
+
+- args:
+  - `{ "trash_id": "..." }` 或 `{ "trash_path": "_trash/<id>" }`
+- output: `{ "trash_path": "_trash/<id>", "deleted": true }`
+
 ### `fs_download`
 
 下载文件到 `servers` 根目录下（用于安装 server.jar / plugins / mods 等）：
