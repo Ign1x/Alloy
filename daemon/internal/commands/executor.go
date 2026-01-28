@@ -528,6 +528,8 @@ func (e *Executor) Execute(ctx context.Context, cmd protocol.Command) protocol.C
 		return e.mcJavaCacheRemove(cmd)
 	case "mc_backup":
 		return e.mcBackup(ctx, cmd)
+	case "mc_backup_verify":
+		return e.mcBackupVerify(ctx, cmd)
 	case "mc_backup_prune":
 		return e.mcBackupPrune(cmd)
 	case "mc_restore":

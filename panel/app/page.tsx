@@ -1357,6 +1357,9 @@ export default function HomePage() {
   const [restoreStatus, setRestoreStatus] = useState<string>("");
   const [restoreCandidates, setRestoreCandidates] = useState<string[]>([]);
   const [restoreZipPath, setRestoreZipPath] = useState<string>("");
+
+  const [restoreVerifyResult, setRestoreVerifyResult] = useState<any | null>(null);
+
   const [backupRetentionKeepLast, setBackupRetentionKeepLast] = useState<number>(0);
 
   // Per-instance scheduled backups (stored in servers/<instance>/.elegantmc.json)
@@ -8431,8 +8434,66 @@ export default function HomePage() {
     setRestoreCandidates([]);
     setRestoreZipPath("");
     setRestoreStatus("");
+	  setRestoreVerifyResult(null);
     setRestoreOpen(true);
     await refreshBackupZips(inst);
+  }
+
+  async function verifyBackupNow(zipPathOverride?: string) {
+    if (gameActionBusy) return;
+    if (!selectedDaemon?.connected) {
+      setRestoreStatus(t.tr("daemon offline", "daemon 离线"));
+      return;
+    }
+    const inst = instanceId.trim();
+    const zip = String(zipPathOverride ?? restoreZipPath ?? "").trim();
+    if (!inst) {
+      setRestoreStatus(t.tr("instance_id is required", "instance_id 不能为空"));
+      return;
+    }
+    if (!zip) {
+      setRestoreStatus(t.tr("Select a backup first", "请先选择备份"));
+      return;
+    }
+
+    setGameActionBusy(true);
+    setRestoreVerifyResult(null);
+    setRestoreStatus(t.tr("Verifying backup...", "校验备份中..."));
+    try {
+      const out = await callOkCommand("mc_backup_verify", { zip_path: zip }, 10 * 60_000);
+      setRestoreVerifyResult(out);
+
+      const valid = out?.valid !== false;
+      const entries = Math.max(0, Math.round(Number(out?.entries || 0) || 0));
+      const bytes = Math.max(0, Number(out?.bytes || 0));
+      const durMs = Math.max(0, Math.round(Number(out?.duration_ms || 0) || 0));
+      const anoms = Array.isArray(out?.anomalies) ? out.anomalies : [];
+
+      if (valid) {
+        pushToast(
+          t.tr(
+            `Backup verified: ok (${entries} entries, ${fmtBytes(bytes)} in ${durMs}ms)`,
+            `备份校验通过：OK（${entries} 项，${fmtBytes(bytes)}，耗时 ${durMs}ms）`
+          ),
+          "ok"
+        );
+        setRestoreStatus(t.tr("Backup OK", "备份正常"));
+      } else {
+        const first = anoms.length ? String(anoms[0]?.error || "").trim() : "";
+        pushToast(
+          t.tr(
+            `Backup corrupted: anomalies=${anoms.length}${first ? ` (${first})` : ""}`,
+            `备份可能损坏：异常=${anoms.length}${first ? `（${first}）` : ""}`
+          ),
+          "error"
+        );
+        setRestoreStatus(t.tr("Backup has anomalies (see details)", "备份存在异常（见详情）"));
+      }
+    } catch (e: any) {
+      setRestoreStatus(String(e?.message || e));
+    } finally {
+      setGameActionBusy(false);
+    }
   }
 
 	  async function restoreBackupNow(zipPathOverride?: string) {
@@ -13546,7 +13607,10 @@ export default function HomePage() {
                   <label>{t.tr("Backup archive", "备份文件")}</label>
                   <Select
                     value={restoreZipPath}
-                    onChange={(v) => setRestoreZipPath(v)}
+                    onChange={(v) => {
+                      setRestoreZipPath(v);
+                      setRestoreVerifyResult(null);
+                    }}
                     disabled={!restoreCandidates.length || gameActionBusy}
                     placeholder={restoreCandidates.length ? t.tr("Select backup…", "选择备份…") : t.tr("No backups found", "未找到备份")}
                     options={restoreCandidates.map((p) => ({ value: p, label: p }))}
@@ -13557,6 +13621,18 @@ export default function HomePage() {
                   {restoreStatus ? <div className="hint">{restoreStatus}</div> : null}
                 </div>
 
+                {restoreVerifyResult ? (
+                  <div className="mt-10px">
+                    <CodeBlock
+                      text={JSON.stringify(restoreVerifyResult, null, 2)}
+                      maxHeight={240}
+                      storageKey={`backup_verify:${instanceId.trim()}:${restoreZipPath || "-"}`}
+                      title={t.tr("Verify result", "校验结果")}
+                      showLineNumbersToggle={false}
+                    />
+                  </div>
+                ) : null}
+
                 <div className="row" style={{ marginTop: 12, justifyContent: "space-between", alignItems: "center" }}>
                   <div className="btnGroup" style={{ justifyContent: "flex-start" }}>
                     <button type="button" onClick={() => refreshBackupZips(instanceId.trim())} disabled={gameActionBusy}>
@@ -13564,9 +13640,14 @@ export default function HomePage() {
                     </button>
                     {gameActionBusy ? <span className="badge">{t.tr("working…", "处理中…")}</span> : null}
                   </div>
-                  <button type="button" className="dangerBtn" onClick={() => restoreBackupNow()} disabled={!restoreZipPath || gameActionBusy}>
-                    {t.tr("Restore", "恢复")}
-                  </button>
+				  <div className="btnGroup" style={{ justifyContent: "flex-end" }}>
+				    <button type="button" onClick={() => verifyBackupNow()} disabled={!restoreZipPath || gameActionBusy}>
+				      {t.tr("Verify", "校验")}
+				    </button>
+				    <button type="button" className="dangerBtn" onClick={() => restoreBackupNow()} disabled={!restoreZipPath || gameActionBusy}>
+				      {t.tr("Restore", "恢复")}
+				    </button>
+				  </div>
                 </div>
           </ManagedModal>
 
