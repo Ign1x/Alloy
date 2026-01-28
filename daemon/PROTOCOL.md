@@ -219,6 +219,17 @@ Daemon 主动连接 Panel 的 WebSocket：
 
 - args: `{ "path": "server1/server.properties", "b64": "..." }`
 
+### `fs_chmod`
+
+修改文件/目录权限（安全白名单，避免误操作）：
+
+- args:
+  - `path`: 目标路径（相对 `servers/` 根）
+  - `mode`: 八进制数字（例如 `644` / `755`；也接受 `0644` / `0755`）
+- output: `{ "path": "...", "chmod": "644", "mode": "-rw-r--r--", "mode_bits": 33188 }`
+
+限制：仅允许 `644` / `755`；目录拒绝设置为 `644`；拒绝 symlink；拒绝对 `servers/` 根目录本身操作。
+
 ### `fs_upload_begin`
 
 为大文件/二进制文件（mods/plugins/jar 等）开启一个分片上传会话：

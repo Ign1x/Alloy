@@ -179,6 +179,113 @@ func TestExecutor_FSStat_File(t *testing.T) {
 	}
 }
 
+func TestExecutor_FSChmod_File_644_755(t *testing.T) {
+	ex, _, serversRoot := newTestExecutor(t)
+	ctx := context.Background()
+
+	// Seed a file.
+	instDir := filepath.Join(serversRoot, "server1")
+	if err := os.MkdirAll(instDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(instDir, "a.txt"), []byte("a"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	res644 := ex.Execute(ctx, protocol.Command{
+		Name: "fs_chmod",
+		Args: map[string]any{"path": "server1/a.txt", "mode": "644"},
+	})
+	if !res644.OK {
+		t.Fatalf("fs_chmod 644 failed: %s", res644.Error)
+	}
+	st, err := os.Stat(filepath.Join(instDir, "a.txt"))
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if st.Mode().Perm() != 0o644 {
+		t.Fatalf("perm=%o", st.Mode().Perm())
+	}
+
+	res755 := ex.Execute(ctx, protocol.Command{
+		Name: "fs_chmod",
+		Args: map[string]any{"path": "server1/a.txt", "mode": 755},
+	})
+	if !res755.OK {
+		t.Fatalf("fs_chmod 755 failed: %s", res755.Error)
+	}
+	st, err = os.Stat(filepath.Join(instDir, "a.txt"))
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if st.Mode().Perm() != 0o755 {
+		t.Fatalf("perm=%o", st.Mode().Perm())
+	}
+}
+
+func TestExecutor_FSChmod_RejectsNonWhitelistedMode(t *testing.T) {
+	ex, _, serversRoot := newTestExecutor(t)
+	ctx := context.Background()
+
+	instDir := filepath.Join(serversRoot, "server1")
+	if err := os.MkdirAll(instDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(instDir, "a.txt"), []byte("a"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	res := ex.Execute(ctx, protocol.Command{
+		Name: "fs_chmod",
+		Args: map[string]any{"path": "server1/a.txt", "mode": "777"},
+	})
+	if res.OK {
+		t.Fatalf("expected failure")
+	}
+}
+
+func TestExecutor_FSChmod_RejectsDir644(t *testing.T) {
+	ex, _, serversRoot := newTestExecutor(t)
+	ctx := context.Background()
+
+	instDir := filepath.Join(serversRoot, "server1")
+	if err := os.MkdirAll(filepath.Join(instDir, "sub"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	res := ex.Execute(ctx, protocol.Command{
+		Name: "fs_chmod",
+		Args: map[string]any{"path": "server1/sub", "mode": "644"},
+	})
+	if res.OK {
+		t.Fatalf("expected failure")
+	}
+}
+
+func TestExecutor_FSChmod_RejectsSymlink(t *testing.T) {
+	ex, _, serversRoot := newTestExecutor(t)
+	ctx := context.Background()
+
+	instDir := filepath.Join(serversRoot, "server1")
+	if err := os.MkdirAll(instDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(instDir, "a.txt"), []byte("a"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if err := os.Symlink("a.txt", filepath.Join(instDir, "link")); err != nil {
+		t.Skipf("symlink not supported: %v", err)
+	}
+
+	res := ex.Execute(ctx, protocol.Command{
+		Name: "fs_chmod",
+		Args: map[string]any{"path": "server1/link", "mode": "755"},
+	})
+	if res.OK {
+		t.Fatalf("expected failure")
+	}
+}
+
 func TestExecutor_FSHash_SHA256(t *testing.T) {
 	ex, _, _ := newTestExecutor(t)
 	ctx := context.Background()

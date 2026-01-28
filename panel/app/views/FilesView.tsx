@@ -379,6 +379,7 @@ function FilesView() {
     openFileByPath,
     fsReadText,
     fsStatEntry,
+    fsChmodEntry,
     fsDuEntry,
     fsHashEntry,
     fsSearchEntries,
@@ -479,6 +480,9 @@ function FilesView() {
   const [entryHashBusy, setEntryHashBusy] = useState<boolean>(false);
   const [entryHashStatus, setEntryHashStatus] = useState<string>("");
   const [entryHash, setEntryHash] = useState<any>(null);
+
+  const [entryChmodBusy, setEntryChmodBusy] = useState<boolean>(false);
+  const [entryChmodStatus, setEntryChmodStatus] = useState<string>("");
 
   const [fsSearchOpen, setFsSearchOpen] = useState<boolean>(false);
   const [fsSearchBusy, setFsSearchBusy] = useState<boolean>(false);
@@ -1390,6 +1394,9 @@ function FilesView() {
     setEntryHashBusy(false);
     setEntryHashStatus("");
     setEntryHash(null);
+
+    setEntryChmodBusy(false);
+    setEntryChmodStatus("");
     try {
       const st = await fsStatEntry(rel);
       setEntryDetails(st);
@@ -1435,6 +1442,53 @@ function FilesView() {
       setEntryDuStatus(String(e?.message || e));
     } finally {
       setEntryDuBusy(false);
+    }
+  }
+
+  function rwxFromModeString(modeRaw: any) {
+    const s = String(modeRaw || "").trim();
+    if (s.length >= 10) return s.slice(1);
+    return s;
+  }
+
+  function octalPermFromModeBits(bitsRaw: any) {
+    const n = Number(bitsRaw ?? 0);
+    if (!Number.isFinite(n)) return "";
+    const perm = (n >>> 0) & 0o777;
+    return perm.toString(8).padStart(3, "0");
+  }
+
+  async function chmodEntryNow(mode: "644" | "755") {
+    const rel = String(entryDetailsPath || "").trim();
+    if (!rel) return;
+    if (!entryDetails) return;
+    if (entryDetails?.isDir && mode === "644") return;
+
+    const ok = await confirmDialog(
+      t.tr(
+        `Apply chmod ${mode} to:\nservers/${rel} ?`,
+        `对以下路径应用 chmod ${mode}？\nservers/${rel}`
+      ),
+      {
+        title: t.tr("chmod", "chmod"),
+        confirmLabel: t.tr("Apply", "应用"),
+        cancelLabel: t.tr("Cancel", "取消"),
+      }
+    );
+    if (!ok) return;
+
+    setEntryChmodBusy(true);
+    setEntryChmodStatus(t.tr("Applying...", "应用中..."));
+    try {
+      await fsChmodEntry(rel, mode, 20_000);
+      const st = await fsStatEntry(rel);
+      setEntryDetails(st);
+      setEntryChmodStatus(t.tr("Applied", "已应用"));
+      window.setTimeout(() => setEntryChmodStatus(""), 1200);
+    } catch (e: any) {
+      setEntryChmodStatus(String(e?.message || e));
+    } finally {
+      setEntryChmodBusy(false);
     }
   }
 
@@ -2966,6 +3020,18 @@ function FilesView() {
                 </td>
               </tr>
               <tr>
+                <td className="muted">{t.tr("rwx", "rwx")}</td>
+                <td>
+                  <code>{rwxFromModeString(entryDetails?.mode) || "-"}</code>
+                </td>
+              </tr>
+              <tr>
+                <td className="muted">{t.tr("octal", "八进制")}</td>
+                <td>
+                  <code>{octalPermFromModeBits(entryDetails?.mode_bits) || "-"}</code>
+                </td>
+              </tr>
+              <tr>
                 <td className="muted">{t.tr("mode bits", "mode bits")}</td>
                 <td>
                   <code>{String(entryDetails?.mode_bits ?? "")}</code>
@@ -2973,6 +3039,29 @@ function FilesView() {
               </tr>
             </tbody>
           </table>
+        ) : null}
+
+        {entryDetails ? (
+          <>
+            <div className="row" style={{ marginTop: 12, justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+              <span className="muted">
+                {t.tr("chmod", "chmod")} <span className="hint">({t.tr("allowed: 644/755", "仅允许：644/755")})</span>
+              </span>
+              <div className="btnGroup" style={{ justifyContent: "flex-end" }}>
+                <button type="button" onClick={() => chmodEntryNow("644")} disabled={entryChmodBusy || !!entryDetails?.isDir}>
+                  {t.tr("Set 644", "设为 644")}
+                </button>
+                <button type="button" onClick={() => chmodEntryNow("755")} disabled={entryChmodBusy}>
+                  {t.tr("Set 755", "设为 755")}
+                </button>
+              </div>
+            </div>
+            {entryChmodStatus ? (
+              <div className="hint" style={{ marginTop: 8 }}>
+                {entryChmodStatus}
+              </div>
+            ) : null}
+          </>
         ) : null}
 
         {entryDetails && !entryDetails?.isDir ? (
