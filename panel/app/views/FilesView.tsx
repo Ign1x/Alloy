@@ -304,6 +304,7 @@ function FilesView() {
     openEntry,
     openFileByPath,
     fsReadText,
+    fsStatEntry,
     fsZipList,
     fsUnzipZip,
     fsDeleteHard,
@@ -388,6 +389,12 @@ function FilesView() {
   const [zipPreviewExtractIntoFolder, setZipPreviewExtractIntoFolder] = useState<boolean>(true);
   const [zipPreviewFolderName, setZipPreviewFolderName] = useState<string>("");
   const [zipPreviewDeleteZip, setZipPreviewDeleteZip] = useState<boolean>(true);
+
+  const [entryDetailsOpen, setEntryDetailsOpen] = useState<boolean>(false);
+  const [entryDetailsBusy, setEntryDetailsBusy] = useState<boolean>(false);
+  const [entryDetailsStatus, setEntryDetailsStatus] = useState<string>("");
+  const [entryDetailsPath, setEntryDetailsPath] = useState<string>("");
+  const [entryDetails, setEntryDetails] = useState<any>(null);
 
   useEffect(() => {
     const t = window.setTimeout(() => setQuery(queryRaw), 160);
@@ -1106,6 +1113,27 @@ function FilesView() {
       if (!e) continue;
       if (e.isDir) await downloadFsFolderAsZip(e);
       else await downloadFsEntry(e);
+    }
+  }
+
+  async function openEntryDetails(entry: any) {
+    const name = String(entry?.name || "").trim();
+    if (!name) return;
+    const rel = joinRelPath(fsPath, name);
+    if (!rel) return;
+    setEntryDetailsOpen(true);
+    setEntryDetailsBusy(true);
+    setEntryDetailsStatus(t.tr("Loading...", "加载中..."));
+    setEntryDetailsPath(rel);
+    setEntryDetails(null);
+    try {
+      const st = await fsStatEntry(rel);
+      setEntryDetails(st);
+      setEntryDetailsStatus("");
+    } catch (e: any) {
+      setEntryDetailsStatus(String(e?.message || e));
+    } finally {
+      setEntryDetailsBusy(false);
     }
   }
 
@@ -1862,6 +1890,17 @@ function FilesView() {
                 >
                   {t.tr("Copy path", "复制路径")}
                 </button>
+                <button
+                  type="button"
+                  className="ctxMenuItem"
+                  onClick={() => {
+                    const entry = ctxMenu.entry;
+                    setCtxMenu(null);
+                    openEntryDetails(entry);
+                  }}
+                >
+                  {t.tr("Details", "详情")}
+                </button>
                 <div className="ctxMenuSep" />
                 <button
                   type="button"
@@ -2252,6 +2291,74 @@ function FilesView() {
           <div className="hint">{t.tr("Tip: binary/large files are download-only.", "提示：二进制/大文件为 download-only（可用 Download 下载）。")}</div>
         </div>
       </div>
+
+      <ManagedModal
+        id="files-entry-details"
+        open={entryDetailsOpen}
+        onOverlayClick={() => {
+          if (!entryDetailsBusy) setEntryDetailsOpen(false);
+        }}
+        modalStyle={{ width: "min(760px, 100%)" }}
+        ariaLabel={t.tr("Entry Details", "条目详情")}
+      >
+        <div className="modalHeader">
+          <div>
+            <div style={{ fontWeight: 800 }}>{t.tr("Entry Details", "条目详情")}</div>
+            <div className="hint">
+              {t.tr("path", "路径")}: <code>{entryDetailsPath ? `servers/${entryDetailsPath}` : "-"}</code>
+            </div>
+          </div>
+          <div className="btnGroup">
+            <CopyButton iconOnly text={entryDetailsPath ? `servers/${entryDetailsPath}` : ""} disabled={!entryDetailsPath} tooltip={t.tr("Copy path", "复制路径")} ariaLabel={t.tr("Copy path", "复制路径")} />
+            <button type="button" onClick={() => setEntryDetailsOpen(false)} disabled={entryDetailsBusy}>
+              {t.tr("Close", "关闭")}
+            </button>
+          </div>
+        </div>
+
+        {entryDetailsStatus ? (
+          <div className="hint" style={{ marginTop: 8 }}>
+            {entryDetailsStatus}
+          </div>
+        ) : null}
+
+        {entryDetails ? (
+          <table className="compact striped" style={{ marginTop: 12 }}>
+            <tbody>
+              <tr>
+                <td className="muted">{t.tr("Type", "类型")}</td>
+                <td>
+                  <code>{entryDetails?.isDir ? "DIR" : "FILE"}</code>
+                </td>
+              </tr>
+              <tr>
+                <td className="muted">{t.tr("Size", "大小")}</td>
+                <td>
+                  <code>{fmtBytes(Number(entryDetails?.size || 0))}</code>
+                </td>
+              </tr>
+              <tr>
+                <td className="muted">{t.tr("Modified", "修改时间")}</td>
+                <td>
+                  <code>{fmtUnix(Number(entryDetails?.mtime_unix || 0))}</code>
+                </td>
+              </tr>
+              <tr>
+                <td className="muted">{t.tr("Mode", "权限")}</td>
+                <td>
+                  <code>{String(entryDetails?.mode || "-")}</code>
+                </td>
+              </tr>
+              <tr>
+                <td className="muted">{t.tr("mode bits", "mode bits")}</td>
+                <td>
+                  <code>{String(entryDetails?.mode_bits ?? "")}</code>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        ) : null}
+      </ManagedModal>
 
       <ManagedModal
         id="files-zip-preview"

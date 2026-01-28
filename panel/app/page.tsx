@@ -5013,6 +5013,17 @@ export default function HomePage() {
     return new TextDecoder().decode(bytes);
   }
 
+  async function fsStatEntry(pathRaw: string, timeoutMs = 10_000) {
+    const p = String(pathRaw || "")
+      .replace(/\\+/g, "/")
+      .replace(/\/+/g, "/")
+      .replace(/^\/+/, "")
+      .replace(/\/+$/, "");
+    if (!p) throw new Error(t.tr("path is required", "path 不能为空"));
+    if (!selected) throw new Error(t.tr("Select a daemon first", "请先选择 Daemon"));
+    return await callOkCommand("fs_stat", { path: p }, timeoutMs);
+  }
+
   async function fsWriteText(pathRaw: string, textRaw: string, timeoutMs = 30_000) {
     const p = String(pathRaw || "")
       .replace(/\\+/g, "/")
@@ -8938,6 +8949,7 @@ export default function HomePage() {
   const openEntryFn = useEvent(openEntry);
   const openFileByPathFn = useEvent(openFileByPath);
   const fsReadTextFn = useEvent(fsReadText);
+  const fsStatEntryFn = useEvent(fsStatEntry);
   const fsWriteTextFn = useEvent(fsWriteText);
   const fsZipListFn = useEvent(fsZipList);
   const fsUnzipZipFn = useEvent(fsUnzipZip);
@@ -9253,6 +9265,7 @@ export default function HomePage() {
       openEntry: openEntryFn,
       openFileByPath: openFileByPathFn,
       fsReadText: fsReadTextFn,
+      fsStatEntry: fsStatEntryFn,
       fsWriteText: fsWriteTextFn,
       fsZipList: fsZipListFn,
       fsUnzipZip: fsUnzipZipFn,
@@ -9297,6 +9310,7 @@ export default function HomePage() {
       openEntryFn,
       openFileByPathFn,
       fsReadTextFn,
+      fsStatEntryFn,
       fsWriteTextFn,
       fsZipListFn,
       fsUnzipZipFn,
