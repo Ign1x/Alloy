@@ -129,3 +129,5 @@ WF-20260128-05,P3,panel-ui,done,Views inline-style reduction,"Views still contai
 WF-20260128-06,P2,files,done,Entry details modal (fs_stat),"Users need quick access to file metadata (mode/mtime/size) without leaving the Panel.","Files view provides a Details action that shows fs_stat (path/type/size/mtime/mode) for the selected entry.",feat(files): entry details
 
 WF-20260128-07,P2,files,done,Folder disk usage in Details,"Directory entry size from stat is misleading; users need true recursive folder size.","Entry Details modal can compute and show fs_du bytes/entries (cached) with Compute/Force actions.",feat(files): folder disk usage
+
+WF-20260128-08,P2,ux,done,Advanced command presets,"Re-running advanced commands is error-prone when args must be retyped each time.","Advanced page supports saving/loading/overwriting/deleting command presets in localStorage and can apply daemon/name/args in one click.",ux(panel): advanced presets
