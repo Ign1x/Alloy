@@ -12,7 +12,44 @@ import Sparkline from "../ui/Sparkline";
 import TimeAgo from "../ui/TimeAgo";
 import StatusBadge from "../ui/StatusBadge";
 
-type RenderLogLine = { text: string; textLower: string; level: "" | "warn" | "error" };
+type RenderLogLine = {
+  text: string;
+  textLower: string;
+  level: "" | "warn" | "error";
+  issueClass: "" | "issueWarn" | "issueDanger";
+};
+
+type CommonLogIssueID = "eula" | "port" | "oom" | "java" | "jar" | "frp_auth";
+
+function detectCommonLogIssueId({ upper, source }: { upper: string; source: string }): CommonLogIssueID | null {
+  // EULA
+  if (upper.includes("YOU NEED TO AGREE TO THE EULA") || upper.includes("SET EULA=TRUE") || upper.includes("EULA.TXT")) return "eula";
+
+  // Port binding
+  if (upper.includes("FAILED TO BIND TO PORT") || upper.includes("BINDEXCEPTION") || upper.includes("ADDRESS ALREADY IN USE")) return "port";
+
+  // Out of memory
+  if (upper.includes("OUTOFMEMORYERROR") || upper.includes("JAVA HEAP SPACE") || upper.includes("GC OVERHEAD LIMIT EXCEEDED")) return "oom";
+
+  // Java version mismatch
+  if (upper.includes("UNSUPPORTEDCLASSVERSIONERROR") || upper.includes("CLASS FILE VERSION")) return "java";
+
+  // Jar/runtime bootstrap failures
+  if (
+    upper.includes("UNABLE TO ACCESS JARFILE") ||
+    upper.includes("NO MAIN MANIFEST ATTRIBUTE") ||
+    upper.includes("COULD NOT FIND OR LOAD MAIN CLASS")
+  ) {
+    return "jar";
+  }
+
+  // FRP auth failures (from frpc)
+  if (source === "frp" && (upper.includes("AUTHENTICATION FAILED") || upper.includes("INVALID TOKEN") || upper.includes("TOKEN IS NOT CORRECT"))) {
+    return "frp_auth";
+  }
+
+  return null;
+}
 
 function highlightText(text: string, qLower: string) {
   const q = String(qLower || "").trim().toLowerCase();
@@ -839,7 +876,7 @@ function GamesView() {
 
   const logLines = useMemo<RenderLogLine[]>(() => {
     const list = filteredLogs.length ? filteredLogs.slice(-2000) : [];
-    if (!list.length) return [{ text: "<no logs>", textLower: "<no logs>", level: "" }];
+    if (!list.length) return [{ text: "<no logs>", textLower: "<no logs>", level: "", issueClass: "" }];
     const baseTs =
       logTimeMode === "relative"
         ? (() => {
@@ -865,18 +902,46 @@ function GamesView() {
       const isErr = /\b(ERROR|FATAL)\b/.test(upper) || upper.includes("EXCEPTION") || upper.includes("STACKTRACE");
       const isWarn = /\bWARN(ING)?\b/.test(upper);
       const level: RenderLogLine["level"] = isErr ? "error" : isWarn ? "warn" : "";
-      return { text, textLower: text.toLowerCase(), level };
+      const issueId = detectCommonLogIssueId({ upper, source: String(src || "") });
+      const issueClass: RenderLogLine["issueClass"] = issueId ? (issueId === "frp_auth" ? "issueWarn" : "issueDanger") : "";
+      return { text, textLower: text.toLowerCase(), level, issueClass };
     });
     if (logLevelFilter === "warn") {
       const out = mapped.filter((l) => l.level === "warn");
-      return out.length ? out : [{ text: "<no logs>", textLower: "<no logs>", level: "" }];
+      return out.length ? out : [{ text: "<no logs>", textLower: "<no logs>", level: "", issueClass: "" }];
     }
     if (logLevelFilter === "error") {
       const out = mapped.filter((l) => l.level === "error");
-      return out.length ? out : [{ text: "<no logs>", textLower: "<no logs>", level: "" }];
+      return out.length ? out : [{ text: "<no logs>", textLower: "<no logs>", level: "", issueClass: "" }];
     }
     return mapped;
   }, [filteredLogs, logLevelFilter, logTimeMode]);
+
+  const commonLogIssues = useMemo(() => {
+    const list = filteredLogs.length ? filteredLogs.slice(-2000) : [];
+    const byId = new Map<CommonLogIssueID, { id: CommonLogIssueID; severity: "warn" | "danger"; lastSeenUnix: number; sample: string; source: string }>();
+    for (const l of list) {
+      const source = String((l as any)?.source || "").trim() || "daemon";
+      const line = String((l as any)?.line || "");
+      if (!line) continue;
+      const upper = line.toUpperCase();
+      const id = detectCommonLogIssueId({ upper, source });
+      if (!id) continue;
+      const severity: "warn" | "danger" = id === "frp_auth" ? "warn" : "danger";
+      const tsUnix = Math.floor(Number((l as any)?.ts_unix || 0));
+      const sample = line.length > 280 ? `${line.slice(0, 280)}…` : line;
+
+      const prev = byId.get(id);
+      if (!prev || (Number.isFinite(tsUnix) && tsUnix > (prev.lastSeenUnix || 0))) {
+        byId.set(id, { id, severity, lastSeenUnix: Number.isFinite(tsUnix) ? tsUnix : 0, sample, source });
+      }
+    }
+
+    const rank = (s: "warn" | "danger") => (s === "danger" ? 2 : 1);
+    const out = Array.from(byId.values());
+    out.sort((a, b) => rank(b.severity) - rank(a.severity) || (b.lastSeenUnix || 0) - (a.lastSeenUnix || 0));
+    return out;
+  }, [filteredLogs]);
 
   const logMatchLineIdxs = useMemo(() => {
     if (logFilter.mode === "none") return [] as number[];
@@ -3887,6 +3952,151 @@ function GamesView() {
             </button>
           </div>
         </div>
+
+        {commonLogIssues.length ? (
+          <details className="uiDetails" open style={{ marginTop: 4 }}>
+            <summary>
+              <span>{t.tr("Likely causes", "可能原因")}</span>
+              <span className={`badge ${commonLogIssues.some((x) => x.severity === "danger") ? "danger" : "warn"}`}>
+                <span className="statusBadgeDot" />
+                {commonLogIssues.length}
+              </span>
+            </summary>
+            <div className="stack" style={{ gap: 10 }}>
+              {commonLogIssues.map((it) => {
+                const inst = instanceId.trim();
+                const view = String(logView || "all");
+                const title =
+                  it.id === "eula"
+                    ? t.tr("EULA not accepted", "未接受 EULA")
+                    : it.id === "port"
+                      ? t.tr("Port already in use", "端口被占用")
+                      : it.id === "oom"
+                        ? t.tr("Out of memory", "内存不足")
+                        : it.id === "java"
+                          ? t.tr("Java version mismatch", "Java 版本不匹配")
+                          : it.id === "jar"
+                            ? t.tr("Jar startup failed", "Jar 启动失败")
+                            : t.tr("FRP auth failure", "FRP 认证失败");
+
+                const detail =
+                  it.id === "eula"
+                    ? t.tr("Server refused to start until eula.txt has eula=true.", "服务端拒绝启动，需在 eula.txt 写入 eula=true。")
+                    : it.id === "port"
+                      ? t.tr("Another process is already listening on this port.", "该端口已被其他进程占用。")
+                      : it.id === "oom"
+                        ? t.tr("JVM ran out of heap memory. Increase Xmx or reduce load.", "JVM 堆内存不足：提高 Xmx 或减少负载/插件。")
+                        : it.id === "java"
+                          ? t.tr(
+                              "The selected Java is too old/new for this jar (e.g. class file 65 requires Java 21).",
+                              "当前 Java 版本与 jar 不匹配（例如 class file 65 需要 Java 21）。"
+                            )
+                          : it.id === "jar"
+                            ? t.tr("Jar path or jar contents are invalid (missing file/manifest/main class).", "jar 路径或内容无效（缺失文件/manifest/main class）。")
+                            : t.tr("frpc cannot authenticate to frps. Check token/profile on both sides.", "frpc 无法通过 frps 认证；请检查两端的 token/配置。 ");
+
+                const applyFilter = () => {
+                  // Apply a focused filter so the user can see the evidence quickly.
+                  setLogMatchOnly(true);
+                  setLogLevelFilter(it.severity === "danger" ? "error" : "warn");
+                  if (it.id === "oom") {
+                    setLogRegex(true);
+                    setLogQueryRaw("OutOfMemoryError|GC overhead limit exceeded|Java heap space");
+                  } else if (it.id === "port") {
+                    setLogRegex(true);
+                    setLogQueryRaw("BindException|Address already in use|Failed to bind to port");
+                  } else if (it.id === "eula") {
+                    setLogRegex(true);
+                    setLogQueryRaw("EULA|eula\\.txt|eula=true");
+                  } else if (it.id === "java") {
+                    setLogRegex(true);
+                    setLogQueryRaw("UnsupportedClassVersionError|class file version");
+                  } else if (it.id === "jar") {
+                    setLogRegex(true);
+                    setLogQueryRaw("Unable to access jarfile|No main manifest attribute|Could not find or load main class");
+                  } else {
+                    setLogRegex(true);
+                    setLogQueryRaw("authentication failed|invalid token|token is not correct");
+                  }
+                };
+
+                const openEula = () => {
+                  if (!inst) return;
+                  setTab("files");
+                  setFsPath(inst);
+                  openFileByPath(joinRelPath(inst, "eula.txt"));
+                };
+
+                const openSettings = () => {
+                  if (!inst) return;
+                  openSettingsModal();
+                };
+
+                return (
+                  <div key={it.id} className="cardSub" style={{ display: "flex", gap: 12, alignItems: "flex-start", justifyContent: "space-between" }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div className="row" style={{ justifyContent: "space-between", gap: 10 }}>
+                        <div style={{ fontWeight: 800, letterSpacing: "-0.01em" }}>{title}</div>
+                        <span className={`badge ${it.severity === "danger" ? "danger" : "warn"}`.trim()}>
+                          <span className="statusBadgeDot" />
+                          <TimeAgo unix={it.lastSeenUnix} fallback={t.tr("recent", "最近")} />
+                        </span>
+                      </div>
+                      <div className="hint" style={{ marginTop: 4 }}>
+                        {detail}
+                      </div>
+                      {it.sample ? (
+                        <div className="hint" style={{ marginTop: 6 }}>
+                          <code style={{ whiteSpace: "pre-wrap" }}>{it.sample}</code>
+                        </div>
+                      ) : null}
+                    </div>
+                    <div className="btnGroup" style={{ flex: "0 0 auto" }}>
+                      <button type="button" className="iconBtn" onClick={applyFilter} title={t.tr("Filter logs to evidence", "筛选日志证据")}
+                      >
+                        <Icon name="search" />
+                        {t.tr("Filter", "筛选")}
+                      </button>
+                      {it.id === "eula" ? (
+                        <button type="button" className="iconBtn" onClick={openEula} disabled={!inst}>
+                          <Icon name="file" />
+                          eula.txt
+                        </button>
+                      ) : null}
+                      {it.id !== "frp_auth" ? (
+                        <button type="button" className="iconBtn" onClick={openSettings} disabled={!inst}>
+                          <Icon name="settings" />
+                          {t.tr("Settings", "设置")}
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className="iconBtn"
+                          onClick={() => {
+                            setLogView("frp" as any);
+                            applyFilter();
+                          }}
+                        >
+                          <Icon name="link" />
+                          FRP
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+              {instanceId.trim() ? (
+                <div className="hint">
+                  {t.tr(
+                    "These hints are best-effort. Use Presets/History search for deeper investigation.",
+                    "这些提示是尽力推断；需要更深入排查可用“预设/历史搜索”。"
+                  )}
+                </div>
+              ) : null}
+            </div>
+          </details>
+        ) : null}
+
         <div className="logScrollWrap">
           <div
             ref={logScrollRef}
@@ -3916,7 +4126,7 @@ function GamesView() {
                     const instSuffixZh = inst ? `（实例 ${inst}）` : "";
                     const isActive = lineIdx === activeLogMatchLineIdx;
                     const isSelected = !!logSelection && lineIdx >= logSelection.start && lineIdx <= logSelection.end;
-                    const cls = `logLine ${highlightLogs ? l.level : ""} ${isSelected ? "selected" : ""} ${isActive ? "activeMatch" : ""}`.trim();
+                    const cls = `logLine ${highlightLogs ? l.level : ""} ${highlightLogs ? l.issueClass : ""} ${isSelected ? "selected" : ""} ${isActive ? "activeMatch" : ""}`.trim();
                     const rawText = String(l.text || "");
                     const maxDisplayLen = 8000;
                     const isLong = rawText.length > maxDisplayLen;
