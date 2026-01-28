@@ -142,7 +142,7 @@ WF-20260128-14,P2,files,done,Trash/restore workflow for deletes,"Accidental dele
 WF-20260128-15,P3,files,done,Quick permission view + chmod action,"When plugins fail, file perms are a common cause; current UI hides mode bits.","Show rwx bits in Details and add a safe chmod (octal) action for files/dirs.",feat(files): chmod action
 
 WF-20260128-16,P2,logs,done,Daemon log tail-follow (stream),"Debugging requires live logs (panel/daemon/frpc), not one-off snapshots.","Add daemon log_follow with cursor; UI supports follow/pause and keeps last N lines.",feat(logs): follow stream
-WF-20260128-17,P3,logs,todo,Log share artifacts (export),"Sharing logs usually means copy/paste; downloadable artifacts are easier to attach.","Allow exporting a selected range into a downloadable artifact with metadata in filename.",ux(logs): export artifact
+WF-20260128-17,P3,logs,done,Log share artifacts (export),"Sharing logs usually means copy/paste; downloadable artifacts are easier to attach.","Allow exporting a selected range into a downloadable artifact with metadata in filename.",ux(logs): export artifact
 WF-20260128-18,P2,logs,todo,Common error detector in logs,"Users miss key lines in noisy logs (OOM, port in use, missing eula).","Add heuristics to highlight common errors and show a Likely causes panel.",ux(logs): error detector
 
 WF-20260128-19,P2,games,todo,Preflight checklist before Start,"Start failures waste time (missing eula, port occupied, wrong java).","Show a preflight checklist (java version, port, eula, disk) with actionable fixes before starting.",ux(games): preflight checks

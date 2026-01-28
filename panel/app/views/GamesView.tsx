@@ -1006,7 +1006,8 @@ function GamesView() {
     const end = logSelection.end;
     const total = logLines.length;
     const lines = logLines.slice(start, end + 1).map((l) => String(l?.text || ""));
-    const text = buildLogExportText(lines, { inst, view: String(logView || ""), start, end, total });
+    const view = String(logView || "");
+    const text = buildLogExportText(lines, { inst, view, start, end, total });
 
     if (mode === "copy") {
       await copyText(text);
@@ -1017,7 +1018,9 @@ function GamesView() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `elegantmc-${inst}-logs-${start + 1}-${end + 1}.txt`;
+    const viewTag = (view || "all").replace(/[^A-Za-z0-9._-]+/g, "_");
+    const exportedAtUnix = Math.floor(Date.now() / 1000);
+    a.download = `elegantmc-${inst}-${viewTag}-logs-${start + 1}-${end + 1}-${exportedAtUnix}.txt`;
     document.body.appendChild(a);
     a.click();
     a.remove();
