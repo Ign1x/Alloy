@@ -278,6 +278,11 @@ function GamesView() {
     computeInstanceUsage,
     instanceMetricsHistory,
     instanceMetricsStatus,
+    crashArtifacts,
+    crashArtifactsStatus,
+    crashArtifactsBusy,
+    refreshCrashArtifacts,
+    downloadCrashArtifact,
     startFrpProxyNow,
     restartFrpProxyNow,
     stopFrpProxyNow,
@@ -1416,6 +1421,14 @@ function GamesView() {
     const inst = instanceId.trim();
     if (!inst) return;
     refreshBackupZips(inst);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [instanceId, selectedDaemon?.connected]);
+
+  useEffect(() => {
+    if (!selectedDaemon?.connected) return;
+    const inst = instanceId.trim();
+    if (!inst) return;
+    refreshCrashArtifacts(inst);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [instanceId, selectedDaemon?.connected]);
 
@@ -3765,6 +3778,103 @@ function GamesView() {
               </div>
             )}
           </>
+        )}
+      </div>
+
+      <div className="card">
+        <div className="toolbar">
+          <div className="toolbarLeft items-center">
+            <div>
+              <h2>{t.tr("Crash artifacts", "崩溃产物")}</h2>
+              <div className="hint">
+                {instanceId.trim() ? (
+                  <>
+                    <code>servers/{instanceId.trim()}/crash-reports/</code> · <code>servers/{instanceId.trim()}/hs_err_pid*.log</code>
+                    {typeof crashArtifactsStatus === "string" && crashArtifactsStatus ? ` · ${crashArtifactsStatus}` : ""}
+                  </>
+                ) : (
+                  t.tr("Select a game to view crash artifacts", "选择游戏以查看崩溃产物")
+                )}
+              </div>
+            </div>
+          </div>
+          <div className="toolbarRight">
+            <button
+              type="button"
+              className="iconBtn"
+              onClick={() => refreshCrashArtifacts(instanceId.trim())}
+              disabled={!selectedDaemon?.connected || !instanceId.trim() || crashArtifactsBusy}
+              title={!instanceId.trim() ? t.tr("Select a game first", "请先选择游戏") : undefined}
+            >
+              <Icon name="refresh" />
+              {crashArtifactsBusy ? t.tr("Refreshing…", "刷新中…") : t.tr("Refresh", "刷新")}
+            </button>
+          </div>
+        </div>
+
+        {instanceId.trim() ? (
+          Array.isArray(crashArtifacts) && crashArtifacts.length ? (
+            <>
+              <div className="hint">
+                {t.tr("showing", "显示")} {crashArtifacts.length}
+              </div>
+              <table className="striped" style={{ marginTop: 10 }}>
+                <thead>
+                  <tr>
+                    <th style={{ width: 180 }}>{t.tr("Time", "时间")}</th>
+                    <th style={{ width: 120 }}>{t.tr("Kind", "类型")}</th>
+                    <th>{t.tr("File", "文件")}</th>
+                    <th style={{ width: 110 }}>{t.tr("Size", "大小")}</th>
+                    <th style={{ width: 210 }} />
+                  </tr>
+                </thead>
+                <tbody>
+                  {crashArtifacts.map((it: any) => {
+                    const path = String(it?.path || "").trim();
+                    const name = String(it?.name || path.split("/").pop() || "").trim();
+                    const kind = String(it?.kind || "").trim();
+                    const unix = Math.max(0, Math.floor(Number(it?.mtimeUnix ?? it?.mtime_unix ?? 0)));
+                    const bytes = Math.max(0, Number(it?.size ?? it?.bytes ?? 0));
+                    const kindLabel = kind === "hs_err" ? "hs_err" : "crash_report";
+                    const copyLabel = t.tr(`Copy path: ${name}`, `复制路径：${name}`);
+                    const dlLabel = t.tr(`Download: ${name}`, `下载：${name}`);
+                    return (
+                      <tr key={path || name}>
+                        <td className="muted">{unix ? <TimeAgo unix={unix} /> : "-"}</td>
+                        <td>
+                          <span className="badge">{kindLabel}</span>
+                        </td>
+                        <td style={{ minWidth: 0 }}>
+                          <code style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{name || "-"}</code>
+                        </td>
+                        <td>{fmtBytes(bytes)}</td>
+                        <td style={{ textAlign: "right" }}>
+                          <div className="btnGroup justify-end">
+                            <CopyButton iconOnly text={path} tooltip={copyLabel} ariaLabel={copyLabel} disabled={!path} />
+                            <button
+                              type="button"
+                              className="iconBtn"
+                              onClick={() => downloadCrashArtifact(path, name)}
+                              disabled={!selectedDaemon?.connected || !path}
+                              title={dlLabel}
+                              aria-label={dlLabel}
+                            >
+                              <Icon name="download" />
+                              {t.tr("Download", "下载")}
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </>
+          ) : (
+            <div className="hint">{t.tr("No crash artifacts found yet.", "暂无崩溃产物。")}</div>
+          )
+        ) : (
+          <div className="hint">{t.tr("Select a game to see crash artifacts.", "选择游戏以查看崩溃产物。")}</div>
         )}
       </div>
 

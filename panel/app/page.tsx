@@ -1360,6 +1360,17 @@ export default function HomePage() {
 
   const [restoreVerifyResult, setRestoreVerifyResult] = useState<any | null>(null);
 
+  type CrashArtifact = {
+    kind: "crash_report" | "hs_err";
+    path: string;
+    name: string;
+    size: number;
+    mtimeUnix: number;
+  };
+  const [crashArtifactsBusy, setCrashArtifactsBusy] = useState<boolean>(false);
+  const [crashArtifactsStatus, setCrashArtifactsStatus] = useState<string>("");
+  const [crashArtifacts, setCrashArtifacts] = useState<CrashArtifact[]>([]);
+
   const [backupRetentionKeepLast, setBackupRetentionKeepLast] = useState<number>(0);
 
   // Per-instance scheduled backups (stored in servers/<instance>/.elegantmc.json)
@@ -9181,6 +9192,139 @@ export default function HomePage() {
     }
   }
 
+  async function refreshCrashArtifacts(instanceOverride?: string) {
+    if (crashArtifactsBusy) return;
+    if (!selectedDaemon?.connected) {
+      setCrashArtifacts([]);
+      setCrashArtifactsStatus(t.tr("daemon offline", "daemon 离线"));
+      return;
+    }
+    const inst = String(instanceOverride ?? instanceId).trim();
+    if (!inst) {
+      setCrashArtifacts([]);
+      setCrashArtifactsStatus(t.tr("instance_id is required", "instance_id 不能为空"));
+      return;
+    }
+
+    setCrashArtifactsBusy(true);
+    setCrashArtifactsStatus(t.tr("Loading...", "加载中..."));
+    try {
+      const list: CrashArtifact[] = [];
+
+      // hs_err_pid*.log usually lives in the server working directory (instance root).
+      try {
+        const out = await callOkCommand("fs_list", { path: inst }, 20_000);
+        const entries = Array.isArray(out?.entries) ? out.entries : [];
+        for (const e of entries) {
+          if (!e || e?.isDir) continue;
+          const name = String(e?.name || "").trim();
+          if (!name) continue;
+          if (!/^hs_err_pid.*\.log$/i.test(name)) continue;
+          const path = joinRelPath(inst, name);
+          list.push({
+            kind: "hs_err",
+            path,
+            name,
+            size: Math.max(0, Number(e?.size || 0)),
+            mtimeUnix: Math.max(0, Math.floor(Number(e?.mtime_unix || 0))),
+          });
+        }
+      } catch {
+        // ignore
+      }
+
+      // Minecraft crash reports live under crash-reports/.
+      const crashDir = joinRelPath(inst, "crash-reports");
+      try {
+        const out = await callOkCommand("fs_list", { path: crashDir }, 20_000);
+        const entries = Array.isArray(out?.entries) ? out.entries : [];
+        for (const e of entries) {
+          if (!e || e?.isDir) continue;
+          const name = String(e?.name || "").trim();
+          if (!name) continue;
+          if (!/^crash-.*\.(txt|log)$/i.test(name)) continue;
+          const path = joinRelPath(crashDir, name);
+          list.push({
+            kind: "crash_report",
+            path,
+            name,
+            size: Math.max(0, Number(e?.size || 0)),
+            mtimeUnix: Math.max(0, Math.floor(Number(e?.mtime_unix || 0))),
+          });
+        }
+      } catch {
+        // crash-reports may not exist; treat as empty.
+      }
+
+      list.sort((a, b) => {
+        const am = Math.floor(Number(a?.mtimeUnix || 0));
+        const bm = Math.floor(Number(b?.mtimeUnix || 0));
+        if (am !== bm) return bm - am;
+        return String(b?.name || "").localeCompare(String(a?.name || ""));
+      });
+
+      const capped = list.slice(0, 10);
+      setCrashArtifacts(capped);
+      setCrashArtifactsStatus(capped.length ? "" : t.tr("No crash artifacts found", "未找到崩溃产物"));
+    } catch (e: any) {
+      setCrashArtifacts([]);
+      setCrashArtifactsStatus(String(e?.message || e));
+    } finally {
+      setCrashArtifactsBusy(false);
+    }
+  }
+
+  async function downloadCrashArtifact(pathRaw: string, downloadNameHint?: string) {
+    if (!selectedDaemon?.connected) {
+      pushToast(t.tr("daemon offline", "daemon 离线"), "error");
+      return;
+    }
+    const p = normalizeRelFilePath(pathRaw);
+    if (!p) {
+      pushToast(t.tr("path is required", "path 不能为空"), "error");
+      return;
+    }
+
+    let size = 0;
+    try {
+      const st = await callOkCommand("fs_stat", { path: p }, 10_000);
+      if (st?.isDir) throw new Error(t.tr("Not a file", "不是文件"));
+      size = Math.max(0, Number(st?.size || 0));
+    } catch (e: any) {
+      pushToast(String(e?.message || e), "error");
+      return;
+    }
+
+    const max = 25 * 1024 * 1024;
+    if (size > max) {
+      pushToast(
+        t.tr(
+          `File too large to download in browser (${fmtBytes(size)} > ${fmtBytes(max)})`,
+          `文件过大，无法在浏览器中下载（${fmtBytes(size)} > ${fmtBytes(max)}）`
+        ),
+        "error"
+      );
+      return;
+    }
+
+    try {
+      const payload = await callOkCommand("fs_read", { path: p }, 60_000);
+      const bytes = b64DecodeBytes(String(payload?.b64 || ""));
+      const blob = new Blob([bytes], { type: "application/octet-stream" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = normalizeDownloadName(downloadNameHint || p, "download.log");
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      pushToast(t.tr(`Downloaded: ${a.download}`, `已下载：${a.download}`), "ok");
+    } catch (e: any) {
+      pushToast(String(e?.message || e), "error");
+    }
+  }
+
   async function downloadLatestLog() {
     if (!selectedDaemon?.connected) {
       pushToast("daemon offline", "error");
@@ -9701,6 +9845,8 @@ export default function HomePage() {
   const cloneInstanceFn = useEvent(cloneInstance);
   const computeInstanceUsageFn = useEvent(computeInstanceUsage);
   const refreshBackupZipsFn = useEvent(refreshBackupZips);
+  const refreshCrashArtifactsFn = useEvent(refreshCrashArtifacts);
+  const downloadCrashArtifactFn = useEvent(downloadCrashArtifact);
   const saveBackupRetentionKeepLastFn = useEvent(saveBackupRetentionKeepLast);
   const pruneBackupsFn = useEvent(pruneBackups);
   const restoreBackupNowFn = useEvent(restoreBackupNow);
@@ -9909,6 +10055,11 @@ export default function HomePage() {
       computeInstanceUsage: computeInstanceUsageFn,
       instanceMetricsHistory,
       instanceMetricsStatus,
+      crashArtifacts,
+      crashArtifactsStatus,
+      crashArtifactsBusy,
+      refreshCrashArtifacts: refreshCrashArtifactsFn,
+      downloadCrashArtifact: downloadCrashArtifactFn,
       backupZips: restoreCandidates,
       backupZipsStatus: restoreStatus,
       refreshBackupZips: refreshBackupZipsFn,
@@ -9981,6 +10132,11 @@ export default function HomePage() {
       computeInstanceUsageFn,
       instanceMetricsHistory,
       instanceMetricsStatus,
+      crashArtifacts,
+      crashArtifactsStatus,
+      crashArtifactsBusy,
+      refreshCrashArtifactsFn,
+      downloadCrashArtifactFn,
       restoreCandidates,
       restoreStatus,
       refreshBackupZipsFn,
