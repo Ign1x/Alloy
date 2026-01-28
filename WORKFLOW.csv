@@ -145,7 +145,7 @@ WF-20260128-16,P2,logs,done,Daemon log tail-follow (stream),"Debugging requires 
 WF-20260128-17,P3,logs,done,Log share artifacts (export),"Sharing logs usually means copy/paste; downloadable artifacts are easier to attach.","Allow exporting a selected range into a downloadable artifact with metadata in filename.",ux(logs): export artifact
 WF-20260128-18,P2,logs,done,Common error detector in logs,"Users miss key lines in noisy logs (OOM, port in use, missing eula).","Add heuristics to highlight common errors and show a Likely causes panel.",ux(logs): error detector
 
-WF-20260128-19,P2,games,todo,Preflight checklist before Start,"Start failures waste time (missing eula, port occupied, wrong java).","Show a preflight checklist (java version, port, eula, disk) with actionable fixes before starting.",ux(games): preflight checks
+WF-20260128-19,P2,games,done,Preflight checklist before Start,"Start failures waste time (missing eula, port occupied, wrong java).","Show a preflight checklist (java version, port, eula, disk) with actionable fixes before starting.",ux(games): preflight checks
 WF-20260128-20,P2,games,todo,EULA acceptance action,"Users often forget to set eula=true after first install.","Detect eula.txt and provide a one-click Accept EULA action (writes safely).",feat(games): accept eula
 
 WF-20260128-21,P2,games,todo,Scheduled backups per instance,"Backups rely on manual action; users forget before updates or risky changes.","Add per-instance backup schedule stored in instance config; daemon runs timers and reports status to Panel.",feat(games): scheduled backups
