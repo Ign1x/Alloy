@@ -4265,6 +4265,55 @@ export default function HomePage() {
     }
   }
 
+  function splitRelDirAndName(p: string) {
+    const s = String(p || "")
+      .replace(/\+/g, "/")
+      .replace(/\/+/g, "/")
+      .replace(/^\/+/, "")
+      .replace(/\/+$/, "");
+    const idx = s.lastIndexOf("/");
+    if (idx < 0) return { dir: "", name: s };
+    return { dir: s.slice(0, idx), name: s.slice(idx + 1) };
+  }
+
+  function applyAutoSuffix(name: string, i: number, keepExt: boolean) {
+    const n = String(name || "").trim();
+    if (!keepExt) return `${n} (${i})`;
+    const dot = n.lastIndexOf(".");
+    if (dot <= 0) return `${n} (${i})`;
+    const stem = n.slice(0, dot);
+    const ext = n.slice(dot);
+    return `${stem} (${i})${ext}`;
+  }
+
+  async function findAvailablePathWithSuffix(basePath: string, isDir: boolean, reserved?: Set<string>) {
+    const base = normalizeRelFilePath(basePath);
+    if (!base) return "";
+    const { dir, name } = splitRelDirAndName(base);
+
+    // If the base itself is free (and not reserved), keep it.
+    try {
+      if (reserved?.has(base)) throw new Error("reserved");
+      await callOkCommand("fs_stat", { path: base }, 10_000);
+    } catch {
+      if (!reserved?.has(base)) return base;
+    }
+
+    const keepExt = !isDir;
+    for (let i = 1; i <= 50; i++) {
+      const nextName = applyAutoSuffix(name, i, keepExt);
+      const next = dir ? `${dir}/${nextName}` : nextName;
+      if (reserved?.has(next)) continue;
+      try {
+        await callOkCommand("fs_stat", { path: next }, 10_000);
+        continue; // exists
+      } catch {
+        return next;
+      }
+    }
+    return "";
+  }
+
   async function renameFsEntry(entry: any) {
     const name = String(entry?.name || "").trim();
     if (!name) return;
@@ -4289,7 +4338,39 @@ export default function HomePage() {
       setTimeout(() => setFsStatus(""), 700);
       return;
     }
-    const to = joinRelPath(fsPath, toName);
+    let to = joinRelPath(fsPath, toName);
+    if (!to) {
+      setFsStatus(t.tr("invalid target path", "目标路径无效"));
+      return;
+    }
+
+    // Conflict preview + optional auto-suffix.
+    try {
+      await callOkCommand("fs_stat", { path: to }, 10_000);
+      const suggested = await findAvailablePathWithSuffix(to, !!entry?.isDir);
+      if (!suggested) {
+        setFsStatus(t.tr("destination exists", "目标已存在"));
+        return;
+      }
+      const ok = await confirmDialog(
+        t.tr(
+          `Destination exists:\n${to}\n\nUse auto-suffix?\n${suggested}`,
+          `目标已存在：\n${to}\n\n是否自动加后缀？\n${suggested}`
+        ),
+        { title: t.tr("Rename", "重命名"), confirmLabel: t.tr("Use", "使用"), cancelLabel: t.tr("Cancel", "取消") }
+      );
+      if (!ok) return;
+      to = suggested;
+    } catch {
+      // ok: destination not found
+    }
+
+    const okPreview = await confirmDialog(
+      t.tr(`Rename:\n${from}\n->\n${to}`, `重命名：\n${from}\n->\n${to}`),
+      { title: t.tr("Rename", "重命名"), confirmLabel: t.tr("Rename", "重命名"), cancelLabel: t.tr("Cancel", "取消") }
+    );
+    if (!okPreview) return;
+
     setFsStatus(t.tr(`Renaming ${from} -> ${to} ...`, `重命名中 ${from} -> ${to} ...`));
     try {
       await callOkCommand("fs_move", { from, to }, 60_000);
@@ -4327,22 +4408,42 @@ export default function HomePage() {
       setFsStatus(t.tr("invalid target path", "目标路径无效"));
       return;
     }
-    const to = toRaw;
+    let to = toRaw;
     if (to === from) {
       setFsStatus(t.tr("No changes", "没有变化"));
       setTimeout(() => setFsStatus(""), 700);
       return;
     }
 
-    setFsStatus(t.tr(`Moving ${from} -> ${to} ...`, `移动中 ${from} -> ${to} ...`));
+    // Conflict preview + optional auto-suffix.
     try {
-      try {
-        await callOkCommand("fs_stat", { path: to }, 10_000);
+      await callOkCommand("fs_stat", { path: to }, 10_000);
+      const suggested = await findAvailablePathWithSuffix(to, !!entry?.isDir);
+      if (!suggested) {
         setFsStatus(t.tr("destination exists", "目标已存在"));
         return;
-      } catch {
-        // ok: target not found
       }
+      const ok = await confirmDialog(
+        t.tr(
+          `Destination exists:\n${to}\n\nUse auto-suffix?\n${suggested}`,
+          `目标已存在：\n${to}\n\n是否自动加后缀？\n${suggested}`
+        ),
+        { title: t.tr("Move", "移动"), confirmLabel: t.tr("Use", "使用"), cancelLabel: t.tr("Cancel", "取消") }
+      );
+      if (!ok) return;
+      to = suggested;
+    } catch {
+      // ok: destination not found
+    }
+
+    const okPreview = await confirmDialog(
+      t.tr(`Move:\n${from}\n->\n${to}`, `移动：\n${from}\n->\n${to}`),
+      { title: t.tr("Move", "移动"), confirmLabel: t.tr("Move", "移动"), cancelLabel: t.tr("Cancel", "取消") }
+    );
+    if (!okPreview) return;
+
+    setFsStatus(t.tr(`Moving ${from} -> ${to} ...`, `移动中 ${from} -> ${to} ...`));
+    try {
       await callOkCommand("fs_move", { from, to }, 60_000);
       if (fsSelectedFile === from || fsSelectedFile.startsWith(`${from}/`)) {
         const suffix = fsSelectedFile.slice(from.length);
@@ -4670,10 +4771,50 @@ export default function HomePage() {
 	      }
 	    }
 
+	    // Preflight: check for destination conflicts (bounded to keep UI responsive).
+	    const checks = Math.min(list.length, 60);
+	    const conflicts: { from: string; to: string }[] = [];
+	    for (let i = 0; i < checks; i++) {
+	      const e = list[i];
+	      const from = joinRelPath(fsPath, e.name);
+	      const to = joinRelPath(dir, e.name);
+	      if (!from || !to || from === to) continue;
+	      try {
+	        await callOkCommand("fs_stat", { path: to }, 3_000);
+	        conflicts.push({ from, to });
+	      } catch {
+	        // ok: target not found
+	      }
+	    }
+
+	    let autoSuffix = false;
+	    if (conflicts.length) {
+	      const shown = conflicts
+	        .slice(0, 8)
+	        .map((c) => `- ${c.to}`)
+	        .join("\n");
+	      const more = conflicts.length > 8 ? `\n… ${conflicts.length - 8} more` : "";
+	      const note = list.length > checks ? `\n(checked first ${checks} items)` : "";
+	      const rawChoice = await promptDialog({
+	        title: t.tr("Conflicts", "冲突预览"),
+	        message: t.tr(
+	          `Found ${conflicts.length} conflict(s) (destination exists):\n\n${shown}${more}${note}\n\nEnter "auto" to auto-suffix conflicting destinations; leave empty to skip conflicts.`,
+	          `发现 ${conflicts.length} 个冲突（目标已存在）：\n\n${shown}${more}${note}\n\n输入 auto 表示自动加后缀；留空表示跳过冲突项。`
+	        ),
+	        defaultValue: "",
+	        placeholder: t.tr("auto / empty", "auto / 留空"),
+	        okLabel: t.tr("Continue", "继续"),
+	        cancelLabel: t.tr("Cancel", "取消"),
+	      });
+	      if (rawChoice == null) return false;
+	      const v = String(rawChoice || "").trim().toLowerCase();
+	      autoSuffix = v === "auto" || v === "a" || v === "自动";
+	    }
+
 	    const ok = await confirmDialog(
 	      t.tr(
-	        `Move ${list.length} item(s) to ${dir ? `servers/${dir}/` : "servers/"} ?`,
-	        `将 ${list.length} 个条目移动到 ${dir ? `servers/${dir}/` : "servers/"} ？`
+	        `Move ${list.length} item(s) to ${dir ? `servers/${dir}/` : "servers/"} ?\n\nConflicts: ${conflicts.length}${autoSuffix ? " (auto suffix)" : conflicts.length ? " (skip)" : ""}`,
+	        `将 ${list.length} 个条目移动到 ${dir ? `servers/${dir}/` : "servers/"} ？\n\n冲突：${conflicts.length}${autoSuffix ? "（自动加后缀）" : conflicts.length ? "（跳过）" : ""}`
 	      ),
 	      { title: t.tr("Bulk Move", "批量移动"), confirmLabel: t.tr("Move", "移动"), cancelLabel: t.tr("Cancel", "取消"), danger: true }
 	    );
@@ -4683,19 +4824,45 @@ export default function HomePage() {
 	    let failed = 0;
 	    let moved = 0;
 
+	    const reserved = new Set<string>();
 	    for (const e of list) {
 	      const from = joinRelPath(fsPath, e.name);
-	      const to = joinRelPath(dir, e.name);
+	      let to = joinRelPath(dir, e.name);
 	      if (!from || !to || from === to) continue;
+
+	      // If this destination collides with another planned move, resolve similarly.
+	      if (reserved.has(to)) {
+	        if (!autoSuffix) {
+	          failed++;
+	          continue;
+	        }
+	        const next = await findAvailablePathWithSuffix(to, e.isDir, reserved);
+	        if (!next) {
+	          failed++;
+	          continue;
+	        }
+	        to = next;
+	      }
+
 	      try {
 	        try {
 	          await callOkCommand("fs_stat", { path: to }, 10_000);
-	          failed++;
-	          continue;
+	          if (!autoSuffix) {
+	            failed++;
+	            continue;
+	          }
+	          const next = await findAvailablePathWithSuffix(to, e.isDir, reserved);
+	          if (!next) {
+	            failed++;
+	            continue;
+	          }
+	          to = next;
 	        } catch {
 	          // ok: target not found
 	        }
+	
 	        await callOkCommand("fs_move", { from, to }, 60_000);
+	        reserved.add(to);
 	        moved++;
 	        if (fsSelectedFile === from || fsSelectedFile.startsWith(`${from}/`)) {
 	          const suffix = fsSelectedFile.slice(from.length);
