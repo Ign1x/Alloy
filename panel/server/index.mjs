@@ -25,6 +25,7 @@ import {
   savePanelSettings,
   sendCommand,
   state,
+  waitForLogSeq,
 } from "./state.mjs";
 
 function readJsonBody(req) {
@@ -3043,7 +3044,7 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { daemon_id: daemonId, instance_id: instanceId, history: filtered });
     }
 
-    const mDaemon = url.pathname.match(/^\/api\/daemons\/([^/]+)(?:\/(logs|command|advanced-command))?$/);
+    const mDaemon = url.pathname.match(/^\/api\/daemons\/([^/]+)(?:\/(logs|log_follow|command|advanced-command))?$/);
     if (mDaemon) {
       const daemonId = decodeURIComponent(mDaemon[1]);
       const suffix = mDaemon[2] || "";
@@ -3059,6 +3060,56 @@ const server = http.createServer(async (req, res) => {
         if (!d) return json(res, 404, { error: "not found" });
         const limit = Math.min(Number(url.searchParams.get("limit") || "200"), 2000);
         return json(res, 200, { logs: d.logs.slice(-limit) });
+      }
+
+      if (suffix === "log_follow" && req.method === "GET") {
+        const d = state.daemons.get(daemonId);
+        if (!d) return json(res, 404, { error: "not found" });
+
+        const limitRaw = Number(url.searchParams.get("limit") || "500");
+        const waitMsRaw = Number(url.searchParams.get("wait_ms") || "0");
+        const cursorRaw = Number(url.searchParams.get("cursor") || "0");
+
+        const limit = Math.max(1, Math.min(2000, Math.floor(Number.isFinite(limitRaw) ? limitRaw : 500)));
+        const waitMs = Math.max(0, Math.min(25_000, Math.floor(Number.isFinite(waitMsRaw) ? waitMsRaw : 0)));
+        const cursor = Math.max(0, Math.floor(Number.isFinite(cursorRaw) ? cursorRaw : 0));
+
+        const baseCursor0 = Math.max(0, Math.floor(Number(d.logsSeqBase || 1) - 1));
+        let effectiveCursor = cursor;
+        let dropped = false;
+        if (effectiveCursor < baseCursor0) {
+          dropped = true;
+          effectiveCursor = baseCursor0;
+        }
+
+        if (waitMs > 0) {
+          await waitForLogSeq(daemonId, effectiveCursor, waitMs);
+        }
+
+        // Re-check base after waiting since the ring buffer might have advanced.
+        const baseCursor = Math.max(0, Math.floor(Number(d.logsSeqBase || 1) - 1));
+        if (effectiveCursor < baseCursor) {
+          dropped = true;
+          effectiveCursor = baseCursor;
+        }
+
+        const wantSeq = effectiveCursor + 1;
+        const idx = d.logs.findIndex((l) => {
+          const s = Math.floor(Number(l?.seq || 0));
+          return Number.isFinite(s) && s >= wantSeq;
+        });
+        const logs = idx < 0 ? [] : d.logs.slice(idx, idx + limit);
+        const lastSeq = logs.length ? Math.floor(Number(logs[logs.length - 1]?.seq || 0)) : 0;
+        const nextCursor = lastSeq > 0 ? lastSeq : Math.max(effectiveCursor, baseCursor);
+
+        return json(res, 200, {
+          daemon_id: daemonId,
+          cursor,
+          base_cursor: baseCursor,
+          next_cursor: nextCursor,
+          dropped,
+          logs,
+        });
       }
 
       if (suffix === "command" && req.method === "POST") {

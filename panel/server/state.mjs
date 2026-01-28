@@ -50,6 +50,59 @@ export const state = {
   panelSettings: null,
 };
 
+// Long-poll support for log follow.
+// Map daemonId -> Set of resolve callbacks waiting for a new log.
+const logWaitersByDaemon = new Map();
+
+function notifyLogWaiters(daemonId) {
+  const set = logWaitersByDaemon.get(daemonId);
+  if (!set || !set.size) return;
+  logWaitersByDaemon.delete(daemonId);
+  for (const fn of set) {
+    try {
+      fn();
+    } catch {
+      // ignore
+    }
+  }
+}
+
+function ensureDaemonLogSeq(d) {
+  if (!d || typeof d !== "object") return;
+  if (!Number.isFinite(d.logsSeqBase) || d.logsSeqBase < 1) d.logsSeqBase = 1;
+  if (!Number.isFinite(d.logsSeqNext) || d.logsSeqNext < d.logsSeqBase) d.logsSeqNext = d.logsSeqBase;
+}
+
+export function waitForLogSeq(daemonId, afterSeq, timeoutMs) {
+  const d = state.daemons.get(daemonId);
+  if (!d) return Promise.resolve(false);
+  ensureDaemonLogSeq(d);
+
+  const after = Math.max(0, Math.floor(Number(afterSeq || 0)));
+  const latest = Math.max(0, Math.floor(Number(d.logsSeqNext || 1) - 1));
+  if (latest > after) return Promise.resolve(true);
+
+  const ms = Math.max(0, Math.min(30_000, Math.floor(Number(timeoutMs || 0))));
+  if (!ms) return Promise.resolve(false);
+
+  return new Promise((resolve) => {
+    const t = setTimeout(() => {
+      const set = logWaitersByDaemon.get(daemonId);
+      if (set) set.delete(onReady);
+      resolve(false);
+    }, ms);
+
+    const onReady = () => {
+      clearTimeout(t);
+      resolve(true);
+    };
+
+    const set = logWaitersByDaemon.get(daemonId) || new Set();
+    set.add(onReady);
+    logWaitersByDaemon.set(daemonId, set);
+  });
+}
+
 async function ensurePanelID() {
   if (panelIDLoaded && panelID) return panelID;
   await fs.mkdir(PANEL_DATA_DIR, { recursive: true });
@@ -398,9 +451,12 @@ export function getOrCreateDaemon(id) {
       history: [],
       instanceHistory: {},
       logs: [],
+      logsSeqBase: 1,
+      logsSeqNext: 1,
     };
     state.daemons.set(id, d);
   }
+  ensureDaemonLogSeq(d);
   return d;
 }
 
@@ -499,13 +555,19 @@ export function handleDaemonMessage(daemonId, raw) {
   }
   if (type === "log") {
     const payload = msg.payload ?? {};
+    ensureDaemonLogSeq(d);
+    const seq = d.logsSeqNext++;
     d.logs.push({
+      seq,
       ts_unix: msg.ts_unix ?? nowUnix(),
       ...payload,
     });
     if (d.logs.length > MAX_LOG_LINES) {
-      d.logs.splice(0, d.logs.length - MAX_LOG_LINES);
+      const drop = d.logs.length - MAX_LOG_LINES;
+      d.logs.splice(0, drop);
+      d.logsSeqBase += drop;
     }
+    notifyLogWaiters(daemonId);
     return;
   }
   if (type === "command_result") {

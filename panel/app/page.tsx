@@ -1267,6 +1267,7 @@ export default function HomePage() {
   // Logs
   const [logs, setLogs] = useState<any[]>([]);
   const [logsLoadedOnce, setLogsLoadedOnce] = useState<boolean>(false);
+  const logsCursorRef = useRef<number>(0);
 
   // Files
   const [fsPath, setFsPath] = useState<string>("");
@@ -3940,34 +3941,100 @@ export default function HomePage() {
   useEffect(() => {
     setLogs([]);
     setLogsLoadedOnce(false);
+    logsCursorRef.current = 0;
   }, [selected]);
 
   // Logs polling (only when useful)
   useEffect(() => {
     if (authed !== true) return;
     let cancelled = false;
-    async function tickLogs() {
+    let abort: AbortController | null = null;
+
+    const sleep = (ms: number) => new Promise((r) => window.setTimeout(r, ms));
+
+    async function pollOnce(waitMs: number) {
       if (!selected) return;
+      const cursor = Math.max(0, Math.floor(Number(logsCursorRef.current || 0)));
+      abort = new AbortController();
       try {
-        const res = await apiFetch(`/api/daemons/${encodeURIComponent(selected)}/logs?limit=300`, { cache: "no-store" });
-        const json = await res.json();
+        const wait = Math.max(0, Math.min(25_000, Math.floor(Number(waitMs || 0))));
+        const res = await apiFetch(
+          `/api/daemons/${encodeURIComponent(selected)}/log_follow?cursor=${encodeURIComponent(String(cursor))}&limit=800&wait_ms=${encodeURIComponent(String(wait))}`,
+          { cache: "no-store", signal: abort.signal }
+        );
+        const json = await res.json().catch(() => null);
         if (cancelled) return;
-        setLogs(json.logs || []);
+
+        if (!res.ok) {
+          // Fallback: keep legacy poll working even if server doesn't have log_follow yet.
+          const legacy = await apiFetch(`/api/daemons/${encodeURIComponent(selected)}/logs?limit=300`, {
+            cache: "no-store",
+            signal: abort.signal,
+          });
+          const j2 = await legacy.json().catch(() => null);
+          if (cancelled) return;
+          if (legacy.ok) {
+            setLogs(Array.isArray(j2?.logs) ? j2.logs : []);
+            setLogsLoadedOnce(true);
+          }
+          return;
+        }
+
+        const logsIn = Array.isArray(json?.logs) ? json.logs : [];
+        const baseCursor = Math.max(0, Math.floor(Number(json?.base_cursor || 0)));
+        const nextCursor = Math.max(0, Math.floor(Number(json?.next_cursor || cursor)));
+        const dropped = !!json?.dropped;
+
+        // If the server tells us we missed logs (ring buffer advanced past cursor), reset to its base.
+        if (dropped && cursor < baseCursor) {
+          setLogs(logsIn);
+        } else if (logsIn.length) {
+          setLogs((prev) => {
+            const prevList = Array.isArray(prev) ? prev : [];
+            const prevLastSeq = prevList.length ? Math.floor(Number(prevList[prevList.length - 1]?.seq || 0)) : 0;
+            const filtered = prevLastSeq > 0 ? logsIn.filter((l: any) => Math.floor(Number(l?.seq || 0)) > prevLastSeq) : logsIn;
+            const merged = [...prevList, ...filtered];
+            return merged.length > 2000 ? merged.slice(merged.length - 2000) : merged;
+          });
+        }
+
+        logsCursorRef.current = nextCursor;
         setLogsLoadedOnce(true);
+      } catch {
+        // ignore (network hiccup / abort)
+      }
+    }
+
+    async function loop() {
+      // Always do a quick first poll (no long wait) so the UI populates promptly.
+      await pollOnce(0);
+      while (!cancelled) {
+        await pollOnce(20_000);
+        // If log_follow errors out, pollOnce will fall back to legacy endpoint and return quickly.
+        // Add a tiny delay to avoid a tight loop in that case.
+        if (!cancelled) await sleep(150);
+      }
+    }
+
+    if (tab === "games" || tab === "advanced" || installOpen) {
+      loop();
+      return () => {
+        cancelled = true;
+        try {
+          abort?.abort();
+        } catch {
+          // ignore
+        }
+      };
+    }
+
+    return () => {
+      cancelled = true;
+      try {
+        abort?.abort();
       } catch {
         // ignore
       }
-    }
-    if (tab === "games" || tab === "advanced" || installOpen) {
-      tickLogs();
-      const t = setInterval(tickLogs, 1500);
-      return () => {
-        cancelled = true;
-        clearInterval(t);
-      };
-    }
-    return () => {
-      cancelled = true;
     };
   }, [selected, tab, installOpen, authed]);
 
