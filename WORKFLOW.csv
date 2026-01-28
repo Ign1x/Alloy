@@ -131,3 +131,5 @@ WF-20260128-06,P2,files,done,Entry details modal (fs_stat),"Users need quick acc
 WF-20260128-07,P2,files,done,Folder disk usage in Details,"Directory entry size from stat is misleading; users need true recursive folder size.","Entry Details modal can compute and show fs_du bytes/entries (cached) with Compute/Force actions.",feat(files): folder disk usage
 
 WF-20260128-08,P2,ux,done,Advanced command presets,"Re-running advanced commands is error-prone when args must be retyped each time.","Advanced page supports saving/loading/overwriting/deleting command presets in localStorage and can apply daemon/name/args in one click.",ux(panel): advanced presets
+
+WF-20260128-09,P2,ux,done,Per-node local notes,"When managing many nodes, it's hard to remember purpose/location/network details without annotations.","Nodes list shows a note badge and Node Details includes an editable note stored in localStorage per user.",ux(nodes): node notes

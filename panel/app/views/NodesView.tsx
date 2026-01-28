@@ -12,7 +12,20 @@ function NodesView() {
   const { apiFetch, copyText, pct, makeDeployComposeYml, confirmDialog, openShareView } = useAppActions();
   const { setSelected, setTab } = useAppCore();
   const { panelInfo } = useAppPanel();
-  const { nodes, nodesStatus, setNodesStatus, pinnedDaemonIds, togglePinnedDaemon, setNodes, openNodeDetails, openAddNodeModal, openAddNodeAndDeploy, openDeployDaemonModal, exportDiagnosticsBundle } = useAppNodes();
+  const {
+    nodes,
+    nodesStatus,
+    setNodesStatus,
+    pinnedDaemonIds,
+    togglePinnedDaemon,
+    nodeNotesById,
+    setNodes,
+    openNodeDetails,
+    openAddNodeModal,
+    openAddNodeAndDeploy,
+    openDeployDaemonModal,
+    exportDiagnosticsBundle,
+  } = useAppNodes();
 
   const [query, setQuery] = useState<string>("");
   const [statusFilter, setStatusFilter] = useState<"all" | "online" | "offline">("all");
@@ -221,6 +234,7 @@ function NodesView() {
                 const panelVer = String(panelInfo?.version || "").trim();
                 const verMismatch = !!daemonVer && !!panelVer && daemonVer !== panelVer && panelVer !== "dev";
                 const nodeId = String(n?.id || "");
+                const note = String((nodeNotesById || {})[nodeId] || "").trim();
                 const line = [
                   `${t.tr("last", "最近")}:`,
                   `${t.tr("instances", "实例")}: ${instances.length}`,
@@ -269,6 +283,11 @@ function NodesView() {
                           </span>
                         ) : null}
                         {isPinned ? <span className="badge">{t.tr("pinned", "已置顶")}</span> : null}
+                        {note ? (
+                          <span className="badge" title={note}>
+                            {t.tr("note", "备注")}
+                          </span>
+                        ) : null}
                       </div>
                       <div className="virtRowSub nodeRowSub" title={line}>
                         <span className="virtRowMetaText">
@@ -355,6 +374,7 @@ function NodesView() {
 	              const panelVer = String(panelInfo?.version || "").trim();
 	              const verMismatch = !!daemonVer && !!panelVer && daemonVer !== panelVer && panelVer !== "dev";
                 const nodeId = String(n?.id || "");
+	              const note = String((nodeNotesById || {})[nodeId] || "").trim();
 	              return (
 	                <div key={n.id} className="itemCard" style={{ opacity: n.connected ? 1 : 0.78 }}>
 	                  <div className="itemCardHeader">
@@ -386,6 +406,11 @@ function NodesView() {
 	                          {t.tr("version mismatch", "版本不一致")}
 	                        </span>
                       ) : null}
+	                      {note ? (
+	                        <span className="badge" title={note}>
+	                          {t.tr("note", "备注")}
+	                        </span>
+	                      ) : null}
                     </div>
                   </div>
 

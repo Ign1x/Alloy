@@ -1055,6 +1055,7 @@ export default function HomePage() {
   const [daemonsLoadedOnce, setDaemonsLoadedOnce] = useState<boolean>(false);
   const [selected, setSelected] = useState<string>("");
   const [pinnedDaemonIds, setPinnedDaemonIds] = useState<string[]>([]);
+  const [nodeNotesById, setNodeNotesById] = useState<Record<string, string>>({});
   const selectedDaemon = useMemo(() => daemons.find((d) => d.id === selected) || null, [daemons, selected]);
   const pinnedDaemonSet = useMemo(() => {
     const out = new Set<string>();
@@ -1967,6 +1968,51 @@ export default function HomePage() {
       // ignore
     }
   }, [authed, authMe?.user_id, pinnedDaemonIds]);
+
+  // Node notes (per user, stored in localStorage)
+  useEffect(() => {
+    if (authed !== true || !authMe?.user_id) {
+      setNodeNotesById({});
+      return;
+    }
+    try {
+      const raw = localStorage.getItem(`elegantmc_node_notes_v1:${String(authMe.user_id)}`) || "{}";
+      const parsed = JSON.parse(raw);
+      const out: Record<string, string> = {};
+      for (const [k, v] of Object.entries(parsed || {})) {
+        const id = String(k || "").trim();
+        if (!id) continue;
+        const note = String(v || "");
+        if (!note.trim()) continue;
+        out[id] = note.slice(0, 2000);
+      }
+      setNodeNotesById(out);
+    } catch {
+      setNodeNotesById({});
+    }
+  }, [authed, authMe?.user_id]);
+
+  useEffect(() => {
+    if (authed !== true || !authMe?.user_id) return;
+    try {
+      localStorage.setItem(`elegantmc_node_notes_v1:${String(authMe.user_id)}`, JSON.stringify(nodeNotesById || {}));
+    } catch {
+      // ignore
+    }
+  }, [authed, authMe?.user_id, nodeNotesById]);
+
+  function updateNodeNote(daemonIdRaw: string, noteRaw: string) {
+    const id = String(daemonIdRaw || "").trim();
+    if (!id) return;
+    const note = String(noteRaw ?? "");
+    setNodeNotesById((prev) => {
+      const cur = prev || {};
+      const next: Record<string, string> = { ...cur };
+      if (!note.trim()) delete next[id];
+      else next[id] = note.slice(0, 2000);
+      return next;
+    });
+  }
 
   function togglePinnedDaemon(daemonIdRaw: string) {
     const id = String(daemonIdRaw || "").trim();
@@ -8911,6 +8957,7 @@ export default function HomePage() {
   const runScheduleTaskFn = useEvent(runScheduleTask);
 
   const togglePinnedDaemonFn = useEvent(togglePinnedDaemon);
+  const updateNodeNoteFn = useEvent(updateNodeNote);
   const openNodeDetailsFn = useEvent(openNodeDetails);
   const openAddNodeModalFn = useEvent(openAddNodeModal);
   const openAddNodeAndDeployFn = useEvent(openAddNodeAndDeploy);
@@ -9082,6 +9129,8 @@ export default function HomePage() {
       setNodesStatus,
       pinnedDaemonIds,
       togglePinnedDaemon: togglePinnedDaemonFn,
+      nodeNotesById,
+      updateNodeNote: updateNodeNoteFn,
       openNodeDetails: openNodeDetailsFn,
       openAddNodeModal: openAddNodeModalFn,
       openAddNodeAndDeploy: openAddNodeAndDeployFn,
@@ -9095,6 +9144,8 @@ export default function HomePage() {
       setNodesStatus,
       pinnedDaemonIds,
       togglePinnedDaemonFn,
+      nodeNotesById,
+      updateNodeNoteFn,
       openNodeDetailsFn,
       openAddNodeModalFn,
       openAddNodeAndDeployFn,
@@ -12864,6 +12915,19 @@ export default function HomePage() {
 	                        {t.tr("Connect", "连接地址")}: {nodeDetailsNode.heartbeat.net.preferred_connect_addrs.slice(0, 6).join(", ")}
 	                      </div>
 	                    ) : null}
+	                    <div className="field" style={{ marginTop: 10 }}>
+	                      <label>{t.tr("Notes", "备注")}</label>
+	                      <textarea
+	                        value={String((nodeNotesById || {})[String(nodeDetailsId || "")] || "")}
+	                        onChange={(e: any) => updateNodeNote(nodeDetailsId, e.target.value)}
+	                        rows={3}
+	                        placeholder={t.tr("Local note for this node…", "为该节点写一条本地备注…")}
+	                        disabled={shareMode || !String(nodeDetailsId || "").trim()}
+	                      />
+	                      <div className="hint" style={{ marginTop: 6 }}>
+	                        {t.tr("Stored locally in your browser.", "仅保存在本地浏览器（localStorage）。")}
+	                      </div>
+	                    </div>
 	                  </div>
 
 		                    <div className="card">
