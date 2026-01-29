@@ -1,30 +1,12 @@
-## Go
-/daemon/bin/
-/daemon/.cache/
-/daemon/*.exe
-/daemon/*.test
-/daemon/*.out
-/daemon/go.work
-/daemon/go.work.sum
+## Rust
+/target/
+**/target/
 
-## Node / Next.js
-/panel/node_modules/
-/panel/.next/
-/panel/out/
-/panel/.env
-*.tsbuildinfo
-
-## Local env / secrets
+## Node / Frontend
+node_modules/
+dist/
 .env
 
-## Logs / runtime
-*.log
+## OS / tooling
 .DS_Store
-
-## Local runtime data
-.elegantmc-panel/
-.elegantmc/
-
-## Local Docker Compose (do not commit)
-docker-compose.override.yml
-docker-compose.local.yml
+.sisyphus/
