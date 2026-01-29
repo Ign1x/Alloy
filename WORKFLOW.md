@@ -56,8 +56,9 @@ Commit rules (strict):
 
 ### Phase 3 - Control plane (Axum + rspc + DB)
 - [ ] DB schema design (SeaORM): users, nodes, instances, games, tokens
-- [ ] Auth/session model (cookie/JWT) and security policy
-- [ ] rspc router skeleton + TS bindings generation strategy
+  - [ ] Auth/session model (cookie/JWT) and security policy
+  - [ ] rspc router skeleton + TS bindings generation strategy
+  - [x] Implement basic Axum server + `/healthz`
 
 ### Phase 4 - Web UI (SolidJS)
 - [ ] Scaffold SolidJS + Tailwind v4 (Vite)
