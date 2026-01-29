@@ -35,14 +35,25 @@ Commit rules (strict):
 
 ## TODO
 
+### Decisions (recorded)
+- [x] Package manager: npm
+- [x] Database: no DB for the initial vertical slice (SeaORM is deferred until persistence is needed)
+- [x] rspc transport (web <-> control): FetchTransport over HTTP
+
 ### Phase 0 - Bootstrap
 - [x] Wipe legacy code and reset repo (keep git history)
 - [x] Create `WORKFLOW.md`
-- [ ] Confirm the rspc+gRPC boundary is acceptable (no gRPC in browsers; rspc provides TS types)
+- [x] Confirm the rspc+gRPC boundary is acceptable (no gRPC in browsers; rspc provides TS types)
 - [x] Initialize Rust workspace skeleton (crates + basic build)
 - [x] Add basic formatting/lint (rustfmt, clippy) and CI
   - [x] Add `.editorconfig`
   - [x] Add GitHub Actions CI (fmt, clippy, test)
+
+### Phase 0.5 - Vertical slice (no DB)
+- [ ] Add rspc router + TS bindings export in `crates/alloy-control`
+- [ ] Web consumes generated bindings and calls `control.ping`
+- [ ] Control exposes `agent.health` (rspc) by calling `alloy-agent` gRPC health
+- [ ] Web shows agent health end-to-end (rspc -> control -> gRPC -> agent)
 
 ### Phase 1 - Core domain + multi-game abstraction
 - [ ] Define `GameAdapter` traits (start/stop/install/config/ports)
@@ -55,7 +66,7 @@ Commit rules (strict):
   - [x] Implement `AgentHealthService` and listen on :50051
 
 ### Phase 3 - Control plane (Axum + rspc + DB)
-- [ ] DB schema design (SeaORM): users, nodes, instances, games, tokens
+- [ ] DB schema design (SeaORM): users, nodes, instances, games, tokens (DEFERRED)
   - [ ] Auth/session model (cookie/JWT) and security policy
   - [ ] rspc router skeleton + TS bindings generation strategy
   - [x] Implement basic Axum server + `/healthz`
