@@ -8,6 +8,7 @@ function statusDotClass(state: { loading: boolean; error: boolean }) {
 
 function App() {
   const ping = rspc.createQuery(() => ['control.ping', null])
+  const agentHealth = rspc.createQuery(() => ['agent.health', null])
 
   const pingErrorMessage = () => {
     if (!ping.isError) return ''
@@ -54,10 +55,25 @@ function App() {
 	          <div class="rounded-2xl border border-slate-800/80 bg-slate-900/40 p-5">
 	            <div class="text-sm font-medium">Agent</div>
 	            <div class="mt-2 flex items-center gap-2">
-	              <span class="h-2.5 w-2.5 rounded-full bg-amber-400" />
-	              <span class="text-sm text-slate-200">gRPC: AgentHealthService</span>
+	              <span class={`h-2.5 w-2.5 rounded-full ${statusDotClass({ loading: agentHealth.isPending, error: agentHealth.isError })}`} />
+	              <span class="text-sm text-slate-200">
+	                {agentHealth.isPending
+	                  ? 'checking...'
+	                  : agentHealth.isError
+	                    ? 'offline'
+	                    : 'online'}
+	              </span>
 	            </div>
-	            <div class="mt-4 text-xs text-slate-400">Default port: :50051</div>
+	            <div class="mt-4 text-xs text-slate-400">
+	              rspc: <span class="font-mono">agent.health</span>
+	            </div>
+	            <div class="mt-2 text-xs text-slate-500">
+	              {agentHealth.isError
+	                ? 'failed to reach agent'
+	                : agentHealth.data
+	                  ? `status: ${agentHealth.data.status} (${agentHealth.data.agent_version})`
+	                  : ''}
+	            </div>
 	          </div>
 	        </section>
 
