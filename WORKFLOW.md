@@ -55,6 +55,23 @@ Commit rules (strict):
 - [x] Control exposes `agent.health` (rspc) by calling `alloy-agent` gRPC health
 - [x] Web shows agent health end-to-end (rspc -> control -> gRPC -> agent)
 
+### Phase 0.6 - Dockerized vertical slice (no DB)
+Definition of Done (must be true):
+- `docker compose -f deploy/docker-compose.yml up -d --build` starts cleanly
+- Web is served on host `:3000` (optional: map to host `:80` via override)
+- Web calls `/rspc` on the same origin (no CORS)
+- Control calls Agent via gRPC using container DNS, not `127.0.0.1`
+- Verification commands in `deploy/README.md` succeed
+
+TODO:
+- [ ] Add `deploy/README.md` with Docker runbook + verification commands
+- [ ] Make `alloy-control` use `ALLOY_AGENT_ENDPOINT` for gRPC target
+- [ ] Add `.dockerignore`
+- [ ] Add Rust Dockerfiles: `deploy/agent.Dockerfile`, `deploy/control.Dockerfile`
+- [ ] Add web Dockerfile + nginx config proxying `/rspc` -> control
+- [ ] Add `deploy/docker-compose.yml` to run `web` + `alloy-control` + `alloy-agent`
+- [ ] Verify end-to-end via compose and check off this section
+
 ### Phase 1 - Core domain + multi-game abstraction
 - [ ] Define `GameAdapter` traits (start/stop/install/config/ports)
 - [ ] Define `ProcessSupervisor` + sandbox boundaries
