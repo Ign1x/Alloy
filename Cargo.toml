@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
   "crates/alloy-core",
+  "crates/alloy-process",
   "crates/alloy-proto",
   "crates/alloy-agent",
   "crates/alloy-control",
