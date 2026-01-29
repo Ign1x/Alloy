@@ -34,24 +34,29 @@ pub struct AgentHealthResponse {
 }
 
 pub fn router() -> Router<Ctx> {
-    Router::new()
-        .procedure(
-            "control.ping",
-            Procedure::builder::<ApiError>().query(|_, _: ()| async move {
-                Ok(PingResponse {
-                    status: "ok".to_string(),
-                    version: env!("CARGO_PKG_VERSION").to_string(),
-                })
-            }),
-        )
-        .procedure(
-            "agent.health",
-            Procedure::builder::<ApiError>().query(|_, _: ()| async move {
-                // Placeholder: wired to gRPC in the next atomic commit.
-                Ok(AgentHealthResponse {
-                    status: "UNKNOWN".to_string(),
-                    agent_version: "".to_string(),
-                })
-            }),
-        )
+    // NOTE: Procedure keys are nested segments. This keeps generated `web/src/bindings.ts`
+    // valid TypeScript (no unquoted keys with dots), while the runtime request path still
+    // flattens to "segment.segment".
+    let control = Router::new().procedure(
+        "ping",
+        Procedure::builder::<ApiError>().query(|_, _: ()| async move {
+            Ok(PingResponse {
+                status: "ok".to_string(),
+                version: env!("CARGO_PKG_VERSION").to_string(),
+            })
+        }),
+    );
+
+    let agent = Router::new().procedure(
+        "health",
+        Procedure::builder::<ApiError>().query(|_, _: ()| async move {
+            // Placeholder: wired to gRPC in the next atomic commit.
+            Ok(AgentHealthResponse {
+                status: "UNKNOWN".to_string(),
+                agent_version: "".to_string(),
+            })
+        }),
+    );
+
+    Router::new().nest("control", control).nest("agent", agent)
 }

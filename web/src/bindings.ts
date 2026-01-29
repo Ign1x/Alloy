@@ -5,6 +5,10 @@
 export type ProceduresLegacy = { queries: { key: "agent.health"; input: null; result: { status: string; agent_version: string } } | { key: "control.ping"; input: null; result: { status: string; version: string } }; mutations: never; subscriptions: never }
 
 export type Procedures = {
-	agent.health: { kind: "query", input: null, output: { status: string; agent_version: string }, error: unknown },
-	control.ping: { kind: "query", input: null, output: { status: string; version: string }, error: unknown },
+	agent: {
+	health: { kind: "query", input: null, output: { status: string; agent_version: string }, error: unknown },
+},
+	control: {
+	ping: { kind: "query", input: null, output: { status: string; version: string }, error: unknown },
+},
 }
