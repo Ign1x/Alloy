@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 alloy-proto = { path = "../alloy-proto" }
+alloy-process = { path = "../alloy-process" }
 anyhow = { workspace = true }
 axum = { workspace = true }
 rspc = { workspace = true }

@@ -35,6 +35,7 @@ dependencies = [
 name = "alloy-control"
 version = "0.1.0"
 dependencies = [
+ "alloy-process",
  "alloy-proto",
  "anyhow",
  "axum",
