@@ -80,7 +80,7 @@ Definition of Done (must be true):
 - No DB; state is in-memory (agent restart clears process table)
 
 TODO:
-- [ ] Add Phase 1 protos: `ProcessService` (start/stop/status/list)
+- [x] Add Phase 1 protos: `ProcessService` (start/stop/status/list)
 - [ ] Add domain crate for process supervision types and policies
 - [ ] Implement `ProcessManager` in `alloy-agent` (graceful stop with timeout)
 - [ ] Bridge `ProcessService` through `alloy-control` to rspc `process.*`

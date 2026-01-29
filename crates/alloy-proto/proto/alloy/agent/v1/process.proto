@@ -1,0 +1,91 @@
+syntax = "proto3";
+
+package alloy.agent.v1;
+
+// ProcessService is the agent-side process supervision API.
+//
+// IMPORTANT: control/web do not supply arbitrary cmd/cwd/env. They select a
+// template_id and provide validated params. The agent maps templates to safe
+// spawn specs.
+service ProcessService {
+  rpc ListTemplates(ListTemplatesRequest) returns (ListTemplatesResponse);
+  rpc StartFromTemplate(StartFromTemplateRequest) returns (StartFromTemplateResponse);
+  rpc Stop(StopProcessRequest) returns (StopProcessResponse);
+  rpc ListProcesses(ListProcessesRequest) returns (ListProcessesResponse);
+  rpc GetStatus(GetStatusRequest) returns (GetStatusResponse);
+  rpc TailLogs(TailLogsRequest) returns (TailLogsResponse);
+}
+
+message ListTemplatesRequest {}
+
+message ProcessTemplate {
+  string template_id = 1;
+  string display_name = 2;
+}
+
+message ListTemplatesResponse {
+  repeated ProcessTemplate templates = 1;
+}
+
+enum ProcessState {
+  PROCESS_STATE_UNSPECIFIED = 0;
+  PROCESS_STATE_STARTING = 1;
+  PROCESS_STATE_RUNNING = 2;
+  PROCESS_STATE_STOPPING = 3;
+  PROCESS_STATE_EXITED = 4;
+  PROCESS_STATE_FAILED = 5;
+}
+
+message ProcessStatus {
+  string process_id = 1;
+  string template_id = 2;
+  ProcessState state = 3;
+  uint32 pid = 4;
+  bool has_pid = 5;
+  int32 exit_code = 6;
+  bool has_exit_code = 7;
+  string message = 8;
+}
+
+message StartFromTemplateRequest {
+  string template_id = 1;
+  map<string, string> params = 2;
+}
+
+message StartFromTemplateResponse {
+  ProcessStatus status = 1;
+}
+
+message StopProcessRequest {
+  string process_id = 1;
+  uint32 timeout_ms = 2;
+}
+
+message StopProcessResponse {
+  ProcessStatus status = 1;
+}
+
+message ListProcessesRequest {}
+
+message ListProcessesResponse {
+  repeated ProcessStatus processes = 1;
+}
+
+message GetStatusRequest {
+  string process_id = 1;
+}
+
+message GetStatusResponse {
+  ProcessStatus status = 1;
+}
+
+message TailLogsRequest {
+  string process_id = 1;
+  uint32 limit = 2;
+  string cursor = 3;
+}
+
+message TailLogsResponse {
+  repeated string lines = 1;
+  string next_cursor = 2;
+}
