@@ -64,9 +64,9 @@ Definition of Done (must be true):
 - Verification commands in `deploy/README.md` succeed
 
 TODO:
-- [ ] Add `deploy/README.md` with Docker runbook + verification commands
+- [x] Add `deploy/README.md` with Docker runbook + verification commands
 - [x] Make `alloy-control` use `ALLOY_AGENT_ENDPOINT` for gRPC target
-- [ ] Add `.dockerignore`
+- [x] Add `.dockerignore`
 - [ ] Add Rust Dockerfiles: `deploy/agent.Dockerfile`, `deploy/control.Dockerfile`
 - [ ] Add web Dockerfile + nginx config proxying `/rspc` -> control
 - [ ] Add `deploy/docker-compose.yml` to run `web` + `alloy-control` + `alloy-agent`
