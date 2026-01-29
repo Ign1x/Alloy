@@ -1,4 +1,23 @@
+import { rspc } from './rspc'
+
+function statusDotClass(state: { loading: boolean; error: boolean }) {
+  if (state.loading) return 'bg-slate-600 animate-pulse'
+  if (state.error) return 'bg-rose-500'
+  return 'bg-emerald-400'
+}
+
 function App() {
+  const ping = rspc.createQuery(() => ['control.ping', null])
+
+  const pingErrorMessage = () => {
+    if (!ping.isError) return ''
+    const err = ping.error as unknown
+    if (err && typeof err === 'object' && 'message' in err) {
+      return String((err as { message?: unknown }).message)
+    }
+    return 'unknown error'
+  }
+
   return (
     <main class="min-h-screen bg-gradient-to-b from-slate-950 via-slate-950 to-slate-900 text-slate-100">
       <div class="mx-auto max-w-5xl px-6 py-10">
@@ -11,25 +30,36 @@ function App() {
           Rust (Axum + SeaORM) as the control plane, gRPC (Tonic) to agents, and SolidJS + Tailwind v4 for the web UI.
         </p>
 
-        <section class="mt-8 grid gap-4 sm:grid-cols-2">
-          <div class="rounded-2xl border border-slate-800/80 bg-slate-900/40 p-5">
-            <div class="text-sm font-medium">Backend</div>
-            <div class="mt-2 flex items-center gap-2">
-              <span class="h-2.5 w-2.5 rounded-full bg-amber-400" />
-              <span class="text-sm text-slate-200">waiting for rspc routes</span>
-            </div>
-            <div class="mt-4 text-xs text-slate-400">HTTP: /healthz (Axum) - coming next</div>
-          </div>
+	        <section class="mt-8 grid gap-4 sm:grid-cols-2">
+	          <div class="rounded-2xl border border-slate-800/80 bg-slate-900/40 p-5">
+	            <div class="text-sm font-medium">Backend</div>
+	            <div class="mt-2 flex items-center gap-2">
+	              <span class={`h-2.5 w-2.5 rounded-full ${statusDotClass({ loading: ping.isPending, error: ping.isError })}`} />
+	              <span class="text-sm text-slate-200">
+	                {ping.isPending
+	                  ? 'checking...'
+	                  : ping.isError
+	                    ? 'offline'
+	                    : 'online'}
+	              </span>
+	            </div>
+	            <div class="mt-4 text-xs text-slate-400">
+	              rspc: <span class="font-mono">control.ping</span>
+	            </div>
+	            <div class="mt-2 text-xs text-slate-500">
+	              {ping.isError ? pingErrorMessage() : ping.data ? `version: ${ping.data.version}` : ''}
+	            </div>
+	          </div>
 
-          <div class="rounded-2xl border border-slate-800/80 bg-slate-900/40 p-5">
-            <div class="text-sm font-medium">Agent</div>
-            <div class="mt-2 flex items-center gap-2">
-              <span class="h-2.5 w-2.5 rounded-full bg-amber-400" />
-              <span class="text-sm text-slate-200">gRPC: AgentHealthService</span>
-            </div>
-            <div class="mt-4 text-xs text-slate-400">Default port: :50051</div>
-          </div>
-        </section>
+	          <div class="rounded-2xl border border-slate-800/80 bg-slate-900/40 p-5">
+	            <div class="text-sm font-medium">Agent</div>
+	            <div class="mt-2 flex items-center gap-2">
+	              <span class="h-2.5 w-2.5 rounded-full bg-amber-400" />
+	              <span class="text-sm text-slate-200">gRPC: AgentHealthService</span>
+	            </div>
+	            <div class="mt-4 text-xs text-slate-400">Default port: :50051</div>
+	          </div>
+	        </section>
 
         <footer class="mt-10 flex flex-wrap items-center justify-between gap-4 text-xs text-slate-500">
           <div>
