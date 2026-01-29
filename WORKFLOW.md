@@ -67,7 +67,7 @@ TODO:
 - [x] Add `deploy/README.md` with Docker runbook + verification commands
 - [x] Make `alloy-control` use `ALLOY_AGENT_ENDPOINT` for gRPC target
 - [x] Add `.dockerignore`
-- [ ] Add Rust Dockerfiles: `deploy/agent.Dockerfile`, `deploy/control.Dockerfile`
+- [x] Add Rust Dockerfiles: `deploy/agent.Dockerfile`, `deploy/control.Dockerfile`
 - [ ] Add web Dockerfile + nginx config proxying `/rspc` -> control
 - [ ] Add `deploy/docker-compose.yml` to run `web` + `alloy-control` + `alloy-agent`
 - [ ] Verify end-to-end via compose and check off this section
