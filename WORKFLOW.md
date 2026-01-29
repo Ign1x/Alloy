@@ -81,8 +81,8 @@ Definition of Done (must be true):
 
 TODO:
 - [x] Add Phase 1 protos: `ProcessService` (start/stop/status/list)
-- [ ] Add domain crate for process supervision types and policies
-- [ ] Implement `ProcessManager` in `alloy-agent` (graceful stop with timeout)
+- [x] Add domain crate for process supervision types and policies
+- [x] Implement `ProcessManager` in `alloy-agent` (graceful stop with timeout)
 - [ ] Bridge `ProcessService` through `alloy-control` to rspc `process.*`
 - [ ] Web UI: process list + start/stop/status
 
