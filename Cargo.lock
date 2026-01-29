@@ -21,8 +21,10 @@ dependencies = [
 name = "alloy-agent"
 version = "0.1.0"
 dependencies = [
+ "alloy-process",
  "alloy-proto",
  "anyhow",
+ "libc",
  "tokio",
  "tonic",
  "tracing",
