@@ -41,6 +41,18 @@ impl LogBuffer {
     }
 
     fn tail_after(&self, cursor: u64, limit: usize) -> (Vec<String>, u64) {
+        // Convenience for UI polling: if cursor is 0, return the most recent lines.
+        if cursor == 0 {
+            let start = self.lines.len().saturating_sub(limit);
+            let mut out = Vec::new();
+            let mut last = 0;
+            for (seq, line) in self.lines.iter().skip(start) {
+                out.push(line.clone());
+                last = *seq;
+            }
+            return (out, last);
+        }
+
         let mut out = Vec::new();
         let mut last = cursor;
         for (seq, line) in self.lines.iter() {
