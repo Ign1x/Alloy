@@ -65,7 +65,7 @@ Definition of Done (must be true):
 
 TODO:
 - [ ] Add `deploy/README.md` with Docker runbook + verification commands
-- [ ] Make `alloy-control` use `ALLOY_AGENT_ENDPOINT` for gRPC target
+- [x] Make `alloy-control` use `ALLOY_AGENT_ENDPOINT` for gRPC target
 - [ ] Add `.dockerignore`
 - [ ] Add Rust Dockerfiles: `deploy/agent.Dockerfile`, `deploy/control.Dockerfile`
 - [ ] Add web Dockerfile + nginx config proxying `/rspc` -> control

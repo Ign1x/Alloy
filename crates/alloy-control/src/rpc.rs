@@ -54,12 +54,17 @@ pub fn router() -> Router<Ctx> {
     let agent = Router::new().procedure(
         "health",
         Procedure::builder::<ApiError>().query(|_, _: ()| async move {
-            // Local dev default: agent listens on :50051.
-            // This will be made configurable via env/config later.
-            let mut client = AgentHealthServiceClient::connect("http://127.0.0.1:50051")
+            // Container-safe: do not hardcode localhost.
+            //
+            // Local dev default is http://127.0.0.1:50051.
+            // In docker-compose, set ALLOY_AGENT_ENDPOINT=http://alloy-agent:50051.
+            let agent_endpoint = std::env::var("ALLOY_AGENT_ENDPOINT")
+                .unwrap_or_else(|_| "http://127.0.0.1:50051".to_string());
+
+            let mut client = AgentHealthServiceClient::connect(agent_endpoint.clone())
                 .await
                 .map_err(|e| ApiError {
-                    message: format!("failed to connect agent: {e}"),
+                    message: format!("failed to connect agent ({agent_endpoint}): {e}"),
                 })?;
 
             let resp = client
