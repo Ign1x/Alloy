@@ -33,6 +33,7 @@ dependencies = [
 name = "alloy-control"
 version = "0.1.0"
 dependencies = [
+ "alloy-proto",
  "anyhow",
  "axum",
  "rspc",
@@ -41,6 +42,7 @@ dependencies = [
  "serde_json",
  "specta",
  "tokio",
+ "tonic",
  "tracing",
  "tracing-subscriber",
 ]

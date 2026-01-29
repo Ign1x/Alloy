@@ -1,4 +1,8 @@
+use alloy_proto::agent_v1::{
+    HealthCheckRequest, agent_health_service_client::AgentHealthServiceClient,
+};
 use rspc::{Procedure, ProcedureError, ResolverError, Router};
+use tonic::Request;
 
 use specta::Type;
 
@@ -50,10 +54,25 @@ pub fn router() -> Router<Ctx> {
     let agent = Router::new().procedure(
         "health",
         Procedure::builder::<ApiError>().query(|_, _: ()| async move {
-            // Placeholder: wired to gRPC in the next atomic commit.
+            // Local dev default: agent listens on :50051.
+            // This will be made configurable via env/config later.
+            let mut client = AgentHealthServiceClient::connect("http://127.0.0.1:50051")
+                .await
+                .map_err(|e| ApiError {
+                    message: format!("failed to connect agent: {e}"),
+                })?;
+
+            let resp = client
+                .check(Request::new(HealthCheckRequest {}))
+                .await
+                .map_err(|e| ApiError {
+                    message: format!("agent health check failed: {e}"),
+                })?;
+
+            let resp = resp.into_inner();
             Ok(AgentHealthResponse {
-                status: "UNKNOWN".to_string(),
-                agent_version: "".to_string(),
+                status: resp.status,
+                agent_version: resp.agent_version,
             })
         }),
     );

@@ -52,7 +52,7 @@ Commit rules (strict):
 ### Phase 0.5 - Vertical slice (no DB)
 - [x] Add rspc router + TS bindings export in `crates/alloy-control`
 - [x] Web consumes generated bindings and calls `control.ping` (procedure key is `control.ping`)
-- [ ] Control exposes `agent.health` (rspc) by calling `alloy-agent` gRPC health
+- [x] Control exposes `agent.health` (rspc) by calling `alloy-agent` gRPC health
 - [ ] Web shows agent health end-to-end (rspc -> control -> gRPC -> agent)
 
 ### Phase 1 - Core domain + multi-game abstraction
