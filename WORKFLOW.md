@@ -50,7 +50,7 @@ Commit rules (strict):
   - [x] Add GitHub Actions CI (fmt, clippy, test)
 
 ### Phase 0.5 - Vertical slice (no DB)
-- [ ] Add rspc router + TS bindings export in `crates/alloy-control`
+- [x] Add rspc router + TS bindings export in `crates/alloy-control`
 - [ ] Web consumes generated bindings and calls `control.ping`
 - [ ] Control exposes `agent.health` (rspc) by calling `alloy-agent` gRPC health
 - [ ] Web shows agent health end-to-end (rspc -> control -> gRPC -> agent)

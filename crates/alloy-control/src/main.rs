@@ -1,5 +1,6 @@
 use std::net::SocketAddr;
 
+use alloy_control::rpc;
 use axum::{Json, Router, routing::get};
 use serde::Serialize;
 
@@ -22,7 +23,14 @@ async fn main() -> anyhow::Result<()> {
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
 
-    let app = Router::new().route("/healthz", get(healthz));
+    let router = rpc::router();
+    let (procedures, _types) = router
+        .build()
+        .map_err(|errs| anyhow::anyhow!("rspc build failed: {errs:?}"))?;
+
+    let app = Router::new()
+        .route("/healthz", get(healthz))
+        .nest("/rspc", rspc_axum::endpoint(procedures, || rpc::Ctx));
     let addr: SocketAddr = ([0, 0, 0, 0], 8080).into();
     tracing::info!(%addr, "alloy-control HTTP listening");
 
