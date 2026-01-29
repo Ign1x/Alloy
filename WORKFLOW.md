@@ -61,7 +61,7 @@ Commit rules (strict):
   - [x] Implement basic Axum server + `/healthz`
 
 ### Phase 4 - Web UI (SolidJS)
-- [ ] Scaffold SolidJS + Tailwind v4 (Vite)
+- [x] Scaffold SolidJS + Tailwind v4 (Vite)
 - [ ] Login + dashboard + node list
 
 ### Phase 5 - Game plugins
