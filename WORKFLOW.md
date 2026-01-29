@@ -73,8 +73,21 @@ TODO:
 - [x] Verify end-to-end via compose and check off this section
 
 ### Phase 1 - Core domain + multi-game abstraction
-- [ ] Define `GameAdapter` traits (start/stop/install/config/ports)
-- [ ] Define `ProcessSupervisor` + sandbox boundaries
+Definition of Done (must be true):
+- Agent can start/stop/list processes via gRPC (no Minecraft assumptions)
+- Control exposes `process.*` via rspc (types are generated, committed)
+- Web can start a process (from a safe template), stop it, and view status
+- No DB; state is in-memory (agent restart clears process table)
+
+TODO:
+- [ ] Add Phase 1 protos: `ProcessService` (start/stop/status/list)
+- [ ] Add domain crate for process supervision types and policies
+- [ ] Implement `ProcessManager` in `alloy-agent` (graceful stop with timeout)
+- [ ] Bridge `ProcessService` through `alloy-control` to rspc `process.*`
+- [ ] Web UI: process list + start/stop/status
+
+Notes:
+- Safety: web/control do NOT accept arbitrary `cmd`; use `ProcessKind` templates enforced by agent
 
 ### Phase 2 - Agent (gRPC)
 - [ ] Define gRPC protos: health, instance lifecycle, logs, filesystem APIs
