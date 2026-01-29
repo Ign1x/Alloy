@@ -1,4 +1,5 @@
 import { rspc } from './rspc'
+import { createMemo, createSignal, For, Show } from 'solid-js'
 
 function statusDotClass(state: { loading: boolean; error: boolean }) {
   if (state.loading) return 'bg-slate-600 animate-pulse'
@@ -9,6 +10,39 @@ function statusDotClass(state: { loading: boolean; error: boolean }) {
 function App() {
   const ping = rspc.createQuery(() => ['control.ping', null])
   const agentHealth = rspc.createQuery(() => ['agent.health', null])
+
+  const templates = rspc.createQuery(() => ['process.templates', null])
+  const processes = rspc.createQuery(() => ['process.list', null])
+
+  const startProcess = rspc.createMutation(() => 'process.start')
+  const stopProcess = rspc.createMutation(() => 'process.stop')
+
+  const [selectedTemplate, setSelectedTemplate] = createSignal<string>('demo:sleep')
+  const [sleepSeconds, setSleepSeconds] = createSignal<string>('60')
+
+  const [selectedProcessId, setSelectedProcessId] = createSignal<string | null>(null)
+  const logs = rspc.createQuery(
+    () => [
+      'process.logsTail',
+      {
+        process_id: selectedProcessId() ?? '',
+        cursor: null,
+        limit: 200,
+      },
+    ],
+    () => ({
+      enabled: !!selectedProcessId(),
+      refetchInterval: 1000,
+    }),
+  )
+
+  const selectedProcess = createMemo(() => {
+    const id = selectedProcessId()
+    if (!id) return null
+    return (
+      (processes.data ?? []).find((p: { process_id: string }) => p.process_id === id) ?? null
+    )
+  })
 
   const pingErrorMessage = () => {
     if (!ping.isError) return ''
@@ -77,12 +111,136 @@ function App() {
 	          </div>
 	        </section>
 
+        <section class="mt-8 grid gap-4 lg:grid-cols-3">
+          <div class="rounded-2xl border border-slate-800/80 bg-slate-900/40 p-5 lg:col-span-1">
+            <div class="text-sm font-medium">Processes</div>
+            <div class="mt-2 text-xs text-slate-400">rspc: process.* (template-based)</div>
+
+            <div class="mt-4 space-y-3">
+              <label class="block text-xs text-slate-300">
+                Template
+                <select
+                  class="mt-1 w-full rounded-lg border border-slate-800 bg-slate-950/60 px-3 py-2 text-sm"
+                  value={selectedTemplate()}
+                  onInput={(e) => setSelectedTemplate(e.currentTarget.value)}
+                >
+                  <For each={templates.data ?? []}>
+                    {(t) => (
+                      <option value={t.template_id}>
+                        {t.display_name} ({t.template_id})
+                      </option>
+                    )}
+                  </For>
+                </select>
+              </label>
+
+              <Show when={selectedTemplate() === 'demo:sleep'}>
+                <label class="block text-xs text-slate-300">
+                  seconds
+                  <input
+                    class="mt-1 w-full rounded-lg border border-slate-800 bg-slate-950/60 px-3 py-2 text-sm"
+                    value={sleepSeconds()}
+                    onInput={(e) => setSleepSeconds(e.currentTarget.value)}
+                  />
+                </label>
+              </Show>
+
+              <button
+                class="w-full rounded-lg bg-slate-200 px-3 py-2 text-sm font-medium text-slate-900 disabled:opacity-50"
+                disabled={startProcess.isPending}
+                onClick={async () => {
+                  const template_id = selectedTemplate()
+                  const params: Record<string, string> = {}
+                  if (template_id === 'demo:sleep') params.seconds = sleepSeconds()
+                  await startProcess.mutateAsync({ template_id, params })
+                  await processes.refetch()
+                }}
+              >
+                {startProcess.isPending ? 'Starting...' : 'Start'}
+              </button>
+              <Show when={startProcess.isError}>
+                <div class="text-xs text-rose-300">start failed</div>
+              </Show>
+            </div>
+          </div>
+
+          <div class="rounded-2xl border border-slate-800/80 bg-slate-900/40 p-5 lg:col-span-2">
+            <div class="flex items-center justify-between gap-4">
+              <div class="text-sm font-medium">Running (agent memory)</div>
+              <button
+                class="rounded-lg border border-slate-800 bg-slate-950/60 px-3 py-1.5 text-xs text-slate-200"
+                onClick={() => processes.refetch()}
+              >
+                Refresh
+              </button>
+            </div>
+
+            <div class="mt-3 grid gap-2">
+              <For each={processes.data ?? []}>
+                {(p) => (
+                  <div
+                    class={`flex items-center justify-between gap-4 rounded-xl border border-slate-800/70 bg-slate-950/40 px-3 py-2 ${
+                      selectedProcessId() === p.process_id ? 'ring-1 ring-slate-600' : ''
+                    }`}
+                  >
+                    <button
+                      class="min-w-0 flex-1 text-left"
+                      onClick={() => setSelectedProcessId(p.process_id)}
+                    >
+                      <div class="truncate text-sm text-slate-100">{p.process_id}</div>
+                      <div class="mt-0.5 truncate text-xs text-slate-400">
+                        {p.template_id} • {p.state}
+                        <Show when={p.pid !== null}> • pid {p.pid}</Show>
+                      </div>
+                    </button>
+
+                    <button
+                      class="rounded-lg border border-slate-800 bg-slate-950/60 px-3 py-1.5 text-xs text-slate-200 disabled:opacity-50"
+                      disabled={stopProcess.isPending}
+                      onClick={async () => {
+                        await stopProcess.mutateAsync({ process_id: p.process_id, timeout_ms: 30_000 })
+                        await processes.refetch()
+                      }}
+                    >
+                      Stop
+                    </button>
+                  </div>
+                )}
+              </For>
+
+              <Show when={(processes.data ?? []).length === 0}>
+                <div class="rounded-xl border border-dashed border-slate-800/70 bg-slate-950/20 p-6 text-sm text-slate-400">
+                  no processes yet
+                </div>
+              </Show>
+            </div>
+
+            <Show when={selectedProcess()}>
+              {(p) => (
+                <div class="mt-4 rounded-xl border border-slate-800/70 bg-slate-950/40 p-4">
+                  <div class="flex items-center justify-between gap-4">
+                    <div class="text-xs text-slate-300">
+                      logs: <span class="font-mono">{p().process_id}</span>
+                    </div>
+                    <div class="text-xs text-slate-500">
+                      {logs.isPending ? 'loading...' : logs.isError ? 'error' : 'live'}
+                    </div>
+                  </div>
+                  <pre class="mt-2 max-h-64 overflow-auto rounded-lg border border-slate-800 bg-slate-950/70 p-3 text-xs text-slate-200">
+                    <For each={logs.data?.lines ?? []}>{(l) => <div class="whitespace-pre-wrap">{l}</div>}</For>
+                  </pre>
+                </div>
+              )}
+            </Show>
+          </div>
+        </section>
+
         <footer class="mt-10 flex flex-wrap items-center justify-between gap-4 text-xs text-slate-500">
           <div>
             UI stack: <span class="text-slate-300">SolidJS</span> + <span class="text-slate-300">Tailwind v4</span>
           </div>
           <div>
-            Next: <span class="text-slate-300">rspc</span> end-to-end TS bindings
+            Next: <span class="text-slate-300">process supervision</span> + <span class="text-slate-300">templates</span>
           </div>
         </footer>
       </div>

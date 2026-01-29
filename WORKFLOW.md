@@ -84,7 +84,7 @@ TODO:
 - [x] Add domain crate for process supervision types and policies
 - [x] Implement `ProcessManager` in `alloy-agent` (graceful stop with timeout)
 - [x] Bridge `ProcessService` through `alloy-control` to rspc `process.*`
-- [ ] Web UI: process list + start/stop/status
+- [x] Web UI: process list + start/stop/status
 
 Notes:
 - Safety: web/control do NOT accept arbitrary `cmd`; use `ProcessKind` templates enforced by agent
