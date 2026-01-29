@@ -50,6 +50,7 @@ Commit rules (strict):
 
 ### Phase 2 - Agent (gRPC)
 - [ ] Define gRPC protos: health, instance lifecycle, logs, filesystem APIs
+  - [x] Create `alloy-proto` codegen crate (build.rs + proto files)
 - [ ] Implement `alloy-agent` gRPC server skeleton
 
 ### Phase 3 - Control plane (Axum + rspc + DB)

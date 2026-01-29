@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+package alloy.agent.v1;
+
+// Minimal agent health API.
+service AgentHealthService {
+  rpc Check(HealthCheckRequest) returns (HealthCheckResponse);
+}
+
+message HealthCheckRequest {}
+
+message HealthCheckResponse {
+  string status = 1;
+  string agent_version = 2;
+}
