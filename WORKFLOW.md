@@ -40,7 +40,9 @@ Commit rules (strict):
 - [x] Create `WORKFLOW.md`
 - [ ] Confirm the rspc+gRPC boundary is acceptable (no gRPC in browsers; rspc provides TS types)
 - [x] Initialize Rust workspace skeleton (crates + basic build)
-- [ ] Add basic formatting/lint (rustfmt, clippy) and CI
+- [x] Add basic formatting/lint (rustfmt, clippy) and CI
+  - [x] Add `.editorconfig`
+  - [x] Add GitHub Actions CI (fmt, clippy, test)
 
 ### Phase 1 - Core domain + multi-game abstraction
 - [ ] Define `GameAdapter` traits (start/stop/install/config/ports)
