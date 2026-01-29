@@ -69,8 +69,8 @@ TODO:
 - [x] Add `.dockerignore`
 - [x] Add Rust Dockerfiles: `deploy/agent.Dockerfile`, `deploy/control.Dockerfile`
 - [x] Add web Dockerfile + nginx config proxying `/rspc` -> control
-- [ ] Add `deploy/docker-compose.yml` to run `web` + `alloy-control` + `alloy-agent`
-- [ ] Verify end-to-end via compose and check off this section
+- [x] Add `deploy/docker-compose.yml` to run `web` + `alloy-control` + `alloy-agent`
+- [x] Verify end-to-end via compose and check off this section
 
 ### Phase 1 - Core domain + multi-game abstraction
 - [ ] Define `GameAdapter` traits (start/stop/install/config/ports)

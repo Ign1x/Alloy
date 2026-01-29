@@ -1,0 +1,30 @@
+services:
+  alloy-agent:
+    build:
+      context: ..
+      dockerfile: deploy/agent.Dockerfile
+    expose:
+      - "50051"
+    environment:
+      - RUST_LOG=info
+
+  alloy-control:
+    build:
+      context: ..
+      dockerfile: deploy/control.Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - RUST_LOG=info
+      - ALLOY_AGENT_ENDPOINT=http://alloy-agent:50051
+    depends_on:
+      - alloy-agent
+
+  web:
+    build:
+      context: ..
+      dockerfile: deploy/web.Dockerfile
+    ports:
+      - "3000:80"
+    depends_on:
+      - alloy-control
