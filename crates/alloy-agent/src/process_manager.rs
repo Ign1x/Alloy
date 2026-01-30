@@ -11,6 +11,7 @@ use tokio::{
     sync::Mutex,
 };
 
+use crate::minecraft;
 use crate::templates;
 
 const LOG_MAX_LINES: usize = 1000;
@@ -129,6 +130,17 @@ impl ProcessManager {
 
         let id = ProcessId::new();
         let logs: Arc<Mutex<LogBuffer>> = Arc::new(Mutex::new(LogBuffer::default()));
+
+        // Milestone 1 step-wise: create the instance directory layout, but do not
+        // run the real server until jar download/launch wiring lands.
+        if t.template_id == "minecraft:vanilla" {
+            let mc = minecraft::validate_vanilla_params(&params)?;
+            let dir = minecraft::instance_dir(&id.0);
+            minecraft::ensure_vanilla_instance_layout(&dir, &mc)?;
+            anyhow::bail!(
+                "minecraft:vanilla runtime not implemented yet (jar download/launch pending)"
+            );
+        }
 
         let mut cmd = Command::new(&t.command);
         cmd.args(&t.args)

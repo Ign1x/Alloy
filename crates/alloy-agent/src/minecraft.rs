@@ -1,4 +1,8 @@
-use std::collections::BTreeMap;
+use std::{
+    collections::BTreeMap,
+    fs,
+    path::{Path, PathBuf},
+};
 
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
@@ -45,4 +49,48 @@ pub fn validate_vanilla_params(params: &BTreeMap<String, String>) -> anyhow::Res
         memory_mb,
         port,
     })
+}
+
+pub fn data_root() -> PathBuf {
+    std::env::var("ALLOY_DATA_ROOT")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("./data"))
+}
+
+pub fn instance_dir(process_id: &str) -> PathBuf {
+    data_root().join("instances").join(process_id)
+}
+
+pub fn ensure_vanilla_instance_layout(
+    instance_dir: &Path,
+    params: &VanillaParams,
+) -> anyhow::Result<()> {
+    fs::create_dir_all(instance_dir)?;
+
+    // EULA gate is handled by validate_vanilla_params(); writing eula=true is the
+    // explicit acceptance action.
+    fs::write(instance_dir.join("eula.txt"), b"eula=true\n")?;
+
+    // Minimal `server.properties` management: ensure server-port is set.
+    let props_path = instance_dir.join("server.properties");
+    let existing = fs::read_to_string(&props_path).unwrap_or_default();
+    let mut out = String::new();
+    let mut wrote_port = false;
+    for line in existing.lines() {
+        if let Some((_k, _v)) = line.split_once('=')
+            && line.starts_with("server-port=")
+        {
+            out.push_str(&format!("server-port={}\n", params.port));
+            wrote_port = true;
+            continue;
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    if !wrote_port {
+        out.push_str(&format!("server-port={}\n", params.port));
+    }
+    fs::write(props_path, out.as_bytes())?;
+
+    Ok(())
 }

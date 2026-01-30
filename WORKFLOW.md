@@ -126,11 +126,11 @@ Defaults (recorded):
 - Memory: `memory_mb` integer (default 2048)
 
 TODO:
-- [ ] Add `minecraft:vanilla` template and param validation in agent
+- [x] Add `minecraft:vanilla` template and param validation in agent
 - [ ] Implement Mojang manifest resolve + jar download/cache + sha1 verify
-- [ ] Create instance layout under `ALLOY_DATA_ROOT` and write `eula.txt` + `server.properties`
+- [x] Create instance layout under `ALLOY_DATA_ROOT` and write `eula.txt` + `server.properties`
 - [ ] Start server via `java -Xmx${memory_mb}M -jar server.jar nogui` in instance dir
-- [ ] Stop via stdin `stop\n` then TERM/KILL fallback
+- [x] Stop via stdin `stop\n` then TERM/KILL fallback
 - [ ] Update Docker agent image to include Java 21 and mount `/data`
 - [ ] Update web UI: add minecraft start form (version/port/memory/eula)
 - [ ] Verify end-to-end in docker-compose and check off this section
