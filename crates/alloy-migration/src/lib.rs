@@ -1,14 +1,18 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+use sea_orm_migration::prelude::*;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+mod m0001_create_users;
+mod m0002_create_nodes;
+mod m0003_create_refresh_tokens;
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
+pub struct Migrator;
+
+#[async_trait::async_trait]
+impl MigratorTrait for Migrator {
+    fn migrations() -> Vec<Box<dyn MigrationTrait>> {
+        vec![
+            Box::new(m0001_create_users::Migration),
+            Box::new(m0002_create_nodes::Migration),
+            Box::new(m0003_create_refresh_tokens::Migration),
+        ]
     }
 }
