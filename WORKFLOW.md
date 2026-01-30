@@ -93,7 +93,7 @@ Notes:
 - [ ] Define gRPC protos: health, instance lifecycle, logs, filesystem APIs
   - [x] Create `alloy-proto` codegen crate (build.rs + proto files)
   - [ ] Filesystem API (agent): list/read small files under a scoped root
-  - [ ] Logs API (agent): streaming tail + cursor model (beyond process-only)
+  - [x] Logs API (agent): tail file + cursor model (beyond process-only)
   - [ ] Instance lifecycle API (agent): create/start/stop/delete instance (game-aware)
 - [x] Implement `alloy-agent` gRPC server skeleton
   - [x] Implement `AgentHealthService` and listen on :50051
