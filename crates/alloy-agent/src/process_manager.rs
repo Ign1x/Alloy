@@ -160,7 +160,102 @@ impl ProcessManager {
                 }
             }
 
-            anyhow::bail!("minecraft:vanilla launch not implemented yet (java run pending)");
+            let mut cmd = Command::new("java");
+            cmd.current_dir(&dir)
+                .arg(format!("-Xmx{}M", mc.memory_mb))
+                .arg("-jar")
+                .arg("server.jar")
+                .arg("nogui")
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped());
+
+            #[cfg(unix)]
+            {
+                unsafe {
+                    cmd.pre_exec(|| {
+                        if libc::setsid() == -1 {
+                            return Err(std::io::Error::last_os_error());
+                        }
+                        Ok(())
+                    });
+                }
+            }
+
+            let mut child = cmd.spawn()?;
+            let pid_u32 = child.id();
+            let pgid = pid_u32.map(|p| p as i32);
+
+            let stdin = child.stdin.take();
+            let stdout = child.stdout.take();
+            let stderr = child.stderr.take();
+
+            if let Some(out) = stdout {
+                let logs = logs.clone();
+                tokio::spawn(async move {
+                    let mut lines = BufReader::new(out).lines();
+                    while let Ok(Some(line)) = lines.next_line().await {
+                        logs.lock().await.push_line(line);
+                    }
+                });
+            }
+            if let Some(err) = stderr {
+                let logs = logs.clone();
+                tokio::spawn(async move {
+                    let mut lines = BufReader::new(err).lines();
+                    while let Ok(Some(line)) = lines.next_line().await {
+                        logs.lock().await.push_line(line);
+                    }
+                });
+            }
+
+            {
+                let mut inner = self.inner.lock().await;
+                inner.insert(
+                    id.0.clone(),
+                    ProcessEntry {
+                        template_id: ProcessTemplateId(t.template_id.clone()),
+                        state: ProcessState::Running,
+                        pid: pid_u32,
+                        exit_code: None,
+                        message: None,
+                        stdin,
+                        graceful_stdin: t.graceful_stdin.clone(),
+                        pgid,
+                        logs: logs.clone(),
+                    },
+                );
+            }
+
+            let inner = self.inner.clone();
+            let id_str = id.0.clone();
+            tokio::spawn(async move {
+                let res = child.wait().await;
+                let mut map = inner.lock().await;
+                if let Some(e) = map.get_mut(&id_str) {
+                    match res {
+                        Ok(status) => {
+                            e.state = ProcessState::Exited;
+                            e.exit_code = status.code();
+                            e.message = Some("exited".to_string());
+                        }
+                        Err(err) => {
+                            e.state = ProcessState::Failed;
+                            e.message = Some(format!("wait failed: {err}"));
+                        }
+                    }
+                    e.stdin = None;
+                }
+            });
+
+            return Ok(ProcessStatus {
+                id: id.clone(),
+                template_id: ProcessTemplateId(t.template_id),
+                state: ProcessState::Running,
+                pid: pid_u32,
+                exit_code: None,
+                message: None,
+            });
         }
 
         let mut cmd = Command::new(&t.command);
