@@ -8,6 +8,33 @@ function statusDotClass(state: { loading: boolean; error: boolean }) {
   return 'bg-emerald-400'
 }
 
+function instanceStateLabel(status: ProcessStatusDto | null) {
+  if (!status) return 'Stopped'
+  switch (status.state) {
+    case 'PROCESS_STATE_STARTING':
+      return 'Starting'
+    case 'PROCESS_STATE_RUNNING':
+      return 'Running'
+    case 'PROCESS_STATE_STOPPING':
+      return 'Stopping'
+    case 'PROCESS_STATE_EXITED':
+      return 'Stopped'
+    case 'PROCESS_STATE_FAILED':
+      return 'Failed'
+    default:
+      return status.state
+  }
+}
+
+function canStartInstance(status: ProcessStatusDto | null) {
+  if (!status) return true
+  return status.state === 'PROCESS_STATE_EXITED' || status.state === 'PROCESS_STATE_FAILED'
+}
+
+function isStopping(status: ProcessStatusDto | null) {
+  return status?.state === 'PROCESS_STATE_STOPPING'
+}
+
 function App() {
   const ping = rspc.createQuery(() => ['control.ping', null])
   const agentHealth = rspc.createQuery(() => ['agent.health', null])
@@ -30,7 +57,7 @@ function App() {
   const [mcError, setMcError] = createSignal<string | null>(null)
 
   const [selectedInstanceId, setSelectedInstanceId] = createSignal<string | null>(null)
-  
+
   const logs = rspc.createQuery(
     () => [
       'process.logsTail',
@@ -50,7 +77,9 @@ function App() {
     const id = selectedInstanceId()
     if (!id) return null
     return (
-      (instances.data ?? []).find((i: { config: InstanceConfigDto; status: ProcessStatusDto | null }) => i.config.instance_id === id) ?? null
+      (instances.data ?? []).find(
+        (i: { config: InstanceConfigDto; status: ProcessStatusDto | null }) => i.config.instance_id === id,
+      ) ?? null
     )
   })
 
@@ -277,18 +306,18 @@ function App() {
                     >
                       <div class="truncate text-sm text-slate-900 dark:text-slate-100">{i.config.instance_id}</div>
                       <div class="mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400">
-                        {i.config.template_id} • {i.status?.state ?? 'Stopped'}
-                        <Show when={i.status?.pid}> • pid {i.status?.pid}</Show>
+                        {i.config.template_id} • {instanceStateLabel(i.status)}
+                        <Show when={i.status?.pid != null}> • pid {i.status?.pid}</Show>
                       </div>
                     </button>
 
                     <div class="flex items-center gap-2">
                       <Show
-                        when={!i.status || i.status.state === 'Stopped'}
+                        when={canStartInstance(i.status)}
                         fallback={
                           <button
                             class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-900 shadow-sm hover:bg-slate-50 disabled:opacity-50 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:shadow-none"
-                            disabled={stopInstance.isPending}
+                            disabled={stopInstance.isPending || isStopping(i.status)}
                             onClick={async () => {
                               await stopInstance.mutateAsync({ instance_id: i.config.instance_id, timeout_ms: 30_000 })
                               await instances.refetch()
@@ -312,7 +341,7 @@ function App() {
 
                       <button
                         class="rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs text-rose-700 shadow-sm hover:bg-rose-100 disabled:opacity-50 dark:border-rose-900/50 dark:bg-rose-950/20 dark:text-rose-300 dark:shadow-none"
-                        disabled={deleteInstance.isPending}
+                        disabled={deleteInstance.isPending || !canStartInstance(i.status)}
                         onClick={async () => {
                           if (confirm('Delete instance?')) {
                             await deleteInstance.mutateAsync({ instance_id: i.config.instance_id })
