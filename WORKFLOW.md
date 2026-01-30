@@ -90,11 +90,11 @@ Notes:
 - Safety: web/control do NOT accept arbitrary `cmd`; use `ProcessKind` templates enforced by agent
 
 ### Phase 2 - Agent (gRPC)
-- [ ] Define gRPC protos: health, instance lifecycle, logs, filesystem APIs
+- [x] Define gRPC protos: health, instance lifecycle, logs, filesystem APIs
   - [x] Create `alloy-proto` codegen crate (build.rs + proto files)
-  - [ ] Filesystem API (agent): list/read small files under a scoped root
+  - [x] Filesystem API (agent): list/read small files under a scoped root
   - [x] Logs API (agent): tail file + cursor model (beyond process-only)
-  - [ ] Instance lifecycle API (agent): create/start/stop/delete instance (game-aware)
+  - [x] Instance lifecycle API (agent): create/start/stop/delete instance (game-aware)
 - [x] Implement `alloy-agent` gRPC server skeleton
   - [x] Implement `AgentHealthService` and listen on :50051
 
