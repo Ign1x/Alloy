@@ -18,6 +18,47 @@ use crate::templates;
 
 const LOG_MAX_LINES: usize = 1000;
 
+fn parse_java_major_from_version_line(first_line: &str) -> anyhow::Result<u32> {
+    // Typical formats:
+    // - openjdk version "21.0.2" 2024-01-16
+    // - java version "1.8.0_402"
+    // Some builds omit quotes:
+    // - openjdk 21.0.2 2024-01-16
+
+    let ver = if let Some(quoted) = first_line.split('"').nth(1) {
+        quoted
+    } else {
+        // Fall back to the first whitespace token that starts with a digit.
+        // This intentionally avoids parsing dates like 2024-01-16 because
+        // the version token appears earlier.
+        first_line
+            .split_whitespace()
+            .find(|t| t.chars().next().is_some_and(|c| c.is_ascii_digit()))
+            .ok_or_else(|| anyhow::anyhow!("failed to parse java version output: {first_line}"))?
+    };
+
+    let parse_leading_u32 = |s: &str| -> anyhow::Result<u32> {
+        let end = s.find(|c: char| !c.is_ascii_digit()).unwrap_or(s.len());
+        if end == 0 {
+            anyhow::bail!("failed to parse java major from: {ver}");
+        }
+        s[..end]
+            .parse::<u32>()
+            .map_err(|_| anyhow::anyhow!("failed to parse java major from: {ver}"))
+    };
+
+    let major = if ver.starts_with("1.") {
+        // Legacy "1.8.x" form.
+        let second = ver.split('.').nth(1).unwrap_or("");
+        parse_leading_u32(second)?
+    } else {
+        let first = ver.split('.').next().unwrap_or("");
+        parse_leading_u32(first)?
+    };
+
+    Ok(major)
+}
+
 fn detect_java_major() -> anyhow::Result<u32> {
     // Use the runtime `java` in PATH. We vendor Java 21 in the Docker image,
     // but this also supports local dev installs.
@@ -28,28 +69,50 @@ fn detect_java_major() -> anyhow::Result<u32> {
     let text = String::from_utf8_lossy(&out.stderr);
     let first = text.lines().next().unwrap_or_default();
 
-    // Typical formats:
-    // - openjdk version "21.0.2" 2024-01-16
-    // - java version "1.8.0_402"
-    let ver = first
-        .split('"')
-        .nth(1)
-        .ok_or_else(|| anyhow::anyhow!("failed to parse java version output: {first}"))?;
-    let major_str = ver.split('.').next().unwrap_or("");
-    let major = if major_str == "1" {
-        // Legacy "1.8.x" form.
-        ver.split('.')
-            .nth(1)
-            .unwrap_or("")
-            .parse::<u32>()
-            .map_err(|_| anyhow::anyhow!("failed to parse java major from: {ver}"))?
-    } else {
-        major_str
-            .parse::<u32>()
-            .map_err(|_| anyhow::anyhow!("failed to parse java major from: {ver}"))?
-    };
+    parse_java_major_from_version_line(first)
+}
 
-    Ok(major)
+#[cfg(test)]
+mod tests {
+    use super::parse_java_major_from_version_line;
+
+    #[test]
+    fn parse_java_major_modern_openjdk() {
+        let line = "openjdk version \"21.0.2\" 2024-01-16";
+        assert_eq!(parse_java_major_from_version_line(line).unwrap(), 21);
+    }
+
+    #[test]
+    fn parse_java_major_modern_no_quotes() {
+        let line = "openjdk 21.0.2 2024-01-16";
+        assert_eq!(parse_java_major_from_version_line(line).unwrap(), 21);
+    }
+
+    #[test]
+    fn parse_java_major_legacy_1_8() {
+        let line = "java version \"1.8.0_402\"";
+        assert_eq!(parse_java_major_from_version_line(line).unwrap(), 8);
+    }
+
+    #[test]
+    fn parse_java_major_bare_major() {
+        let line = "openjdk version 17.0.9 2023-10-17";
+        assert_eq!(parse_java_major_from_version_line(line).unwrap(), 17);
+    }
+
+    #[test]
+    fn parse_java_major_rejects_garbage() {
+        let err = parse_java_major_from_version_line("not java").unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("failed to parse java version output"));
+    }
+
+    #[test]
+    fn parse_java_major_rejects_non_numeric() {
+        let err = parse_java_major_from_version_line("openjdk version \"abc\"").unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("failed to parse java major"));
+    }
 }
 
 #[derive(Debug)]
