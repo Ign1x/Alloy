@@ -1,0 +1,78 @@
+syntax = "proto3";
+
+package alloy.agent.v1;
+
+import "alloy/agent/v1/process.proto";
+
+// InstanceService manages persisted game instances.
+//
+// An instance is a named/configured unit that can be started/stopped multiple
+// times. For the MVP, instance_id is also used as the process_id when running.
+service InstanceService {
+  rpc Create(CreateInstanceRequest) returns (CreateInstanceResponse);
+  rpc Get(GetInstanceRequest) returns (GetInstanceResponse);
+  rpc List(ListInstancesRequest) returns (ListInstancesResponse);
+  rpc Start(StartInstanceRequest) returns (StartInstanceResponse);
+  rpc Stop(StopInstanceRequest) returns (StopInstanceResponse);
+  rpc Delete(DeleteInstanceRequest) returns (DeleteInstanceResponse);
+}
+
+message InstanceConfig {
+  string instance_id = 1;
+  string template_id = 2;
+  map<string, string> params = 3;
+}
+
+message InstanceInfo {
+  InstanceConfig config = 1;
+  // Present when the instance is currently tracked by the process manager.
+  ProcessStatus status = 2;
+}
+
+message CreateInstanceRequest {
+  string template_id = 1;
+  map<string, string> params = 2;
+}
+
+message CreateInstanceResponse {
+  InstanceConfig config = 1;
+}
+
+message GetInstanceRequest {
+  string instance_id = 1;
+}
+
+message GetInstanceResponse {
+  InstanceInfo info = 1;
+}
+
+message ListInstancesRequest {}
+
+message ListInstancesResponse {
+  repeated InstanceInfo instances = 1;
+}
+
+message StartInstanceRequest {
+  string instance_id = 1;
+}
+
+message StartInstanceResponse {
+  ProcessStatus status = 1;
+}
+
+message StopInstanceRequest {
+  string instance_id = 1;
+  uint32 timeout_ms = 2;
+}
+
+message StopInstanceResponse {
+  ProcessStatus status = 1;
+}
+
+message DeleteInstanceRequest {
+  string instance_id = 1;
+}
+
+message DeleteInstanceResponse {
+  bool ok = 1;
+}
