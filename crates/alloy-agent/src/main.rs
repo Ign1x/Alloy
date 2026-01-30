@@ -7,6 +7,7 @@ use alloy_proto::agent_v1::{HealthCheckRequest, HealthCheckResponse};
 use tonic::{Request, Response, Status, transport::Server};
 
 mod minecraft;
+mod minecraft_download;
 mod process_manager;
 mod process_service;
 mod templates;

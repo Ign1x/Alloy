@@ -12,6 +12,7 @@ use tokio::{
 };
 
 use crate::minecraft;
+use crate::minecraft_download;
 use crate::templates;
 
 const LOG_MAX_LINES: usize = 1000;
@@ -137,9 +138,29 @@ impl ProcessManager {
             let mc = minecraft::validate_vanilla_params(&params)?;
             let dir = minecraft::instance_dir(&id.0);
             minecraft::ensure_vanilla_instance_layout(&dir, &mc)?;
-            anyhow::bail!(
-                "minecraft:vanilla runtime not implemented yet (jar download/launch pending)"
-            );
+
+            let resolved = minecraft_download::resolve_server_jar(&mc.version).await?;
+            if resolved.java_major != 21 {
+                anyhow::bail!(
+                    "unsupported java major for this version: {} (expected 21)",
+                    resolved.java_major
+                );
+            }
+            let cached_jar = minecraft_download::ensure_server_jar(&resolved).await?;
+
+            let instance_jar = dir.join("server.jar");
+            if !instance_jar.exists() {
+                #[cfg(unix)]
+                {
+                    std::os::unix::fs::symlink(&cached_jar, &instance_jar)?;
+                }
+                #[cfg(not(unix))]
+                {
+                    std::fs::copy(&cached_jar, &instance_jar)?;
+                }
+            }
+
+            anyhow::bail!("minecraft:vanilla launch not implemented yet (java run pending)");
         }
 
         let mut cmd = Command::new(&t.command);
