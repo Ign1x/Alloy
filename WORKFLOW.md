@@ -121,7 +121,7 @@ Definition of Done (must be true):
 
 Defaults (recorded):
 - EULA: require explicit `accept_eula=true` in params
-- Java: 21 (read `javaVersion.majorVersion` from version json; refuse if not 21 for now)
+- Java: agent image ships Java 21 (Temurin) and checks Mojang `javaVersion.majorVersion` against the local runtime
 - Port: 25565 (configurable in params)
 - Memory: `memory_mb` integer (default 2048)
 
