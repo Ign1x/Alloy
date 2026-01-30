@@ -1,7 +1,9 @@
 use alloy_proto::agent_v1::{
+    ListDirRequest, ReadFileRequest,
     GetStatusRequest, HealthCheckRequest, ListProcessesRequest, ListTemplatesRequest,
     StartFromTemplateRequest, StopProcessRequest, TailLogsRequest,
     agent_health_service_client::AgentHealthServiceClient,
+    filesystem_service_client::FilesystemServiceClient,
     process_service_client::ProcessServiceClient,
 };
 use rspc::{Procedure, ProcedureError, ResolverError, Router};
@@ -84,6 +86,45 @@ pub struct TailLogsInput {
 pub struct TailLogsOutput {
     pub lines: Vec<String>,
     pub next_cursor: String,
+}
+
+#[derive(Debug, Clone, serde::Deserialize, Type)]
+pub struct ListDirInput {
+    pub path: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, Type)]
+pub struct DirEntryDto {
+    pub name: String,
+    pub is_dir: bool,
+    pub size_bytes: u32,
+}
+
+#[derive(Debug, Clone, serde::Serialize, Type)]
+pub struct ListDirOutput {
+    pub entries: Vec<DirEntryDto>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize, Type)]
+pub struct ReadFileInput {
+    pub path: String,
+    pub offset: Option<u32>,
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, Type)]
+pub struct ReadFileOutput {
+    // For MVP: return as UTF-8 text (logs/config). Binary files are not supported yet.
+    pub text: String,
+    pub size_bytes: u32,
+}
+
+fn clamp_u64_to_u32(v: u64) -> u32 {
+    if v > u32::MAX as u64 {
+        u32::MAX
+    } else {
+        v as u32
+    }
 }
 
 pub fn router() -> Router<Ctx> {
@@ -379,8 +420,79 @@ pub fn router() -> Router<Ctx> {
             }),
         );
 
+    let fs = Router::new()
+        .procedure(
+            "listDir",
+            Procedure::builder::<ApiError>().query(|_, input: ListDirInput| async move {
+                let agent_endpoint = std::env::var("ALLOY_AGENT_ENDPOINT")
+                    .unwrap_or_else(|_| "http://127.0.0.1:50051".to_string());
+                let mut client = FilesystemServiceClient::connect(agent_endpoint.clone())
+                    .await
+                    .map_err(|e| ApiError {
+                        message: format!("failed to connect agent ({agent_endpoint}): {e}"),
+                    })?;
+
+                let resp = client
+                    .list_dir(Request::new(ListDirRequest {
+                        path: input.path.unwrap_or_default(),
+                    }))
+                    .await
+                    .map_err(|e| ApiError {
+                        message: format!("list_dir failed: {e}"),
+                    })?
+                    .into_inner();
+
+                Ok(ListDirOutput {
+                    entries: resp
+                        .entries
+                        .into_iter()
+                        .map(|e| DirEntryDto {
+                            name: e.name,
+                            is_dir: e.is_dir,
+                            size_bytes: clamp_u64_to_u32(e.size_bytes),
+                        })
+                        .collect(),
+                })
+            }),
+        )
+        .procedure(
+            "readFile",
+            Procedure::builder::<ApiError>().query(|_, input: ReadFileInput| async move {
+                let agent_endpoint = std::env::var("ALLOY_AGENT_ENDPOINT")
+                    .unwrap_or_else(|_| "http://127.0.0.1:50051".to_string());
+                let mut client = FilesystemServiceClient::connect(agent_endpoint.clone())
+                    .await
+                    .map_err(|e| ApiError {
+                        message: format!("failed to connect agent ({agent_endpoint}): {e}"),
+                    })?;
+
+                let resp = client
+                    .read_file(Request::new(ReadFileRequest {
+                        path: input.path,
+                        offset: input.offset.unwrap_or(0) as u64,
+                        limit: input.limit.unwrap_or(0) as u64,
+                    }))
+                    .await
+                    .map_err(|e| ApiError {
+                        message: format!("read_file failed: {e}"),
+                    })?
+                    .into_inner();
+
+                let text = String::from_utf8(resp.data)
+                    .map_err(|_| ApiError {
+                        message: "file is not valid utf-8".to_string(),
+                    })?;
+
+                Ok(ReadFileOutput {
+                    text,
+                    size_bytes: clamp_u64_to_u32(resp.size_bytes),
+                })
+            }),
+        );
+
     Router::new()
         .nest("control", control)
         .nest("agent", agent)
         .nest("process", process)
+        .nest("fs", fs)
 }
