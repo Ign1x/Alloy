@@ -198,8 +198,16 @@ impl ProcessManager {
         }
 
         // Keep the ID stable (instance_id == process_id for MVP).
-        if self.get_status(process_id).await.is_some() {
-            anyhow::bail!("process_id already exists: {process_id}");
+        // Allow restarting after exit/failure by replacing the old entry.
+        {
+            let mut inner = self.inner.lock().await;
+            if let Some(existing) = inner.get(process_id)
+                && matches!(existing.state, ProcessState::Running | ProcessState::Starting | ProcessState::Stopping)
+            {
+                anyhow::bail!("process_id already running: {process_id}");
+            }
+            // Remove any stale entry so we can re-use the same id.
+            inner.remove(process_id);
         }
 
         let base = templates::find_template(template_id)
