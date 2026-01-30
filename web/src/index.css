@@ -1,5 +1,10 @@
 @import "tailwindcss";
 
+/* Let the UA style built-in controls to match system theme. */
+:root {
+  color-scheme: light dark;
+}
+
 html,
 body {
   height: 100%;

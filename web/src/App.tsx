@@ -60,51 +60,51 @@ function App() {
   }
 
   return (
-    <main class="min-h-screen bg-gradient-to-b from-slate-50 via-white to-slate-100 text-slate-900">
+    <main class="min-h-screen bg-gradient-to-b from-slate-50 via-white to-slate-100 text-slate-900 dark:from-slate-950 dark:via-slate-950 dark:to-slate-900 dark:text-slate-100">
       <div class="mx-auto max-w-5xl px-6 py-10">
         <header class="flex items-baseline justify-between gap-6">
           <h1 class="text-4xl font-semibold tracking-tight">Alloy</h1>
-          <div class="text-xs uppercase tracking-[0.2em] text-slate-500">control plane</div>
+          <div class="text-xs uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">control plane</div>
         </header>
 
-        <p class="mt-4 max-w-2xl text-sm leading-6 text-slate-600">
+        <p class="mt-4 max-w-2xl text-sm leading-6 text-slate-600 dark:text-slate-300">
           Rust (Axum + SeaORM) as the control plane, gRPC (Tonic) to agents, and SolidJS + Tailwind v4 for the web UI.
         </p>
 
 
         <section class="mt-8 grid gap-4 sm:grid-cols-2">
-          <div class="rounded-2xl border border-slate-200 bg-white/80 p-5 shadow-sm">
+          <div class="rounded-2xl border border-slate-200 bg-white/80 p-5 shadow-sm dark:border-slate-800/80 dark:bg-slate-900/40 dark:shadow-none">
             <div class="text-sm font-medium">Backend</div>
             <div class="mt-2 flex items-center gap-2">
               <span
                 class={`h-2.5 w-2.5 rounded-full ${statusDotClass({ loading: ping.isPending, error: ping.isError })}`}
               />
-              <span class="text-sm text-slate-800">
+              <span class="text-sm text-slate-800 dark:text-slate-200">
                 {ping.isPending ? 'checking...' : ping.isError ? 'offline' : 'online'}
               </span>
             </div>
-            <div class="mt-4 text-xs text-slate-500">
+            <div class="mt-4 text-xs text-slate-500 dark:text-slate-400">
               rspc: <span class="font-mono">control.ping</span>
             </div>
-            <div class="mt-2 text-xs text-slate-600">
+            <div class="mt-2 text-xs text-slate-600 dark:text-slate-500">
               {ping.isError ? pingErrorMessage() : ping.data ? `version: ${ping.data.version}` : ''}
             </div>
           </div>
 
-          <div class="rounded-2xl border border-slate-200 bg-white/80 p-5 shadow-sm">
+          <div class="rounded-2xl border border-slate-200 bg-white/80 p-5 shadow-sm dark:border-slate-800/80 dark:bg-slate-900/40 dark:shadow-none">
             <div class="text-sm font-medium">Agent</div>
             <div class="mt-2 flex items-center gap-2">
               <span
                 class={`h-2.5 w-2.5 rounded-full ${statusDotClass({ loading: agentHealth.isPending, error: agentHealth.isError })}`}
               />
-              <span class="text-sm text-slate-800">
+              <span class="text-sm text-slate-800 dark:text-slate-200">
                 {agentHealth.isPending ? 'checking...' : agentHealth.isError ? 'offline' : 'online'}
               </span>
             </div>
-            <div class="mt-4 text-xs text-slate-500">
+            <div class="mt-4 text-xs text-slate-500 dark:text-slate-400">
               rspc: <span class="font-mono">agent.health</span>
             </div>
-            <div class="mt-2 text-xs text-slate-600">
+            <div class="mt-2 text-xs text-slate-600 dark:text-slate-500">
               {agentHealth.isError
                 ? 'failed to reach agent'
                 : agentHealth.data
@@ -115,15 +115,15 @@ function App() {
         </section>
 
         <section class="mt-8 grid gap-4 lg:grid-cols-3">
-          <div class="rounded-2xl border border-slate-200 bg-white/80 p-5 shadow-sm lg:col-span-1">
+          <div class="rounded-2xl border border-slate-200 bg-white/80 p-5 shadow-sm dark:border-slate-800/80 dark:bg-slate-900/40 dark:shadow-none lg:col-span-1">
             <div class="text-sm font-medium">Processes</div>
-            <div class="mt-2 text-xs text-slate-500">rspc: process.* (template-based)</div>
+            <div class="mt-2 text-xs text-slate-500 dark:text-slate-400">rspc: process.* (template-based)</div>
 
             <div class="mt-4 space-y-3">
-              <label class="block text-xs text-slate-700">
+              <label class="block text-xs text-slate-700 dark:text-slate-300">
                 Template
                 <select
-                  class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-300"
+                  class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-300 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:focus:border-slate-600 dark:focus:ring-slate-600"
                   value={selectedTemplate()}
                   onInput={(e) => setSelectedTemplate(e.currentTarget.value)}
                 >
@@ -138,10 +138,10 @@ function App() {
               </label>
 
               <Show when={selectedTemplate() === 'demo:sleep'}>
-                <label class="block text-xs text-slate-700">
+                <label class="block text-xs text-slate-700 dark:text-slate-300">
                   seconds
                   <input
-                    class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-300"
+                    class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-300 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:focus:border-slate-600 dark:focus:ring-slate-600"
                     value={sleepSeconds()}
                     onInput={(e) => setSleepSeconds(e.currentTarget.value)}
                   />
@@ -149,22 +149,25 @@ function App() {
               </Show>
 
               <Show when={selectedTemplate() === 'minecraft:vanilla'}>
-                <div class="space-y-3 border-t border-slate-200 pt-3">
+                <div class="space-y-3 border-t border-slate-200 pt-3 dark:border-slate-800/50">
                   <div class="flex items-start gap-3">
                     <input
                       id="mc-eula"
                       type="checkbox"
-                      class="mt-1 h-4 w-4 rounded border-slate-300 bg-white text-slate-700 focus:ring-slate-400 focus:ring-offset-white"
+                      class="mt-1 h-4 w-4 rounded border-slate-300 bg-white text-slate-700 focus:ring-slate-400 focus:ring-offset-white dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-500 dark:focus:ring-slate-500 dark:focus:ring-offset-slate-900"
                       checked={mcEula()}
                       onChange={(e) => setMcEula(e.currentTarget.checked)}
                     />
-                    <label for="mc-eula" class="text-xs leading-tight text-slate-700 select-none">
+                    <label
+                      for="mc-eula"
+                      class="text-xs leading-tight text-slate-700 select-none dark:text-slate-300"
+                    >
                       I agree to the{' '}
                       <a
                         href="https://account.mojang.com/documents/minecraft_eula"
                         target="_blank"
                         rel="noreferrer noopener"
-                        class="text-indigo-600 hover:text-indigo-500 underline"
+                        class="text-indigo-600 hover:text-indigo-500 underline dark:text-indigo-400 dark:hover:text-indigo-300"
                       >
                         Minecraft EULA
                       </a>
@@ -173,39 +176,39 @@ function App() {
                   </div>
 
                   <div class="grid grid-cols-2 gap-3">
-                    <label class="block text-xs text-slate-700">
+                    <label class="block text-xs text-slate-700 dark:text-slate-300">
                       Version
                       <input
-                        class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder-slate-400 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-300"
+                        class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder-slate-400 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-300 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:placeholder-slate-600 dark:focus:border-slate-600 dark:focus:ring-slate-600"
                         value={mcVersion()}
                         onInput={(e) => setMcVersion(e.currentTarget.value)}
                         placeholder="latest_release"
                       />
                     </label>
 
-                    <label class="block text-xs text-slate-700">
+                    <label class="block text-xs text-slate-700 dark:text-slate-300">
                       Memory (MB)
                       <input
                         type="number"
-                        class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-300"
+                        class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-300 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:focus:border-slate-600 dark:focus:ring-slate-600"
                         value={mcMemory()}
                         onInput={(e) => setMcMemory(e.currentTarget.value)}
                       />
                     </label>
                   </div>
 
-                  <label class="block text-xs text-slate-700">
+                  <label class="block text-xs text-slate-700 dark:text-slate-300">
                     Port
                     <input
                       type="number"
-                      class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-300"
+                      class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-300 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:focus:border-slate-600 dark:focus:ring-slate-600"
                       value={mcPort()}
                       onInput={(e) => setMcPort(e.currentTarget.value)}
                     />
                   </label>
 
                   <Show when={mcError()}>
-                    <div class="text-xs text-rose-700 bg-rose-50 border border-rose-200 p-2 rounded animate-pulse">
+                    <div class="text-xs text-rose-700 bg-rose-50 border border-rose-200 p-2 rounded animate-pulse dark:text-rose-300 dark:bg-rose-950/20 dark:border-rose-900/50">
                       {mcError()}
                     </div>
                   </Show>
@@ -245,11 +248,11 @@ function App() {
             </div>
           </div>
 
-          <div class="rounded-2xl border border-slate-200 bg-white/80 p-5 shadow-sm lg:col-span-2">
+          <div class="rounded-2xl border border-slate-200 bg-white/80 p-5 shadow-sm dark:border-slate-800/80 dark:bg-slate-900/40 dark:shadow-none lg:col-span-2">
             <div class="flex items-center justify-between gap-4">
               <div class="text-sm font-medium">Running (agent memory)</div>
               <button
-                class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-900 shadow-sm hover:bg-slate-50"
+                class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-900 shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:shadow-none"
                 onClick={() => processes.refetch()}
               >
                 Refresh
@@ -260,23 +263,23 @@ function App() {
               <For each={processes.data ?? []}>
                 {(p) => (
                   <div
-                    class={`flex items-center justify-between gap-4 rounded-xl border border-slate-200 bg-white/70 px-3 py-2 ${
-                      selectedProcessId() === p.process_id ? 'ring-1 ring-slate-300' : ''
+                    class={`flex items-center justify-between gap-4 rounded-xl border border-slate-200 bg-white/70 px-3 py-2 dark:border-slate-800/70 dark:bg-slate-950/40 ${
+                      selectedProcessId() === p.process_id ? 'ring-1 ring-slate-300 dark:ring-slate-600' : ''
                     }`}
                   >
                     <button
                       class="min-w-0 flex-1 text-left"
                       onClick={() => setSelectedProcessId(p.process_id)}
                     >
-                      <div class="truncate text-sm text-slate-900">{p.process_id}</div>
-                      <div class="mt-0.5 truncate text-xs text-slate-500">
+                      <div class="truncate text-sm text-slate-900 dark:text-slate-100">{p.process_id}</div>
+                      <div class="mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400">
                         {p.template_id} • {p.state}
                         <Show when={p.pid !== null}> • pid {p.pid}</Show>
                       </div>
                     </button>
 
                     <button
-                      class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-900 shadow-sm hover:bg-slate-50 disabled:opacity-50"
+                      class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-900 shadow-sm hover:bg-slate-50 disabled:opacity-50 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:shadow-none"
                       disabled={stopProcess.isPending}
                       onClick={async () => {
                         await stopProcess.mutateAsync({ process_id: p.process_id, timeout_ms: 30_000 })
@@ -290,7 +293,7 @@ function App() {
               </For>
 
               <Show when={(processes.data ?? []).length === 0}>
-                <div class="rounded-xl border border-dashed border-slate-200 bg-white/50 p-6 text-sm text-slate-500">
+                <div class="rounded-xl border border-dashed border-slate-200 bg-white/50 p-6 text-sm text-slate-500 dark:border-slate-800/70 dark:bg-slate-950/20 dark:text-slate-400">
                   no processes yet
                 </div>
               </Show>
@@ -298,16 +301,16 @@ function App() {
 
             <Show when={selectedProcess()}>
               {(p) => (
-                <div class="mt-4 rounded-xl border border-slate-200 bg-white/70 p-4">
+                <div class="mt-4 rounded-xl border border-slate-200 bg-white/70 p-4 dark:border-slate-800/70 dark:bg-slate-950/40">
                   <div class="flex items-center justify-between gap-4">
-                    <div class="text-xs text-slate-600">
+                    <div class="text-xs text-slate-600 dark:text-slate-300">
                       logs: <span class="font-mono">{p().process_id}</span>
                     </div>
                     <div class="text-xs text-slate-500">
                       {logs.isPending ? 'loading...' : logs.isError ? 'error' : 'live'}
                     </div>
                   </div>
-                  <pre class="mt-2 max-h-64 overflow-auto rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-800">
+                  <pre class="mt-2 max-h-64 overflow-auto rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-800 dark:border-slate-800 dark:bg-slate-950/70 dark:text-slate-200">
                     <For each={logs.data?.lines ?? []}>{(l) => <div class="whitespace-pre-wrap">{l}</div>}</For>
                   </pre>
                 </div>
@@ -318,10 +321,14 @@ function App() {
 
         <footer class="mt-10 flex flex-wrap items-center justify-between gap-4 text-xs text-slate-500">
           <div>
-            UI stack: <span class="text-slate-700">SolidJS</span> + <span class="text-slate-700">Tailwind v4</span>
+            UI stack:{' '}
+            <span class="text-slate-700 dark:text-slate-300">SolidJS</span> +{' '}
+            <span class="text-slate-700 dark:text-slate-300">Tailwind v4</span>
           </div>
           <div>
-            Next: <span class="text-slate-700">process supervision</span> + <span class="text-slate-700">templates</span>
+            Next:{' '}
+            <span class="text-slate-700 dark:text-slate-300">process supervision</span> +{' '}
+            <span class="text-slate-700 dark:text-slate-300">templates</span>
           </div>
         </footer>
       </div>
