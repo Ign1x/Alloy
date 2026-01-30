@@ -16,9 +16,17 @@ edition = "2024"
 [workspace.dependencies]
 anyhow = "1"
 axum = "0.7"
+axum-extra = { version = "0.9", features = ["cookie"] }
 prost = "0.13"
 rspc = { version = "0.4.1", features = ["typescript"] }
 rspc-axum = "0.3.0"
+sea-orm = { version = "1.1", features = ["sqlx-postgres", "runtime-tokio-rustls", "macros", "with-uuid", "with-chrono"] }
+sea-orm-migration = { version = "1.1", features = ["runtime-tokio-rustls", "sqlx-postgres"] }
+jsonwebtoken = "9"
+argon2 = "0.5"
+rand = "0.8"
+time = { version = "0.3", features = ["macros", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
 specta = { version = "2.0.0-rc.22", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

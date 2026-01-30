@@ -6,13 +6,23 @@ edition = "2024"
 [dependencies]
 alloy-proto = { path = "../alloy-proto" }
 alloy-process = { path = "../alloy-process" }
+alloy-db = { path = "../alloy-db" }
+alloy-migration = { path = "../alloy-migration" }
 anyhow = { workspace = true }
 axum = { workspace = true }
+axum-extra = { workspace = true }
+argon2 = { workspace = true }
+chrono = { workspace = true }
+jsonwebtoken = { workspace = true }
+rand = { workspace = true }
 rspc = { workspace = true }
 rspc-axum = { workspace = true }
+sea-orm = { workspace = true }
+sea-orm-migration = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 specta = { workspace = true, features = ["derive"] }
+time = { workspace = true }
 tokio = { workspace = true }
 tonic = { workspace = true }
 tracing = { workspace = true }
