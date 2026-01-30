@@ -19,7 +19,7 @@ dependencies = [
 
 [[package]]
 name = "alloy-agent"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "alloy-process",
  "alloy-proto",
@@ -38,7 +38,7 @@ dependencies = [
 
 [[package]]
 name = "alloy-control"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "alloy-process",
  "alloy-proto",
@@ -57,19 +57,19 @@ dependencies = [
 
 [[package]]
 name = "alloy-core"
-version = "0.1.0"
+version = "0.2.0"
 
 [[package]]
 name = "alloy-db"
-version = "0.1.0"
+version = "0.2.0"
 
 [[package]]
 name = "alloy-migration"
-version = "0.1.0"
+version = "0.2.0"
 
 [[package]]
 name = "alloy-process"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde",
  "specta",
@@ -78,7 +78,7 @@ dependencies = [
 
 [[package]]
 name = "alloy-proto"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "prost",
  "tonic",
