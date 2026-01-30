@@ -1,5 +1,6 @@
 import { rspc } from './rspc'
 import { createMemo, createSignal, For, Show } from 'solid-js'
+import type { InstanceConfigDto, ProcessStatusDto } from './bindings'
 
 function statusDotClass(state: { loading: boolean; error: boolean }) {
   if (state.loading) return 'bg-slate-600 animate-pulse'
@@ -12,10 +13,12 @@ function App() {
   const agentHealth = rspc.createQuery(() => ['agent.health', null])
 
   const templates = rspc.createQuery(() => ['process.templates', null])
-  const processes = rspc.createQuery(() => ['process.list', null])
+  const instances = rspc.createQuery(() => ['instance.list', null])
 
-  const startProcess = rspc.createMutation(() => 'process.start')
-  const stopProcess = rspc.createMutation(() => 'process.stop')
+  const createInstance = rspc.createMutation(() => 'instance.create')
+  const startInstance = rspc.createMutation(() => 'instance.start')
+  const stopInstance = rspc.createMutation(() => 'instance.stop')
+  const deleteInstance = rspc.createMutation(() => 'instance.delete')
 
   const [selectedTemplate, setSelectedTemplate] = createSignal<string>('demo:sleep')
   const [sleepSeconds, setSleepSeconds] = createSignal<string>('60')
@@ -26,27 +29,28 @@ function App() {
   const [mcPort, setMcPort] = createSignal('25565')
   const [mcError, setMcError] = createSignal<string | null>(null)
 
-  const [selectedProcessId, setSelectedProcessId] = createSignal<string | null>(null)
+  const [selectedInstanceId, setSelectedInstanceId] = createSignal<string | null>(null)
+  
   const logs = rspc.createQuery(
     () => [
       'process.logsTail',
       {
-        process_id: selectedProcessId() ?? '',
+        process_id: selectedInstanceId() ?? '',
         cursor: null,
         limit: 200,
       },
     ],
     () => ({
-      enabled: !!selectedProcessId(),
+      enabled: !!selectedInstanceId(),
       refetchInterval: 1000,
     }),
   )
 
-  const selectedProcess = createMemo(() => {
-    const id = selectedProcessId()
+  const selectedInstance = createMemo(() => {
+    const id = selectedInstanceId()
     if (!id) return null
     return (
-      (processes.data ?? []).find((p: { process_id: string }) => p.process_id === id) ?? null
+      (instances.data ?? []).find((i: { config: InstanceConfigDto; status: ProcessStatusDto | null }) => i.config.instance_id === id) ?? null
     )
   })
 
@@ -116,8 +120,8 @@ function App() {
 
         <section class="mt-8 grid gap-4 lg:grid-cols-3">
           <div class="rounded-2xl border border-slate-200 bg-white/80 p-5 shadow-sm dark:border-slate-800/80 dark:bg-slate-900/40 dark:shadow-none lg:col-span-1">
-            <div class="text-sm font-medium">Processes</div>
-            <div class="mt-2 text-xs text-slate-500 dark:text-slate-400">rspc: process.* (template-based)</div>
+            <div class="text-sm font-medium">Create Instance</div>
+            <div class="mt-2 text-xs text-slate-500 dark:text-slate-400">rspc: instance.create</div>
 
             <div class="mt-4 space-y-3">
               <label class="block text-xs text-slate-700 dark:text-slate-300">
@@ -217,7 +221,7 @@ function App() {
 
               <button
                 class="w-full rounded-lg bg-slate-200 px-3 py-2 text-sm font-medium text-slate-900 disabled:opacity-50"
-                disabled={startProcess.isPending}
+                disabled={createInstance.isPending}
                 onClick={async () => {
                   const template_id = selectedTemplate()
                   const params: Record<string, string> = {}
@@ -236,75 +240,109 @@ function App() {
                     params.port = mcPort() || '25565'
                   }
 
-                  await startProcess.mutateAsync({ template_id, params })
-                  await processes.refetch()
+                  await createInstance.mutateAsync({ template_id, params })
+                  await instances.refetch()
                 }}
               >
-                {startProcess.isPending ? 'Starting...' : 'Start'}
+                {createInstance.isPending ? 'Creating...' : 'Create Instance'}
               </button>
-              <Show when={startProcess.isError}>
-                <div class="text-xs text-rose-300">start failed</div>
+              <Show when={createInstance.isError}>
+                <div class="text-xs text-rose-300">create failed</div>
               </Show>
             </div>
           </div>
 
           <div class="rounded-2xl border border-slate-200 bg-white/80 p-5 shadow-sm dark:border-slate-800/80 dark:bg-slate-900/40 dark:shadow-none lg:col-span-2">
             <div class="flex items-center justify-between gap-4">
-              <div class="text-sm font-medium">Running (agent memory)</div>
+              <div class="text-sm font-medium">Instances</div>
               <button
                 class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-900 shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:shadow-none"
-                onClick={() => processes.refetch()}
+                onClick={() => instances.refetch()}
               >
                 Refresh
               </button>
             </div>
 
             <div class="mt-3 grid gap-2">
-              <For each={processes.data ?? []}>
-                {(p) => (
+              <For each={instances.data ?? []}>
+                {(i) => (
                   <div
                     class={`flex items-center justify-between gap-4 rounded-xl border border-slate-200 bg-white/70 px-3 py-2 dark:border-slate-800/70 dark:bg-slate-950/40 ${
-                      selectedProcessId() === p.process_id ? 'ring-1 ring-slate-300 dark:ring-slate-600' : ''
+                      selectedInstanceId() === i.config.instance_id ? 'ring-1 ring-slate-300 dark:ring-slate-600' : ''
                     }`}
                   >
                     <button
                       class="min-w-0 flex-1 text-left"
-                      onClick={() => setSelectedProcessId(p.process_id)}
+                      onClick={() => setSelectedInstanceId(i.config.instance_id)}
                     >
-                      <div class="truncate text-sm text-slate-900 dark:text-slate-100">{p.process_id}</div>
+                      <div class="truncate text-sm text-slate-900 dark:text-slate-100">{i.config.instance_id}</div>
                       <div class="mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400">
-                        {p.template_id} • {p.state}
-                        <Show when={p.pid !== null}> • pid {p.pid}</Show>
+                        {i.config.template_id} • {i.status?.state ?? 'Stopped'}
+                        <Show when={i.status?.pid}> • pid {i.status?.pid}</Show>
                       </div>
                     </button>
 
-                    <button
-                      class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-900 shadow-sm hover:bg-slate-50 disabled:opacity-50 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:shadow-none"
-                      disabled={stopProcess.isPending}
-                      onClick={async () => {
-                        await stopProcess.mutateAsync({ process_id: p.process_id, timeout_ms: 30_000 })
-                        await processes.refetch()
-                      }}
-                    >
-                      Stop
-                    </button>
+                    <div class="flex items-center gap-2">
+                      <Show
+                        when={!i.status || i.status.state === 'Stopped'}
+                        fallback={
+                          <button
+                            class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-900 shadow-sm hover:bg-slate-50 disabled:opacity-50 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:shadow-none"
+                            disabled={stopInstance.isPending}
+                            onClick={async () => {
+                              await stopInstance.mutateAsync({ instance_id: i.config.instance_id, timeout_ms: 30_000 })
+                              await instances.refetch()
+                            }}
+                          >
+                            Stop
+                          </button>
+                        }
+                      >
+                        <button
+                          class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-900 shadow-sm hover:bg-slate-50 disabled:opacity-50 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:shadow-none"
+                          disabled={startInstance.isPending}
+                          onClick={async () => {
+                            await startInstance.mutateAsync({ instance_id: i.config.instance_id })
+                            await instances.refetch()
+                          }}
+                        >
+                          Start
+                        </button>
+                      </Show>
+
+                      <button
+                        class="rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs text-rose-700 shadow-sm hover:bg-rose-100 disabled:opacity-50 dark:border-rose-900/50 dark:bg-rose-950/20 dark:text-rose-300 dark:shadow-none"
+                        disabled={deleteInstance.isPending}
+                        onClick={async () => {
+                          if (confirm('Delete instance?')) {
+                            await deleteInstance.mutateAsync({ instance_id: i.config.instance_id })
+                            if (selectedInstanceId() === i.config.instance_id) {
+                              setSelectedInstanceId(null)
+                            }
+                            await instances.refetch()
+                          }
+                        }}
+                      >
+                        Del
+                      </button>
+                    </div>
                   </div>
                 )}
               </For>
 
-              <Show when={(processes.data ?? []).length === 0}>
+              <Show when={(instances.data ?? []).length === 0}>
                 <div class="rounded-xl border border-dashed border-slate-200 bg-white/50 p-6 text-sm text-slate-500 dark:border-slate-800/70 dark:bg-slate-950/20 dark:text-slate-400">
-                  no processes yet
+                  no instances created yet
                 </div>
               </Show>
             </div>
 
-            <Show when={selectedProcess()}>
-              {(p) => (
+            <Show when={selectedInstance()}>
+              {(i) => (
                 <div class="mt-4 rounded-xl border border-slate-200 bg-white/70 p-4 dark:border-slate-800/70 dark:bg-slate-950/40">
                   <div class="flex items-center justify-between gap-4">
                     <div class="text-xs text-slate-600 dark:text-slate-300">
-                      logs: <span class="font-mono">{p().process_id}</span>
+                      logs: <span class="font-mono">{i().config.instance_id}</span>
                     </div>
                     <div class="text-xs text-slate-500">
                       {logs.isPending ? 'loading...' : logs.isError ? 'error' : 'live'}
