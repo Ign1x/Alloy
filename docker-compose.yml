@@ -1,0 +1,44 @@
+services:
+  alloy-agent:
+    build:
+      context: .
+      dockerfile: deploy/agent.Dockerfile
+    # gRPC is used only inside the compose network by default.
+    expose:
+      - "50051"
+    # Publish the Minecraft server port to the host.
+    ports:
+      - "25565:25565"
+    environment:
+      - RUST_LOG=info
+      - ALLOY_DATA_ROOT=/data
+    volumes:
+      - alloy-agent-data:/data
+    restart: unless-stopped
+
+  alloy-control:
+    build:
+      context: .
+      dockerfile: deploy/control.Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - RUST_LOG=info
+      # gRPC target for alloy-agent inside the compose network.
+      - ALLOY_AGENT_ENDPOINT=http://alloy-agent:50051
+    depends_on:
+      - alloy-agent
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: deploy/web.Dockerfile
+    ports:
+      - "3000:80"
+    depends_on:
+      - alloy-control
+    restart: unless-stopped
+
+volumes:
+  alloy-agent-data:
