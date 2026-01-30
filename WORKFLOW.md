@@ -108,3 +108,29 @@ Notes:
 ### Phase 5 - Game plugins
 - [ ] Minecraft adapter (parity with legacy core features)
 - [ ] Terraria adapter (prove multi-game extensibility)
+
+---
+
+## Milestone 1 - Minecraft Vanilla (real)
+Definition of Done (must be true):
+- Agent exposes a template `minecraft:vanilla` (no arbitrary cmd from web/control)
+- Agent downloads vanilla server.jar from Mojang piston-meta, verifies sha1, caches it under a persistent data root
+- Agent creates an instance dir, writes `eula.txt` after explicit acceptance, and sets `server.properties` (server-port)
+- Start/stop works end-to-end from web UI, logs are visible via tail, and stop is graceful (stdin `stop\n`) with TERM/KILL fallback
+- Docker compose mounts persistent `/data` for agent (instance+cache) and publishes port `25565`
+
+Defaults (recorded):
+- EULA: require explicit `accept_eula=true` in params
+- Java: 21 (read `javaVersion.majorVersion` from version json; refuse if not 21 for now)
+- Port: 25565 (configurable in params)
+- Memory: `memory_mb` integer (default 2048)
+
+TODO:
+- [ ] Add `minecraft:vanilla` template and param validation in agent
+- [ ] Implement Mojang manifest resolve + jar download/cache + sha1 verify
+- [ ] Create instance layout under `ALLOY_DATA_ROOT` and write `eula.txt` + `server.properties`
+- [ ] Start server via `java -Xmx${memory_mb}M -jar server.jar nogui` in instance dir
+- [ ] Stop via stdin `stop\n` then TERM/KILL fallback
+- [ ] Update Docker agent image to include Java 21 and mount `/data`
+- [ ] Update web UI: add minecraft start form (version/port/memory/eula)
+- [ ] Verify end-to-end in docker-compose and check off this section
