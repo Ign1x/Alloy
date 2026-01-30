@@ -131,6 +131,6 @@ TODO:
 - [x] Create instance layout under `ALLOY_DATA_ROOT` and write `eula.txt` + `server.properties`
 - [x] Start server via `java -Xmx${memory_mb}M -jar server.jar nogui` in instance dir
 - [x] Stop via stdin `stop\n` then TERM/KILL fallback
-- [ ] Update Docker agent image to include Java 21 and mount `/data`
-- [ ] Update web UI: add minecraft start form (version/port/memory/eula)
-- [ ] Verify end-to-end in docker-compose and check off this section
+- [x] Update Docker agent image to include Java 21 and mount `/data`
+- [x] Update web UI: add minecraft start form (version/port/memory/eula)
+- [x] Verify end-to-end in docker-compose and check off this section
