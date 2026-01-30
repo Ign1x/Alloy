@@ -1,0 +1,42 @@
+syntax = "proto3";
+
+package alloy.agent.v1;
+
+// FilesystemService provides a minimal, safe filesystem API.
+//
+// This is intentionally scoped to a server-selected root (e.g. ALLOY_DATA_ROOT)
+// and only supports relative paths. No arbitrary host filesystem access.
+service FilesystemService {
+  rpc ListDir(ListDirRequest) returns (ListDirResponse);
+  rpc ReadFile(ReadFileRequest) returns (ReadFileResponse);
+}
+
+message ListDirRequest {
+  // Relative path under the scoped root. Empty means root.
+  string path = 1;
+}
+
+message DirEntry {
+  string name = 1;
+  bool is_dir = 2;
+  uint64 size_bytes = 3;
+}
+
+message ListDirResponse {
+  repeated DirEntry entries = 1;
+}
+
+message ReadFileRequest {
+  // Relative path under the scoped root.
+  string path = 1;
+  // Optional byte offset.
+  uint64 offset = 2;
+  // Optional max bytes to read. 0 means default.
+  uint64 limit = 3;
+}
+
+message ReadFileResponse {
+  bytes data = 1;
+  // Total file size in bytes (best-effort).
+  uint64 size_bytes = 2;
+}

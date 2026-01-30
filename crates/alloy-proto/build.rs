@@ -5,12 +5,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .compile_protos(
             &[
                 "proto/alloy/agent/v1/agent.proto",
+                "proto/alloy/agent/v1/filesystem.proto",
                 "proto/alloy/agent/v1/process.proto",
             ],
             &["proto"],
         )?;
 
     println!("cargo:rerun-if-changed=proto/alloy/agent/v1/agent.proto");
+    println!("cargo:rerun-if-changed=proto/alloy/agent/v1/filesystem.proto");
     println!("cargo:rerun-if-changed=proto/alloy/agent/v1/process.proto");
     println!("cargo:rerun-if-changed=proto");
 
