@@ -68,7 +68,7 @@ function App() {
         </header>
 
         <p class="mt-4 max-w-2xl text-sm leading-6 text-slate-600 dark:text-slate-300">
-          Rust (Axum + SeaORM) as the control plane, gRPC (Tonic) to agents, and SolidJS + Tailwind v4 for the web UI.
+          Game server control plane.
         </p>
 
 
@@ -319,18 +319,7 @@ function App() {
           </div>
         </section>
 
-        <footer class="mt-10 flex flex-wrap items-center justify-between gap-4 text-xs text-slate-500">
-          <div>
-            UI stack:{' '}
-            <span class="text-slate-700 dark:text-slate-300">SolidJS</span> +{' '}
-            <span class="text-slate-700 dark:text-slate-300">Tailwind v4</span>
-          </div>
-          <div>
-            Next:{' '}
-            <span class="text-slate-700 dark:text-slate-300">process supervision</span> +{' '}
-            <span class="text-slate-700 dark:text-slate-300">templates</span>
-          </div>
-        </footer>
+        <footer class="mt-10 text-xs text-slate-500">CopyRight@ign1x</footer>
       </div>
     </main>
   )
