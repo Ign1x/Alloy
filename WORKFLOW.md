@@ -107,6 +107,9 @@ Notes:
 ### Phase 4 - Web UI (SolidJS)
 - [x] Scaffold SolidJS + Tailwind v4 (Vite)
 - [ ] Login + dashboard + node list
+  - [x] Instance manager (create/list/start/stop/delete)
+  - [ ] File explorer (fs.listDir/fs.readFile)
+  - [ ] Log viewer (log.tailFile)
 
 ### Phase 5 - Game plugins
 - [ ] Minecraft adapter (parity with legacy core features)
