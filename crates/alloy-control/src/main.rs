@@ -1,8 +1,10 @@
 use std::net::SocketAddr;
 
 use alloy_control::rpc;
+use alloy_control::state::AppState;
 use axum::{Json, Router, routing::get};
 use serde::Serialize;
+use sea_orm_migration::MigratorTrait;
 
 #[derive(Debug, Serialize)]
 struct HealthzResponse {
@@ -17,11 +19,26 @@ async fn healthz() -> Json<HealthzResponse> {
     })
 }
 
+async fn init_db_and_migrate() -> anyhow::Result<AppState> {
+    let database_url = std::env::var("DATABASE_URL")
+        .map_err(|_| anyhow::anyhow!("DATABASE_URL is required"))?;
+    let db = alloy_db::connect(&database_url).await?;
+
+    // Apply migrations on boot (idempotent).
+    alloy_migration::Migrator::up(&db, None).await?;
+
+    Ok(AppState {
+        db: std::sync::Arc::new(db),
+    })
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
+
+    let state = init_db_and_migrate().await?;
 
     let router = rpc::router();
     let (procedures, _types) = router
@@ -30,7 +47,8 @@ async fn main() -> anyhow::Result<()> {
 
     let app = Router::new()
         .route("/healthz", get(healthz))
-        .nest("/rspc", rspc_axum::endpoint(procedures, || rpc::Ctx));
+        .nest("/rspc", rspc_axum::endpoint(procedures, || rpc::Ctx))
+        .with_state(state);
     let addr: SocketAddr = ([0, 0, 0, 0], 8080).into();
     tracing::info!(%addr, "alloy-control HTTP listening");
 
