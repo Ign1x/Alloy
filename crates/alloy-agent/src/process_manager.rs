@@ -76,6 +76,7 @@ struct ProcessEntry {
     exit_code: Option<i32>,
     message: Option<String>,
     stdin: Option<ChildStdin>,
+    graceful_stdin: Option<String>,
     pgid: Option<i32>,
     logs: Arc<Mutex<LogBuffer>>,
 }
@@ -186,6 +187,7 @@ impl ProcessManager {
                     exit_code: None,
                     message: None,
                     stdin,
+                    graceful_stdin: t.graceful_stdin.clone(),
                     pgid,
                     logs: logs.clone(),
                 },
@@ -230,12 +232,25 @@ impl ProcessManager {
             let e = inner
                 .get_mut(process_id)
                 .ok_or_else(|| anyhow::anyhow!("unknown process_id: {process_id}"))?;
+
+            if matches!(e.state, ProcessState::Exited | ProcessState::Failed) {
+                return Ok(ProcessStatus {
+                    id: ProcessId(process_id.to_string()),
+                    template_id: e.template_id.clone(),
+                    state: e.state,
+                    pid: e.pid,
+                    exit_code: e.exit_code,
+                    message: e.message.clone(),
+                });
+            }
             e.state = ProcessState::Stopping;
             e.message = Some("stopping".to_string());
 
             // Best-effort graceful command.
-            if let Some(mut stdin) = e.stdin.take() {
-                // NOTE: phase 1 templates do not currently define graceful_stdin.
+            if let Some(mut stdin) = e.stdin.take()
+                && let Some(cmd) = e.graceful_stdin.take()
+            {
+                let _ = stdin.write_all(cmd.as_bytes()).await;
                 let _ = stdin.flush().await;
             }
 
