@@ -108,8 +108,9 @@ Notes:
 - [x] Scaffold SolidJS + Tailwind v4 (Vite)
 - [ ] Login + dashboard + node list
   - [x] Instance manager (create/list/start/stop/delete)
-  - [ ] File explorer (fs.listDir/fs.readFile)
-  - [ ] Log viewer (log.tailFile)
+  - [x] File explorer (fs.listDir/fs.readFile)
+  - [x] Log viewer (log.tailFile)
+  - [x] Instance -> Files shortcuts (open instance dir / latest.log)
 
 ### Phase 5 - Game plugins
 - [ ] Minecraft adapter (parity with legacy core features)
