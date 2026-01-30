@@ -4,6 +4,8 @@ use alloy_proto::agent_v1::{
     StartFromTemplateRequest, StopProcessRequest, TailLogsRequest,
     agent_health_service_client::AgentHealthServiceClient,
     filesystem_service_client::FilesystemServiceClient,
+    logs_service_client::LogsServiceClient,
+    TailFileRequest,
     process_service_client::ProcessServiceClient,
 };
 use rspc::{Procedure, ProcedureError, ResolverError, Router};
@@ -117,6 +119,20 @@ pub struct ReadFileOutput {
     // For MVP: return as UTF-8 text (logs/config). Binary files are not supported yet.
     pub text: String,
     pub size_bytes: u32,
+}
+
+#[derive(Debug, Clone, serde::Deserialize, Type)]
+pub struct TailFileInput {
+    pub path: String,
+    pub cursor: Option<String>,
+    pub limit_bytes: Option<u32>,
+    pub max_lines: Option<u32>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, Type)]
+pub struct TailFileOutput {
+    pub lines: Vec<String>,
+    pub next_cursor: String,
 }
 
 fn clamp_u64_to_u32(v: u64) -> u32 {
@@ -490,9 +506,41 @@ pub fn router() -> Router<Ctx> {
             }),
         );
 
+    let log = Router::new().procedure(
+        "tailFile",
+        Procedure::builder::<ApiError>().query(|_, input: TailFileInput| async move {
+            let agent_endpoint = std::env::var("ALLOY_AGENT_ENDPOINT")
+                .unwrap_or_else(|_| "http://127.0.0.1:50051".to_string());
+            let mut client = LogsServiceClient::connect(agent_endpoint.clone())
+                .await
+                .map_err(|e| ApiError {
+                    message: format!("failed to connect agent ({agent_endpoint}): {e}"),
+                })?;
+
+            let resp = client
+                .tail_file(Request::new(TailFileRequest {
+                    path: input.path,
+                    cursor: input.cursor.unwrap_or_default(),
+                    limit_bytes: input.limit_bytes.unwrap_or(0),
+                    max_lines: input.max_lines.unwrap_or(0),
+                }))
+                .await
+                .map_err(|e| ApiError {
+                    message: format!("tail_file failed: {e}"),
+                })?
+                .into_inner();
+
+            Ok(TailFileOutput {
+                lines: resp.lines,
+                next_cursor: resp.next_cursor,
+            })
+        }),
+    );
+
     Router::new()
         .nest("control", control)
         .nest("agent", agent)
         .nest("process", process)
         .nest("fs", fs)
+        .nest("log", log)
 }
