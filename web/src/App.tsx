@@ -35,6 +35,20 @@ function isStopping(status: ProcessStatusDto | null) {
   return status?.state === 'PROCESS_STATE_STOPPING'
 }
 
+type UiTab = 'instances' | 'files'
+
+function isTextFilePath(p: string) {
+  const lower = p.toLowerCase()
+  return (
+    lower.endsWith('.log') ||
+    lower.endsWith('.txt') ||
+    lower.endsWith('.yml') ||
+    lower.endsWith('.yaml') ||
+    lower.endsWith('.json') ||
+    lower.endsWith('.properties')
+  )
+}
+
 function App() {
   const ping = rspc.createQuery(() => ['control.ping', null])
   const agentHealth = rspc.createQuery(() => ['agent.health', null])
@@ -55,6 +69,8 @@ function App() {
   const [mcMemory, setMcMemory] = createSignal('2048')
   const [mcPort, setMcPort] = createSignal('25565')
   const [mcError, setMcError] = createSignal<string | null>(null)
+
+  const [tab, setTab] = createSignal<UiTab>('instances')
 
   const [selectedInstanceId, setSelectedInstanceId] = createSignal<string | null>(null)
 
@@ -81,6 +97,50 @@ function App() {
         (i: { config: InstanceConfigDto; status: ProcessStatusDto | null }) => i.config.instance_id === id,
       ) ?? null
     )
+  })
+
+  const [fsPath, setFsPath] = createSignal<string>('')
+  const fsList = rspc.createQuery(
+    () => ['fs.listDir', { path: fsPath() ? fsPath() : null }],
+    () => ({ refetchOnWindowFocus: false }),
+  )
+  const [selectedFilePath, setSelectedFilePath] = createSignal<string | null>(null)
+
+  const fileText = rspc.createQuery(
+    () => [
+      'fs.readFile',
+      {
+        path: selectedFilePath() ?? '',
+        offset: 0,
+        limit: 65536,
+      },
+    ],
+    () => ({ enabled: !!selectedFilePath(), refetchOnWindowFocus: false }),
+  )
+
+  const [logCursor, setLogCursor] = createSignal<string | null>(null)
+  const logTail = rspc.createQuery(
+    () => [
+      'log.tailFile',
+      {
+        path: selectedFilePath() ?? '',
+        cursor: logCursor(),
+        limit_bytes: 65536,
+        max_lines: 400,
+      },
+    ],
+    () => ({ enabled: !!selectedFilePath() && isTextFilePath(selectedFilePath() ?? ''), refetchInterval: 1000 }),
+  )
+
+  const visibleText = createMemo(() => {
+    if (!selectedFilePath()) return ''
+    if (!isTextFilePath(selectedFilePath() ?? '')) return 'Binary file preview not supported'
+
+    // Prefer tailing (for logs) when available.
+    if (logTail.data?.lines) {
+      return logTail.data.lines.join('\n')
+    }
+    return fileText.data?.text ?? ''
   })
 
   const pingErrorMessage = () => {
@@ -149,10 +209,36 @@ function App() {
 
         <section class="mt-8 grid gap-4 lg:grid-cols-3">
           <div class="rounded-2xl border border-slate-200 bg-white/80 p-5 shadow-sm dark:border-slate-800/80 dark:bg-slate-900/40 dark:shadow-none lg:col-span-1">
-            <div class="text-sm font-medium">Create Instance</div>
-            <div class="mt-2 text-xs text-slate-500 dark:text-slate-400">rspc: instance.create</div>
+            <div class="flex items-center justify-between gap-3">
+              <div class="text-sm font-medium">Workspace</div>
+              <div class="flex items-center gap-2">
+                <button
+                  class={`rounded-lg border px-3 py-1.5 text-xs shadow-sm ${
+                    tab() === 'instances'
+                      ? 'border-slate-300 bg-white text-slate-900 dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-200'
+                      : 'border-transparent bg-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'
+                  }`}
+                  onClick={() => setTab('instances')}
+                >
+                  Instances
+                </button>
+                <button
+                  class={`rounded-lg border px-3 py-1.5 text-xs shadow-sm ${
+                    tab() === 'files'
+                      ? 'border-slate-300 bg-white text-slate-900 dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-200'
+                      : 'border-transparent bg-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'
+                  }`}
+                  onClick={() => setTab('files')}
+                >
+                  Files
+                </button>
+              </div>
+            </div>
 
-            <div class="mt-4 space-y-3">
+            <Show when={tab() === 'instances'}>
+              <div class="mt-4 text-xs text-slate-500 dark:text-slate-400">rspc: instance.create</div>
+
+              <div class="mt-4 space-y-3">
               <label class="block text-xs text-slate-700 dark:text-slate-300">
                 Template
                 <select
@@ -278,19 +364,132 @@ function App() {
               <Show when={createInstance.isError}>
                 <div class="text-xs text-rose-300">create failed</div>
               </Show>
-            </div>
+              </div>
+            </Show>
+
+            <Show when={tab() === 'files'}>
+              <div class="mt-4 text-xs text-slate-500 dark:text-slate-400">rspc: fs.* + log.tailFile</div>
+
+              <div class="mt-4 space-y-3">
+                <label class="block text-xs text-slate-700 dark:text-slate-300">
+                  Path
+                  <input
+                    class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-300 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:focus:border-slate-600 dark:focus:ring-slate-600"
+                    value={fsPath()}
+                    onInput={(e) => setFsPath(e.currentTarget.value)}
+                    placeholder="(empty = /data)"
+                  />
+                </label>
+
+                <div class="grid grid-cols-2 gap-2">
+                  <button
+                    class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-900 shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:shadow-none"
+                    onClick={() => {
+                      setSelectedFilePath(null)
+                      setLogCursor(null)
+                      void fsList.refetch()
+                    }}
+                  >
+                    Refresh
+                  </button>
+                  <button
+                    class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-900 shadow-sm hover:bg-slate-50 disabled:opacity-50 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:shadow-none"
+                    disabled={!fsPath()}
+                    onClick={() => {
+                      const cur = fsPath().replace(/\/+$/, '')
+                      const idx = cur.lastIndexOf('/')
+                      const next = idx <= 0 ? '' : cur.slice(0, idx)
+                      setFsPath(next)
+                      setSelectedFilePath(null)
+                      setLogCursor(null)
+                    }}
+                  >
+                    Up
+                  </button>
+                </div>
+
+                <div class="max-h-64 overflow-auto rounded-xl border border-slate-200 bg-white/60 p-2 dark:border-slate-800/70 dark:bg-slate-950/30">
+                  <Show when={!fsList.isPending} fallback={<div class="p-2 text-xs text-slate-500">loading...</div>}>
+                    <For each={fsList.data?.entries ?? []}>
+                      {(e) => (
+                        <button
+                          class={`w-full rounded-lg px-2 py-1 text-left text-xs hover:bg-slate-100 dark:hover:bg-slate-900/40 ${
+                            selectedFilePath() === (fsPath() ? `${fsPath().replace(/\/+$/, '')}/${e.name}` : e.name)
+                              ? 'bg-slate-100 dark:bg-slate-900/40'
+                              : ''
+                          }`}
+                          onClick={() => {
+                            if (e.is_dir) {
+                              const next = fsPath() ? `${fsPath().replace(/\/+$/, '')}/${e.name}` : e.name
+                              setFsPath(next)
+                              setSelectedFilePath(null)
+                              setLogCursor(null)
+                            } else {
+                              const file = fsPath() ? `${fsPath().replace(/\/+$/, '')}/${e.name}` : e.name
+                              setSelectedFilePath(file)
+                              setLogCursor(null)
+                            }
+                          }}
+                        >
+                          <span class="font-mono">
+                            {e.is_dir ? 'dir' : 'file'} {e.name}
+                          </span>
+                        </button>
+                      )}
+                    </For>
+                    <Show when={(fsList.data?.entries ?? []).length === 0}>
+                      <div class="p-2 text-xs text-slate-500">empty</div>
+                    </Show>
+                  </Show>
+                </div>
+              </div>
+            </Show>
           </div>
 
           <div class="rounded-2xl border border-slate-200 bg-white/80 p-5 shadow-sm dark:border-slate-800/80 dark:bg-slate-900/40 dark:shadow-none lg:col-span-2">
-            <div class="flex items-center justify-between gap-4">
-              <div class="text-sm font-medium">Instances</div>
-              <button
-                class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-900 shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:shadow-none"
-                onClick={() => instances.refetch()}
-              >
-                Refresh
-              </button>
-            </div>
+            <Show
+              when={tab() === 'instances'}
+              fallback={
+                <div>
+                  <div class="flex items-center justify-between gap-4">
+                    <div class="text-sm font-medium">Preview</div>
+                    <div class="text-xs text-slate-500 dark:text-slate-400">
+                      {selectedFilePath() ? selectedFilePath() : 'no file selected'}
+                    </div>
+                  </div>
+
+                  <div class="mt-3 grid gap-2">
+                    <Show when={selectedFilePath()}>
+                      <button
+                        class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-900 shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:shadow-none"
+                        onClick={() => {
+                          if (logTail.data?.next_cursor) {
+                            setLogCursor(logTail.data.next_cursor)
+                          } else {
+                            setLogCursor(null)
+                          }
+                        }}
+                      >
+                        Follow
+                      </button>
+                    </Show>
+
+                    <pre class="mt-0 max-h-80 overflow-auto rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-800 dark:border-slate-800 dark:bg-slate-950/70 dark:text-slate-200">
+                      {selectedFilePath() ? visibleText() : 'Select a file from the list'}
+                    </pre>
+                  </div>
+                </div>
+              }
+            >
+              <div class="flex items-center justify-between gap-4">
+                <div class="text-sm font-medium">Instances</div>
+                <button
+                  class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-900 shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:shadow-none"
+                  onClick={() => instances.refetch()}
+                >
+                  Refresh
+                </button>
+              </div>
 
             <div class="mt-3 grid gap-2">
               <For each={instances.data ?? []}>
@@ -382,6 +581,7 @@ function App() {
                   </pre>
                 </div>
               )}
+            </Show>
             </Show>
           </div>
         </section>
