@@ -5,6 +5,7 @@ use std::{
 };
 
 use alloy_process::{ProcessId, ProcessState, ProcessStatus, ProcessTemplateId};
+use anyhow::Context;
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     process::{ChildStdin, Command},
@@ -16,6 +17,40 @@ use crate::minecraft_download;
 use crate::templates;
 
 const LOG_MAX_LINES: usize = 1000;
+
+fn detect_java_major() -> anyhow::Result<u32> {
+    // Use the runtime `java` in PATH. We vendor Java 21 in the Docker image,
+    // but this also supports local dev installs.
+    let out = std::process::Command::new("java")
+        .arg("-version")
+        .output()
+        .context("run `java -version`")?;
+    let text = String::from_utf8_lossy(&out.stderr);
+    let first = text.lines().next().unwrap_or_default();
+
+    // Typical formats:
+    // - openjdk version "21.0.2" 2024-01-16
+    // - java version "1.8.0_402"
+    let ver = first
+        .split('"')
+        .nth(1)
+        .ok_or_else(|| anyhow::anyhow!("failed to parse java version output: {first}"))?;
+    let major_str = ver.split('.').next().unwrap_or("");
+    let major = if major_str == "1" {
+        // Legacy "1.8.x" form.
+        ver.split('.')
+            .nth(1)
+            .unwrap_or("")
+            .parse::<u32>()
+            .map_err(|_| anyhow::anyhow!("failed to parse java major from: {ver}"))?
+    } else {
+        major_str
+            .parse::<u32>()
+            .map_err(|_| anyhow::anyhow!("failed to parse java major from: {ver}"))?
+    };
+
+    Ok(major)
+}
 
 #[derive(Debug)]
 struct LogBuffer {
@@ -140,10 +175,13 @@ impl ProcessManager {
             minecraft::ensure_vanilla_instance_layout(&dir, &mc)?;
 
             let resolved = minecraft_download::resolve_server_jar(&mc.version).await?;
-            if resolved.java_major != 21 {
+            let have_java = detect_java_major()?;
+            if have_java != resolved.java_major {
                 anyhow::bail!(
-                    "unsupported java major for this version: {} (expected 21)",
-                    resolved.java_major
+                    "java major mismatch: need {} (minecraft version {}), but runtime has {}",
+                    resolved.java_major,
+                    resolved.version_id,
+                    have_java
                 );
             }
             let cached_jar = minecraft_download::ensure_server_jar(&resolved).await?;
