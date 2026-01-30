@@ -1,0 +1,30 @@
+syntax = "proto3";
+
+package alloy.agent.v1;
+
+// LogsService provides a minimal, safe log tail API.
+//
+// It is intentionally scoped to a server-selected root (e.g. ALLOY_DATA_ROOT)
+// and only supports relative paths.
+service LogsService {
+  rpc TailFile(TailFileRequest) returns (TailFileResponse);
+}
+
+message TailFileRequest {
+  // Relative path under the scoped root.
+  string path = 1;
+
+  // Cursor as a stringified byte offset. Empty or "0" means "tail from end".
+  string cursor = 2;
+
+  // Max bytes to read/scan in this call. 0 means default.
+  uint32 limit_bytes = 3;
+
+  // Max lines to return. 0 means default.
+  uint32 max_lines = 4;
+}
+
+message TailFileResponse {
+  repeated string lines = 1;
+  string next_cursor = 2;
+}
