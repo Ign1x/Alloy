@@ -1,4 +1,15 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_DB=alloy
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - alloy-postgres:/var/lib/postgresql/data
+
   alloy-agent:
     build:
       context: ..
@@ -13,6 +24,18 @@ services:
     volumes:
       - alloy-agent-data:/data
 
+  alloy-agent-2:
+    build:
+      context: ..
+      dockerfile: deploy/agent.Dockerfile
+    expose:
+      - "50051"
+    environment:
+      - RUST_LOG=info
+      - ALLOY_DATA_ROOT=/data
+    volumes:
+      - alloy-agent-2-data:/data
+
   alloy-control:
     build:
       context: ..
@@ -22,7 +45,9 @@ services:
     environment:
       - RUST_LOG=info
       - ALLOY_AGENT_ENDPOINT=http://alloy-agent:50051
+      - DATABASE_URL=postgres://postgres:postgres@postgres:5432/alloy
     depends_on:
+      - postgres
       - alloy-agent
 
   web:
@@ -36,3 +61,5 @@ services:
 
 volumes:
   alloy-agent-data:
+  alloy-agent-2-data:
+  alloy-postgres:
