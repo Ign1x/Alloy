@@ -20,6 +20,12 @@ function App() {
   const [selectedTemplate, setSelectedTemplate] = createSignal<string>('demo:sleep')
   const [sleepSeconds, setSleepSeconds] = createSignal<string>('60')
 
+  const [mcEula, setMcEula] = createSignal(false)
+  const [mcVersion, setMcVersion] = createSignal('latest_release')
+  const [mcMemory, setMcMemory] = createSignal('2048')
+  const [mcPort, setMcPort] = createSignal('25565')
+  const [mcError, setMcError] = createSignal<string | null>(null)
+
   const [selectedProcessId, setSelectedProcessId] = createSignal<string | null>(null)
   const logs = rspc.createQuery(
     () => [
@@ -65,51 +71,48 @@ function App() {
           Rust (Axum + SeaORM) as the control plane, gRPC (Tonic) to agents, and SolidJS + Tailwind v4 for the web UI.
         </p>
 
-	        <section class="mt-8 grid gap-4 sm:grid-cols-2">
-	          <div class="rounded-2xl border border-slate-800/80 bg-slate-900/40 p-5">
-	            <div class="text-sm font-medium">Backend</div>
-	            <div class="mt-2 flex items-center gap-2">
-	              <span class={`h-2.5 w-2.5 rounded-full ${statusDotClass({ loading: ping.isPending, error: ping.isError })}`} />
-	              <span class="text-sm text-slate-200">
-	                {ping.isPending
-	                  ? 'checking...'
-	                  : ping.isError
-	                    ? 'offline'
-	                    : 'online'}
-	              </span>
-	            </div>
-	            <div class="mt-4 text-xs text-slate-400">
-	              rspc: <span class="font-mono">control.ping</span>
-	            </div>
-	            <div class="mt-2 text-xs text-slate-500">
-	              {ping.isError ? pingErrorMessage() : ping.data ? `version: ${ping.data.version}` : ''}
-	            </div>
-	          </div>
 
-	          <div class="rounded-2xl border border-slate-800/80 bg-slate-900/40 p-5">
-	            <div class="text-sm font-medium">Agent</div>
-	            <div class="mt-2 flex items-center gap-2">
-	              <span class={`h-2.5 w-2.5 rounded-full ${statusDotClass({ loading: agentHealth.isPending, error: agentHealth.isError })}`} />
-	              <span class="text-sm text-slate-200">
-	                {agentHealth.isPending
-	                  ? 'checking...'
-	                  : agentHealth.isError
-	                    ? 'offline'
-	                    : 'online'}
-	              </span>
-	            </div>
-	            <div class="mt-4 text-xs text-slate-400">
-	              rspc: <span class="font-mono">agent.health</span>
-	            </div>
-	            <div class="mt-2 text-xs text-slate-500">
-	              {agentHealth.isError
-	                ? 'failed to reach agent'
-	                : agentHealth.data
-	                  ? `status: ${agentHealth.data.status} (${agentHealth.data.agent_version})`
-	                  : ''}
-	            </div>
-	          </div>
-	        </section>
+        <section class="mt-8 grid gap-4 sm:grid-cols-2">
+          <div class="rounded-2xl border border-slate-800/80 bg-slate-900/40 p-5">
+            <div class="text-sm font-medium">Backend</div>
+            <div class="mt-2 flex items-center gap-2">
+              <span
+                class={`h-2.5 w-2.5 rounded-full ${statusDotClass({ loading: ping.isPending, error: ping.isError })}`}
+              />
+              <span class="text-sm text-slate-200">
+                {ping.isPending ? 'checking...' : ping.isError ? 'offline' : 'online'}
+              </span>
+            </div>
+            <div class="mt-4 text-xs text-slate-400">
+              rspc: <span class="font-mono">control.ping</span>
+            </div>
+            <div class="mt-2 text-xs text-slate-500">
+              {ping.isError ? pingErrorMessage() : ping.data ? `version: ${ping.data.version}` : ''}
+            </div>
+          </div>
+
+          <div class="rounded-2xl border border-slate-800/80 bg-slate-900/40 p-5">
+            <div class="text-sm font-medium">Agent</div>
+            <div class="mt-2 flex items-center gap-2">
+              <span
+                class={`h-2.5 w-2.5 rounded-full ${statusDotClass({ loading: agentHealth.isPending, error: agentHealth.isError })}`}
+              />
+              <span class="text-sm text-slate-200">
+                {agentHealth.isPending ? 'checking...' : agentHealth.isError ? 'offline' : 'online'}
+              </span>
+            </div>
+            <div class="mt-4 text-xs text-slate-400">
+              rspc: <span class="font-mono">agent.health</span>
+            </div>
+            <div class="mt-2 text-xs text-slate-500">
+              {agentHealth.isError
+                ? 'failed to reach agent'
+                : agentHealth.data
+                  ? `status: ${agentHealth.data.status} (${agentHealth.data.agent_version})`
+                  : ''}
+            </div>
+          </div>
+        </section>
 
         <section class="mt-8 grid gap-4 lg:grid-cols-3">
           <div class="rounded-2xl border border-slate-800/80 bg-slate-900/40 p-5 lg:col-span-1">
@@ -145,13 +148,91 @@ function App() {
                 </label>
               </Show>
 
+              <Show when={selectedTemplate() === 'minecraft:vanilla'}>
+                <div class="space-y-3 border-t border-slate-800/50 pt-3">
+                  <div class="flex items-start gap-3">
+                    <input
+                      id="mc-eula"
+                      type="checkbox"
+                      class="mt-1 h-4 w-4 rounded border-slate-700 bg-slate-900/60 text-slate-500 focus:ring-slate-500 focus:ring-offset-slate-900"
+                      checked={mcEula()}
+                      onChange={(e) => setMcEula(e.currentTarget.checked)}
+                    />
+                    <label for="mc-eula" class="text-xs leading-tight text-slate-300 select-none">
+                      I agree to the{' '}
+                      <a
+                        href="https://account.mojang.com/documents/minecraft_eula"
+                        target="_blank"
+                        rel="noreferrer noopener"
+                        class="text-indigo-400 hover:text-indigo-300 underline"
+                      >
+                        Minecraft EULA
+                      </a>
+                      <span class="block text-[10px] text-slate-500 mt-0.5">Required to start server</span>
+                    </label>
+                  </div>
+
+                  <div class="grid grid-cols-2 gap-3">
+                    <label class="block text-xs text-slate-300">
+                      Version
+                      <input
+                        class="mt-1 w-full rounded-lg border border-slate-800 bg-slate-950/60 px-3 py-2 text-sm text-slate-200 placeholder-slate-600 focus:border-slate-600 focus:outline-none focus:ring-1 focus:ring-slate-600"
+                        value={mcVersion()}
+                        onInput={(e) => setMcVersion(e.currentTarget.value)}
+                        placeholder="latest_release"
+                      />
+                    </label>
+
+                    <label class="block text-xs text-slate-300">
+                      Memory (MB)
+                      <input
+                        type="number"
+                        class="mt-1 w-full rounded-lg border border-slate-800 bg-slate-950/60 px-3 py-2 text-sm text-slate-200 focus:border-slate-600 focus:outline-none focus:ring-1 focus:ring-slate-600"
+                        value={mcMemory()}
+                        onInput={(e) => setMcMemory(e.currentTarget.value)}
+                      />
+                    </label>
+                  </div>
+
+                  <label class="block text-xs text-slate-300">
+                    Port
+                    <input
+                      type="number"
+                      class="mt-1 w-full rounded-lg border border-slate-800 bg-slate-950/60 px-3 py-2 text-sm text-slate-200 focus:border-slate-600 focus:outline-none focus:ring-1 focus:ring-slate-600"
+                      value={mcPort()}
+                      onInput={(e) => setMcPort(e.currentTarget.value)}
+                    />
+                  </label>
+
+                  <Show when={mcError()}>
+                    <div class="text-xs text-rose-400 bg-rose-950/20 border border-rose-900/50 p-2 rounded animate-pulse">
+                      {mcError()}
+                    </div>
+                  </Show>
+                </div>
+              </Show>
+
               <button
                 class="w-full rounded-lg bg-slate-200 px-3 py-2 text-sm font-medium text-slate-900 disabled:opacity-50"
                 disabled={startProcess.isPending}
                 onClick={async () => {
                   const template_id = selectedTemplate()
                   const params: Record<string, string> = {}
-                  if (template_id === 'demo:sleep') params.seconds = sleepSeconds()
+
+                  if (template_id === 'demo:sleep') {
+                    params.seconds = sleepSeconds()
+                  } else if (template_id === 'minecraft:vanilla') {
+                    if (!mcEula()) {
+                      setMcError('You must accept the EULA')
+                      return
+                    }
+                    setMcError(null)
+                    params.accept_eula = 'true'
+                    params.version = mcVersion() || 'latest_release'
+                    params.memory_mb = mcMemory() || '2048'
+                    params.port = mcPort() || '25565'
+                  }
+
                   await startProcess.mutateAsync({ template_id, params })
                   await processes.refetch()
                 }}
