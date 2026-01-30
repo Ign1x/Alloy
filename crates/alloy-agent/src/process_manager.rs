@@ -260,6 +260,15 @@ impl ProcessManager {
     }
 
     pub async fn stop(&self, process_id: &str, timeout: Duration) -> anyhow::Result<ProcessStatus> {
+        // Phase 1 policy:
+        // - If template defines `graceful_stdin`, send it first and give the process time.
+        // - Otherwise, send SIGTERM immediately.
+        // - Always escalate: SIGTERM (fallback) -> SIGKILL at the end of timeout.
+
+        let mut graceful_sent = false;
+        let mut term_sent = false;
+        let pgid: Option<i32>;
+
         {
             let mut inner = self.inner.lock().await;
             let e = inner
@@ -276,27 +285,41 @@ impl ProcessManager {
                     message: e.message.clone(),
                 });
             }
+
+            pgid = e.pgid;
             e.state = ProcessState::Stopping;
             e.message = Some("stopping".to_string());
 
-            // Best-effort graceful command.
             if let Some(mut stdin) = e.stdin.take()
                 && let Some(cmd) = e.graceful_stdin.take()
             {
                 let _ = stdin.write_all(cmd.as_bytes()).await;
                 let _ = stdin.flush().await;
-            }
-
-            if let Some(pgid) = e.pgid {
-                #[cfg(unix)]
-                unsafe {
-                    // Send SIGTERM to the process group.
-                    libc::kill(-pgid, libc::SIGTERM);
-                }
+                // Intentionally drop stdin so the child sees EOF.
+                graceful_sent = true;
             }
         }
 
-        let deadline = tokio::time::Instant::now() + timeout;
+        // If we didn't have a graceful command, send SIGTERM right away.
+        if !graceful_sent && let Some(pgid) = pgid {
+            #[cfg(unix)]
+            unsafe {
+                libc::kill(-pgid, libc::SIGTERM);
+            }
+            term_sent = true;
+        }
+
+        let start = tokio::time::Instant::now();
+        let kill_deadline = start + timeout;
+        // If we attempted graceful stdin, only send SIGTERM near the end.
+        let term_deadline = if graceful_sent {
+            kill_deadline
+                .checked_sub(Duration::from_secs(5))
+                .unwrap_or(start)
+        } else {
+            start
+        };
+
         loop {
             if let Some(status) = self.get_status(process_id).await
                 && matches!(status.state, ProcessState::Exited | ProcessState::Failed)
@@ -304,7 +327,20 @@ impl ProcessManager {
                 return Ok(status);
             }
 
-            if tokio::time::Instant::now() >= deadline {
+            let now = tokio::time::Instant::now();
+
+            if !term_sent
+                && now >= term_deadline
+                && let Some(pgid) = pgid
+            {
+                #[cfg(unix)]
+                unsafe {
+                    libc::kill(-pgid, libc::SIGTERM);
+                }
+                term_sent = true;
+            }
+
+            if now >= kill_deadline {
                 // Escalate to SIGKILL.
                 let mut inner = self.inner.lock().await;
                 if let Some(e) = inner.get_mut(process_id)
