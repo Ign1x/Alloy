@@ -9,6 +9,7 @@ use tonic::{Request, Response, Status, transport::Server};
 mod minecraft;
 mod minecraft_download;
 mod filesystem_service;
+mod logs_service;
 mod process_manager;
 mod process_service;
 mod templates;
@@ -44,6 +45,7 @@ async fn main() -> anyhow::Result<()> {
     Server::builder()
         .add_service(AgentHealthServiceServer::new(AgentHealth))
         .add_service(filesystem_service::server())
+        .add_service(logs_service::server())
         .add_service(process_service::server(manager))
         .serve(addr)
         .await?;
