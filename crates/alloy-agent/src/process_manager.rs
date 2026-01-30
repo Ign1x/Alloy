@@ -187,51 +187,28 @@ pub struct ProcessManager {
 }
 
 impl ProcessManager {
-    pub async fn list_templates(&self) -> Vec<templates::ProcessTemplate> {
-        templates::list_templates()
-    }
-
-    pub async fn list_processes(&self) -> Vec<ProcessStatus> {
-        let inner = self.inner.lock().await;
-        inner
-            .iter()
-            .map(|(id, e)| ProcessStatus {
-                id: ProcessId(id.clone()),
-                template_id: e.template_id.clone(),
-                state: e.state,
-                pid: e.pid,
-                exit_code: e.exit_code,
-                message: e.message.clone(),
-            })
-            .collect()
-    }
-
-    pub async fn get_status(&self, process_id: &str) -> Option<ProcessStatus> {
-        let inner = self.inner.lock().await;
-        inner.get(process_id).map(|e| ProcessStatus {
-            id: ProcessId(process_id.to_string()),
-            template_id: e.template_id.clone(),
-            state: e.state,
-            pid: e.pid,
-            exit_code: e.exit_code,
-            message: e.message.clone(),
-        })
-    }
-
-    pub async fn start_from_template(
+    pub async fn start_from_template_with_process_id(
         &self,
+        process_id: &str,
         template_id: &str,
         params: BTreeMap<String, String>,
     ) -> anyhow::Result<ProcessStatus> {
+        if process_id.is_empty() {
+            anyhow::bail!("process_id must be non-empty");
+        }
+
+        // Keep the ID stable (instance_id == process_id for MVP).
+        if self.get_status(process_id).await.is_some() {
+            anyhow::bail!("process_id already exists: {process_id}");
+        }
+
         let base = templates::find_template(template_id)
             .ok_or_else(|| anyhow::anyhow!("unknown template_id: {template_id}"))?;
         let t = templates::apply_params(base, &params)?;
 
-        let id = ProcessId::new();
+        let id = ProcessId(process_id.to_string());
         let logs: Arc<Mutex<LogBuffer>> = Arc::new(Mutex::new(LogBuffer::default()));
 
-        // Milestone 1 step-wise: create the instance directory layout, but do not
-        // run the real server until jar download/launch wiring lands.
         if t.template_id == "minecraft:vanilla" {
             let mc = minecraft::validate_vanilla_params(&params)?;
             let dir = minecraft::instance_dir(&id.0);
@@ -440,7 +417,6 @@ impl ProcessManager {
                         e.message = Some(format!("wait failed: {err}"));
                     }
                 }
-                // Ensure stdin is dropped.
                 e.stdin = None;
             }
         });
@@ -453,6 +429,47 @@ impl ProcessManager {
             exit_code: None,
             message: None,
         })
+    }
+
+    pub async fn list_templates(&self) -> Vec<templates::ProcessTemplate> {
+        templates::list_templates()
+    }
+
+    pub async fn list_processes(&self) -> Vec<ProcessStatus> {
+        let inner = self.inner.lock().await;
+        inner
+            .iter()
+            .map(|(id, e)| ProcessStatus {
+                id: ProcessId(id.clone()),
+                template_id: e.template_id.clone(),
+                state: e.state,
+                pid: e.pid,
+                exit_code: e.exit_code,
+                message: e.message.clone(),
+            })
+            .collect()
+    }
+
+    pub async fn get_status(&self, process_id: &str) -> Option<ProcessStatus> {
+        let inner = self.inner.lock().await;
+        inner.get(process_id).map(|e| ProcessStatus {
+            id: ProcessId(process_id.to_string()),
+            template_id: e.template_id.clone(),
+            state: e.state,
+            pid: e.pid,
+            exit_code: e.exit_code,
+            message: e.message.clone(),
+        })
+    }
+
+    pub async fn start_from_template(
+        &self,
+        template_id: &str,
+        params: BTreeMap<String, String>,
+    ) -> anyhow::Result<ProcessStatus> {
+        let id = ProcessId::new();
+        self.start_from_template_with_process_id(&id.0, template_id, params)
+            .await
     }
 
     pub async fn stop(&self, process_id: &str, timeout: Duration) -> anyhow::Result<ProcessStatus> {

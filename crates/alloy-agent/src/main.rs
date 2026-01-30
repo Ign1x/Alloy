@@ -10,6 +10,7 @@ mod minecraft;
 mod minecraft_download;
 mod filesystem_service;
 mod logs_service;
+mod instance_service;
 mod process_manager;
 mod process_service;
 mod templates;
@@ -46,7 +47,8 @@ async fn main() -> anyhow::Result<()> {
         .add_service(AgentHealthServiceServer::new(AgentHealth))
         .add_service(filesystem_service::server())
         .add_service(logs_service::server())
-        .add_service(process_service::server(manager))
+        .add_service(process_service::server(manager.clone()))
+        .add_service(instance_service::server(manager))
         .serve(addr)
         .await?;
 

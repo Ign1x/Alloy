@@ -32,7 +32,7 @@ fn map_state(s: alloy_process::ProcessState) -> ProcessState {
     }
 }
 
-fn map_status(s: alloy_process::ProcessStatus) -> ProcessStatus {
+pub fn map_status(s: alloy_process::ProcessStatus) -> ProcessStatus {
     ProcessStatus {
         process_id: s.id.0,
         template_id: s.template_id.0,
