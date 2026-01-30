@@ -4,6 +4,9 @@ use alloy_proto::agent_v1::{
     StartFromTemplateRequest, StopProcessRequest, TailLogsRequest,
     agent_health_service_client::AgentHealthServiceClient,
     filesystem_service_client::FilesystemServiceClient,
+    instance_service_client::InstanceServiceClient,
+    CreateInstanceRequest, DeleteInstanceRequest, GetInstanceRequest, ListInstancesRequest,
+    StartInstanceRequest, StopInstanceRequest,
     logs_service_client::LogsServiceClient,
     TailFileRequest,
     process_service_client::ProcessServiceClient,
@@ -133,6 +136,69 @@ pub struct TailFileInput {
 pub struct TailFileOutput {
     pub lines: Vec<String>,
     pub next_cursor: String,
+}
+
+#[derive(Debug, Clone, serde::Deserialize, Type)]
+pub struct CreateInstanceInput {
+    pub template_id: String,
+    pub params: std::collections::BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, Type)]
+pub struct InstanceConfigDto {
+    pub instance_id: String,
+    pub template_id: String,
+    pub params: std::collections::BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, Type)]
+pub struct InstanceInfoDto {
+    pub config: InstanceConfigDto,
+    pub status: Option<ProcessStatusDto>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize, Type)]
+pub struct InstanceIdInput {
+    pub instance_id: String,
+}
+
+#[derive(Debug, Clone, serde::Deserialize, Type)]
+pub struct StopInstanceInput {
+    pub instance_id: String,
+    pub timeout_ms: Option<u32>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, Type)]
+pub struct DeleteInstanceOutput {
+    pub ok: bool,
+}
+
+fn map_instance_config(cfg: alloy_proto::agent_v1::InstanceConfig) -> InstanceConfigDto {
+    InstanceConfigDto {
+        instance_id: cfg.instance_id,
+        template_id: cfg.template_id,
+        params: cfg.params.into_iter().collect(),
+    }
+}
+
+fn map_instance_info(info: alloy_proto::agent_v1::InstanceInfo) -> Result<InstanceInfoDto, ApiError> {
+    let cfg = info
+        .config
+        .ok_or_else(|| ApiError {
+            message: "missing instance config".to_string(),
+        })?;
+
+    Ok(InstanceInfoDto {
+        config: map_instance_config(cfg),
+        status: info.status.map(|p| ProcessStatusDto {
+            process_id: p.process_id.clone(),
+            template_id: p.template_id.clone(),
+            state: p.state().as_str_name().to_string(),
+            pid: if p.has_pid { Some(p.pid) } else { None },
+            exit_code: if p.has_exit_code { Some(p.exit_code) } else { None },
+            message: if p.message.is_empty() { None } else { Some(p.message) },
+        }),
+    })
 }
 
 fn clamp_u64_to_u32(v: u64) -> u32 {
@@ -537,10 +603,215 @@ pub fn router() -> Router<Ctx> {
         }),
     );
 
+    let instance = Router::new()
+        .procedure(
+            "create",
+            Procedure::builder::<ApiError>().mutation(|_, input: CreateInstanceInput| async move {
+                let agent_endpoint = std::env::var("ALLOY_AGENT_ENDPOINT")
+                    .unwrap_or_else(|_| "http://127.0.0.1:50051".to_string());
+                let mut client = InstanceServiceClient::connect(agent_endpoint.clone())
+                    .await
+                    .map_err(|e| ApiError {
+                        message: format!("failed to connect agent ({agent_endpoint}): {e}"),
+                    })?;
+
+                let resp = client
+                    .create(Request::new(CreateInstanceRequest {
+                        template_id: input.template_id,
+                        params: input.params.into_iter().collect(),
+                    }))
+                    .await
+                    .map_err(|e| ApiError {
+                        message: format!("instance.create failed: {e}"),
+                    })?
+                    .into_inner();
+
+                let cfg = resp
+                    .config
+                    .ok_or_else(|| ApiError {
+                        message: "missing instance config".to_string(),
+                    })?;
+
+                Ok(map_instance_config(cfg))
+            }),
+        )
+        .procedure(
+            "get",
+            Procedure::builder::<ApiError>().query(|_, input: InstanceIdInput| async move {
+                let agent_endpoint = std::env::var("ALLOY_AGENT_ENDPOINT")
+                    .unwrap_or_else(|_| "http://127.0.0.1:50051".to_string());
+                let mut client = InstanceServiceClient::connect(agent_endpoint.clone())
+                    .await
+                    .map_err(|e| ApiError {
+                        message: format!("failed to connect agent ({agent_endpoint}): {e}"),
+                    })?;
+
+                let resp = client
+                    .get(Request::new(GetInstanceRequest {
+                        instance_id: input.instance_id,
+                    }))
+                    .await
+                    .map_err(|e| ApiError {
+                        message: format!("instance.get failed: {e}"),
+                    })?
+                    .into_inner();
+
+                let info = resp
+                    .info
+                    .ok_or_else(|| ApiError {
+                        message: "missing instance info".to_string(),
+                    })?;
+
+                map_instance_info(info)
+            }),
+        )
+        .procedure(
+            "list",
+            Procedure::builder::<ApiError>().query(|_, _: ()| async move {
+                let agent_endpoint = std::env::var("ALLOY_AGENT_ENDPOINT")
+                    .unwrap_or_else(|_| "http://127.0.0.1:50051".to_string());
+                let mut client = InstanceServiceClient::connect(agent_endpoint.clone())
+                    .await
+                    .map_err(|e| ApiError {
+                        message: format!("failed to connect agent ({agent_endpoint}): {e}"),
+                    })?;
+
+                let resp = client
+                    .list(Request::new(ListInstancesRequest {}))
+                    .await
+                    .map_err(|e| ApiError {
+                        message: format!("instance.list failed: {e}"),
+                    })?
+                    .into_inner();
+
+                let mut out = Vec::new();
+                for info in resp.instances {
+                    out.push(map_instance_info(info)?);
+                }
+                Ok(out)
+            }),
+        )
+        .procedure(
+            "start",
+            Procedure::builder::<ApiError>().mutation(|_, input: InstanceIdInput| async move {
+                let agent_endpoint = std::env::var("ALLOY_AGENT_ENDPOINT")
+                    .unwrap_or_else(|_| "http://127.0.0.1:50051".to_string());
+                let mut client = InstanceServiceClient::connect(agent_endpoint.clone())
+                    .await
+                    .map_err(|e| ApiError {
+                        message: format!("failed to connect agent ({agent_endpoint}): {e}"),
+                    })?;
+
+                let resp = client
+                    .start(Request::new(StartInstanceRequest {
+                        instance_id: input.instance_id,
+                    }))
+                    .await
+                    .map_err(|e| ApiError {
+                        message: format!("instance.start failed: {e}"),
+                    })?
+                    .into_inner();
+
+                let status = resp
+                    .status
+                    .ok_or_else(|| ApiError {
+                        message: "missing status".to_string(),
+                    })?;
+
+                Ok(ProcessStatusDto {
+                    process_id: status.process_id.clone(),
+                    template_id: status.template_id.clone(),
+                    state: status.state().as_str_name().to_string(),
+                    pid: if status.has_pid { Some(status.pid) } else { None },
+                    exit_code: if status.has_exit_code {
+                        Some(status.exit_code)
+                    } else {
+                        None
+                    },
+                    message: if status.message.is_empty() {
+                        None
+                    } else {
+                        Some(status.message)
+                    },
+                })
+            }),
+        )
+        .procedure(
+            "stop",
+            Procedure::builder::<ApiError>().mutation(|_, input: StopInstanceInput| async move {
+                let agent_endpoint = std::env::var("ALLOY_AGENT_ENDPOINT")
+                    .unwrap_or_else(|_| "http://127.0.0.1:50051".to_string());
+                let mut client = InstanceServiceClient::connect(agent_endpoint.clone())
+                    .await
+                    .map_err(|e| ApiError {
+                        message: format!("failed to connect agent ({agent_endpoint}): {e}"),
+                    })?;
+
+                let resp = client
+                    .stop(Request::new(StopInstanceRequest {
+                        instance_id: input.instance_id,
+                        timeout_ms: input.timeout_ms.unwrap_or(30_000),
+                    }))
+                    .await
+                    .map_err(|e| ApiError {
+                        message: format!("instance.stop failed: {e}"),
+                    })?
+                    .into_inner();
+
+                let status = resp
+                    .status
+                    .ok_or_else(|| ApiError {
+                        message: "missing status".to_string(),
+                    })?;
+
+                Ok(ProcessStatusDto {
+                    process_id: status.process_id.clone(),
+                    template_id: status.template_id.clone(),
+                    state: status.state().as_str_name().to_string(),
+                    pid: if status.has_pid { Some(status.pid) } else { None },
+                    exit_code: if status.has_exit_code {
+                        Some(status.exit_code)
+                    } else {
+                        None
+                    },
+                    message: if status.message.is_empty() {
+                        None
+                    } else {
+                        Some(status.message)
+                    },
+                })
+            }),
+        )
+        .procedure(
+            "delete",
+            Procedure::builder::<ApiError>().mutation(|_, input: InstanceIdInput| async move {
+                let agent_endpoint = std::env::var("ALLOY_AGENT_ENDPOINT")
+                    .unwrap_or_else(|_| "http://127.0.0.1:50051".to_string());
+                let mut client = InstanceServiceClient::connect(agent_endpoint.clone())
+                    .await
+                    .map_err(|e| ApiError {
+                        message: format!("failed to connect agent ({agent_endpoint}): {e}"),
+                    })?;
+
+                let resp = client
+                    .delete(Request::new(DeleteInstanceRequest {
+                        instance_id: input.instance_id,
+                    }))
+                    .await
+                    .map_err(|e| ApiError {
+                        message: format!("instance.delete failed: {e}"),
+                    })?
+                    .into_inner();
+
+                Ok(DeleteInstanceOutput { ok: resp.ok })
+            }),
+        );
+
     Router::new()
         .nest("control", control)
         .nest("agent", agent)
         .nest("process", process)
         .nest("fs", fs)
         .nest("log", log)
+        .nest("instance", instance)
 }
