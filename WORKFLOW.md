@@ -103,10 +103,14 @@ Notes:
   - [ ] Auth/session model (cookie/JWT) and security policy
   - [ ] rspc router skeleton + TS bindings generation strategy
   - [x] Implement basic Axum server + `/healthz`
+  - [x] Add cookie-based auth endpoints (`/auth/*`) with refresh rotation + CSRF middleware
+  - [x] Protect `/rspc` procedures with access-JWT cookie (allowlist ping/health)
 
 ### Phase 4 - Web UI (SolidJS)
 - [x] Scaffold SolidJS + Tailwind v4 (Vite)
 - [ ] Login + dashboard + node list
+  - [x] Login UI + session chip + modal
+  - [x] Auto-refresh access token on rspc 401 (single retry) + auth-expired UX
   - [x] Instance manager (create/list/start/stop/delete)
   - [x] File explorer (fs.listDir/fs.readFile)
   - [x] Log viewer (log.tailFile)
