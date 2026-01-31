@@ -2,6 +2,7 @@ import { onAuthEvent, queryClient, rspc } from './rspc'
 import { createEffect, createMemo, createSignal, For, Show } from 'solid-js'
 import type { InstanceConfigDto, ProcessStatusDto } from './bindings'
 import { ensureCsrfCookie, login, logout, whoami } from './auth'
+import { Dropdown } from './components/Dropdown'
 
 function statusDotClass(state: { loading: boolean; error: boolean }) {
   if (state.loading) return 'bg-slate-600 animate-pulse'
@@ -179,6 +180,22 @@ function App() {
     () => ['process.templates', null],
     () => ({ enabled: isAuthed() }),
   )
+
+  const templateOptions = createMemo(() =>
+    (templates.data ?? []).map((t: { template_id: string; display_name: string }) => ({
+      value: t.template_id,
+      label: t.display_name,
+      meta: t.template_id,
+    })),
+  )
+
+  createEffect(() => {
+    const opts = templateOptions()
+    if (!opts.length) return
+    if (!opts.some((o: { value: string }) => o.value === selectedTemplate())) {
+      setSelectedTemplate(opts[0].value)
+    }
+  })
   const instances = rspc.createQuery(
     () => ['instance.list', null],
     () => ({ enabled: isAuthed() }),
@@ -198,6 +215,17 @@ function App() {
   const [mcMemory, setMcMemory] = createSignal('2048')
   const [mcPort, setMcPort] = createSignal('25565')
   const [mcError, setMcError] = createSignal<string | null>(null)
+
+  const mcVersionOptions = createMemo(() => [
+    { value: 'latest_release', label: 'Latest release', meta: 'recommended' },
+    { value: 'latest_snapshot', label: 'Latest snapshot', meta: 'unstable' },
+    { value: '1.21.4', label: '1.21.4' },
+    { value: '1.21.3', label: '1.21.3' },
+    { value: '1.21.2', label: '1.21.2' },
+    { value: '1.21.1', label: '1.21.1' },
+    { value: '1.21', label: '1.21' },
+    { value: 'custom', label: 'Custom...' },
+  ])
 
   const [tab, setTab] = createSignal<UiTab>('instances')
 
@@ -550,39 +578,14 @@ function App() {
               <div class="mt-4 text-xs text-slate-500 dark:text-slate-400">rspc: instance.create</div>
 
               <div class="mt-4 space-y-3">
-              <label class="block text-xs text-slate-700 dark:text-slate-300">
-                Template
-                <div class="relative mt-1">
-                  <select
-                    class="w-full appearance-none rounded-lg border border-slate-300 bg-white px-3 py-2 pr-10 text-sm text-slate-900 shadow-sm transition-colors focus:border-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-300 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:focus:border-slate-600 dark:focus:ring-slate-600"
-                    value={selectedTemplate()}
-                    onInput={(e) => setSelectedTemplate(e.currentTarget.value)}
-                    disabled={templates.isPending || (templates.data ?? []).length === 0}
-                  >
-                    <Show when={!templates.isPending} fallback={<option value={selectedTemplate()}>Loading templates...</option>}>
-                      <Show when={(templates.data ?? []).length > 0} fallback={<option value={selectedTemplate()}>No templates</option>}>
-                        <For each={templates.data ?? []}>
-                          {(t) => <option value={t.template_id}>{t.display_name}</option>}
-                        </For>
-                      </Show>
-                    </Show>
-                  </select>
-                  <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3">
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      viewBox="0 0 20 20"
-                      fill="currentColor"
-                      class="h-4 w-4 text-slate-500 dark:text-slate-400"
-                    >
-                      <path
-                        fill-rule="evenodd"
-                        d="M5.23 7.21a.75.75 0 011.06.02L10 10.94l3.71-3.71a.75.75 0 111.06 1.06l-4.24 4.24a.75.75 0 01-1.06 0L5.21 8.29a.75.75 0 01.02-1.08z"
-                        clip-rule="evenodd"
-                      />
-                    </svg>
-                  </div>
-                </div>
-              </label>
+                <Dropdown
+                  label="Template"
+                  value={selectedTemplate()}
+                  options={templateOptions()}
+                  disabled={templates.isPending || templateOptions().length === 0}
+                  placeholder={templates.isPending ? 'Loading templates...' : 'No templates'}
+                  onChange={setSelectedTemplate}
+                />
 
               <Show when={selectedTemplate() === 'demo:sleep'}>
                 <label class="block text-xs text-slate-700 dark:text-slate-300">
@@ -625,39 +628,16 @@ function App() {
                   <div class="grid grid-cols-2 gap-3">
                     <label class="block text-xs text-slate-700 dark:text-slate-300">
                       Version
-                      <div class="relative mt-1">
-                        <select
-                          class="w-full appearance-none rounded-lg border border-slate-300 bg-white px-3 py-2 pr-10 text-sm text-slate-900 shadow-sm transition-colors focus:border-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-300 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:focus:border-slate-600 dark:focus:ring-slate-600"
+                      <div class="mt-1">
+                        <Dropdown
+                          label=""
                           value={mcVersionPreset()}
-                          onInput={(e) => {
-                            const v = e.currentTarget.value
+                          options={mcVersionOptions()}
+                          onChange={(v) => {
                             setMcVersionPreset(v)
                             if (v !== 'custom') setMcVersion(v)
                           }}
-                        >
-                          <option value="latest_release">Latest release</option>
-                          <option value="latest_snapshot">Latest snapshot</option>
-                          <option value="1.21.4">1.21.4</option>
-                          <option value="1.21.3">1.21.3</option>
-                          <option value="1.21.2">1.21.2</option>
-                          <option value="1.21.1">1.21.1</option>
-                          <option value="1.21">1.21</option>
-                          <option value="custom">Custom...</option>
-                        </select>
-                        <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3">
-                          <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            viewBox="0 0 20 20"
-                            fill="currentColor"
-                            class="h-4 w-4 text-slate-500 dark:text-slate-400"
-                          >
-                            <path
-                              fill-rule="evenodd"
-                              d="M5.23 7.21a.75.75 0 011.06.02L10 10.94l3.71-3.71a.75.75 0 111.06 1.06l-4.24 4.24a.75.75 0 01-1.06 0L5.21 8.29a.75.75 0 01.02-1.08z"
-                              clip-rule="evenodd"
-                            />
-                          </svg>
-                        </div>
+                        />
                       </div>
 
                       <Show when={mcVersionPreset() === 'custom'}>
