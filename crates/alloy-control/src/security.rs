@@ -7,9 +7,8 @@ use axum::{
 use axum_extra::extract::cookie::CookieJar;
 use serde::Serialize;
 
-use crate::auth::CSRF_COOKIE_NAME;
-use crate::auth::ACCESS_COOKIE_NAME;
-use crate::auth::validate_access_jwt;
+use crate::auth::{ACCESS_COOKIE_NAME, CSRF_COOKIE_NAME, validate_access_jwt};
+use crate::rpc::AuthUser;
 
 const CSRF_HEADER_NAME: &str = "x-csrf-token";
 
@@ -126,9 +125,16 @@ pub async fn rspc_auth_guard(req: Request<Body>, next: Next) -> Response {
         None => return json_error(StatusCode::UNAUTHORIZED, "missing access token"),
     };
 
-    if validate_access_jwt(token).is_err() {
-        return json_error(StatusCode::UNAUTHORIZED, "invalid access token");
-    }
+    let user = match validate_access_jwt(token) {
+        Ok(u) => AuthUser {
+            user_id: u.user_id,
+            username: u.username,
+            is_admin: u.is_admin,
+        },
+        Err(_) => return json_error(StatusCode::UNAUTHORIZED, "invalid access token"),
+    };
 
+    let mut req = req;
+    req.extensions_mut().insert(user);
     next.run(req).await
 }
