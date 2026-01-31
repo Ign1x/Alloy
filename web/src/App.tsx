@@ -67,6 +67,7 @@ function App() {
   const [loginUser, setLoginUser] = createSignal('admin')
   const [loginPass, setLoginPass] = createSignal('admin')
   const [showLoginModal, setShowLoginModal] = createSignal(false)
+  const [confirmDeleteInstanceId, setConfirmDeleteInstanceId] = createSignal<string | null>(null)
 
   const [focusLoginUsername, setFocusLoginUsername] = createSignal(false)
   let loginUsernameEl: HTMLInputElement | undefined
@@ -493,19 +494,35 @@ function App() {
               <div class="mt-4 space-y-3">
               <label class="block text-xs text-slate-700 dark:text-slate-300">
                 Template
-                <select
-                  class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-300 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:focus:border-slate-600 dark:focus:ring-slate-600"
-                  value={selectedTemplate()}
-                  onInput={(e) => setSelectedTemplate(e.currentTarget.value)}
-                >
-                  <For each={templates.data ?? []}>
-                    {(t) => (
-                      <option value={t.template_id}>
-                        {t.display_name} ({t.template_id})
-                      </option>
-                    )}
-                  </For>
-                </select>
+                <div class="relative mt-1">
+                  <select
+                    class="w-full appearance-none rounded-lg border border-slate-300 bg-white px-3 py-2 pr-10 text-sm text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-300 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:focus:border-slate-600 dark:focus:ring-slate-600"
+                    value={selectedTemplate()}
+                    onInput={(e) => setSelectedTemplate(e.currentTarget.value)}
+                  >
+                    <For each={templates.data ?? []}>
+                      {(t) => (
+                        <option value={t.template_id}>
+                          {t.display_name} ({t.template_id})
+                        </option>
+                      )}
+                    </For>
+                  </select>
+                  <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3">
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      viewBox="0 0 20 20"
+                      fill="currentColor"
+                      class="h-4 w-4 text-slate-500 dark:text-slate-400"
+                    >
+                      <path
+                        fill-rule="evenodd"
+                        d="M5.23 7.21a.75.75 0 011.06.02L10 10.94l3.71-3.71a.75.75 0 111.06 1.06l-4.24 4.24a.75.75 0 01-1.06 0L5.21 8.29a.75.75 0 01.02-1.08z"
+                        clip-rule="evenodd"
+                      />
+                    </svg>
+                  </div>
+                </div>
               </label>
 
               <Show when={selectedTemplate() === 'demo:sleep'}>
@@ -828,13 +845,7 @@ function App() {
                         class="rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs text-rose-700 shadow-sm hover:bg-rose-100 disabled:opacity-50 dark:border-rose-900/50 dark:bg-rose-950/20 dark:text-rose-300 dark:shadow-none"
                         disabled={deleteInstance.isPending || !canStartInstance(i.status)}
                         onClick={async () => {
-                          if (confirm('Delete instance?')) {
-                            await deleteInstance.mutateAsync({ instance_id: i.config.instance_id })
-                            if (selectedInstanceId() === i.config.instance_id) {
-                              setSelectedInstanceId(null)
-                            }
-                            await instances.refetch()
-                          }
+                          setConfirmDeleteInstanceId(i.config.instance_id)
                         }}
                       >
                         Del
@@ -977,6 +988,74 @@ function App() {
                     </button>
                   </div>
                 </form>
+              </div>
+            </div>
+          </div>
+        </Show>
+
+        <Show when={confirmDeleteInstanceId() != null}>
+          <div class="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div
+              class="absolute inset-0 bg-slate-900/20 backdrop-blur-sm dark:bg-slate-950/60"
+              onClick={() => setConfirmDeleteInstanceId(null)}
+            />
+
+            <div
+              class="relative w-full max-w-sm overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-900"
+              role="dialog"
+              aria-modal="true"
+            >
+              <div class="px-6 py-6">
+                <div class="flex items-start gap-3">
+                  <div class="mt-0.5 flex h-9 w-9 items-center justify-center rounded-full bg-rose-50 text-rose-700 dark:bg-rose-950/30 dark:text-rose-300">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-5 w-5">
+                      <path
+                        fill-rule="evenodd"
+                        d="M8.257 3.099c.765-1.36 2.72-1.36 3.486 0l5.58 9.92c.75 1.334-.214 2.98-1.743 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM10 7.25a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0V8a.75.75 0 01.75-.75zM10 13.75a1 1 0 100 2 1 1 0 000-2z"
+                        clip-rule="evenodd"
+                      />
+                    </svg>
+                  </div>
+                  <div class="min-w-0">
+                    <h3 class="text-base font-semibold text-slate-900 dark:text-slate-100">Delete instance</h3>
+                    <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                      This will permanently delete
+                      <span class="mx-1 rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[12px] text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                        {confirmDeleteInstanceId()}
+                      </span>
+                      .
+                    </p>
+                  </div>
+                </div>
+
+                <div class="mt-6 flex gap-3">
+                  <button
+                    type="button"
+                    class="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                    onClick={() => setConfirmDeleteInstanceId(null)}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    class="flex-1 rounded-lg bg-rose-600 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-rose-700 disabled:opacity-50 dark:bg-rose-500 dark:hover:bg-rose-400"
+                    disabled={deleteInstance.isPending}
+                    onClick={async () => {
+                      const id = confirmDeleteInstanceId()
+                      if (!id) return
+                      try {
+                        await deleteInstance.mutateAsync({ instance_id: id })
+                        if (selectedInstanceId() === id) setSelectedInstanceId(null)
+                        setConfirmDeleteInstanceId(null)
+                        await instances.refetch()
+                      } catch {
+                        // Error state already reflected on existing mutation handling.
+                      }
+                    }}
+                  >
+                    Delete
+                  </button>
+                </div>
               </div>
             </div>
           </div>
