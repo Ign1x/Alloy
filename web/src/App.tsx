@@ -388,15 +388,6 @@ function App() {
     return fileText.data?.text ?? ''
   })
 
-  const pingErrorMessage = () => {
-    if (!ping.isError) return ''
-    const err = ping.error as unknown
-    if (err && typeof err === 'object' && 'message' in err) {
-      return String((err as { message?: unknown }).message)
-    }
-    return 'unknown error'
-  }
-
   return (
     <div class="h-screen w-screen overflow-hidden bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-200">
       <div class="flex h-full">
@@ -902,26 +893,26 @@ function App() {
                   <Show when={tab() === 'nodes'}>
                     <div class="space-y-3">
                       <button
-                        class="w-full rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-2 text-xs text-slate-200 hover:bg-slate-900"
+                        class="w-full rounded-xl border border-slate-200 bg-white/70 px-3 py-2 text-xs text-slate-700 shadow-sm hover:bg-white dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:shadow-none dark:hover:bg-slate-900"
                         onClick={() => void nodes.refetch()}
                       >
                         REFRESH
                       </button>
 
-                      <div class="max-h-96 overflow-auto rounded-xl border border-slate-800 bg-slate-950/40 p-1">
+                      <div class="max-h-96 overflow-auto rounded-xl border border-slate-200 bg-white/60 p-1 dark:border-slate-800 dark:bg-slate-950/40">
                         <Show when={!nodes.isPending} fallback={<div class="p-2 text-xs font-mono text-slate-500">loading...</div>}>
                           <For each={nodes.data ?? []}>
                             {(n) => (
                               <button
                                 type="button"
-                                class={`w-full rounded-lg px-2 py-2 text-left transition-colors hover:bg-slate-900 ${
-                                  selectedNodeId() === n.id ? 'bg-slate-900' : ''
+                                class={`w-full rounded-lg px-2 py-2 text-left transition-colors hover:bg-slate-100 dark:hover:bg-slate-900 ${
+                                  selectedNodeId() === n.id ? 'bg-slate-100 dark:bg-slate-900' : ''
                                 }`}
                                 onClick={() => setSelectedNodeId(n.id)}
                               >
                                 <div class="flex items-center justify-between gap-2">
                                   <div class="min-w-0">
-                                    <div class="truncate text-sm font-medium text-slate-100">{n.name}</div>
+                                    <div class="truncate text-sm font-medium text-slate-900 dark:text-slate-100">{n.name}</div>
                                     <div class="mt-0.5 truncate font-mono text-[11px] text-slate-500">{n.endpoint}</div>
                                   </div>
                                   <span
@@ -1052,15 +1043,15 @@ function App() {
 
                   <div class="mt-3 grid gap-2">
                     <Show when={selectedFilePath() && isLogFilePath(selectedFilePath() ?? '')}>
-                      <div class="flex items-center justify-between rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2 text-xs">
-                        <div class="text-slate-400">Tail</div>
+                      <div class="flex items-center justify-between rounded-xl border border-slate-200 bg-white/60 px-3 py-2 text-xs dark:border-slate-800 dark:bg-slate-950/40">
+                        <div class="text-slate-600 dark:text-slate-400">Tail</div>
                         <div class="flex items-center gap-3">
-                          <label class="flex items-center gap-2 text-slate-300">
+                          <label class="flex items-center gap-2 text-slate-600 dark:text-slate-300">
                             <input type="checkbox" checked={liveTail()} onChange={(e) => setLiveTail(e.currentTarget.checked)} />
                             Live
                           </label>
                           <button
-                            class="rounded-lg border border-slate-800 bg-slate-950/60 px-2 py-1 text-xs text-slate-200 hover:bg-slate-900"
+                            class="rounded-lg border border-slate-200 bg-white/70 px-2 py-1 text-xs text-slate-700 shadow-sm hover:bg-white dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:shadow-none dark:hover:bg-slate-900"
                             onClick={() => {
                               setLogCursor(null)
                               void logTail.refetch()
@@ -1073,10 +1064,10 @@ function App() {
                     </Show>
 
                     <Show when={selectedFilePath() && isTextFilePath(selectedFilePath() ?? '') && !isLogFilePath(selectedFilePath() ?? '')}>
-                      <div class="flex items-center justify-between rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2 text-xs">
-                        <div class="text-slate-400">Read</div>
+                      <div class="flex items-center justify-between rounded-xl border border-slate-200 bg-white/60 px-3 py-2 text-xs dark:border-slate-800 dark:bg-slate-950/40">
+                        <div class="text-slate-600 dark:text-slate-400">Read</div>
                         <button
-                          class="rounded-lg border border-slate-800 bg-slate-950/60 px-2 py-1 text-xs text-slate-200 hover:bg-slate-900"
+                          class="rounded-lg border border-slate-200 bg-white/70 px-2 py-1 text-xs text-slate-700 shadow-sm hover:bg-white dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:shadow-none dark:hover:bg-slate-900"
                           onClick={() => void fileText.refetch()}
                         >
                           Refresh
@@ -1084,7 +1075,7 @@ function App() {
                       </div>
                     </Show>
 
-                    <pre class="mt-0 max-h-[70vh] overflow-auto rounded-xl border border-slate-800 bg-slate-950 p-3 text-xs text-slate-200">
+                    <pre class="mt-0 max-h-[70vh] overflow-auto rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-900 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200">
                       {selectedFilePath() ? visibleText() : 'Select a file from the list'}
                     </pre>
                   </div>
@@ -1094,27 +1085,27 @@ function App() {
                   <div class="flex items-center justify-between">
                     <div class="text-xs font-semibold uppercase tracking-wider text-slate-400">Node</div>
                     <button
-                      class="rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-2 text-xs text-slate-200 hover:bg-slate-900"
+                      class="rounded-xl border border-slate-200 bg-white/70 px-3 py-2 text-xs text-slate-700 shadow-sm hover:bg-white dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:shadow-none dark:hover:bg-slate-900"
                       onClick={() => void nodes.refetch()}
                     >
                       REFRESH
                     </button>
                   </div>
 
-                  <div class="mt-3 rounded-xl border border-slate-800 bg-slate-950/40 p-4">
+                  <div class="mt-3 rounded-xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
                     <Show when={selectedNode()} fallback={<div class="text-xs text-slate-500">select a node</div>}>
                       {(n) => (
                         <div>
                           <div class="flex items-center justify-between gap-3">
                             <div class="min-w-0">
-                              <div class="truncate text-sm font-medium text-slate-100">{n().name}</div>
+                              <div class="truncate text-sm font-medium text-slate-900 dark:text-slate-100">{n().name}</div>
                               <div class="mt-0.5 truncate font-mono text-[11px] text-slate-500">{n().endpoint}</div>
                             </div>
                             <Show when={me()?.is_admin}>
                               <button
                                 type="button"
                                 disabled={setNodeEnabled.isPending}
-                                class="group inline-flex items-center gap-2 rounded-full border border-slate-800 bg-slate-950/60 px-2 py-1.5 text-[11px] text-slate-300 hover:bg-slate-900 disabled:opacity-50"
+                                class="group inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/60 px-2 py-1.5 text-[11px] text-slate-700 shadow-sm hover:bg-white disabled:opacity-50 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-300 dark:shadow-none dark:hover:bg-slate-900"
                                 onClick={async () => {
                                   const id = n().id
                                   const current =
@@ -1131,14 +1122,14 @@ function App() {
                                   }
                                 }}
                               >
-                                <span class="text-slate-500">Enabled</span>
+                                <span class="text-slate-500 dark:text-slate-500">Enabled</span>
                                 <span
                                   class={`relative inline-flex h-5 w-9 items-center rounded-full border transition-colors ${
                                     (Object.prototype.hasOwnProperty.call(nodeEnabledOverride(), n().id)
                                       ? nodeEnabledOverride()[n().id]
                                       : n().enabled)
-                                      ? 'border-emerald-900/40 bg-emerald-950/20'
-                                      : 'border-slate-700 bg-slate-900/40'
+                                      ? 'border-emerald-200 bg-emerald-100 dark:border-emerald-900/40 dark:bg-emerald-950/20'
+                                      : 'border-slate-300 bg-slate-200 dark:border-slate-700 dark:bg-slate-900/40'
                                   }`}
                                 >
                                   <span
@@ -1158,19 +1149,19 @@ function App() {
                           <div class="mt-4 grid grid-cols-2 gap-3 text-xs">
                             <div>
                               <div class="text-[11px] text-slate-500">Status</div>
-                              <div class="mt-1 text-slate-200">{n().last_error ? 'Error' : n().last_seen_at ? 'Healthy' : 'Unknown'}</div>
+                              <div class="mt-1 text-slate-700 dark:text-slate-200">{n().last_error ? 'Error' : n().last_seen_at ? 'Healthy' : 'Unknown'}</div>
                             </div>
                             <div>
                               <div class="text-[11px] text-slate-500">Agent</div>
-                              <div class="mt-1 text-slate-200">{n().agent_version ?? '-'}</div>
+                              <div class="mt-1 text-slate-700 dark:text-slate-200">{n().agent_version ?? '-'}</div>
                             </div>
                             <div class="col-span-2">
                               <div class="text-[11px] text-slate-500">Last seen</div>
-                              <div class="mt-1 font-mono text-[11px] text-slate-200">{n().last_seen_at ?? '-'}</div>
+                              <div class="mt-1 font-mono text-[11px] text-slate-700 dark:text-slate-200">{n().last_seen_at ?? '-'}</div>
                             </div>
                             <div class="col-span-2">
                               <div class="text-[11px] text-slate-500">Last error</div>
-                              <div class="mt-1 font-mono text-[11px] text-rose-300">{n().last_error ?? '-'}</div>
+                              <div class="mt-1 font-mono text-[11px] text-rose-700 dark:text-rose-300">{n().last_error ?? '-'}</div>
                             </div>
                           </div>
                         </div>
@@ -1214,706 +1205,8 @@ function App() {
       </div>
 
 
-        <section class="mt-8 grid gap-4 sm:grid-cols-2">
-          <div class="rounded-2xl border border-slate-200 bg-white/80 p-5 shadow-sm dark:border-slate-800/80 dark:bg-slate-900/40 dark:shadow-none">
-            <div class="text-sm font-medium">Backend</div>
-            <div class="mt-2 flex items-center gap-2">
-              <span
-                class={`h-2.5 w-2.5 rounded-full ${statusDotClass({ loading: ping.isPending, error: ping.isError })}`}
-              />
-              <span class="text-sm text-slate-800 dark:text-slate-200">
-                {ping.isPending ? 'checking...' : ping.isError ? 'offline' : 'online'}
-              </span>
-            </div>
-            <div class="mt-4 text-xs text-slate-500 dark:text-slate-400">
-              rspc: <span class="font-mono">control.ping</span>
-            </div>
-            <div class="mt-2 text-xs text-slate-600 dark:text-slate-500">
-              {ping.isError ? pingErrorMessage() : ping.data ? `version: ${ping.data.version}` : ''}
-            </div>
-          </div>
-
-          <div class="rounded-2xl border border-slate-200 bg-white/80 p-5 shadow-sm dark:border-slate-800/80 dark:bg-slate-900/40 dark:shadow-none">
-            <div class="text-sm font-medium">Agent</div>
-            <div class="mt-2 flex items-center gap-2">
-              <span
-                class={`h-2.5 w-2.5 rounded-full ${statusDotClass({ loading: agentHealth.isPending, error: agentHealth.isError })}`}
-              />
-              <span class="text-sm text-slate-800 dark:text-slate-200">
-                {agentHealth.isPending ? 'checking...' : agentHealth.isError ? 'offline' : 'online'}
-              </span>
-            </div>
-            <div class="mt-4 text-xs text-slate-500 dark:text-slate-400">
-              rspc: <span class="font-mono">agent.health</span>
-            </div>
-            <div class="mt-2 text-xs text-slate-600 dark:text-slate-500">
-              {agentHealth.isError
-                ? 'failed to reach agent'
-                : agentHealth.data
-                  ? `status: ${agentHealth.data.status} (${agentHealth.data.agent_version})`
-                  : ''}
-            </div>
-          </div>
-        </section>
-
-        <Show
-          when={isAuthed()}
-          fallback={
-            <section class="mt-8 rounded-3xl border border-dashed border-slate-300 bg-slate-50/50 py-16 text-center dark:border-slate-800 dark:bg-slate-900/20">
-              <div class="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-full bg-slate-100 text-slate-400 dark:bg-slate-800/50 dark:text-slate-500">
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke-width="1.5"
-                  stroke="currentColor"
-                  class="h-8 w-8"
-                >
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z"
-                  />
-                </svg>
-              </div>
-              <h3 class="text-lg font-medium text-slate-900 dark:text-slate-100">Workspace Locked</h3>
-              <p class="mt-2 mx-auto max-w-sm text-sm text-slate-500 dark:text-slate-400">
-                Sign in to manage instances and browse logs.
-              </p>
-              <Show when={authError()}>
-                <div class="mt-4 text-xs text-rose-700 dark:text-rose-300">{authError()}</div>
-              </Show>
-              <button
-                class="mt-8 rounded-lg bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white"
-                onClick={() => {
-                  setAuthError(null)
-                  setShowLoginModal(true)
-                  setFocusLoginUsername(true)
-                }}
-              >
-                Sign in to Alloy
-              </button>
-            </section>
-          }
-        >
-        <section class="mt-8 grid gap-4 lg:grid-cols-3">
-          <div class="rounded-2xl border border-slate-200 bg-white/80 p-5 shadow-sm dark:border-slate-800/80 dark:bg-slate-900/40 dark:shadow-none lg:col-span-1">
-            <div class="flex items-center justify-between gap-3">
-              <div class="text-sm font-medium">Workspace</div>
-              <div class="flex items-center gap-2">
-                <button
-                  class={`rounded-lg border px-3 py-1.5 text-xs shadow-sm ${
-                    tab() === 'instances'
-                      ? 'border-slate-300 bg-white text-slate-900 dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-200'
-                      : 'border-transparent bg-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'
-                  }`}
-                  onClick={() => setTab('instances')}
-                >
-                  Instances
-                </button>
-                <button
-                  class={`rounded-lg border px-3 py-1.5 text-xs shadow-sm ${
-                    tab() === 'files'
-                      ? 'border-slate-300 bg-white text-slate-900 dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-200'
-                      : 'border-transparent bg-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'
-                  }`}
-                  onClick={() => setTab('files')}
-                >
-                  Files
-                </button>
-                <button
-                  class={`rounded-lg border px-3 py-1.5 text-xs shadow-sm ${
-                    tab() === 'nodes'
-                      ? 'border-slate-300 bg-white text-slate-900 dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-200'
-                      : 'border-transparent bg-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'
-                  }`}
-                  onClick={() => setTab('nodes')}
-                >
-                  Nodes
-                </button>
-              </div>
-            </div>
-
-            <Show when={tab() === 'instances'}>
-              <div class="mt-4 text-xs text-slate-500 dark:text-slate-400">rspc: instance.create</div>
-
-              <div class="mt-4 space-y-3">
-                <Dropdown
-                  label="Template"
-                  value={selectedTemplate()}
-                  options={templateOptions()}
-                  disabled={templates.isPending || templateOptions().length === 0}
-                  placeholder={templates.isPending ? 'Loading templates...' : 'No templates'}
-                  onChange={setSelectedTemplate}
-                />
-
-              <Show when={selectedTemplate() === 'demo:sleep'}>
-                <label class="block text-xs text-slate-700 dark:text-slate-300">
-                  seconds
-                  <input
-                    class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-300 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:focus:border-slate-600 dark:focus:ring-slate-600"
-                    value={sleepSeconds()}
-                    onInput={(e) => setSleepSeconds(e.currentTarget.value)}
-                  />
-                </label>
-              </Show>
-
-              <Show when={selectedTemplate() === 'minecraft:vanilla'}>
-                <div class="space-y-3 border-t border-slate-200 pt-3 dark:border-slate-800/50">
-                  <div class="flex items-start gap-3">
-                    <input
-                      id="mc-eula"
-                      type="checkbox"
-                      class="mt-1 h-4 w-4 rounded border-slate-300 bg-white text-slate-700 focus:ring-slate-400 focus:ring-offset-white dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-500 dark:focus:ring-slate-500 dark:focus:ring-offset-slate-900"
-                      checked={mcEula()}
-                      onChange={(e) => setMcEula(e.currentTarget.checked)}
-                    />
-                    <label
-                      for="mc-eula"
-                      class="text-xs leading-tight text-slate-700 select-none dark:text-slate-300"
-                    >
-                      I agree to the{' '}
-                      <a
-                        href="https://account.mojang.com/documents/minecraft_eula"
-                        target="_blank"
-                        rel="noreferrer noopener"
-                        class="text-indigo-600 hover:text-indigo-500 underline dark:text-indigo-400 dark:hover:text-indigo-300"
-                      >
-                        Minecraft EULA
-                      </a>
-                      <span class="block text-[10px] text-slate-500 mt-0.5">Required to start server</span>
-                    </label>
-                  </div>
-
-                  <div class="grid grid-cols-2 gap-3">
-                    <label class="block text-xs text-slate-700 dark:text-slate-300">
-                      Version
-                      <div class="mt-1">
-                        <Dropdown
-                          label=""
-                          value={mcVersionPreset()}
-                          options={mcVersionOptions()}
-                          onChange={(v) => {
-                            setMcVersionPreset(v)
-                            if (v !== 'custom') setMcVersion(v)
-                          }}
-                        />
-                      </div>
-
-                      <Show when={mcVersionPreset() === 'custom'}>
-                        <input
-                          class="mt-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder-slate-400 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-300 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:placeholder-slate-600 dark:focus:border-slate-600 dark:focus:ring-slate-600"
-                          value={mcVersion()}
-                          onInput={(e) => setMcVersion(e.currentTarget.value)}
-                          placeholder="e.g. 1.20.4"
-                        />
-                      </Show>
-                    </label>
-
-                    <label class="block text-xs text-slate-700 dark:text-slate-300">
-                      Memory (MB)
-                      <input
-                        type="number"
-                        class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-300 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:focus:border-slate-600 dark:focus:ring-slate-600"
-                        value={mcMemory()}
-                        onInput={(e) => setMcMemory(e.currentTarget.value)}
-                      />
-                    </label>
-                  </div>
-
-                  <label class="block text-xs text-slate-700 dark:text-slate-300">
-                    Port
-                    <input
-                      type="number"
-                      class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-300 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:focus:border-slate-600 dark:focus:ring-slate-600"
-                      value={mcPort()}
-                      onInput={(e) => setMcPort(e.currentTarget.value)}
-                    />
-                  </label>
-
-                  <Show when={mcError()}>
-                    <div class="text-xs text-rose-700 bg-rose-50 border border-rose-200 p-2 rounded animate-pulse dark:text-rose-300 dark:bg-rose-950/20 dark:border-rose-900/50">
-                      {mcError()}
-                    </div>
-                  </Show>
-                </div>
-              </Show>
-
-              <button
-                class="w-full rounded-lg bg-slate-200 px-3 py-2 text-sm font-medium text-slate-900 disabled:opacity-50"
-                disabled={createInstance.isPending}
-                onClick={async () => {
-                  const template_id = selectedTemplate()
-                  const params: Record<string, string> = {}
-
-                  if (template_id === 'demo:sleep') {
-                    params.seconds = sleepSeconds()
-                  } else if (template_id === 'minecraft:vanilla') {
-                    if (!mcEula()) {
-                      setMcError('You must accept the EULA')
-                      return
-                    }
-                    setMcError(null)
-                    params.accept_eula = 'true'
-                    params.version = mcVersion() || 'latest_release'
-                    params.memory_mb = mcMemory() || '2048'
-                    params.port = mcPort() || '25565'
-                  }
-
-                  await createInstance.mutateAsync({ template_id, params })
-                  await instances.refetch()
-                }}
-              >
-                {createInstance.isPending ? 'Creating...' : 'Create Instance'}
-              </button>
-              <Show when={createInstance.isError}>
-                <div class="text-xs text-rose-300">create failed</div>
-              </Show>
-              </div>
-            </Show>
-
-            <Show when={tab() === 'files'}>
-              <div class="mt-4 text-xs text-slate-500 dark:text-slate-400">rspc: fs.* + log.tailFile</div>
-
-              <div class="mt-4 space-y-3">
-                <label class="block text-xs text-slate-700 dark:text-slate-300">
-                  Path
-                  <input
-                    class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-300 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:focus:border-slate-600 dark:focus:ring-slate-600"
-                    value={fsPath()}
-                    onInput={(e) => setFsPath(e.currentTarget.value)}
-                    placeholder="(empty = /data)"
-                  />
-                </label>
-
-                <div class="grid grid-cols-2 gap-2">
-                  <button
-                    class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-900 shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:shadow-none"
-                    onClick={() => {
-                      setSelectedFilePath(null)
-                      setFsSelectedName(null)
-                      setLogCursor(null)
-                      setLiveTail(true)
-                      void fsList.refetch()
-                    }}
-                  >
-                    Refresh
-                  </button>
-                  <button
-                    class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-900 shadow-sm hover:bg-slate-50 disabled:opacity-50 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:shadow-none"
-                    disabled={!fsPath()}
-                    onClick={() => {
-                      const cur = fsPath().replace(/\/+$/, '')
-                      const idx = cur.lastIndexOf('/')
-                      const next = idx <= 0 ? '' : cur.slice(0, idx)
-                      setFsPath(next)
-                      setSelectedFilePath(null)
-                      setFsSelectedName(null)
-                      setLogCursor(null)
-                      setLiveTail(true)
-                    }}
-                  >
-                    Up
-                  </button>
-                </div>
-
-                <div class="max-h-64 overflow-auto rounded-xl border border-slate-200 bg-white/60 p-2 dark:border-slate-800/70 dark:bg-slate-950/30">
-                  <Show when={!fsList.isPending} fallback={<div class="p-2 text-xs text-slate-500">loading...</div>}>
-                    <For each={fsList.data?.entries ?? []}>
-                      {(e) => (
-                        <button
-                          class={`w-full rounded-lg px-2 py-1 text-left text-xs hover:bg-slate-100 dark:hover:bg-slate-900/40 ${
-                            fsSelectedName() === e.name && !e.is_dir
-                              ? 'bg-slate-100 dark:bg-slate-900/40'
-                              : ''
-                          }`}
-                          onClick={() => {
-                            if (e.is_dir) {
-                              const next = fsPath() ? `${fsPath().replace(/\/+$/, '')}/${e.name}` : e.name
-                              setFsPath(next)
-                              setSelectedFilePath(null)
-                              setFsSelectedName(null)
-                              setLogCursor(null)
-                              setLiveTail(true)
-                            } else {
-                              const file = fsPath() ? `${fsPath().replace(/\/+$/, '')}/${e.name}` : e.name
-                              setSelectedFilePath(file)
-                              setFsSelectedName(e.name)
-                              setLogCursor(null)
-                              setLiveTail(true)
-                            }
-                          }}
-                        >
-                          <span class="font-mono">
-                            {e.is_dir ? 'dir' : 'file'} {e.name}
-                          </span>
-                        </button>
-                      )}
-                    </For>
-                    <Show when={(fsList.data?.entries ?? []).length === 0}>
-                      <div class="p-2 text-xs text-slate-500">empty</div>
-                    </Show>
-                  </Show>
-                </div>
-              </div>
-            </Show>
-
-            <Show when={tab() === 'nodes'}>
-              <div class="mt-4 text-xs text-slate-500 dark:text-slate-400">rspc: node.*</div>
-
-              <div class="mt-4 space-y-3">
-                <div class="flex items-center justify-between">
-                  <div class="text-xs text-slate-500 dark:text-slate-400">Nodes</div>
-                  <button
-                    class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-900 shadow-sm hover:bg-slate-50 disabled:opacity-50 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:shadow-none"
-                    disabled={nodes.isPending}
-                    onClick={() => void nodes.refetch()}
-                  >
-                    Refresh
-                  </button>
-                </div>
-
-                <Show when={!nodes.isPending} fallback={<div class="text-xs text-slate-500">loading...</div>}>
-                  <Show when={!nodes.isError} fallback={<div class="text-xs text-rose-600">failed to load nodes</div>}>
-                    <Show
-                      when={(nodes.data ?? []).length > 0}
-                      fallback={
-                        <div class="rounded-xl border border-dashed border-slate-200 bg-white/50 p-6 text-sm text-slate-500 dark:border-slate-800/70 dark:bg-slate-950/20 dark:text-slate-400">
-                          no nodes
-                        </div>
-                      }
-                    >
-                      <div class="grid gap-3">
-                        <div class="max-h-72 overflow-auto rounded-xl border border-slate-200 bg-white/60 p-1 dark:border-slate-800/70 dark:bg-slate-950/30">
-                          <For each={nodes.data ?? []}>
-                            {(n) => (
-                              <button
-                                type="button"
-                                class={`w-full rounded-lg px-3 py-2 text-left transition-colors hover:bg-slate-100 dark:hover:bg-slate-900/40 ${
-                                  selectedNodeId() === n.id ? 'bg-slate-100 dark:bg-slate-900/40' : ''
-                                }`}
-                                onClick={() => setSelectedNodeId(n.id)}
-                              >
-                                <div class="flex items-center justify-between gap-3">
-                                  <div class="min-w-0">
-                                    <div class="truncate text-sm font-medium text-slate-900 dark:text-slate-100">
-                                      {n.name}
-                                    </div>
-                                    <div class="mt-0.5 truncate font-mono text-[11px] text-slate-500 dark:text-slate-400">
-                                      {n.endpoint}
-                                    </div>
-                                  </div>
-                                  <div class="flex items-center gap-2">
-                                    <span
-                                      class={`h-2 w-2 rounded-full ${
-                                        n.last_error
-                                          ? 'bg-rose-500'
-                                          : n.last_seen_at
-                                            ? 'bg-emerald-400'
-                                            : 'bg-slate-400'
-                                      }`}
-                                      title={n.last_error ? 'error' : n.last_seen_at ? 'healthy' : 'unknown'}
-                                    />
-                                    <span
-                                      class={`rounded-full border px-2 py-0.5 text-[10px] ${
-                                        (Object.prototype.hasOwnProperty.call(nodeEnabledOverride(), n.id)
-                                          ? nodeEnabledOverride()[n.id]
-                                          : n.enabled)
-                                          ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-950/20 dark:text-emerald-300'
-                                          : 'border-slate-200 bg-slate-50 text-slate-600 dark:border-slate-800 dark:bg-slate-950/20 dark:text-slate-300'
-                                      }`}
-                                    >
-                                      {(Object.prototype.hasOwnProperty.call(nodeEnabledOverride(), n.id)
-                                        ? nodeEnabledOverride()[n.id]
-                                        : n.enabled)
-                                        ? 'enabled'
-                                        : 'disabled'}
-                                    </span>
-                                  </div>
-                                </div>
-                              </button>
-                            )}
-                          </For>
-                        </div>
-
-                        <div class="rounded-xl border border-slate-200 bg-white/70 p-4 dark:border-slate-800/70 dark:bg-slate-950/40">
-                          <Show when={selectedNode()} fallback={<div class="text-xs text-slate-500">select a node</div>}>
-                            {(n) => (
-                              <div>
-                                <div class="flex items-center justify-between gap-3">
-                                  <div class="min-w-0">
-                                    <div class="truncate text-sm font-medium text-slate-900 dark:text-slate-100">
-                                      {n().name}
-                                    </div>
-                                    <div class="mt-0.5 truncate font-mono text-[11px] text-slate-500 dark:text-slate-400">
-                                      {n().endpoint}
-                                    </div>
-                                  </div>
-
-                                  <Show when={me()?.is_admin}>
-                                    <button
-                                      type="button"
-                                      disabled={setNodeEnabled.isPending}
-                                      class="group inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/60 px-2 py-1.5 text-[11px] text-slate-700 shadow-sm transition-colors hover:bg-white disabled:opacity-50 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-200 dark:hover:bg-slate-950/70"
-                                      onClick={async () => {
-                                        const id = n().id
-                                        const current =
-                                          Object.prototype.hasOwnProperty.call(nodeEnabledOverride(), id)
-                                            ? nodeEnabledOverride()[id]
-                                            : n().enabled
-                                        const next = !current
-                                        setNodeEnabledOverride({ ...nodeEnabledOverride(), [id]: next })
-                                        try {
-                                          await setNodeEnabled.mutateAsync({ node_id: id, enabled: next })
-                                          void nodes.refetch()
-                                        } catch {
-                                          setNodeEnabledOverride({ ...nodeEnabledOverride(), [id]: current })
-                                        }
-                                      }}
-                                    >
-                                      <span class="text-slate-500 dark:text-slate-400">Enabled</span>
-                                      <span
-                                        class={`relative inline-flex h-5 w-9 items-center rounded-full border transition-colors ${
-                                          (Object.prototype.hasOwnProperty.call(nodeEnabledOverride(), n().id)
-                                            ? nodeEnabledOverride()[n().id]
-                                            : n().enabled)
-                                            ? 'border-emerald-200 bg-emerald-100 dark:border-emerald-900/50 dark:bg-emerald-950/30'
-                                            : 'border-slate-200 bg-slate-100 dark:border-slate-700 dark:bg-slate-900/40'
-                                        }`}
-                                      >
-                                        <span
-                                          class={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform dark:bg-slate-100 ${
-                                            (Object.prototype.hasOwnProperty.call(nodeEnabledOverride(), n().id)
-                                              ? nodeEnabledOverride()[n().id]
-                                              : n().enabled)
-                                              ? 'translate-x-4'
-                                              : 'translate-x-1'
-                                          }`}
-                                        />
-                                      </span>
-                                    </button>
-                                  </Show>
-                                </div>
-
-                                <div class="mt-4 grid grid-cols-2 gap-3 text-xs">
-                                  <div>
-                                    <div class="text-[11px] text-slate-500 dark:text-slate-400">Status</div>
-                                    <div class="mt-1 text-slate-700 dark:text-slate-200">
-                                      {n().last_error ? 'Error' : n().last_seen_at ? 'Healthy' : 'Unknown'}
-                                    </div>
-                                  </div>
-                                  <div>
-                                    <div class="text-[11px] text-slate-500 dark:text-slate-400">Agent</div>
-                                    <div class="mt-1 text-slate-700 dark:text-slate-200">{n().agent_version ?? '-'}</div>
-                                  </div>
-                                  <div class="col-span-2">
-                                    <div class="text-[11px] text-slate-500 dark:text-slate-400">Last seen</div>
-                                    <div class="mt-1 font-mono text-[11px] text-slate-700 dark:text-slate-200">
-                                      {n().last_seen_at ?? '-'}
-                                    </div>
-                                  </div>
-                                  <div class="col-span-2">
-                                    <div class="text-[11px] text-slate-500 dark:text-slate-400">Last error</div>
-                                    <div class="mt-1 font-mono text-[11px] text-rose-600 dark:text-rose-400">
-                                      {n().last_error ?? '-'}
-                                    </div>
-                                  </div>
-                                </div>
-                              </div>
-                            )}
-                          </Show>
-                        </div>
-                      </div>
-                    </Show>
-                  </Show>
-                </Show>
-              </div>
-            </Show>
-          </div>
-
-          <div class="rounded-2xl border border-slate-200 bg-white/80 p-5 shadow-sm dark:border-slate-800/80 dark:bg-slate-900/40 dark:shadow-none lg:col-span-2">
-            <Show
-              when={tab() === 'instances'}
-              fallback={
-                <div>
-                  <div class="flex items-center justify-between gap-4">
-                    <div class="text-sm font-medium">Preview</div>
-                    <div class="text-xs text-slate-500 dark:text-slate-400">
-                      {selectedFilePath() ? selectedFilePath() : 'no file selected'}
-                    </div>
-                  </div>
-
-                  <div class="mt-3 grid gap-2">
-                    <Show when={selectedFilePath() && isLogFilePath(selectedFilePath() ?? '')}>
-                      <div class="flex items-center justify-between rounded-lg border border-slate-200 bg-white/60 px-3 py-2 text-xs dark:border-slate-800/70 dark:bg-slate-950/30">
-                        <div class="text-slate-600 dark:text-slate-300">Tail</div>
-                        <div class="flex items-center gap-3">
-                          <label class="flex items-center gap-2 text-slate-600 dark:text-slate-300">
-                            <input
-                              type="checkbox"
-                              checked={liveTail()}
-                              onChange={(e) => setLiveTail(e.currentTarget.checked)}
-                            />
-                            Live
-                          </label>
-
-                          <button
-                            class="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs text-slate-900 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200"
-                            onClick={() => {
-                              setLogCursor(null)
-                              void logTail.refetch()
-                            }}
-                            title="Jump to end"
-                          >
-                            End
-                          </button>
-                        </div>
-                      </div>
-                    </Show>
-
-                    <Show
-                      when={selectedFilePath() && isTextFilePath(selectedFilePath() ?? '') && !isLogFilePath(selectedFilePath() ?? '')}
-                    >
-                      <div class="flex items-center justify-between rounded-lg border border-slate-200 bg-white/60 px-3 py-2 text-xs dark:border-slate-800/70 dark:bg-slate-950/30">
-                        <div class="text-slate-600 dark:text-slate-300">Read</div>
-                        <button
-                          class="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs text-slate-900 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200"
-                          onClick={() => void fileText.refetch()}
-                        >
-                          Refresh
-                        </button>
-                      </div>
-                    </Show>
-
-                    <pre class="mt-0 max-h-80 overflow-auto rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-800 dark:border-slate-800 dark:bg-slate-950/70 dark:text-slate-200">
-                      {selectedFilePath() ? visibleText() : 'Select a file from the list'}
-                    </pre>
-                  </div>
-                </div>
-              }
-            >
-              <div class="flex items-center justify-between gap-4">
-                <div class="text-sm font-medium">Instances</div>
-                <button
-                  class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-900 shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:shadow-none"
-                  onClick={() => instances.refetch()}
-                >
-                  Refresh
-                </button>
-              </div>
-
-            <div class="mt-3 grid gap-2">
-              <For each={instances.data ?? []}>
-                {(i) => (
-                  <div
-                    class={`flex items-center justify-between gap-4 rounded-xl border border-slate-200 bg-white/70 px-3 py-2 dark:border-slate-800/70 dark:bg-slate-950/40 ${
-                      selectedInstanceId() === i.config.instance_id ? 'ring-1 ring-slate-300 dark:ring-slate-600' : ''
-                    }`}
-                  >
-                    <button
-                      class="min-w-0 flex-1 text-left"
-                      onClick={() => setSelectedInstanceId(i.config.instance_id)}
-                    >
-                      <div class="truncate text-sm text-slate-900 dark:text-slate-100">{i.config.instance_id}</div>
-                      <div class="mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400">
-                        {i.config.template_id} • {instanceStateLabel(i.status)}
-                        <Show when={i.status?.pid != null}> • pid {i.status?.pid}</Show>
-                      </div>
-                    </button>
-
-                    <div class="flex items-center gap-2">
-                      <Show
-                        when={canStartInstance(i.status)}
-                        fallback={
-                          <button
-                            class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-900 shadow-sm hover:bg-slate-50 disabled:opacity-50 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:shadow-none"
-                            disabled={stopInstance.isPending || isStopping(i.status)}
-                            onClick={async () => {
-                              await stopInstance.mutateAsync({ instance_id: i.config.instance_id, timeout_ms: 30_000 })
-                              await instances.refetch()
-                            }}
-                          >
-                            Stop
-                          </button>
-                        }
-                      >
-                        <button
-                          class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-900 shadow-sm hover:bg-slate-50 disabled:opacity-50 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:shadow-none"
-                          disabled={startInstance.isPending}
-                          onClick={async () => {
-                            await startInstance.mutateAsync({ instance_id: i.config.instance_id })
-                            await instances.refetch()
-                          }}
-                        >
-                          Start
-                        </button>
-                      </Show>
-
-                      <button
-                        class="rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs text-rose-700 shadow-sm hover:bg-rose-100 disabled:opacity-50 dark:border-rose-900/50 dark:bg-rose-950/20 dark:text-rose-300 dark:shadow-none"
-                        disabled={deleteInstance.isPending || !canStartInstance(i.status)}
-                        onClick={async () => {
-                          setConfirmDeleteInstanceId(i.config.instance_id)
-                        }}
-                      >
-                        Del
-                      </button>
-
-                      <button
-                        class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-900 shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:shadow-none"
-                        onClick={() => openInFiles(`instances/${i.config.instance_id}`, i.config.instance_id)}
-                        title="Open instance directory"
-                      >
-                        Files
-                      </button>
-
-                      <Show when={i.config.template_id === 'minecraft:vanilla'}>
-                        <button
-                          class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-900 shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:shadow-none"
-                          onClick={() =>
-                            openFileInFiles(
-                              `instances/${i.config.instance_id}/logs/latest.log`,
-                              'latest.log',
-                            )
-                          }
-                          title="Open latest.log"
-                        >
-                          Log
-                        </button>
-                      </Show>
-                    </div>
-                  </div>
-                )}
-              </For>
-
-              <Show when={(instances.data ?? []).length === 0}>
-                <div class="rounded-xl border border-dashed border-slate-200 bg-white/50 p-6 text-sm text-slate-500 dark:border-slate-800/70 dark:bg-slate-950/20 dark:text-slate-400">
-                  no instances created yet
-                </div>
-              </Show>
-            </div>
-
-              <Show when={selectedInstance()}>
-                {(i) => (
-                <div class="mt-4 rounded-xl border border-slate-200 bg-white/70 p-4 dark:border-slate-800/70 dark:bg-slate-950/40">
-                  <div class="flex items-center justify-between gap-4">
-                    <div class="text-xs text-slate-600 dark:text-slate-300">
-                      logs: <span class="font-mono">{i().config.instance_id}</span>
-                    </div>
-                    <div class="text-xs text-slate-500">
-                      {logs.isPending ? 'loading...' : logs.isError ? 'error' : 'live'}
-                    </div>
-                  </div>
-                  <pre class="mt-2 max-h-64 overflow-auto rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-800 dark:border-slate-800 dark:bg-slate-950/70 dark:text-slate-200">
-                    <For each={logs.data?.lines ?? []}>{(l) => <div class="whitespace-pre-wrap">{l}</div>}</For>
-                  </pre>
-                </div>
-                )}
-              </Show>
-            </Show>
-          </div>
-        </section>
-        </Show>
+        {/* Legacy UI below the new console layout was accidentally left in place.
+            Keep return() to the new layout + modals only. */}
 
         <Show when={showLoginModal() && !me()}>
           <div class="fixed inset-0 z-50 flex items-center justify-center p-4">
