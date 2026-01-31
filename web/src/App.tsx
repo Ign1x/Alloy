@@ -202,9 +202,22 @@ function App() {
   return (
     <main class="min-h-screen bg-gradient-to-b from-slate-50 via-white to-slate-100 text-slate-900 dark:from-slate-950 dark:via-slate-950 dark:to-slate-900 dark:text-slate-100">
       <div class="mx-auto max-w-5xl px-6 py-10">
-        <header class="flex items-baseline justify-between gap-6">
-          <h1 class="text-4xl font-semibold tracking-tight">Alloy</h1>
-          <div class="text-xs uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">control plane</div>
+        <header class="flex items-center justify-between gap-6">
+          <div class="flex items-center gap-4">
+            <img
+              src="/logo.svg"
+              width="40"
+              height="40"
+              class="h-10 w-10 rounded-xl shadow-lg shadow-amber-500/10"
+              alt="Alloy"
+            />
+            <div class="leading-none">
+              <h1 class="text-4xl font-semibold tracking-tight">Alloy</h1>
+              <div class="mt-1 text-xs uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">
+                control plane
+              </div>
+            </div>
+          </div>
         </header>
 
         <p class="mt-4 max-w-2xl text-sm leading-6 text-slate-600 dark:text-slate-300">
