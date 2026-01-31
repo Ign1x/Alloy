@@ -4,6 +4,7 @@ use alloy_control::rpc;
 use alloy_control::state::AppState;
 use alloy_control::auth;
 use alloy_control::security;
+use alloy_control::node_health::NodeHealthPoller;
 use axum::{Json, Router, routing::{get, post}};
 use axum::middleware;
 use serde::Serialize;
@@ -68,6 +69,8 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let state = init_db_and_migrate().await?;
+
+    NodeHealthPoller::new(state.db.clone()).spawn();
 
     let router = rpc::router();
     let (procedures, _types) = router
