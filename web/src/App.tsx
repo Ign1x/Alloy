@@ -229,6 +229,8 @@ function App() {
 
   const [tab, setTab] = createSignal<UiTab>('instances')
 
+  const [selectedNodeId, setSelectedNodeId] = createSignal<string | null>(null)
+
   const nodes = rspc.createQuery(
     () => ['node.list', null],
     () => ({ enabled: isAuthed() && tab() === 'nodes', refetchOnWindowFocus: false }),
@@ -237,6 +239,22 @@ function App() {
   const setNodeEnabled = rspc.createMutation(() => 'node.setEnabled')
 
   const [nodeEnabledOverride, setNodeEnabledOverride] = createSignal<Record<string, boolean>>({})
+
+  createEffect(() => {
+    if (tab() !== 'nodes') return
+    const list = nodes.data ?? []
+    if (!list.length) return
+    const current = selectedNodeId()
+    if (!current || !list.some((n: { id: string }) => n.id === current)) {
+      setSelectedNodeId(list[0].id)
+    }
+  })
+
+  const selectedNode = createMemo(() => {
+    const id = selectedNodeId()
+    if (!id) return null
+    return (nodes.data ?? []).find((n: { id: string }) => n.id === id) ?? null
+  })
 
   const [selectedInstanceId, setSelectedInstanceId] = createSignal<string | null>(null)
 
@@ -821,13 +839,16 @@ function App() {
               <div class="mt-4 text-xs text-slate-500 dark:text-slate-400">rspc: node.*</div>
 
               <div class="mt-4 space-y-3">
-                <button
-                  class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-900 shadow-sm hover:bg-slate-50 disabled:opacity-50 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:shadow-none"
-                  disabled={nodes.isPending}
-                  onClick={() => void nodes.refetch()}
-                >
-                  Refresh
-                </button>
+                <div class="flex items-center justify-between">
+                  <div class="text-xs text-slate-500 dark:text-slate-400">Nodes</div>
+                  <button
+                    class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-900 shadow-sm hover:bg-slate-50 disabled:opacity-50 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:shadow-none"
+                    disabled={nodes.isPending}
+                    onClick={() => void nodes.refetch()}
+                  >
+                    Refresh
+                  </button>
+                </div>
 
                 <Show when={!nodes.isPending} fallback={<div class="text-xs text-slate-500">loading...</div>}>
                   <Show when={!nodes.isError} fallback={<div class="text-xs text-rose-600">failed to load nodes</div>}>
@@ -839,103 +860,146 @@ function App() {
                         </div>
                       }
                     >
-                      <div class="space-y-2">
-                        <For each={nodes.data ?? []}>
-                          {(n) => (
-                            <div class="rounded-xl border border-slate-200 bg-white/70 p-3 dark:border-slate-800/70 dark:bg-slate-950/40">
-                              <div class="flex items-start justify-between gap-3">
-                                <div class="min-w-0">
-                                  <div class="truncate text-sm font-medium text-slate-900 dark:text-slate-100">
-                                    {n.name}
+                      <div class="grid gap-3">
+                        <div class="max-h-72 overflow-auto rounded-xl border border-slate-200 bg-white/60 p-1 dark:border-slate-800/70 dark:bg-slate-950/30">
+                          <For each={nodes.data ?? []}>
+                            {(n) => (
+                              <button
+                                type="button"
+                                class={`w-full rounded-lg px-3 py-2 text-left transition-colors hover:bg-slate-100 dark:hover:bg-slate-900/40 ${
+                                  selectedNodeId() === n.id ? 'bg-slate-100 dark:bg-slate-900/40' : ''
+                                }`}
+                                onClick={() => setSelectedNodeId(n.id)}
+                              >
+                                <div class="flex items-center justify-between gap-3">
+                                  <div class="min-w-0">
+                                    <div class="truncate text-sm font-medium text-slate-900 dark:text-slate-100">
+                                      {n.name}
+                                    </div>
+                                    <div class="mt-0.5 truncate font-mono text-[11px] text-slate-500 dark:text-slate-400">
+                                      {n.endpoint}
+                                    </div>
                                   </div>
-                                  <div class="mt-0.5 truncate font-mono text-[11px] text-slate-500 dark:text-slate-400">
-                                    {n.endpoint}
-                                  </div>
-                                </div>
-                                <div class="text-[11px] text-slate-500 dark:text-slate-400">
-                                  <Show
-                                    when={me()?.is_admin}
-                                    fallback={
-                                      <span
-                                        class={`inline-flex items-center gap-2 rounded-full border px-2 py-1 ${
-                                          n.enabled
-                                            ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-950/20 dark:text-emerald-300'
-                                            : 'border-slate-200 bg-slate-50 text-slate-600 dark:border-slate-800 dark:bg-slate-950/20 dark:text-slate-300'
-                                        }`}
-                                      >
-                                        <span
-                                          class={`h-1.5 w-1.5 rounded-full ${
-                                            n.enabled ? 'bg-emerald-500' : 'bg-slate-400'
-                                          }`}
-                                        />
-                                        {n.enabled ? 'enabled' : 'disabled'}
-                                      </span>
-                                    }
-                                  >
-                                    <button
-                                      type="button"
-                                      disabled={setNodeEnabled.isPending}
-                                      class={`inline-flex items-center gap-2 rounded-full border px-2 py-1 transition-colors disabled:opacity-60 ${
+                                  <div class="flex items-center gap-2">
+                                    <span
+                                      class={`h-2 w-2 rounded-full ${
+                                        n.last_error
+                                          ? 'bg-rose-500'
+                                          : n.last_seen_at
+                                            ? 'bg-emerald-400'
+                                            : 'bg-slate-400'
+                                      }`}
+                                      title={n.last_error ? 'error' : n.last_seen_at ? 'healthy' : 'unknown'}
+                                    />
+                                    <span
+                                      class={`rounded-full border px-2 py-0.5 text-[10px] ${
                                         (Object.prototype.hasOwnProperty.call(nodeEnabledOverride(), n.id)
                                           ? nodeEnabledOverride()[n.id]
                                           : n.enabled)
-                                          ? 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-900/50 dark:bg-emerald-950/20 dark:text-emerald-300 dark:hover:bg-emerald-950/40'
-                                          : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100 dark:border-slate-800 dark:bg-slate-950/20 dark:text-slate-300 dark:hover:bg-slate-950/40'
+                                          ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-950/20 dark:text-emerald-300'
+                                          : 'border-slate-200 bg-slate-50 text-slate-600 dark:border-slate-800 dark:bg-slate-950/20 dark:text-slate-300'
                                       }`}
-                                      onClick={async () => {
-                                        const current =
-                                          Object.prototype.hasOwnProperty.call(nodeEnabledOverride(), n.id)
-                                            ? nodeEnabledOverride()[n.id]
-                                            : n.enabled
-                                        const next = !current
-                                        // Optimistic: update local UI state immediately.
-                                        setNodeEnabledOverride({ ...nodeEnabledOverride(), [n.id]: next })
-                                        try {
-                                          await setNodeEnabled.mutateAsync({ node_id: n.id, enabled: next })
-                                          // Best-effort: resync from server.
-                                          void nodes.refetch()
-                                        } catch {
-                                          // Revert on failure.
-                                          setNodeEnabledOverride({ ...nodeEnabledOverride(), [n.id]: current })
-                                        }
-                                      }}
                                     >
-                                      <span
-                                        class={`h-1.5 w-1.5 rounded-full ${
-                                          (Object.prototype.hasOwnProperty.call(nodeEnabledOverride(), n.id)
-                                            ? nodeEnabledOverride()[n.id]
-                                            : n.enabled)
-                                            ? 'bg-emerald-500'
-                                            : 'bg-slate-400'
-                                        }`}
-                                      />
                                       {(Object.prototype.hasOwnProperty.call(nodeEnabledOverride(), n.id)
                                         ? nodeEnabledOverride()[n.id]
                                         : n.enabled)
                                         ? 'enabled'
                                         : 'disabled'}
+                                    </span>
+                                  </div>
+                                </div>
+                              </button>
+                            )}
+                          </For>
+                        </div>
+
+                        <div class="rounded-xl border border-slate-200 bg-white/70 p-4 dark:border-slate-800/70 dark:bg-slate-950/40">
+                          <Show when={selectedNode()} fallback={<div class="text-xs text-slate-500">select a node</div>}>
+                            {(n) => (
+                              <div>
+                                <div class="flex items-center justify-between gap-3">
+                                  <div class="min-w-0">
+                                    <div class="truncate text-sm font-medium text-slate-900 dark:text-slate-100">
+                                      {n().name}
+                                    </div>
+                                    <div class="mt-0.5 truncate font-mono text-[11px] text-slate-500 dark:text-slate-400">
+                                      {n().endpoint}
+                                    </div>
+                                  </div>
+
+                                  <Show when={me()?.is_admin}>
+                                    <button
+                                      type="button"
+                                      disabled={setNodeEnabled.isPending}
+                                      class="group inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/60 px-2 py-1.5 text-[11px] text-slate-700 shadow-sm transition-colors hover:bg-white disabled:opacity-50 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-200 dark:hover:bg-slate-950/70"
+                                      onClick={async () => {
+                                        const id = n().id
+                                        const current =
+                                          Object.prototype.hasOwnProperty.call(nodeEnabledOverride(), id)
+                                            ? nodeEnabledOverride()[id]
+                                            : n().enabled
+                                        const next = !current
+                                        setNodeEnabledOverride({ ...nodeEnabledOverride(), [id]: next })
+                                        try {
+                                          await setNodeEnabled.mutateAsync({ node_id: id, enabled: next })
+                                          void nodes.refetch()
+                                        } catch {
+                                          setNodeEnabledOverride({ ...nodeEnabledOverride(), [id]: current })
+                                        }
+                                      }}
+                                    >
+                                      <span class="text-slate-500 dark:text-slate-400">Enabled</span>
+                                      <span
+                                        class={`relative inline-flex h-5 w-9 items-center rounded-full border transition-colors ${
+                                          (Object.prototype.hasOwnProperty.call(nodeEnabledOverride(), n().id)
+                                            ? nodeEnabledOverride()[n().id]
+                                            : n().enabled)
+                                            ? 'border-emerald-200 bg-emerald-100 dark:border-emerald-900/50 dark:bg-emerald-950/30'
+                                            : 'border-slate-200 bg-slate-100 dark:border-slate-700 dark:bg-slate-900/40'
+                                        }`}
+                                      >
+                                        <span
+                                          class={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform dark:bg-slate-100 ${
+                                            (Object.prototype.hasOwnProperty.call(nodeEnabledOverride(), n().id)
+                                              ? nodeEnabledOverride()[n().id]
+                                              : n().enabled)
+                                              ? 'translate-x-4'
+                                              : 'translate-x-1'
+                                          }`}
+                                        />
+                                      </span>
                                     </button>
                                   </Show>
                                 </div>
-                              </div>
 
-                              <div class="mt-3 grid grid-cols-2 gap-2 text-[11px] text-slate-500 dark:text-slate-400">
-                                <div>
-                                  <span class="text-slate-400">last seen</span>
-                                  <div class="truncate text-slate-600 dark:text-slate-300">{n.last_seen_at ?? '-'}</div>
-                                </div>
-                                <div>
-                                  <span class="text-slate-400">agent</span>
-                                  <div class="truncate text-slate-600 dark:text-slate-300">{n.agent_version ?? '-'}</div>
-                                </div>
-                                <div class="col-span-2">
-                                  <span class="text-slate-400">error</span>
-                                  <div class="truncate text-rose-600 dark:text-rose-400">{n.last_error ?? '-'}</div>
+                                <div class="mt-4 grid grid-cols-2 gap-3 text-xs">
+                                  <div>
+                                    <div class="text-[11px] text-slate-500 dark:text-slate-400">Status</div>
+                                    <div class="mt-1 text-slate-700 dark:text-slate-200">
+                                      {n().last_error ? 'Error' : n().last_seen_at ? 'Healthy' : 'Unknown'}
+                                    </div>
+                                  </div>
+                                  <div>
+                                    <div class="text-[11px] text-slate-500 dark:text-slate-400">Agent</div>
+                                    <div class="mt-1 text-slate-700 dark:text-slate-200">{n().agent_version ?? '-'}</div>
+                                  </div>
+                                  <div class="col-span-2">
+                                    <div class="text-[11px] text-slate-500 dark:text-slate-400">Last seen</div>
+                                    <div class="mt-1 font-mono text-[11px] text-slate-700 dark:text-slate-200">
+                                      {n().last_seen_at ?? '-'}
+                                    </div>
+                                  </div>
+                                  <div class="col-span-2">
+                                    <div class="text-[11px] text-slate-500 dark:text-slate-400">Last error</div>
+                                    <div class="mt-1 font-mono text-[11px] text-rose-600 dark:text-rose-400">
+                                      {n().last_error ?? '-'}
+                                    </div>
+                                  </div>
                                 </div>
                               </div>
-                            </div>
-                          )}
-                        </For>
+                            )}
+                          </Show>
+                        </div>
                       </div>
                     </Show>
                   </Show>
