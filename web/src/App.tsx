@@ -1,7 +1,7 @@
 import { rspc } from './rspc'
 import { createEffect, createMemo, createSignal, For, Show } from 'solid-js'
 import type { InstanceConfigDto, ProcessStatusDto } from './bindings'
-import { ensureCsrfCookie } from './auth'
+import { ensureCsrfCookie, login, logout, whoami } from './auth'
 
 function statusDotClass(state: { loading: boolean; error: boolean }) {
   if (state.loading) return 'bg-slate-600 animate-pulse'
@@ -61,11 +61,48 @@ function App() {
     void ensureCsrfCookie()
   })
 
+  const [me, setMe] = createSignal<{ username: string; is_admin: boolean } | null>(null)
+  const [authLoading, setAuthLoading] = createSignal(true)
+  const [authError, setAuthError] = createSignal<string | null>(null)
+  const [loginUser, setLoginUser] = createSignal('admin')
+  const [loginPass, setLoginPass] = createSignal('admin')
+
+  createEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        setAuthLoading(true)
+        setAuthError(null)
+        const res = await whoami()
+        if (cancelled) return
+        setMe(res ? { username: res.username, is_admin: res.is_admin } : null)
+      } catch (e) {
+        if (cancelled) return
+        setAuthError(e instanceof Error ? e.message : 'auth error')
+        setMe(null)
+      } finally {
+        if (!cancelled) setAuthLoading(false)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  })
+
+  const isAuthed = createMemo(() => !!me())
+
   const ping = rspc.createQuery(() => ['control.ping', null])
   const agentHealth = rspc.createQuery(() => ['agent.health', null])
 
-  const templates = rspc.createQuery(() => ['process.templates', null])
-  const instances = rspc.createQuery(() => ['instance.list', null])
+  const templates = rspc.createQuery(
+    () => ['process.templates', null],
+    () => ({ enabled: isAuthed() }),
+  )
+  const instances = rspc.createQuery(
+    () => ['instance.list', null],
+    () => ({ enabled: isAuthed() }),
+  )
 
   const createInstance = rspc.createMutation(() => 'instance.create')
   const startInstance = rspc.createMutation(() => 'instance.start')
@@ -95,8 +132,8 @@ function App() {
       },
     ],
     () => ({
-      enabled: !!selectedInstanceId(),
-      refetchInterval: 1000,
+      enabled: isAuthed() && !!selectedInstanceId(),
+      refetchInterval: isAuthed() ? 1000 : false,
     }),
   )
 
@@ -114,7 +151,7 @@ function App() {
   const [fsSelectedName, setFsSelectedName] = createSignal<string | null>(null)
   const fsList = rspc.createQuery(
     () => ['fs.listDir', { path: fsPath() ? fsPath() : null }],
-    () => ({ refetchOnWindowFocus: false }),
+    () => ({ enabled: isAuthed(), refetchOnWindowFocus: false }),
   )
   const [selectedFilePath, setSelectedFilePath] = createSignal<string | null>(null)
 
@@ -127,7 +164,10 @@ function App() {
         limit: 65536,
       },
     ],
-    () => ({ enabled: !!selectedFilePath() && isTextFilePath(selectedFilePath() ?? ''), refetchOnWindowFocus: false }),
+    () => ({
+      enabled: isAuthed() && !!selectedFilePath() && isTextFilePath(selectedFilePath() ?? ''),
+      refetchOnWindowFocus: false,
+    }),
   )
 
   const [logCursor, setLogCursor] = createSignal<string | null>(null)
@@ -143,7 +183,7 @@ function App() {
       },
     ],
     () => ({
-      enabled: !!selectedFilePath() && isLogFilePath(selectedFilePath() ?? ''),
+      enabled: isAuthed() && !!selectedFilePath() && isLogFilePath(selectedFilePath() ?? ''),
       refetchInterval: liveTail() ? 1000 : false,
     }),
   )
@@ -267,6 +307,106 @@ function App() {
           </div>
         </section>
 
+        <section class="mt-4 rounded-2xl border border-slate-200 bg-white/80 p-5 shadow-sm dark:border-slate-800/80 dark:bg-slate-900/40 dark:shadow-none">
+          <div class="flex items-start justify-between gap-6">
+            <div>
+              <div class="text-sm font-medium">Session</div>
+              <div class="mt-1 text-xs text-slate-600 dark:text-slate-300">
+                <Show
+                  when={!authLoading()}
+                  fallback={<span class="text-slate-500 dark:text-slate-400">checking...</span>}
+                >
+                  <Show when={me()} fallback={<span class="text-slate-500 dark:text-slate-400">not signed in</span>}>
+                    <span class="text-slate-800 dark:text-slate-200">
+                      {me()!.username}
+                      <span class="ml-2 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/20 dark:text-amber-200">
+                        {me()!.is_admin ? 'admin' : 'user'}
+                      </span>
+                    </span>
+                  </Show>
+                </Show>
+              </div>
+              <Show when={authError()}>
+                <div class="mt-2 text-xs text-rose-700 dark:text-rose-300">{authError()}</div>
+              </Show>
+            </div>
+
+            <Show
+              when={!me()}
+              fallback={
+                <button
+                  class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-900 shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:shadow-none"
+                  onClick={async () => {
+                    try {
+                      setAuthError(null)
+                      await logout()
+                    } catch (e) {
+                      setAuthError(e instanceof Error ? e.message : 'logout error')
+                    } finally {
+                      setMe(null)
+                      setSelectedInstanceId(null)
+                      setSelectedFilePath(null)
+                    }
+                  }}
+                >
+                  Sign out
+                </button>
+              }
+            >
+              <form
+                class="grid w-full max-w-sm gap-3"
+                onSubmit={async (e) => {
+                  e.preventDefault()
+                  try {
+                    setAuthError(null)
+                    const res = await login({ username: loginUser(), password: loginPass() })
+                    setMe({ username: res.username, is_admin: res.is_admin })
+                    await instances.refetch()
+                    await templates.refetch()
+                  } catch (err) {
+                    setAuthError(err instanceof Error ? err.message : 'login failed')
+                  }
+                }}
+              >
+                <div class="grid grid-cols-2 gap-3">
+                  <label class="block text-xs text-slate-700 dark:text-slate-300">
+                    Username
+                    <input
+                      class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-300 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:focus:border-slate-600 dark:focus:ring-slate-600"
+                      value={loginUser()}
+                      onInput={(ev) => setLoginUser(ev.currentTarget.value)}
+                      autocomplete="username"
+                    />
+                  </label>
+                  <label class="block text-xs text-slate-700 dark:text-slate-300">
+                    Password
+                    <input
+                      type="password"
+                      class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-300 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:focus:border-slate-600 dark:focus:ring-slate-600"
+                      value={loginPass()}
+                      onInput={(ev) => setLoginPass(ev.currentTarget.value)}
+                      autocomplete="current-password"
+                    />
+                  </label>
+                </div>
+                <button
+                  class="rounded-lg bg-slate-900 px-3 py-2 text-xs font-medium text-white shadow-sm hover:bg-slate-800 disabled:opacity-50 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white"
+                  type="submit"
+                  disabled={authLoading()}
+                >
+                  Sign in
+                </button>
+              </form>
+            </Show>
+          </div>
+
+          <Show when={!isAuthed()}>
+            <div class="mt-4 rounded-xl border border-dashed border-slate-200 bg-white/40 p-4 text-xs text-slate-600 dark:border-slate-800/70 dark:bg-slate-950/20 dark:text-slate-400">
+              Sign in to manage instances and browse logs.
+            </div>
+          </Show>
+        </section>
+
         <section class="mt-8 grid gap-4 lg:grid-cols-3">
           <div class="rounded-2xl border border-slate-200 bg-white/80 p-5 shadow-sm dark:border-slate-800/80 dark:bg-slate-900/40 dark:shadow-none lg:col-span-1">
             <div class="flex items-center justify-between gap-3">
@@ -297,6 +437,8 @@ function App() {
 
             <Show when={tab() === 'instances'}>
               <div class="mt-4 text-xs text-slate-500 dark:text-slate-400">rspc: instance.create</div>
+
+              <Show when={isAuthed()} fallback={<div class="mt-4 text-xs text-slate-500">Sign in to create instances.</div>}>
 
               <div class="mt-4 space-y-3">
               <label class="block text-xs text-slate-700 dark:text-slate-300">
@@ -425,10 +567,13 @@ function App() {
                 <div class="text-xs text-rose-300">create failed</div>
               </Show>
               </div>
+              </Show>
             </Show>
 
             <Show when={tab() === 'files'}>
               <div class="mt-4 text-xs text-slate-500 dark:text-slate-400">rspc: fs.* + log.tailFile</div>
+
+              <Show when={isAuthed()} fallback={<div class="mt-4 text-xs text-slate-500">Sign in to browse files.</div>}>
 
               <div class="mt-4 space-y-3">
                 <label class="block text-xs text-slate-700 dark:text-slate-300">
@@ -511,6 +656,7 @@ function App() {
                   </Show>
                 </div>
               </div>
+              </Show>
             </Show>
           </div>
 
