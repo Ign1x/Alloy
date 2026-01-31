@@ -1,4 +1,4 @@
-import { rspc } from './rspc'
+import { queryClient, rspc } from './rspc'
 import { createEffect, createMemo, createSignal, For, Show } from 'solid-js'
 import type { InstanceConfigDto, ProcessStatusDto } from './bindings'
 import { ensureCsrfCookie, login, logout, whoami } from './auth'
@@ -66,27 +66,48 @@ function App() {
   const [authError, setAuthError] = createSignal<string | null>(null)
   const [loginUser, setLoginUser] = createSignal('admin')
   const [loginPass, setLoginPass] = createSignal('admin')
+  const [showLoginModal, setShowLoginModal] = createSignal(false)
+
+  // Prevent out-of-order session fetches from clobbering newer state.
+  let sessionFetchToken = 0
+
+  async function refreshSession() {
+    const token = ++sessionFetchToken
+    setAuthLoading(true)
+    setAuthError(null)
+    try {
+      const res = await whoami()
+      if (token !== sessionFetchToken) return
+      setMe(res ? { username: res.username, is_admin: res.is_admin } : null)
+    } catch (e) {
+      if (token !== sessionFetchToken) return
+      setAuthError(e instanceof Error ? e.message : 'auth error')
+      setMe(null)
+    } finally {
+      if (token === sessionFetchToken) setAuthLoading(false)
+    }
+  }
+
+  async function handleLogout() {
+    try {
+      setAuthError(null)
+      await logout()
+    } catch (e) {
+      setAuthError(e instanceof Error ? e.message : 'logout error')
+    } finally {
+      setMe(null)
+      setSelectedInstanceId(null)
+      setSelectedFilePath(null)
+      // Ensure we don't show stale data in a "logged-out" state.
+      queryClient.clear()
+    }
+  }
 
   createEffect(() => {
-    let cancelled = false
-    ;(async () => {
-      try {
-        setAuthLoading(true)
-        setAuthError(null)
-        const res = await whoami()
-        if (cancelled) return
-        setMe(res ? { username: res.username, is_admin: res.is_admin } : null)
-      } catch (e) {
-        if (cancelled) return
-        setAuthError(e instanceof Error ? e.message : 'auth error')
-        setMe(null)
-      } finally {
-        if (!cancelled) setAuthLoading(false)
-      }
-    })()
-
+    void refreshSession()
     return () => {
-      cancelled = true
+      // Invalidate any in-flight `whoami`.
+      sessionFetchToken++
     }
   })
 
@@ -258,6 +279,60 @@ function App() {
               </div>
             </div>
           </div>
+
+          <div class="flex items-center gap-3">
+            <Show
+              when={!authLoading()}
+              fallback={<div class="h-9 w-24 animate-pulse rounded-lg bg-slate-200 dark:bg-slate-800" />}
+            >
+              <Show
+                when={me()}
+                fallback={
+                  <button
+                    class="rounded-full bg-slate-900 px-5 py-2 text-xs font-semibold text-white shadow-sm transition-all hover:bg-slate-800 hover:shadow-md dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white"
+                    onClick={() => {
+                      setAuthError(null)
+                      setShowLoginModal(true)
+                    }}
+                  >
+                    Sign in
+                  </button>
+                }
+              >
+                <div class="flex items-center gap-3 rounded-full border border-slate-200 bg-white/50 py-1.5 pl-4 pr-1.5 shadow-sm backdrop-blur-sm dark:border-slate-800 dark:bg-slate-900/50">
+                  <div class="flex flex-col text-right leading-none">
+                    <span class="text-xs font-medium text-slate-700 dark:text-slate-200">{me()!.username}</span>
+                    <span class="text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                      {me()!.is_admin ? 'Admin' : 'User'}
+                    </span>
+                  </div>
+                  <button
+                    class="group rounded-full bg-slate-100 p-2 text-slate-500 transition-colors hover:bg-rose-50 hover:text-rose-600 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-rose-950/30 dark:hover:text-rose-400"
+                    title="Sign out"
+                    onClick={handleLogout}
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      viewBox="0 0 20 20"
+                      fill="currentColor"
+                      class="h-4 w-4"
+                    >
+                      <path
+                        fill-rule="evenodd"
+                        d="M3 4.25A2.25 2.25 0 015.25 2h5.5A2.25 2.25 0 0113 4.25v2a.75.75 0 01-1.5 0v-2a.75.75 0 00-.75-.75h-5.5a.75.75 0 00-.75.75v11.5c0 .414.336.75.75.75h5.5a.75.75 0 00.75-.75v-2a.75.75 0 011.5 0v2A2.25 2.25 0 0110.75 18h-5.5A2.25 2.25 0 013 15.75V4.25z"
+                        clip-rule="evenodd"
+                      />
+                      <path
+                        fill-rule="evenodd"
+                        d="M19 10a.75.75 0 00-.75-.75H8.704l1.048-1.047a.75.75 0 00-1.06-1.06l-2.358 2.358a.75.75 0 000 1.06l2.358 2.358a.75.75 0 101.06-1.06L8.704 10.75h9.546A.75.75 0 0019 10z"
+                        clip-rule="evenodd"
+                      />
+                    </svg>
+                  </button>
+                </div>
+              </Show>
+            </Show>
+          </div>
         </header>
 
         <p class="mt-4 max-w-2xl text-sm leading-6 text-slate-600 dark:text-slate-300">
@@ -307,106 +382,45 @@ function App() {
           </div>
         </section>
 
-        <section class="mt-4 rounded-2xl border border-slate-200 bg-white/80 p-5 shadow-sm dark:border-slate-800/80 dark:bg-slate-900/40 dark:shadow-none">
-          <div class="flex items-start justify-between gap-6">
-            <div>
-              <div class="text-sm font-medium">Session</div>
-              <div class="mt-1 text-xs text-slate-600 dark:text-slate-300">
-                <Show
-                  when={!authLoading()}
-                  fallback={<span class="text-slate-500 dark:text-slate-400">checking...</span>}
+        <Show
+          when={isAuthed()}
+          fallback={
+            <section class="mt-8 rounded-3xl border border-dashed border-slate-300 bg-slate-50/50 py-16 text-center dark:border-slate-800 dark:bg-slate-900/20">
+              <div class="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-full bg-slate-100 text-slate-400 dark:bg-slate-800/50 dark:text-slate-500">
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke-width="1.5"
+                  stroke="currentColor"
+                  class="h-8 w-8"
                 >
-                  <Show when={me()} fallback={<span class="text-slate-500 dark:text-slate-400">not signed in</span>}>
-                    <span class="text-slate-800 dark:text-slate-200">
-                      {me()!.username}
-                      <span class="ml-2 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/20 dark:text-amber-200">
-                        {me()!.is_admin ? 'admin' : 'user'}
-                      </span>
-                    </span>
-                  </Show>
-                </Show>
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z"
+                  />
+                </svg>
               </div>
+              <h3 class="text-lg font-medium text-slate-900 dark:text-slate-100">Workspace Locked</h3>
+              <p class="mt-2 mx-auto max-w-sm text-sm text-slate-500 dark:text-slate-400">
+                Sign in to manage instances and browse logs.
+              </p>
               <Show when={authError()}>
-                <div class="mt-2 text-xs text-rose-700 dark:text-rose-300">{authError()}</div>
+                <div class="mt-4 text-xs text-rose-700 dark:text-rose-300">{authError()}</div>
               </Show>
-            </div>
-
-            <Show
-              when={!me()}
-              fallback={
-                <button
-                  class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-900 shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:shadow-none"
-                  onClick={async () => {
-                    try {
-                      setAuthError(null)
-                      await logout()
-                    } catch (e) {
-                      setAuthError(e instanceof Error ? e.message : 'logout error')
-                    } finally {
-                      setMe(null)
-                      setSelectedInstanceId(null)
-                      setSelectedFilePath(null)
-                    }
-                  }}
-                >
-                  Sign out
-                </button>
-              }
-            >
-              <form
-                class="grid w-full max-w-sm gap-3"
-                onSubmit={async (e) => {
-                  e.preventDefault()
-                  try {
-                    setAuthError(null)
-                    const res = await login({ username: loginUser(), password: loginPass() })
-                    setMe({ username: res.username, is_admin: res.is_admin })
-                    await instances.refetch()
-                    await templates.refetch()
-                  } catch (err) {
-                    setAuthError(err instanceof Error ? err.message : 'login failed')
-                  }
+              <button
+                class="mt-8 rounded-lg bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white"
+                onClick={() => {
+                  setAuthError(null)
+                  setShowLoginModal(true)
                 }}
               >
-                <div class="grid grid-cols-2 gap-3">
-                  <label class="block text-xs text-slate-700 dark:text-slate-300">
-                    Username
-                    <input
-                      class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-300 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:focus:border-slate-600 dark:focus:ring-slate-600"
-                      value={loginUser()}
-                      onInput={(ev) => setLoginUser(ev.currentTarget.value)}
-                      autocomplete="username"
-                    />
-                  </label>
-                  <label class="block text-xs text-slate-700 dark:text-slate-300">
-                    Password
-                    <input
-                      type="password"
-                      class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-300 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:focus:border-slate-600 dark:focus:ring-slate-600"
-                      value={loginPass()}
-                      onInput={(ev) => setLoginPass(ev.currentTarget.value)}
-                      autocomplete="current-password"
-                    />
-                  </label>
-                </div>
-                <button
-                  class="rounded-lg bg-slate-900 px-3 py-2 text-xs font-medium text-white shadow-sm hover:bg-slate-800 disabled:opacity-50 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white"
-                  type="submit"
-                  disabled={authLoading()}
-                >
-                  Sign in
-                </button>
-              </form>
-            </Show>
-          </div>
-
-          <Show when={!isAuthed()}>
-            <div class="mt-4 rounded-xl border border-dashed border-slate-200 bg-white/40 p-4 text-xs text-slate-600 dark:border-slate-800/70 dark:bg-slate-950/20 dark:text-slate-400">
-              Sign in to manage instances and browse logs.
-            </div>
-          </Show>
-        </section>
-
+                Sign in to Alloy
+              </button>
+            </section>
+          }
+        >
         <section class="mt-8 grid gap-4 lg:grid-cols-3">
           <div class="rounded-2xl border border-slate-200 bg-white/80 p-5 shadow-sm dark:border-slate-800/80 dark:bg-slate-900/40 dark:shadow-none lg:col-span-1">
             <div class="flex items-center justify-between gap-3">
@@ -437,8 +451,6 @@ function App() {
 
             <Show when={tab() === 'instances'}>
               <div class="mt-4 text-xs text-slate-500 dark:text-slate-400">rspc: instance.create</div>
-
-              <Show when={isAuthed()} fallback={<div class="mt-4 text-xs text-slate-500">Sign in to create instances.</div>}>
 
               <div class="mt-4 space-y-3">
               <label class="block text-xs text-slate-700 dark:text-slate-300">
@@ -567,13 +579,10 @@ function App() {
                 <div class="text-xs text-rose-300">create failed</div>
               </Show>
               </div>
-              </Show>
             </Show>
 
             <Show when={tab() === 'files'}>
               <div class="mt-4 text-xs text-slate-500 dark:text-slate-400">rspc: fs.* + log.tailFile</div>
-
-              <Show when={isAuthed()} fallback={<div class="mt-4 text-xs text-slate-500">Sign in to browse files.</div>}>
 
               <div class="mt-4 space-y-3">
                 <label class="block text-xs text-slate-700 dark:text-slate-300">
@@ -656,7 +665,6 @@ function App() {
                   </Show>
                 </div>
               </div>
-              </Show>
             </Show>
           </div>
 
@@ -848,6 +856,90 @@ function App() {
             </Show>
           </div>
         </section>
+        </Show>
+
+        <Show when={showLoginModal() && !me()}>
+          <div class="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div
+              class="absolute inset-0 bg-slate-900/20 backdrop-blur-sm dark:bg-slate-950/60"
+              onClick={() => setShowLoginModal(false)}
+            />
+
+            <div
+              class="relative w-full max-w-sm overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-900"
+              role="dialog"
+              aria-modal="true"
+            >
+              <div class="px-6 py-8">
+                <h2 class="text-xl font-semibold text-slate-900 dark:text-slate-100">Welcome back</h2>
+                <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                  Enter your credentials to access the control plane.
+                </p>
+
+                <form
+                  class="mt-6 grid gap-4"
+                  onSubmit={async (e) => {
+                    e.preventDefault()
+                    try {
+                      setAuthError(null)
+                      setAuthLoading(true)
+                      await login({ username: loginUser(), password: loginPass() })
+                      await refreshSession()
+                      setShowLoginModal(false)
+                    } catch (err) {
+                      setAuthError(err instanceof Error ? err.message : 'login failed')
+                    } finally {
+                      setAuthLoading(false)
+                    }
+                  }}
+                >
+                  <label class="block text-xs font-medium text-slate-700 dark:text-slate-300">
+                    Username
+                    <input
+                      class="mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500 dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-200"
+                      value={loginUser()}
+                      onInput={(ev) => setLoginUser(ev.currentTarget.value)}
+                      autocomplete="username"
+                    />
+                  </label>
+                  <label class="block text-xs font-medium text-slate-700 dark:text-slate-300">
+                    Password
+                    <input
+                      type="password"
+                      class="mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500 dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-200"
+                      value={loginPass()}
+                      onInput={(ev) => setLoginPass(ev.currentTarget.value)}
+                      autocomplete="current-password"
+                    />
+                  </label>
+
+                  <Show when={authError()}>
+                    <div class="rounded-md bg-rose-50 p-3 text-xs text-rose-600 dark:bg-rose-950/30 dark:text-rose-400">
+                      {authError()}
+                    </div>
+                  </Show>
+
+                  <div class="mt-4 flex gap-3">
+                    <button
+                      type="button"
+                      class="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                      onClick={() => setShowLoginModal(false)}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={authLoading()}
+                      class="flex-1 rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-slate-800 disabled:opacity-50 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white"
+                    >
+                      Sign in
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          </div>
+        </Show>
 
         <footer class="mt-10 text-xs text-slate-500">CopyRight@ign1x</footer>
       </div>
