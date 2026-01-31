@@ -8,6 +8,8 @@ use axum_extra::extract::cookie::CookieJar;
 use serde::Serialize;
 
 use crate::auth::CSRF_COOKIE_NAME;
+use crate::auth::ACCESS_COOKIE_NAME;
+use crate::auth::validate_access_jwt;
 
 const CSRF_HEADER_NAME: &str = "x-csrf-token";
 
@@ -99,6 +101,33 @@ pub async fn csrf_and_origin(req: Request<Body>, next: Next) -> Response {
     // service-to-service clients workable without forcing CSRF headers.
     if request_has_cookie_header(headers) && !csrf_is_valid(headers) {
         return json_error(StatusCode::FORBIDDEN, "csrf invalid");
+    }
+
+    next.run(req).await
+}
+
+// Middleware: require a valid access JWT cookie for `/rspc` requests.
+//
+// Allowlist a few public procedures so the UI can show health/version before login.
+pub async fn rspc_auth_guard(req: Request<Body>, next: Next) -> Response {
+    // `/rspc/<procedure>` (v2 endpoint uses `/:id`).
+    let path = req.uri().path();
+    let proc = path.strip_prefix('/').unwrap_or(path);
+
+    // Health endpoints should remain public.
+    if matches!(proc, "control.ping" | "agent.health") {
+        return next.run(req).await;
+    }
+
+    let headers = req.headers();
+    let jar = CookieJar::from_headers(headers);
+    let token = match jar.get(ACCESS_COOKIE_NAME) {
+        Some(c) => c.value(),
+        None => return json_error(StatusCode::UNAUTHORIZED, "missing access token"),
+    };
+
+    if validate_access_jwt(token).is_err() {
+        return json_error(StatusCode::UNAUTHORIZED, "invalid access token");
     }
 
     next.run(req).await

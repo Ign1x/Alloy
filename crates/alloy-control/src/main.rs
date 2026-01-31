@@ -57,11 +57,15 @@ async fn main() -> anyhow::Result<()> {
         .layer(middleware::from_fn(security::csrf_and_origin))
         .with_state(state.clone());
 
+    // Protect /rspc procedures with JWT cookie; allowlist health procedures.
+    let rspc_router = rspc_axum::endpoint(procedures, || rpc::Ctx)
+        .layer(middleware::from_fn(security::rspc_auth_guard));
+
     let app = Router::new()
         .route("/healthz", get(healthz))
         .route("/auth/whoami", get(auth::whoami))
         .nest("/auth", auth_router)
-        .nest("/rspc", rspc_axum::endpoint(procedures, || rpc::Ctx))
+        .nest("/rspc", rspc_router)
         .with_state(state);
     let addr: SocketAddr = ([0, 0, 0, 0], 8080).into();
     tracing::info!(%addr, "alloy-control HTTP listening");
