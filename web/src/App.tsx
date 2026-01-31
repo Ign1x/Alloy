@@ -682,7 +682,7 @@ function App() {
                       </Show>
 
                       <Show when={selectedTemplate() === 'minecraft:vanilla'}>
-                        <div class="space-y-3 border-t border-slate-800 pt-3">
+                        <div class="space-y-3 border-t border-slate-200 pt-3 dark:border-slate-800">
                           <div class="flex items-start gap-3">
                             <input
                               id="mc-eula"
@@ -943,9 +943,9 @@ function App() {
               <section class="min-w-0 flex-1 overflow-auto bg-slate-50 p-4 dark:bg-slate-950">
                 <Show when={tab() === 'instances'}>
                   <div class="flex items-center justify-between">
-                    <div class="text-xs font-semibold uppercase tracking-wider text-slate-400">Instances</div>
+                    <div class="text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">Instances</div>
                     <button
-                      class="rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-2 text-xs text-slate-200 hover:bg-slate-900"
+                      class="rounded-xl border border-slate-200 bg-white/70 px-3 py-2 text-xs text-slate-800 shadow-sm hover:bg-white dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:hover:bg-slate-900"
                       onClick={() => instances.refetch()}
                     >
                       REFRESH
@@ -956,12 +956,12 @@ function App() {
                     <For each={instances.data ?? []}>
                       {(i) => (
                         <div
-                          class={`flex items-center justify-between gap-4 rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2 ${
+                          class={`flex items-center justify-between gap-4 rounded-xl border border-slate-200 bg-white/70 px-3 py-2 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none ${
                             selectedInstanceId() === i.config.instance_id ? 'ring-1 ring-amber-500/20' : ''
                           }`}
                         >
                           <button class="min-w-0 flex-1 text-left" onClick={() => setSelectedInstanceId(i.config.instance_id)}>
-                            <div class="truncate font-mono text-sm text-slate-100">{i.config.instance_id}</div>
+                            <div class="truncate font-mono text-sm text-slate-900 dark:text-slate-100">{i.config.instance_id}</div>
                             <div class="mt-0.5 truncate text-xs text-slate-500">
                               {i.config.template_id} • {instanceStateLabel(i.status)}
                               <Show when={i.status?.pid != null}> • pid {i.status?.pid}</Show>
@@ -973,7 +973,7 @@ function App() {
                               when={canStartInstance(i.status)}
                               fallback={
                                 <button
-                                  class="rounded-lg border border-slate-800 bg-slate-950/60 px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-900 disabled:opacity-50"
+                                  class="rounded-lg border border-slate-200 bg-white/70 px-3 py-1.5 text-xs text-slate-800 shadow-sm hover:bg-white disabled:opacity-50 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:shadow-none dark:hover:bg-slate-900"
                                   disabled={stopInstance.isPending || isStopping(i.status)}
                                   onClick={async () => {
                                     await stopInstance.mutateAsync({ instance_id: i.config.instance_id, timeout_ms: 30_000 })
@@ -985,7 +985,7 @@ function App() {
                               }
                             >
                               <button
-                                class="rounded-lg border border-slate-800 bg-slate-950/60 px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-900 disabled:opacity-50"
+                                class="rounded-lg border border-slate-200 bg-white/70 px-3 py-1.5 text-xs text-slate-800 shadow-sm hover:bg-white disabled:opacity-50 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:shadow-none dark:hover:bg-slate-900"
                                 disabled={startInstance.isPending}
                                 onClick={async () => {
                                   await startInstance.mutateAsync({ instance_id: i.config.instance_id })
@@ -997,7 +997,7 @@ function App() {
                             </Show>
 
                             <button
-                              class="rounded-lg border border-rose-900/40 bg-rose-950/20 px-3 py-1.5 text-xs text-rose-200 hover:bg-rose-950/30 disabled:opacity-50"
+                              class="rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs text-rose-800 shadow-sm hover:bg-rose-100 disabled:opacity-50 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-200 dark:shadow-none dark:hover:bg-rose-950/30"
                               disabled={deleteInstance.isPending || !canStartInstance(i.status)}
                               onClick={() => setConfirmDeleteInstanceId(i.config.instance_id)}
                             >
@@ -1005,7 +1005,7 @@ function App() {
                             </button>
 
                             <button
-                              class="rounded-lg border border-slate-800 bg-slate-950/60 px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-900"
+                              class="rounded-lg border border-slate-200 bg-white/70 px-3 py-1.5 text-xs text-slate-800 shadow-sm hover:bg-white dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:shadow-none dark:hover:bg-slate-900"
                               onClick={() => openInFiles(`instances/${i.config.instance_id}`, i.config.instance_id)}
                               title="Open instance directory"
                             >
@@ -1014,7 +1014,7 @@ function App() {
 
                             <Show when={i.config.template_id === 'minecraft:vanilla'}>
                               <button
-                                class="rounded-lg border border-slate-800 bg-slate-950/60 px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-900"
+                                class="rounded-lg border border-slate-200 bg-white/70 px-3 py-1.5 text-xs text-slate-800 shadow-sm hover:bg-white dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:shadow-none dark:hover:bg-slate-900"
                                 onClick={() => openFileInFiles(`instances/${i.config.instance_id}/logs/latest.log`, 'latest.log')}
                                 title="Open latest.log"
                               >
@@ -1029,14 +1029,14 @@ function App() {
 
                   <Show when={selectedInstance()}>
                     {(i) => (
-                      <div class="mt-4 rounded-xl border border-slate-800 bg-slate-950/40 p-4">
+                      <div class="mt-4 rounded-xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
                         <div class="flex items-center justify-between">
-                          <div class="text-xs text-slate-400">
-                            logs: <span class="font-mono text-slate-200">{i().config.instance_id}</span>
+                          <div class="text-xs text-slate-600 dark:text-slate-400">
+                            logs: <span class="font-mono text-slate-900 dark:text-slate-200">{i().config.instance_id}</span>
                           </div>
                           <div class="text-xs text-slate-500">{logs.isPending ? 'loading...' : logs.isError ? 'error' : 'live'}</div>
                         </div>
-                        <pre class="mt-2 max-h-72 overflow-auto rounded-lg border border-slate-800 bg-slate-950 p-3 text-xs text-slate-200">
+                        <pre class="mt-2 max-h-72 overflow-auto rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-800 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200">
                           <For each={logs.data?.lines ?? []}>{(l) => <div class="whitespace-pre-wrap">{l}</div>}</For>
                         </pre>
                       </div>
