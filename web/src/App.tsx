@@ -72,6 +72,28 @@ function App() {
   const [focusLoginUsername, setFocusLoginUsername] = createSignal(false)
   let loginUsernameEl: HTMLInputElement | undefined
 
+  const THEME_STORAGE_KEY = 'alloy.theme'
+  const [theme, setTheme] = createSignal<'light' | 'dark'>((() => {
+    try {
+      const saved = localStorage.getItem(THEME_STORAGE_KEY)
+      if (saved === 'light' || saved === 'dark') return saved
+    } catch {
+      // ignore
+    }
+    const systemDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+    return systemDark ? 'dark' : 'light'
+  })())
+
+  createEffect(() => {
+    const next = theme()
+    document.documentElement.classList.toggle('dark', next === 'dark')
+    try {
+      localStorage.setItem(THEME_STORAGE_KEY, next)
+    } catch {
+      // ignore
+    }
+  })
+
   // Prevent out-of-order session fetches from clobbering newer state.
   let sessionFetchToken = 0
 
@@ -318,6 +340,41 @@ function App() {
           </div>
 
           <div class="flex items-center gap-3">
+            <button
+              class="group rounded-full border border-slate-200 bg-white/60 p-2 text-slate-600 shadow-sm backdrop-blur-sm transition-colors hover:bg-white dark:border-slate-800 dark:bg-slate-900/40 dark:text-slate-300 dark:hover:bg-slate-900"
+              title={theme() === 'dark' ? 'Switch to light' : 'Switch to dark'}
+              onClick={() => setTheme(theme() === 'dark' ? 'light' : 'dark')}
+            >
+              <Show
+                when={theme() === 'dark'}
+                fallback={
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
+                    <path d="M10 3.25a.75.75 0 01.75.75v1.25a.75.75 0 01-1.5 0V4A.75.75 0 0110 3.25z" />
+                    <path d="M10 14.75a.75.75 0 01.75.75v1.25a.75.75 0 01-1.5 0V15.5a.75.75 0 01.75-.75z" />
+                    <path d="M6.1 5.04a.75.75 0 01.99.33l.5 1.1a.75.75 0 01-1.36.62l-.5-1.1a.75.75 0 01.37-.95z" />
+                    <path d="M13.41 13.53a.75.75 0 01.99.33l.5 1.1a.75.75 0 11-1.36.62l-.5-1.1a.75.75 0 01.37-.95z" />
+                    <path d="M3.25 10a.75.75 0 01.75-.75h1.25a.75.75 0 010 1.5H4a.75.75 0 01-.75-.75z" />
+                    <path d="M14.75 10a.75.75 0 01.75-.75h1.25a.75.75 0 010 1.5H15.5a.75.75 0 01-.75-.75z" />
+                    <path d="M6.1 14.96a.75.75 0 01.33-.99l1.1-.5a.75.75 0 01.62 1.36l-1.1.5a.75.75 0 01-.95-.37z" />
+                    <path d="M13.41 6.47a.75.75 0 01.33-.99l1.1-.5a.75.75 0 11.62 1.36l-1.1.5a.75.75 0 01-.95-.37z" />
+                    <path
+                      fill-rule="evenodd"
+                      d="M10 6.5a3.5 3.5 0 100 7 3.5 3.5 0 000-7zM5 10a5 5 0 1110 0 5 5 0 01-10 0z"
+                      clip-rule="evenodd"
+                    />
+                  </svg>
+                }
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
+                  <path
+                    fill-rule="evenodd"
+                    d="M17.293 13.293A8 8 0 016.707 2.707a8 8 0 1010.586 10.586z"
+                    clip-rule="evenodd"
+                  />
+                </svg>
+              </Show>
+            </button>
+
             <Show
               when={!authLoading()}
               fallback={<div class="h-9 w-24 animate-pulse rounded-lg bg-slate-200 dark:bg-slate-800" />}

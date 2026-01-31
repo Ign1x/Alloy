@@ -1,8 +1,20 @@
 @import "tailwindcss";
 
+/* Tailwind v4: use a class-based dark mode.
+   This lets us toggle by setting/removing `.dark` on <html>. */
+@custom-variant dark (&:where(.dark, .dark *));
+
 /* Let the UA style built-in controls to match system theme. */
 :root {
   color-scheme: light dark;
+}
+
+html:not(.dark) {
+  color-scheme: light;
+}
+
+html.dark {
+  color-scheme: dark;
 }
 
 html,
