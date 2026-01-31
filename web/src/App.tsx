@@ -1,6 +1,7 @@
 import { rspc } from './rspc'
 import { createEffect, createMemo, createSignal, For, Show } from 'solid-js'
 import type { InstanceConfigDto, ProcessStatusDto } from './bindings'
+import { ensureCsrfCookie } from './auth'
 
 function statusDotClass(state: { loading: boolean; error: boolean }) {
   if (state.loading) return 'bg-slate-600 animate-pulse'
@@ -54,6 +55,12 @@ function isLogFilePath(p: string) {
 }
 
 function App() {
+  // Ensure CSRF cookie exists early so authenticated POSTs (auth/rspc mutations)
+  // can always attach x-csrf-token.
+  createEffect(() => {
+    void ensureCsrfCookie()
+  })
+
   const ping = rspc.createQuery(() => ['control.ping', null])
   const agentHealth = rspc.createQuery(() => ['agent.health', null])
 
