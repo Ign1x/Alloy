@@ -2,7 +2,10 @@ use std::net::SocketAddr;
 
 use alloy_control::rpc;
 use alloy_control::state::AppState;
-use axum::{Json, Router, routing::get};
+use alloy_control::auth;
+use alloy_control::security;
+use axum::{Json, Router, routing::{get, post}};
+use axum::middleware;
 use serde::Serialize;
 use sea_orm_migration::MigratorTrait;
 
@@ -45,8 +48,19 @@ async fn main() -> anyhow::Result<()> {
         .build()
         .map_err(|errs| anyhow::anyhow!("rspc build failed: {errs:?}"))?;
 
+    // State-changing auth routes are protected by CSRF double-submit + Origin allowlist.
+    let auth_router = Router::new()
+        .route("/csrf", get(auth::csrf))
+        .route("/login", post(auth::login))
+        .route("/refresh", post(auth::refresh))
+        .route("/logout", post(auth::logout))
+        .layer(middleware::from_fn(security::csrf_and_origin))
+        .with_state(state.clone());
+
     let app = Router::new()
         .route("/healthz", get(healthz))
+        .route("/auth/whoami", get(auth::whoami))
+        .nest("/auth", auth_router)
         .nest("/rspc", rspc_axum::endpoint(procedures, || rpc::Ctx))
         .with_state(state);
     let addr: SocketAddr = ([0, 0, 0, 0], 8080).into();
