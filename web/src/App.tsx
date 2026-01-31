@@ -37,7 +37,7 @@ function isStopping(status: ProcessStatusDto | null) {
   return status?.state === 'PROCESS_STATE_STOPPING'
 }
 
-type UiTab = 'instances' | 'files'
+type UiTab = 'instances' | 'files' | 'nodes'
 
 function isTextFilePath(p: string) {
   const lower = p.toLowerCase()
@@ -228,6 +228,15 @@ function App() {
   ])
 
   const [tab, setTab] = createSignal<UiTab>('instances')
+
+  const nodes = rspc.createQuery(
+    () => ['node.list', null],
+    () => ({ enabled: isAuthed() && tab() === 'nodes', refetchOnWindowFocus: false }),
+  )
+
+  const setNodeEnabled = rspc.createMutation(() => 'node.setEnabled')
+
+  const [nodeEnabledOverride, setNodeEnabledOverride] = createSignal<Record<string, boolean>>({})
 
   const [selectedInstanceId, setSelectedInstanceId] = createSignal<string | null>(null)
 
@@ -571,6 +580,16 @@ function App() {
                 >
                   Files
                 </button>
+                <button
+                  class={`rounded-lg border px-3 py-1.5 text-xs shadow-sm ${
+                    tab() === 'nodes'
+                      ? 'border-slate-300 bg-white text-slate-900 dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-200'
+                      : 'border-transparent bg-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'
+                  }`}
+                  onClick={() => setTab('nodes')}
+                >
+                  Nodes
+                </button>
               </div>
             </div>
 
@@ -795,6 +814,132 @@ function App() {
                     </Show>
                   </Show>
                 </div>
+              </div>
+            </Show>
+
+            <Show when={tab() === 'nodes'}>
+              <div class="mt-4 text-xs text-slate-500 dark:text-slate-400">rspc: node.*</div>
+
+              <div class="mt-4 space-y-3">
+                <button
+                  class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-900 shadow-sm hover:bg-slate-50 disabled:opacity-50 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:shadow-none"
+                  disabled={nodes.isPending}
+                  onClick={() => void nodes.refetch()}
+                >
+                  Refresh
+                </button>
+
+                <Show when={!nodes.isPending} fallback={<div class="text-xs text-slate-500">loading...</div>}>
+                  <Show when={!nodes.isError} fallback={<div class="text-xs text-rose-600">failed to load nodes</div>}>
+                    <Show
+                      when={(nodes.data ?? []).length > 0}
+                      fallback={
+                        <div class="rounded-xl border border-dashed border-slate-200 bg-white/50 p-6 text-sm text-slate-500 dark:border-slate-800/70 dark:bg-slate-950/20 dark:text-slate-400">
+                          no nodes
+                        </div>
+                      }
+                    >
+                      <div class="space-y-2">
+                        <For each={nodes.data ?? []}>
+                          {(n) => (
+                            <div class="rounded-xl border border-slate-200 bg-white/70 p-3 dark:border-slate-800/70 dark:bg-slate-950/40">
+                              <div class="flex items-start justify-between gap-3">
+                                <div class="min-w-0">
+                                  <div class="truncate text-sm font-medium text-slate-900 dark:text-slate-100">
+                                    {n.name}
+                                  </div>
+                                  <div class="mt-0.5 truncate font-mono text-[11px] text-slate-500 dark:text-slate-400">
+                                    {n.endpoint}
+                                  </div>
+                                </div>
+                                <div class="text-[11px] text-slate-500 dark:text-slate-400">
+                                  <Show
+                                    when={me()?.is_admin}
+                                    fallback={
+                                      <span
+                                        class={`inline-flex items-center gap-2 rounded-full border px-2 py-1 ${
+                                          n.enabled
+                                            ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-950/20 dark:text-emerald-300'
+                                            : 'border-slate-200 bg-slate-50 text-slate-600 dark:border-slate-800 dark:bg-slate-950/20 dark:text-slate-300'
+                                        }`}
+                                      >
+                                        <span
+                                          class={`h-1.5 w-1.5 rounded-full ${
+                                            n.enabled ? 'bg-emerald-500' : 'bg-slate-400'
+                                          }`}
+                                        />
+                                        {n.enabled ? 'enabled' : 'disabled'}
+                                      </span>
+                                    }
+                                  >
+                                    <button
+                                      type="button"
+                                      disabled={setNodeEnabled.isPending}
+                                      class={`inline-flex items-center gap-2 rounded-full border px-2 py-1 transition-colors disabled:opacity-60 ${
+                                        (Object.prototype.hasOwnProperty.call(nodeEnabledOverride(), n.id)
+                                          ? nodeEnabledOverride()[n.id]
+                                          : n.enabled)
+                                          ? 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-900/50 dark:bg-emerald-950/20 dark:text-emerald-300 dark:hover:bg-emerald-950/40'
+                                          : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100 dark:border-slate-800 dark:bg-slate-950/20 dark:text-slate-300 dark:hover:bg-slate-950/40'
+                                      }`}
+                                      onClick={async () => {
+                                        const current =
+                                          Object.prototype.hasOwnProperty.call(nodeEnabledOverride(), n.id)
+                                            ? nodeEnabledOverride()[n.id]
+                                            : n.enabled
+                                        const next = !current
+                                        // Optimistic: update local UI state immediately.
+                                        setNodeEnabledOverride({ ...nodeEnabledOverride(), [n.id]: next })
+                                        try {
+                                          await setNodeEnabled.mutateAsync({ node_id: n.id, enabled: next })
+                                          // Best-effort: resync from server.
+                                          void nodes.refetch()
+                                        } catch {
+                                          // Revert on failure.
+                                          setNodeEnabledOverride({ ...nodeEnabledOverride(), [n.id]: current })
+                                        }
+                                      }}
+                                    >
+                                      <span
+                                        class={`h-1.5 w-1.5 rounded-full ${
+                                          (Object.prototype.hasOwnProperty.call(nodeEnabledOverride(), n.id)
+                                            ? nodeEnabledOverride()[n.id]
+                                            : n.enabled)
+                                            ? 'bg-emerald-500'
+                                            : 'bg-slate-400'
+                                        }`}
+                                      />
+                                      {(Object.prototype.hasOwnProperty.call(nodeEnabledOverride(), n.id)
+                                        ? nodeEnabledOverride()[n.id]
+                                        : n.enabled)
+                                        ? 'enabled'
+                                        : 'disabled'}
+                                    </button>
+                                  </Show>
+                                </div>
+                              </div>
+
+                              <div class="mt-3 grid grid-cols-2 gap-2 text-[11px] text-slate-500 dark:text-slate-400">
+                                <div>
+                                  <span class="text-slate-400">last seen</span>
+                                  <div class="truncate text-slate-600 dark:text-slate-300">{n.last_seen_at ?? '-'}</div>
+                                </div>
+                                <div>
+                                  <span class="text-slate-400">agent</span>
+                                  <div class="truncate text-slate-600 dark:text-slate-300">{n.agent_version ?? '-'}</div>
+                                </div>
+                                <div class="col-span-2">
+                                  <span class="text-slate-400">error</span>
+                                  <div class="truncate text-rose-600 dark:text-rose-400">{n.last_error ?? '-'}</div>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </For>
+                      </div>
+                    </Show>
+                  </Show>
+                </Show>
               </div>
             </Show>
           </div>
