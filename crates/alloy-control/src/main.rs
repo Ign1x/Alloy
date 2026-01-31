@@ -8,6 +8,7 @@ use axum::{Json, Router, routing::{get, post}};
 use axum::middleware;
 use serde::Serialize;
 use sea_orm_migration::MigratorTrait;
+use sea_orm::EntityTrait;
 
 #[derive(Debug, Serialize)]
 struct HealthzResponse {
@@ -29,6 +30,31 @@ async fn init_db_and_migrate() -> anyhow::Result<AppState> {
 
     // Apply migrations on boot (idempotent).
     alloy_migration::Migrator::up(&db, None).await?;
+
+    // Ensure the default node exists so the UI has something to show.
+    // This is idempotent and safe to run on every boot.
+    if let Ok(endpoint) = std::env::var("ALLOY_AGENT_ENDPOINT") {
+        let _ = alloy_db::entities::nodes::Entity::insert(alloy_db::entities::nodes::ActiveModel {
+            id: sea_orm::Set(sea_orm::prelude::Uuid::new_v4()),
+            name: sea_orm::Set("default".to_string()),
+            endpoint: sea_orm::Set(endpoint),
+            enabled: sea_orm::Set(true),
+            last_seen_at: sea_orm::Set(None),
+            agent_version: sea_orm::Set(None),
+            last_error: sea_orm::Set(None),
+            created_at: sea_orm::Set(chrono::Utc::now().into()),
+            updated_at: sea_orm::Set(chrono::Utc::now().into()),
+        })
+        .on_conflict(
+            sea_orm::sea_query::OnConflict::columns([
+                alloy_db::entities::nodes::Column::Name,
+            ])
+            .do_nothing()
+            .to_owned(),
+        )
+        .exec(&db)
+        .await;
+    }
 
     Ok(AppState {
         db: std::sync::Arc::new(db),
@@ -58,8 +84,17 @@ async fn main() -> anyhow::Result<()> {
         .with_state(state.clone());
 
     // Protect /rspc procedures with JWT cookie; allowlist health procedures.
-    let rspc_router = rspc_axum::endpoint(procedures, || rpc::Ctx)
-        .layer(middleware::from_fn(security::rspc_auth_guard));
+    let rspc_router = rspc_axum::endpoint(
+        procedures,
+        |axum::extract::State(state): axum::extract::State<AppState>,
+         user: Option<axum::Extension<rpc::AuthUser>>| {
+            rpc::Ctx {
+                db: state.db.clone(),
+                user: user.map(|axum::Extension(u)| u),
+            }
+        },
+    )
+    .layer(middleware::from_fn(security::rspc_auth_guard));
 
     let app = Router::new()
         .route("/healthz", get(healthz))
