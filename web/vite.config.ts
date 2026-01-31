@@ -11,6 +11,11 @@ export default defineConfig({
         target: 'http://localhost:8080',
         changeOrigin: true,
       },
+      // Auth endpoints are outside /rspc.
+      '/auth': {
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+      },
     },
   },
 })
