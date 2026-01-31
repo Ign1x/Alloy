@@ -80,3 +80,19 @@ export async function logout(): Promise<void> {
   const resp = await authFetch('/auth/logout', { method: 'POST' })
   if (!resp.ok && resp.status !== 401) throw new Error(`logout failed: ${resp.status}`)
 }
+
+let refreshInFlight: Promise<void> | null = null
+
+export async function refreshSession(): Promise<void> {
+  // Refresh rotates the refresh token; guard against concurrent calls.
+  if (!refreshInFlight) {
+    refreshInFlight = (async () => {
+      const resp = await authFetch('/auth/refresh', { method: 'POST' })
+      if (resp.status === 401) return
+      if (!resp.ok) throw new Error(`refresh failed: ${resp.status}`)
+    })().finally(() => {
+      refreshInFlight = null
+    })
+  }
+  await refreshInFlight
+}

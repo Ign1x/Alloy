@@ -1,4 +1,4 @@
-import { queryClient, rspc } from './rspc'
+import { onAuthEvent, queryClient, rspc } from './rspc'
 import { createEffect, createMemo, createSignal, For, Show } from 'solid-js'
 import type { InstanceConfigDto, ProcessStatusDto } from './bindings'
 import { ensureCsrfCookie, login, logout, whoami } from './auth'
@@ -68,6 +68,9 @@ function App() {
   const [loginPass, setLoginPass] = createSignal('admin')
   const [showLoginModal, setShowLoginModal] = createSignal(false)
 
+  const [focusLoginUsername, setFocusLoginUsername] = createSignal(false)
+  let loginUsernameEl: HTMLInputElement | undefined
+
   // Prevent out-of-order session fetches from clobbering newer state.
   let sessionFetchToken = 0
 
@@ -102,6 +105,39 @@ function App() {
       queryClient.clear()
     }
   }
+
+  createEffect(() => {
+    const off = onAuthEvent((e) => {
+      if (e.type !== 'auth-expired') return
+      // Session expired (access token missing/expired and refresh failed).
+      setMe(null)
+      setSelectedInstanceId(null)
+      setSelectedFilePath(null)
+      queryClient.clear()
+      setAuthError('Session expired. Please sign in again.')
+      setShowLoginModal(true)
+      setFocusLoginUsername(true)
+    })
+    return off
+  })
+
+  createEffect(() => {
+    if (!showLoginModal()) return
+    if (!focusLoginUsername()) return
+    setFocusLoginUsername(false)
+    queueMicrotask(() => loginUsernameEl?.focus())
+  })
+
+  createEffect(() => {
+    if (!showLoginModal()) return
+    const onKeyDown = (ev: KeyboardEvent) => {
+      if (ev.key !== 'Escape') return
+      ev.preventDefault()
+      setShowLoginModal(false)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  })
 
   createEffect(() => {
     void refreshSession()
@@ -293,6 +329,7 @@ function App() {
                     onClick={() => {
                       setAuthError(null)
                       setShowLoginModal(true)
+                      setFocusLoginUsername(true)
                     }}
                   >
                     Sign in
@@ -414,6 +451,7 @@ function App() {
                 onClick={() => {
                   setAuthError(null)
                   setShowLoginModal(true)
+                  setFocusLoginUsername(true)
                 }}
               >
                 Sign in to Alloy
@@ -896,6 +934,9 @@ function App() {
                   <label class="block text-xs font-medium text-slate-700 dark:text-slate-300">
                     Username
                     <input
+                      ref={(el) => {
+                        loginUsernameEl = el
+                      }}
                       class="mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500 dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-200"
                       value={loginUser()}
                       onInput={(ev) => setLoginUser(ev.currentTarget.value)}
