@@ -11,7 +11,7 @@ use sea_orm::prelude::Uuid;
 use crate::state::AppState;
 
 pub const CSRF_COOKIE_NAME: &str = "csrf";
-const ACCESS_COOKIE_NAME: &str = "access";
+pub const ACCESS_COOKIE_NAME: &str = "access";
 const REFRESH_COOKIE_NAME: &str = "refresh";
 
 #[derive(Debug, Serialize)]
@@ -168,6 +168,24 @@ struct Claims {
     aud: String,
 }
 
+pub fn validate_access_jwt(token: &str) -> anyhow::Result<WhoamiResponse> {
+    let mut validation = jsonwebtoken::Validation::new(jsonwebtoken::Algorithm::HS256);
+    validation.set_audience(&["alloy-web"]);
+    validation.set_issuer(&["alloy"]);
+
+    let data = jsonwebtoken::decode::<Claims>(
+        token,
+        &jsonwebtoken::DecodingKey::from_secret(&jwt_secret()),
+        &validation,
+    )?;
+
+    Ok(WhoamiResponse {
+        user_id: data.claims.sub,
+        username: data.claims.username,
+        is_admin: data.claims.is_admin,
+    })
+}
+
 fn make_access_jwt(user: &alloy_db::entities::users::Model) -> anyhow::Result<String> {
     let now = time::OffsetDateTime::now_utc();
     let exp = (now + time::Duration::minutes(5)).unix_timestamp() as usize;
@@ -260,25 +278,10 @@ pub async fn whoami(State(_state): State<AppState>, jar: CookieJar) -> impl Into
         None => return json_error(StatusCode::UNAUTHORIZED, "missing access token").into_response(),
     };
 
-    let mut validation = jsonwebtoken::Validation::new(jsonwebtoken::Algorithm::HS256);
-    validation.set_audience(&["alloy-web"]);
-    validation.set_issuer(&["alloy"]);
-
-    let data = match jsonwebtoken::decode::<Claims>(
-        &token,
-        &jsonwebtoken::DecodingKey::from_secret(&jwt_secret()),
-        &validation,
-    ) {
-        Ok(v) => v,
-        Err(_) => return json_error(StatusCode::UNAUTHORIZED, "invalid access token").into_response(),
-    };
-
-    (StatusCode::OK, Json(WhoamiResponse {
-        user_id: data.claims.sub,
-        username: data.claims.username,
-        is_admin: data.claims.is_admin,
-    }))
-        .into_response()
+    match validate_access_jwt(&token) {
+        Ok(me) => (StatusCode::OK, Json(me)).into_response(),
+        Err(_) => json_error(StatusCode::UNAUTHORIZED, "invalid access token").into_response(),
+    }
 }
 
 pub async fn logout(
