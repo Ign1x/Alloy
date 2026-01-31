@@ -69,6 +69,7 @@ function App() {
   const [loginPass, setLoginPass] = createSignal('admin')
   const [showLoginModal, setShowLoginModal] = createSignal(false)
   const [confirmDeleteInstanceId, setConfirmDeleteInstanceId] = createSignal<string | null>(null)
+  const [showAccountMenu, setShowAccountMenu] = createSignal(false)
 
   const [focusLoginUsername, setFocusLoginUsername] = createSignal(false)
   let loginUsernameEl: HTMLInputElement | undefined
@@ -150,6 +151,27 @@ function App() {
     if (!focusLoginUsername()) return
     setFocusLoginUsername(false)
     queueMicrotask(() => loginUsernameEl?.focus())
+  })
+
+  createEffect(() => {
+    if (!showAccountMenu()) return
+    const onDoc = (ev: MouseEvent) => {
+      const t = ev.target as Node | null
+      if (!t) return
+      // Close on any outside click; menu is simple.
+      setShowAccountMenu(false)
+    }
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key === 'Escape') setShowAccountMenu(false)
+    }
+    // Use capture so clicks on menu still close after action.
+    // Use a plain listener (no options) for compatibility and easy cleanup.
+    document.addEventListener('mousedown', onDoc)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDoc)
+      window.removeEventListener('keydown', onKey)
+    }
   })
 
   createEffect(() => {
@@ -376,28 +398,63 @@ function App() {
   }
 
   return (
-    <main class="min-h-screen bg-gradient-to-b from-slate-50 via-white to-slate-100 text-slate-900 dark:from-slate-950 dark:via-slate-950 dark:to-slate-900 dark:text-slate-100">
-      <div class="mx-auto max-w-5xl px-6 py-10">
-        <header class="flex items-center justify-between gap-6">
-          <div class="flex items-center gap-4">
-            <img
-              src="/logo.svg"
-              width="40"
-              height="40"
-              class="h-10 w-10 rounded-xl shadow-lg shadow-amber-500/10"
-              alt="Alloy"
-            />
-            <div class="leading-none">
-              <h1 class="text-4xl font-semibold tracking-tight">Alloy</h1>
-              <div class="mt-1 text-xs uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">
-                control plane
-              </div>
-            </div>
+    <div class="h-screen w-screen overflow-hidden bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-200">
+      <div class="flex h-full">
+        <nav class="hidden sm:flex w-14 flex-none flex-col items-center gap-3 border-r border-slate-200 bg-white px-2 py-3 dark:border-slate-800 dark:bg-slate-950">
+          <img src="/logo.svg" class="mt-1 h-8 w-8 rounded-xl" alt="Alloy" />
+
+          <div class="mt-2 flex w-full flex-col items-center gap-2">
+            <button
+              type="button"
+              class={`group relative flex h-10 w-10 items-center justify-center rounded-xl transition-colors ${
+                tab() === 'instances'
+                  ? 'bg-amber-500/10 text-amber-700 ring-1 ring-inset ring-amber-500/20 dark:text-amber-300'
+                  : 'text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-900 dark:hover:text-slate-200'
+              }`}
+              onClick={() => setTab('instances')}
+              title="Instances"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-5 w-5">
+                <path d="M10.75 2.5a.75.75 0 00-1.5 0V3.2a6.8 6.8 0 00-2.98 1.235l-.5-.5a.75.75 0 10-1.06 1.06l.5.5A6.8 6.8 0 003.2 9.25H2.5a.75.75 0 000 1.5h.7a6.8 6.8 0 001.235 2.98l-.5.5a.75.75 0 101.06 1.06l.5-.5A6.8 6.8 0 009.25 16.8v.7a.75.75 0 001.5 0v-.7a6.8 6.8 0 002.98-1.235l.5.5a.75.75 0 101.06-1.06l-.5-.5a6.8 6.8 0 001.235-2.98h.7a.75.75 0 000-1.5h-.7a6.8 6.8 0 00-1.235-2.98l.5-.5a.75.75 0 10-1.06-1.06l-.5.5A6.8 6.8 0 0010.75 3.2V2.5z" />
+                <path d="M10 6.5a3.5 3.5 0 100 7 3.5 3.5 0 000-7z" />
+              </svg>
+            </button>
+
+            <button
+              type="button"
+              class={`group relative flex h-10 w-10 items-center justify-center rounded-xl transition-colors ${
+                tab() === 'files'
+                  ? 'bg-amber-500/10 text-amber-700 ring-1 ring-inset ring-amber-500/20 dark:text-amber-300'
+                  : 'text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-900 dark:hover:text-slate-200'
+              }`}
+              onClick={() => setTab('files')}
+              title="Files"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-5 w-5">
+                <path d="M2 5.75A2.75 2.75 0 014.75 3h4.19a2.75 2.75 0 011.944.806l.56.56c.215.215.507.334.812.334h2.994A2.75 2.75 0 0118 7.45v6.8A2.75 2.75 0 0115.25 17H4.75A2.75 2.75 0 012 14.25v-8.5z" />
+              </svg>
+            </button>
+
+            <button
+              type="button"
+              class={`group relative flex h-10 w-10 items-center justify-center rounded-xl transition-colors ${
+                tab() === 'nodes'
+                  ? 'bg-amber-500/10 text-amber-700 ring-1 ring-inset ring-amber-500/20 dark:text-amber-300'
+                  : 'text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-900 dark:hover:text-slate-200'
+              }`}
+              onClick={() => setTab('nodes')}
+              title="Nodes"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-5 w-5">
+                <path d="M4.75 3A2.75 2.75 0 002 5.75v.5A2.75 2.75 0 004.75 9h10.5A2.75 2.75 0 0018 6.25v-.5A2.75 2.75 0 0015.25 3H4.75z" />
+                <path d="M4.75 11A2.75 2.75 0 002 13.75v.5A2.75 2.75 0 004.75 17h10.5A2.75 2.75 0 0018 14.25v-.5A2.75 2.75 0 0015.25 11H4.75z" />
+              </svg>
+            </button>
           </div>
 
-          <div class="flex items-center gap-3">
+          <div class="mt-auto flex w-full flex-col items-center gap-2 pb-2">
             <button
-              class="group rounded-full border border-slate-200 bg-white/60 p-2 text-slate-600 shadow-sm backdrop-blur-sm transition-colors hover:bg-white dark:border-slate-800 dark:bg-slate-900/40 dark:text-slate-300 dark:hover:bg-slate-900"
+              class="rounded-xl border border-slate-200 bg-white/70 p-2 text-slate-700 shadow-sm transition-colors hover:bg-white dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-300 dark:hover:bg-slate-900"
               title={theme() === 'dark' ? 'Switch to light' : 'Switch to dark'}
               onClick={() => setTheme(theme() === 'dark' ? 'light' : 'dark')}
             >
@@ -405,14 +462,6 @@ function App() {
                 when={theme() === 'dark'}
                 fallback={
                   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-                    <path d="M10 3.25a.75.75 0 01.75.75v1.25a.75.75 0 01-1.5 0V4A.75.75 0 0110 3.25z" />
-                    <path d="M10 14.75a.75.75 0 01.75.75v1.25a.75.75 0 01-1.5 0V15.5a.75.75 0 01.75-.75z" />
-                    <path d="M6.1 5.04a.75.75 0 01.99.33l.5 1.1a.75.75 0 01-1.36.62l-.5-1.1a.75.75 0 01.37-.95z" />
-                    <path d="M13.41 13.53a.75.75 0 01.99.33l.5 1.1a.75.75 0 11-1.36.62l-.5-1.1a.75.75 0 01.37-.95z" />
-                    <path d="M3.25 10a.75.75 0 01.75-.75h1.25a.75.75 0 010 1.5H4a.75.75 0 01-.75-.75z" />
-                    <path d="M14.75 10a.75.75 0 01.75-.75h1.25a.75.75 0 010 1.5H15.5a.75.75 0 01-.75-.75z" />
-                    <path d="M6.1 14.96a.75.75 0 01.33-.99l1.1-.5a.75.75 0 01.62 1.36l-1.1.5a.75.75 0 01-.95-.37z" />
-                    <path d="M13.41 6.47a.75.75 0 01.33-.99l1.1-.5a.75.75 0 11.62 1.36l-1.1.5a.75.75 0 01-.95-.37z" />
                     <path
                       fill-rule="evenodd"
                       d="M10 6.5a3.5 3.5 0 100 7 3.5 3.5 0 000-7zM5 10a5 5 0 1110 0 5 5 0 01-10 0z"
@@ -430,65 +479,739 @@ function App() {
                 </svg>
               </Show>
             </button>
+          </div>
+        </nav>
 
-            <Show
-              when={!authLoading()}
-              fallback={<div class="h-9 w-24 animate-pulse rounded-lg bg-slate-200 dark:bg-slate-800" />}
-            >
-              <Show
-                when={me()}
-                fallback={
-                  <button
-                    class="rounded-full bg-slate-900 px-5 py-2 text-xs font-semibold text-white shadow-sm transition-all hover:bg-slate-800 hover:shadow-md dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white"
-                    onClick={() => {
-                      setAuthError(null)
-                      setShowLoginModal(true)
-                      setFocusLoginUsername(true)
-                    }}
-                  >
-                    Sign in
-                  </button>
-                }
+        <div class="flex min-w-0 flex-1 flex-col">
+          <header class="flex h-12 flex-none items-center justify-between border-b border-slate-200 bg-white/70 px-4 backdrop-blur dark:border-slate-800 dark:bg-slate-950/70">
+            <div class="flex items-center gap-4">
+              <div class="flex items-center gap-2">
+                <img src="/logo.svg" class="h-6 w-6 rounded-lg" alt="Alloy" />
+                <div class="leading-none">
+                  <div class="text-sm font-semibold tracking-tight text-slate-900 dark:text-slate-100">ALLOY</div>
+                  <div class="text-[10px] uppercase tracking-[0.2em] text-slate-500">control plane</div>
+                </div>
+              </div>
+
+              <div class="hidden md:flex items-center gap-2 font-mono text-[10px] text-slate-400">
+                <div class="flex items-center gap-2 rounded-lg border border-slate-200 bg-white/60 px-2 py-1 dark:border-slate-800 dark:bg-slate-950/60">
+                  <span
+                    class={`h-1.5 w-1.5 rounded-full ${statusDotClass({ loading: ping.isPending, error: ping.isError })}`}
+                  />
+                  <span>BACKEND</span>
+                  <span class="text-slate-500">{ping.isError ? 'offline' : ping.isPending ? '...' : 'ok'}</span>
+                </div>
+                <div class="flex items-center gap-2 rounded-lg border border-slate-200 bg-white/60 px-2 py-1 dark:border-slate-800 dark:bg-slate-950/60">
+                  <span
+                    class={`h-1.5 w-1.5 rounded-full ${statusDotClass({ loading: agentHealth.isPending, error: agentHealth.isError })}`}
+                  />
+                  <span>AGENT</span>
+                  <span class="text-slate-500">{agentHealth.isError ? 'offline' : agentHealth.isPending ? '...' : 'ok'}</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="flex items-center gap-3">
+              <button
+                class="sm:hidden rounded-xl border border-slate-200 bg-white/70 p-2 text-slate-700 shadow-sm transition-colors hover:bg-white dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-300 dark:hover:bg-slate-900"
+                title={theme() === 'dark' ? 'Switch to light' : 'Switch to dark'}
+                onClick={() => setTheme(theme() === 'dark' ? 'light' : 'dark')}
               >
-                <div class="flex items-center gap-3 rounded-full border border-slate-200 bg-white/50 py-1.5 pl-4 pr-1.5 shadow-sm backdrop-blur-sm dark:border-slate-800 dark:bg-slate-900/50">
-                  <div class="flex flex-col text-right leading-none">
-                    <span class="text-xs font-medium text-slate-700 dark:text-slate-200">{me()!.username}</span>
-                    <span class="text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                      {me()!.is_admin ? 'Admin' : 'User'}
-                    </span>
-                  </div>
-                  <button
-                    class="group rounded-full bg-slate-100 p-2 text-slate-500 transition-colors hover:bg-rose-50 hover:text-rose-600 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-rose-950/30 dark:hover:text-rose-400"
-                    title="Sign out"
-                    onClick={handleLogout}
-                  >
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      viewBox="0 0 20 20"
-                      fill="currentColor"
-                      class="h-4 w-4"
-                    >
+                <Show
+                  when={theme() === 'dark'}
+                  fallback={
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
                       <path
                         fill-rule="evenodd"
-                        d="M3 4.25A2.25 2.25 0 015.25 2h5.5A2.25 2.25 0 0113 4.25v2a.75.75 0 01-1.5 0v-2a.75.75 0 00-.75-.75h-5.5a.75.75 0 00-.75.75v11.5c0 .414.336.75.75.75h5.5a.75.75 0 00.75-.75v-2a.75.75 0 011.5 0v2A2.25 2.25 0 0110.75 18h-5.5A2.25 2.25 0 013 15.75V4.25z"
-                        clip-rule="evenodd"
-                      />
-                      <path
-                        fill-rule="evenodd"
-                        d="M19 10a.75.75 0 00-.75-.75H8.704l1.048-1.047a.75.75 0 00-1.06-1.06l-2.358 2.358a.75.75 0 000 1.06l2.358 2.358a.75.75 0 101.06-1.06L8.704 10.75h9.546A.75.75 0 0019 10z"
+                        d="M10 6.5a3.5 3.5 0 100 7 3.5 3.5 0 000-7zM5 10a5 5 0 1110 0 5 5 0 01-10 0z"
                         clip-rule="evenodd"
                       />
                     </svg>
+                  }
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
+                    <path
+                      fill-rule="evenodd"
+                      d="M17.293 13.293A8 8 0 016.707 2.707a8 8 0 1010.586 10.586z"
+                      clip-rule="evenodd"
+                    />
+                  </svg>
+                </Show>
+              </button>
+
+              <Show when={!authLoading()} fallback={<div class="h-8 w-28 animate-pulse rounded-lg bg-slate-200 dark:bg-slate-800" />}>
+                <Show
+                  when={me()}
+                  fallback={
+                    <button
+                      class="rounded-xl bg-amber-500/10 px-3 py-2 text-xs font-semibold text-amber-800 ring-1 ring-inset ring-amber-500/20 hover:bg-amber-500/15 dark:bg-amber-500/15 dark:text-amber-200 dark:hover:bg-amber-500/20"
+                      onClick={() => {
+                        setAuthError(null)
+                        setShowLoginModal(true)
+                        setFocusLoginUsername(true)
+                      }}
+                    >
+                      INITIALIZE_SESSION
+                    </button>
+                  }
+                >
+                  <div class="relative">
+                    <button
+                      type="button"
+                      class="flex items-center gap-3 rounded-xl border border-slate-200 bg-white/60 py-1.5 pl-3 pr-2 shadow-sm hover:bg-white dark:border-slate-800 dark:bg-slate-950/50 dark:hover:bg-slate-950/70"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setShowAccountMenu((v) => !v)
+                      }}
+                      aria-expanded={showAccountMenu()}
+                    >
+                      <div class="flex flex-col text-right leading-none">
+                        <span class="text-sm font-medium text-slate-900 dark:text-slate-100">{me()!.username}</span>
+                        <span class="text-[11px] text-slate-500">{me()!.is_admin ? 'Admin' : 'User'}</span>
+                      </div>
+                      <div class="flex items-center gap-2">
+                        <span class="h-2 w-2 rounded-full bg-emerald-400" title="session active" />
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4 text-slate-500">
+                          <path
+                            fill-rule="evenodd"
+                            d="M5.23 7.21a.75.75 0 011.06.02L10 10.94l3.71-3.71a.75.75 0 111.06 1.06l-4.24 4.24a.75.75 0 01-1.06 0L5.21 8.29a.75.75 0 01.02-1.08z"
+                            clip-rule="evenodd"
+                          />
+                        </svg>
+                      </div>
+                    </button>
+
+                    <Show when={showAccountMenu()}>
+                      <div class="absolute right-0 mt-2 w-44 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl shadow-slate-900/5 dark:border-slate-800 dark:bg-slate-950">
+                        <button
+                          type="button"
+                          class="flex w-full items-center justify-between px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-900/50"
+                          onClick={async () => {
+                            setShowAccountMenu(false)
+                            await handleLogout()
+                          }}
+                        >
+                          <span>Sign out</span>
+                          <span class="text-xs text-slate-400">logout</span>
+                        </button>
+                      </div>
+                    </Show>
+                  </div>
+                </Show>
+              </Show>
+            </div>
+          </header>
+
+          <main class="relative flex min-h-0 flex-1 overflow-hidden">
+            <Show when={!isAuthed()}>
+              <div class="absolute inset-0 z-40 flex items-center justify-center bg-white/70 backdrop-blur-sm dark:bg-slate-950/70">
+                <div class="w-full max-w-md rounded-2xl border border-slate-200 bg-white/80 p-6 shadow-2xl dark:border-slate-800 dark:bg-slate-950/80">
+                  <div class="font-mono text-[11px] uppercase tracking-wider text-amber-400">
+                    SYSTEM_LOCKED // AUTH_REQUIRED
+                  </div>
+                  <div class="mt-2 text-sm text-slate-900 dark:text-slate-200">Workspace is locked.</div>
+                  <div class="mt-1 text-xs text-slate-600 dark:text-slate-500">Sign in to manage instances, browse files, and view nodes.</div>
+                  <Show when={authError()}>
+                    <div class="mt-3 rounded-lg border border-rose-900/40 bg-rose-950/20 p-3 text-xs text-rose-200">
+                      {authError()}
+                    </div>
+                  </Show>
+                  <div class="mt-5 flex gap-3">
+                    <button
+                      class="flex-1 rounded-xl bg-amber-500/10 px-3 py-2 text-xs font-semibold text-amber-800 ring-1 ring-inset ring-amber-500/20 hover:bg-amber-500/15 dark:bg-amber-500/15 dark:text-amber-200 dark:hover:bg-amber-500/20"
+                      onClick={() => {
+                        setAuthError(null)
+                        setShowLoginModal(true)
+                        setFocusLoginUsername(true)
+                      }}
+                    >
+                      INITIALIZE_SESSION
+                    </button>
+                    <button
+                      class="flex-1 rounded-xl border border-slate-200 bg-white/70 px-3 py-2 text-xs text-slate-700 hover:bg-white dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-300 dark:hover:bg-slate-900"
+                      onClick={() => {
+                        void ping.refetch()
+                        void agentHealth.refetch()
+                      }}
+                    >
+                      RECHECK_STATUS
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </Show>
+
+            <div class={`flex min-h-0 flex-1 ${!isAuthed() ? 'pointer-events-none blur-sm grayscale opacity-50' : ''}`}>
+              <aside class="hidden md:flex w-[360px] flex-none flex-col border-r border-slate-200 bg-white/60 dark:border-slate-800 dark:bg-slate-950/60">
+                <div class="flex items-center justify-between border-b border-slate-200 bg-white/60 px-4 py-3 dark:border-slate-800 dark:bg-slate-950/60">
+                  <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">{tab()}</div>
+                  <button
+                    class="rounded-lg border border-slate-200 bg-white/60 px-2 py-1 text-[11px] text-slate-700 hover:bg-white dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-300 dark:hover:bg-slate-900"
+                    onClick={() => {
+                      if (tab() === 'instances') void templates.refetch()
+                      if (tab() === 'instances') void instances.refetch()
+                      if (tab() === 'files') void fsList.refetch()
+                      if (tab() === 'nodes') void nodes.refetch()
+                    }}
+                  >
+                    REFRESH
                   </button>
                 </div>
-              </Show>
-            </Show>
-          </div>
-        </header>
 
-        <p class="mt-4 max-w-2xl text-sm leading-6 text-slate-600 dark:text-slate-300">
-          Game server control plane.
-        </p>
+                <div class="min-h-0 flex-1 overflow-auto p-4">
+                  <Show when={tab() === 'instances'}>
+                    <div class="space-y-3">
+                      <Dropdown
+                        label="Template"
+                        value={selectedTemplate()}
+                        options={templateOptions()}
+                        disabled={templates.isPending || templateOptions().length === 0}
+                        placeholder={templates.isPending ? 'Loading templates...' : 'No templates'}
+                        onChange={setSelectedTemplate}
+                      />
+
+                      <Show when={selectedTemplate() === 'demo:sleep'}>
+                      <label class="block text-sm text-slate-700 dark:text-slate-400">
+                        seconds
+                        <input
+                            class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-amber-500/40 focus:outline-none focus:ring-1 focus:ring-amber-500/20 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200"
+                            value={sleepSeconds()}
+                            onInput={(e) => setSleepSeconds(e.currentTarget.value)}
+                          />
+                        </label>
+                      </Show>
+
+                      <Show when={selectedTemplate() === 'minecraft:vanilla'}>
+                        <div class="space-y-3 border-t border-slate-800 pt-3">
+                          <div class="flex items-start gap-3">
+                            <input
+                              id="mc-eula"
+                              type="checkbox"
+                              class="mt-1 h-4 w-4 rounded border-slate-300 bg-white text-amber-600 focus:ring-amber-400 dark:border-slate-700 dark:bg-slate-950/60 dark:text-amber-400"
+                              checked={mcEula()}
+                              onChange={(e) => setMcEula(e.currentTarget.checked)}
+                            />
+                              <label for="mc-eula" class="text-sm leading-tight text-slate-800 select-none dark:text-slate-300">
+                              I agree to the{' '}
+                              <a
+                                href="https://account.mojang.com/documents/minecraft_eula"
+                                target="_blank"
+                                rel="noreferrer noopener"
+                                class="text-amber-700 underline hover:text-amber-600 dark:text-amber-300 dark:hover:text-amber-200"
+                              >
+                                Minecraft EULA
+                              </a>
+                              <span class="block text-xs text-slate-500 mt-0.5">Required to start server</span>
+                            </label>
+                          </div>
+
+                          <div class="grid grid-cols-2 gap-3">
+                            <div>
+                              <div class="text-sm text-slate-700 dark:text-slate-400">Version</div>
+                              <div class="mt-1">
+                                <Dropdown
+                                  label=""
+                                  value={mcVersionPreset()}
+                                  options={mcVersionOptions()}
+                                  onChange={(v) => {
+                                    setMcVersionPreset(v)
+                                    if (v !== 'custom') setMcVersion(v)
+                                  }}
+                                />
+                              </div>
+                              <Show when={mcVersionPreset() === 'custom'}>
+                                <input
+                                  class="mt-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-amber-500/40 focus:outline-none focus:ring-1 focus:ring-amber-500/20 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200"
+                                  value={mcVersion()}
+                                  onInput={(e) => setMcVersion(e.currentTarget.value)}
+                                  placeholder="e.g. 1.20.4"
+                                />
+                              </Show>
+                            </div>
+                            <label class="block text-sm text-slate-700 dark:text-slate-400">
+                              Memory (MB)
+                              <input
+                                type="number"
+                                class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-amber-500/40 focus:outline-none focus:ring-1 focus:ring-amber-500/20 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200"
+                                value={mcMemory()}
+                                onInput={(e) => setMcMemory(e.currentTarget.value)}
+                              />
+                            </label>
+                          </div>
+
+                          <label class="block text-sm text-slate-700 dark:text-slate-400">
+                            Port
+                            <input
+                              type="number"
+                              class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-amber-500/40 focus:outline-none focus:ring-1 focus:ring-amber-500/20 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200"
+                              value={mcPort()}
+                              onInput={(e) => setMcPort(e.currentTarget.value)}
+                            />
+                          </label>
+
+                          <Show when={mcError()}>
+                            <div class="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-200">
+                              {mcError()}
+                            </div>
+                          </Show>
+                        </div>
+                      </Show>
+
+                      <button
+                        class="w-full rounded-xl bg-slate-900 px-3 py-2 text-sm font-medium text-slate-100 ring-1 ring-inset ring-slate-800 hover:bg-slate-800 disabled:opacity-50"
+                        disabled={createInstance.isPending}
+                        onClick={async () => {
+                          const template_id = selectedTemplate()
+                          const params: Record<string, string> = {}
+
+                          if (template_id === 'demo:sleep') {
+                            params.seconds = sleepSeconds()
+                          } else if (template_id === 'minecraft:vanilla') {
+                            if (!mcEula()) {
+                              setMcError('You must accept the EULA')
+                              return
+                            }
+                            setMcError(null)
+                            params.accept_eula = 'true'
+                            params.version = mcVersion() || 'latest_release'
+                            params.memory_mb = mcMemory() || '2048'
+                            params.port = mcPort() || '25565'
+                          }
+
+                          await createInstance.mutateAsync({ template_id, params })
+                          await instances.refetch()
+                        }}
+                      >
+                        {createInstance.isPending ? 'CREATING...' : 'CREATE_INSTANCE'}
+                      </button>
+                    </div>
+                  </Show>
+
+                  <Show when={tab() === 'files'}>
+                    <div class="space-y-3">
+                  <label class="block text-sm text-slate-700 dark:text-slate-400">
+                    Path
+                    <input
+                          class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-amber-500/40 focus:outline-none focus:ring-1 focus:ring-amber-500/20 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200"
+                      value={fsPath()}
+                      onInput={(e) => setFsPath(e.currentTarget.value)}
+                      placeholder="(empty = /data)"
+                    />
+                  </label>
+
+                      <div class="grid grid-cols-2 gap-2">
+                        <button
+                          class="rounded-xl border border-slate-200 bg-white/70 px-3 py-2 text-xs text-slate-800 hover:bg-white dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:hover:bg-slate-900"
+                          onClick={() => {
+                            setSelectedFilePath(null)
+                            setFsSelectedName(null)
+                            setLogCursor(null)
+                            setLiveTail(true)
+                            void fsList.refetch()
+                          }}
+                        >
+                          REFRESH
+                        </button>
+                        <button
+                          class="rounded-xl border border-slate-200 bg-white/70 px-3 py-2 text-xs text-slate-800 hover:bg-white disabled:opacity-50 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:hover:bg-slate-900"
+                          disabled={!fsPath()}
+                          onClick={() => {
+                            const cur = fsPath().replace(/\/+$/, '')
+                            const idx = cur.lastIndexOf('/')
+                            const next = idx <= 0 ? '' : cur.slice(0, idx)
+                            setFsPath(next)
+                            setSelectedFilePath(null)
+                            setFsSelectedName(null)
+                            setLogCursor(null)
+                            setLiveTail(true)
+                          }}
+                        >
+                          UP
+                        </button>
+                      </div>
+
+                      <div class="max-h-96 overflow-auto rounded-xl border border-slate-200 bg-white/60 p-1 dark:border-slate-800 dark:bg-slate-950/40">
+                        <Show
+                          when={!fsList.isPending}
+                          fallback={<div class="p-2 text-xs text-slate-500 font-mono">loading...</div>}
+                        >
+                          <For each={fsList.data?.entries ?? []}>
+                            {(e) => (
+                              <button
+                                class={`w-full rounded-lg px-2 py-2 text-left text-sm font-mono text-slate-900 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-900 ${
+                                  fsSelectedName() === e.name && !e.is_dir ? 'bg-slate-100 dark:bg-slate-900' : ''
+                                }`}
+                                onClick={() => {
+                                  if (e.is_dir) {
+                                    const next = fsPath() ? `${fsPath().replace(/\/+$/, '')}/${e.name}` : e.name
+                                    setFsPath(next)
+                                    setSelectedFilePath(null)
+                                    setFsSelectedName(null)
+                                    setLogCursor(null)
+                                    setLiveTail(true)
+                                  } else {
+                                    const file = fsPath() ? `${fsPath().replace(/\/+$/, '')}/${e.name}` : e.name
+                                    setSelectedFilePath(file)
+                                    setFsSelectedName(e.name)
+                                    setLogCursor(null)
+                                    setLiveTail(true)
+                                  }
+                                }}
+                              >
+                                <span class="inline-flex items-center gap-2">
+                                  <span class="text-slate-500">
+                                    <Show
+                                      when={e.is_dir}
+                                      fallback={
+                                        <svg
+                                          xmlns="http://www.w3.org/2000/svg"
+                                          viewBox="0 0 20 20"
+                                          fill="currentColor"
+                                          class="h-4 w-4"
+                                        >
+                                          <path d="M4.75 3A2.75 2.75 0 002 5.75v8.5A2.75 2.75 0 004.75 17h10.5A2.75 2.75 0 0018 14.25V7.45A2.75 2.75 0 0015.25 4.7h-2.994a1.25 1.25 0 01-.884-.366l-.56-.56A2.75 2.75 0 009.69 3H4.75z" />
+                                        </svg>
+                                      }
+                                    >
+                                      <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        viewBox="0 0 20 20"
+                                        fill="currentColor"
+                                        class="h-4 w-4"
+                                      >
+                                        <path d="M2 5.75A2.75 2.75 0 014.75 3h4.19a2.75 2.75 0 011.944.806l.56.56c.215.215.507.334.812.334h2.994A2.75 2.75 0 0118 7.45v6.8A2.75 2.75 0 0115.25 17H4.75A2.75 2.75 0 012 14.25v-8.5z" />
+                                      </svg>
+                                    </Show>
+                                  </span>
+                                  <span class="truncate">{e.name}</span>
+                                  <span class="ml-auto rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 text-[10px] uppercase tracking-wider text-slate-500 dark:border-slate-800 dark:bg-slate-950/50 dark:text-slate-400">
+                                    {e.is_dir ? 'dir' : 'file'}
+                                  </span>
+                                </span>
+                              </button>
+                            )}
+                          </For>
+                          <Show when={(fsList.data?.entries ?? []).length === 0}>
+                            <div class="p-2 text-xs text-slate-500 font-mono">empty</div>
+                          </Show>
+                        </Show>
+                      </div>
+                    </div>
+                  </Show>
+
+                  <Show when={tab() === 'nodes'}>
+                    <div class="space-y-3">
+                      <button
+                        class="w-full rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-2 text-xs text-slate-200 hover:bg-slate-900"
+                        onClick={() => void nodes.refetch()}
+                      >
+                        REFRESH
+                      </button>
+
+                      <div class="max-h-96 overflow-auto rounded-xl border border-slate-800 bg-slate-950/40 p-1">
+                        <Show when={!nodes.isPending} fallback={<div class="p-2 text-xs font-mono text-slate-500">loading...</div>}>
+                          <For each={nodes.data ?? []}>
+                            {(n) => (
+                              <button
+                                type="button"
+                                class={`w-full rounded-lg px-2 py-2 text-left transition-colors hover:bg-slate-900 ${
+                                  selectedNodeId() === n.id ? 'bg-slate-900' : ''
+                                }`}
+                                onClick={() => setSelectedNodeId(n.id)}
+                              >
+                                <div class="flex items-center justify-between gap-2">
+                                  <div class="min-w-0">
+                                    <div class="truncate text-sm font-medium text-slate-100">{n.name}</div>
+                                    <div class="mt-0.5 truncate font-mono text-[11px] text-slate-500">{n.endpoint}</div>
+                                  </div>
+                                  <span
+                                    class={`h-2 w-2 rounded-full ${
+                                      n.last_error ? 'bg-rose-500' : n.last_seen_at ? 'bg-emerald-400' : 'bg-slate-500'
+                                    }`}
+                                  />
+                                </div>
+                              </button>
+                            )}
+                          </For>
+                        </Show>
+                      </div>
+                    </div>
+                  </Show>
+                </div>
+              </aside>
+
+              <section class="min-w-0 flex-1 overflow-auto bg-slate-50 p-4 dark:bg-slate-950">
+                <Show when={tab() === 'instances'}>
+                  <div class="flex items-center justify-between">
+                    <div class="text-xs font-semibold uppercase tracking-wider text-slate-400">Instances</div>
+                    <button
+                      class="rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-2 text-xs text-slate-200 hover:bg-slate-900"
+                      onClick={() => instances.refetch()}
+                    >
+                      REFRESH
+                    </button>
+                  </div>
+
+                  <div class="mt-3 grid gap-2">
+                    <For each={instances.data ?? []}>
+                      {(i) => (
+                        <div
+                          class={`flex items-center justify-between gap-4 rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2 ${
+                            selectedInstanceId() === i.config.instance_id ? 'ring-1 ring-amber-500/20' : ''
+                          }`}
+                        >
+                          <button class="min-w-0 flex-1 text-left" onClick={() => setSelectedInstanceId(i.config.instance_id)}>
+                            <div class="truncate font-mono text-sm text-slate-100">{i.config.instance_id}</div>
+                            <div class="mt-0.5 truncate text-xs text-slate-500">
+                              {i.config.template_id} • {instanceStateLabel(i.status)}
+                              <Show when={i.status?.pid != null}> • pid {i.status?.pid}</Show>
+                            </div>
+                          </button>
+
+                          <div class="flex items-center gap-2">
+                            <Show
+                              when={canStartInstance(i.status)}
+                              fallback={
+                                <button
+                                  class="rounded-lg border border-slate-800 bg-slate-950/60 px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-900 disabled:opacity-50"
+                                  disabled={stopInstance.isPending || isStopping(i.status)}
+                                  onClick={async () => {
+                                    await stopInstance.mutateAsync({ instance_id: i.config.instance_id, timeout_ms: 30_000 })
+                                    await instances.refetch()
+                                  }}
+                                >
+                                  STOP
+                                </button>
+                              }
+                            >
+                              <button
+                                class="rounded-lg border border-slate-800 bg-slate-950/60 px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-900 disabled:opacity-50"
+                                disabled={startInstance.isPending}
+                                onClick={async () => {
+                                  await startInstance.mutateAsync({ instance_id: i.config.instance_id })
+                                  await instances.refetch()
+                                }}
+                              >
+                                START
+                              </button>
+                            </Show>
+
+                            <button
+                              class="rounded-lg border border-rose-900/40 bg-rose-950/20 px-3 py-1.5 text-xs text-rose-200 hover:bg-rose-950/30 disabled:opacity-50"
+                              disabled={deleteInstance.isPending || !canStartInstance(i.status)}
+                              onClick={() => setConfirmDeleteInstanceId(i.config.instance_id)}
+                            >
+                              DEL
+                            </button>
+
+                            <button
+                              class="rounded-lg border border-slate-800 bg-slate-950/60 px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-900"
+                              onClick={() => openInFiles(`instances/${i.config.instance_id}`, i.config.instance_id)}
+                              title="Open instance directory"
+                            >
+                              FILES
+                            </button>
+
+                            <Show when={i.config.template_id === 'minecraft:vanilla'}>
+                              <button
+                                class="rounded-lg border border-slate-800 bg-slate-950/60 px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-900"
+                                onClick={() => openFileInFiles(`instances/${i.config.instance_id}/logs/latest.log`, 'latest.log')}
+                                title="Open latest.log"
+                              >
+                                LOG
+                              </button>
+                            </Show>
+                          </div>
+                        </div>
+                      )}
+                    </For>
+                  </div>
+
+                  <Show when={selectedInstance()}>
+                    {(i) => (
+                      <div class="mt-4 rounded-xl border border-slate-800 bg-slate-950/40 p-4">
+                        <div class="flex items-center justify-between">
+                          <div class="text-xs text-slate-400">
+                            logs: <span class="font-mono text-slate-200">{i().config.instance_id}</span>
+                          </div>
+                          <div class="text-xs text-slate-500">{logs.isPending ? 'loading...' : logs.isError ? 'error' : 'live'}</div>
+                        </div>
+                        <pre class="mt-2 max-h-72 overflow-auto rounded-lg border border-slate-800 bg-slate-950 p-3 text-xs text-slate-200">
+                          <For each={logs.data?.lines ?? []}>{(l) => <div class="whitespace-pre-wrap">{l}</div>}</For>
+                        </pre>
+                      </div>
+                    )}
+                  </Show>
+                </Show>
+
+                <Show when={tab() === 'files'}>
+                  <div class="flex items-center justify-between">
+                    <div class="text-xs font-semibold uppercase tracking-wider text-slate-400">Preview</div>
+                    <div class="truncate font-mono text-[11px] text-slate-500">{selectedFilePath() ?? '-'}</div>
+                  </div>
+
+                  <div class="mt-3 grid gap-2">
+                    <Show when={selectedFilePath() && isLogFilePath(selectedFilePath() ?? '')}>
+                      <div class="flex items-center justify-between rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2 text-xs">
+                        <div class="text-slate-400">Tail</div>
+                        <div class="flex items-center gap-3">
+                          <label class="flex items-center gap-2 text-slate-300">
+                            <input type="checkbox" checked={liveTail()} onChange={(e) => setLiveTail(e.currentTarget.checked)} />
+                            Live
+                          </label>
+                          <button
+                            class="rounded-lg border border-slate-800 bg-slate-950/60 px-2 py-1 text-xs text-slate-200 hover:bg-slate-900"
+                            onClick={() => {
+                              setLogCursor(null)
+                              void logTail.refetch()
+                            }}
+                          >
+                            End
+                          </button>
+                        </div>
+                      </div>
+                    </Show>
+
+                    <Show when={selectedFilePath() && isTextFilePath(selectedFilePath() ?? '') && !isLogFilePath(selectedFilePath() ?? '')}>
+                      <div class="flex items-center justify-between rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2 text-xs">
+                        <div class="text-slate-400">Read</div>
+                        <button
+                          class="rounded-lg border border-slate-800 bg-slate-950/60 px-2 py-1 text-xs text-slate-200 hover:bg-slate-900"
+                          onClick={() => void fileText.refetch()}
+                        >
+                          Refresh
+                        </button>
+                      </div>
+                    </Show>
+
+                    <pre class="mt-0 max-h-[70vh] overflow-auto rounded-xl border border-slate-800 bg-slate-950 p-3 text-xs text-slate-200">
+                      {selectedFilePath() ? visibleText() : 'Select a file from the list'}
+                    </pre>
+                  </div>
+                </Show>
+
+                <Show when={tab() === 'nodes'}>
+                  <div class="flex items-center justify-between">
+                    <div class="text-xs font-semibold uppercase tracking-wider text-slate-400">Node</div>
+                    <button
+                      class="rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-2 text-xs text-slate-200 hover:bg-slate-900"
+                      onClick={() => void nodes.refetch()}
+                    >
+                      REFRESH
+                    </button>
+                  </div>
+
+                  <div class="mt-3 rounded-xl border border-slate-800 bg-slate-950/40 p-4">
+                    <Show when={selectedNode()} fallback={<div class="text-xs text-slate-500">select a node</div>}>
+                      {(n) => (
+                        <div>
+                          <div class="flex items-center justify-between gap-3">
+                            <div class="min-w-0">
+                              <div class="truncate text-sm font-medium text-slate-100">{n().name}</div>
+                              <div class="mt-0.5 truncate font-mono text-[11px] text-slate-500">{n().endpoint}</div>
+                            </div>
+                            <Show when={me()?.is_admin}>
+                              <button
+                                type="button"
+                                disabled={setNodeEnabled.isPending}
+                                class="group inline-flex items-center gap-2 rounded-full border border-slate-800 bg-slate-950/60 px-2 py-1.5 text-[11px] text-slate-300 hover:bg-slate-900 disabled:opacity-50"
+                                onClick={async () => {
+                                  const id = n().id
+                                  const current =
+                                    Object.prototype.hasOwnProperty.call(nodeEnabledOverride(), id)
+                                      ? nodeEnabledOverride()[id]
+                                      : n().enabled
+                                  const next = !current
+                                  setNodeEnabledOverride({ ...nodeEnabledOverride(), [id]: next })
+                                  try {
+                                    await setNodeEnabled.mutateAsync({ node_id: id, enabled: next })
+                                    void nodes.refetch()
+                                  } catch {
+                                    setNodeEnabledOverride({ ...nodeEnabledOverride(), [id]: current })
+                                  }
+                                }}
+                              >
+                                <span class="text-slate-500">Enabled</span>
+                                <span
+                                  class={`relative inline-flex h-5 w-9 items-center rounded-full border transition-colors ${
+                                    (Object.prototype.hasOwnProperty.call(nodeEnabledOverride(), n().id)
+                                      ? nodeEnabledOverride()[n().id]
+                                      : n().enabled)
+                                      ? 'border-emerald-900/40 bg-emerald-950/20'
+                                      : 'border-slate-700 bg-slate-900/40'
+                                  }`}
+                                >
+                                  <span
+                                    class={`inline-block h-4 w-4 transform rounded-full bg-slate-100 shadow transition-transform ${
+                                      (Object.prototype.hasOwnProperty.call(nodeEnabledOverride(), n().id)
+                                        ? nodeEnabledOverride()[n().id]
+                                        : n().enabled)
+                                        ? 'translate-x-4'
+                                        : 'translate-x-1'
+                                    }`}
+                                  />
+                                </span>
+                              </button>
+                            </Show>
+                          </div>
+
+                          <div class="mt-4 grid grid-cols-2 gap-3 text-xs">
+                            <div>
+                              <div class="text-[11px] text-slate-500">Status</div>
+                              <div class="mt-1 text-slate-200">{n().last_error ? 'Error' : n().last_seen_at ? 'Healthy' : 'Unknown'}</div>
+                            </div>
+                            <div>
+                              <div class="text-[11px] text-slate-500">Agent</div>
+                              <div class="mt-1 text-slate-200">{n().agent_version ?? '-'}</div>
+                            </div>
+                            <div class="col-span-2">
+                              <div class="text-[11px] text-slate-500">Last seen</div>
+                              <div class="mt-1 font-mono text-[11px] text-slate-200">{n().last_seen_at ?? '-'}</div>
+                            </div>
+                            <div class="col-span-2">
+                              <div class="text-[11px] text-slate-500">Last error</div>
+                              <div class="mt-1 font-mono text-[11px] text-rose-300">{n().last_error ?? '-'}</div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </Show>
+                  </div>
+                </Show>
+              </section>
+            </div>
+          </main>
+
+          <nav class="sm:hidden flex h-12 flex-none items-center justify-around border-t border-slate-200 bg-white/70 px-2 dark:border-slate-800 dark:bg-slate-950/80">
+            <button
+              class={`flex flex-1 items-center justify-center rounded-xl py-2 text-xs ${
+                tab() === 'instances'
+                  ? 'bg-amber-500/10 text-amber-800 dark:text-amber-200'
+                  : 'text-slate-600 dark:text-slate-400'
+              }`}
+              onClick={() => setTab('instances')}
+            >
+              Instances
+            </button>
+            <button
+              class={`flex flex-1 items-center justify-center rounded-xl py-2 text-xs ${
+                tab() === 'files' ? 'bg-amber-500/10 text-amber-800 dark:text-amber-200' : 'text-slate-600 dark:text-slate-400'
+              }`}
+              onClick={() => setTab('files')}
+            >
+              Files
+            </button>
+            <button
+              class={`flex flex-1 items-center justify-center rounded-xl py-2 text-xs ${
+                tab() === 'nodes' ? 'bg-amber-500/10 text-amber-800 dark:text-amber-200' : 'text-slate-600 dark:text-slate-400'
+              }`}
+              onClick={() => setTab('nodes')}
+            >
+              Nodes
+            </button>
+          </nav>
+        </div>
+      </div>
 
 
         <section class="mt-8 grid gap-4 sm:grid-cols-2">
@@ -1346,9 +2069,7 @@ function App() {
           </div>
         </Show>
 
-        <footer class="mt-10 text-xs text-slate-500">CopyRight@ign1x</footer>
-      </div>
-    </main>
+    </div>
   )
 }
 
