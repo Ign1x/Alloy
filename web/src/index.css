@@ -1,13 +1,39 @@
 @import "tailwindcss";
 
+/* Tailwind v4: use a class-based dark mode.
+   This lets us toggle by setting/removing `.dark` on <html>. */
+@custom-variant dark (&:where(.dark, .dark *));
+
 /* Let the UA style built-in controls to match system theme. */
 :root {
   color-scheme: light dark;
 }
 
+html:not(.dark) {
+  color-scheme: light;
+}
+
+html.dark {
+  color-scheme: dark;
+}
+
 html,
 body {
   height: 100%;
+}
+
+body {
+  font-family: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Noto Sans",
+    "Apple Color Emoji", "Segoe UI Emoji";
+}
+
+code,
+pre,
+kbd,
+samp,
+.font-mono {
+  font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
+    monospace;
 }
 
 body {

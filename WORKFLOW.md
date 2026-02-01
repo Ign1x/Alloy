@@ -57,7 +57,7 @@ Commit rules (strict):
 
 ### Phase 0.6 - Dockerized vertical slice (no DB)
 Definition of Done (must be true):
-- `docker compose -f deploy/docker-compose.yml up -d --build` starts cleanly
+- `docker compose up -d --build` starts cleanly
 - Web is served on host `:3000` (optional: map to host `:80` via override)
 - Web calls `/rspc` on the same origin (no CORS)
 - Control calls Agent via gRPC using container DNS, not `127.0.0.1`
@@ -69,7 +69,7 @@ TODO:
 - [x] Add `.dockerignore`
 - [x] Add Rust Dockerfiles: `deploy/agent.Dockerfile`, `deploy/control.Dockerfile`
 - [x] Add web Dockerfile + nginx config proxying `/rspc` -> control
-- [x] Add `deploy/docker-compose.yml` to run `web` + `alloy-control` + `alloy-agent`
+- [x] Add docker compose file to run `web` + `alloy-control` + `alloy-agent`
 - [x] Verify end-to-end via compose and check off this section
 
 ### Phase 1 - Core domain + multi-game abstraction
@@ -103,10 +103,14 @@ Notes:
   - [ ] Auth/session model (cookie/JWT) and security policy
   - [ ] rspc router skeleton + TS bindings generation strategy
   - [x] Implement basic Axum server + `/healthz`
+  - [x] Add cookie-based auth endpoints (`/auth/*`) with refresh rotation + CSRF middleware
+  - [x] Protect `/rspc` procedures with access-JWT cookie (allowlist ping/health)
 
 ### Phase 4 - Web UI (SolidJS)
 - [x] Scaffold SolidJS + Tailwind v4 (Vite)
 - [ ] Login + dashboard + node list
+  - [x] Login UI + session chip + modal
+  - [x] Auto-refresh access token on rspc 401 (single retry) + auth-expired UX
   - [x] Instance manager (create/list/start/stop/delete)
   - [x] File explorer (fs.listDir/fs.readFile)
   - [x] Log viewer (log.tailFile)

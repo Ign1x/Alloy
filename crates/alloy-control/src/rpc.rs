@@ -15,13 +15,21 @@ use rspc::{Procedure, ProcedureError, ResolverError, Router};
 use tonic::Request;
 
 use specta::Type;
+use std::sync::Arc;
+
+#[derive(Clone, Debug, serde::Serialize, Type)]
+pub struct AuthUser {
+    pub user_id: String,
+    pub username: String,
+    pub is_admin: bool,
+}
 
 // Request context for rspc procedures.
-//
-// No DB for the initial vertical slice; keep it empty until we need shared state
-// (gRPC clients, config, auth/session, etc.).
-#[derive(Clone, Debug, Default)]
-pub struct Ctx;
+#[derive(Clone)]
+pub struct Ctx {
+    pub db: Arc<alloy_db::sea_orm::DatabaseConnection>,
+    pub user: Option<AuthUser>,
+}
 
 #[derive(Debug, Clone, serde::Serialize, Type)]
 pub struct ApiError {
@@ -138,6 +146,17 @@ pub struct TailFileOutput {
     pub next_cursor: String,
 }
 
+#[derive(Debug, Clone, serde::Serialize, Type)]
+pub struct NodeDto {
+    pub id: String,
+    pub name: String,
+    pub endpoint: String,
+    pub enabled: bool,
+    pub last_seen_at: Option<String>,
+    pub agent_version: Option<String>,
+    pub last_error: Option<String>,
+}
+
 #[derive(Debug, Clone, serde::Deserialize, Type)]
 pub struct CreateInstanceInput {
     pub template_id: String,
@@ -171,6 +190,12 @@ pub struct StopInstanceInput {
 #[derive(Debug, Clone, serde::Serialize, Type)]
 pub struct DeleteInstanceOutput {
     pub ok: bool,
+}
+
+#[derive(Debug, Clone, serde::Deserialize, Type)]
+pub struct NodeSetEnabledInput {
+    pub node_id: String,
+    pub enabled: bool,
 }
 
 fn map_instance_config(cfg: alloy_proto::agent_v1::InstanceConfig) -> InstanceConfigDto {
@@ -807,6 +832,80 @@ pub fn router() -> Router<Ctx> {
             }),
         );
 
+    let node = Router::new().procedure(
+        "list",
+        Procedure::builder::<ApiError>().query(|ctx: Ctx, _: ()| async move {
+            use alloy_db::entities::nodes;
+            use sea_orm::EntityTrait;
+
+            let rows = nodes::Entity::find()
+                .all(&*ctx.db)
+                .await
+                .map_err(|e| ApiError {
+                    message: format!("db error: {e}"),
+                })?;
+
+            Ok(rows
+                .into_iter()
+                .map(|n| NodeDto {
+                    id: n.id.to_string(),
+                    name: n.name,
+                    endpoint: n.endpoint,
+                    enabled: n.enabled,
+                    last_seen_at: n.last_seen_at.map(|t| t.to_rfc3339()),
+                    agent_version: n.agent_version,
+                    last_error: n.last_error,
+                })
+                .collect::<Vec<_>>())
+        }),
+    )
+    .procedure(
+        "setEnabled",
+        Procedure::builder::<ApiError>().mutation(|ctx: Ctx, input: NodeSetEnabledInput| async move {
+            use alloy_db::entities::nodes;
+            use sea_orm::{ActiveModelTrait, EntityTrait, Set};
+
+            let user = ctx.user.ok_or_else(|| ApiError {
+                message: "unauthorized".to_string(),
+            })?;
+            if !user.is_admin {
+                return Err(ApiError {
+                    message: "forbidden".to_string(),
+                });
+            }
+
+            let id = sea_orm::prelude::Uuid::parse_str(&input.node_id).map_err(|_| ApiError {
+                message: "invalid node_id".to_string(),
+            })?;
+
+            let model = nodes::Entity::find_by_id(id)
+                .one(&*ctx.db)
+                .await
+                .map_err(|e| ApiError {
+                    message: format!("db error: {e}"),
+                })?
+                .ok_or_else(|| ApiError {
+                    message: "node not found".to_string(),
+                })?;
+
+            let mut active: nodes::ActiveModel = model.into();
+            active.enabled = Set(input.enabled);
+            let updated = active.update(&*ctx.db).await.map_err(|e| ApiError {
+                message: format!("db error: {e}"),
+            })?;
+
+            Ok(NodeDto {
+                id: updated.id.to_string(),
+                name: updated.name,
+                endpoint: updated.endpoint,
+                enabled: updated.enabled,
+                last_seen_at: updated.last_seen_at.map(|t| t.to_rfc3339()),
+                agent_version: updated.agent_version,
+                last_error: updated.last_error,
+            })
+        }),
+    );
+
     Router::new()
         .nest("control", control)
         .nest("agent", agent)
@@ -814,4 +913,5 @@ pub fn router() -> Router<Ctx> {
         .nest("fs", fs)
         .nest("log", log)
         .nest("instance", instance)
+        .nest("node", node)
 }

@@ -19,22 +19,10 @@ Default host ports (via compose):
 Build and start:
 
 ```bash
-docker compose -f deploy/docker-compose.yml up -d --build
-```
-
-Alternative (repo root):
-
-```bash
 docker compose up -d --build
 ```
 
 Stop:
-
-```bash
-docker compose -f deploy/docker-compose.yml down -v
-```
-
-Alternative (repo root):
 
 ```bash
 docker compose down -v

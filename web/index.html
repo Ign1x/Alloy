@@ -2,9 +2,29 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <link rel="icon" type="image/svg+xml" href="/logo.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
     <title>Alloy</title>
+    <script>
+      ;(() => {
+        try {
+          const key = 'alloy.theme'
+          const saved = localStorage.getItem(key)
+          const systemDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+          const theme = saved === 'light' || saved === 'dark' ? saved : systemDark ? 'dark' : 'light'
+          if (theme === 'dark') document.documentElement.classList.add('dark')
+          else document.documentElement.classList.remove('dark')
+        } catch {
+          // If storage is blocked, just fall back to the CSS default.
+        }
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>

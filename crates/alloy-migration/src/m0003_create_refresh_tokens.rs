@@ -30,12 +30,6 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(RefreshTokens::RotatedAt).timestamp_with_time_zone().null())
                     .index(
                         Index::create()
-                            .name("idx_refresh_tokens_user_id")
-                            .table(RefreshTokens::Table)
-                            .col(RefreshTokens::UserId),
-                    )
-                    .index(
-                        Index::create()
                             .name("idx_refresh_tokens_token_hash_unique")
                             .table(RefreshTokens::Table)
                             .col(RefreshTokens::TokenHash)
@@ -51,9 +45,31 @@ impl MigrationTrait for Migration {
                     .to_owned(),
             )
             .await
+            ?;
+
+        // sea-query emits `CONSTRAINT name (col)` for non-unique indexes when attached to
+        // `CREATE TABLE`, which is invalid in Postgres. Create the index separately.
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_refresh_tokens_user_id")
+                    .table(RefreshTokens::Table)
+                    .col(RefreshTokens::UserId)
+                    .to_owned(),
+            )
+            .await
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        manager
+            .drop_index(
+                Index::drop()
+                    .name("idx_refresh_tokens_user_id")
+                    .table(RefreshTokens::Table)
+                    .to_owned(),
+            )
+            .await?;
+
         manager
             .drop_table(Table::drop().table(RefreshTokens::Table).to_owned())
             .await
