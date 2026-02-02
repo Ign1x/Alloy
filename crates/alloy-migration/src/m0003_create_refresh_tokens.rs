@@ -25,9 +25,21 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .default(Expr::current_timestamp()),
                     )
-                    .col(ColumnDef::new(RefreshTokens::ExpiresAt).timestamp_with_time_zone().not_null())
-                    .col(ColumnDef::new(RefreshTokens::RevokedAt).timestamp_with_time_zone().null())
-                    .col(ColumnDef::new(RefreshTokens::RotatedAt).timestamp_with_time_zone().null())
+                    .col(
+                        ColumnDef::new(RefreshTokens::ExpiresAt)
+                            .timestamp_with_time_zone()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(RefreshTokens::RevokedAt)
+                            .timestamp_with_time_zone()
+                            .null(),
+                    )
+                    .col(
+                        ColumnDef::new(RefreshTokens::RotatedAt)
+                            .timestamp_with_time_zone()
+                            .null(),
+                    )
                     .index(
                         Index::create()
                             .name("idx_refresh_tokens_token_hash_unique")
@@ -44,8 +56,7 @@ impl MigrationTrait for Migration {
                     )
                     .to_owned(),
             )
-            .await
-            ?;
+            .await?;
 
         // sea-query emits `CONSTRAINT name (col)` for non-unique indexes when attached to
         // `CREATE TABLE`, which is invalid in Postgres. Create the index separately.

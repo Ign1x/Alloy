@@ -11,12 +11,7 @@ impl MigrationTrait for Migration {
                 Table::create()
                     .table(Nodes::Table)
                     .if_not_exists()
-                    .col(
-                        ColumnDef::new(Nodes::Id)
-                            .uuid()
-                            .not_null()
-                            .primary_key(),
-                    )
+                    .col(ColumnDef::new(Nodes::Id).uuid().not_null().primary_key())
                     .col(ColumnDef::new(Nodes::Name).string().not_null())
                     .col(ColumnDef::new(Nodes::Endpoint).string().not_null())
                     .col(
@@ -25,7 +20,11 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .default(true),
                     )
-                    .col(ColumnDef::new(Nodes::LastSeenAt).timestamp_with_time_zone().null())
+                    .col(
+                        ColumnDef::new(Nodes::LastSeenAt)
+                            .timestamp_with_time_zone()
+                            .null(),
+                    )
                     .col(ColumnDef::new(Nodes::AgentVersion).string().null())
                     .col(ColumnDef::new(Nodes::LastError).string().null())
                     .col(
