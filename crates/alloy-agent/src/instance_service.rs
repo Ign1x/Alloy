@@ -273,7 +273,12 @@ impl InstanceService for InstanceApi {
 
         // If running, refuse deletion.
         if let Some(st) = self.manager.get_status(&id).await
-            && matches!(st.state, alloy_process::ProcessState::Running | alloy_process::ProcessState::Starting | alloy_process::ProcessState::Stopping)
+            && matches!(
+                st.state,
+                alloy_process::ProcessState::Running
+                    | alloy_process::ProcessState::Starting
+                    | alloy_process::ProcessState::Stopping
+            )
         {
             return Err(Status::failed_precondition("instance is running"));
         }

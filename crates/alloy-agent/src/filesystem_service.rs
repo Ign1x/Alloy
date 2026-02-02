@@ -92,10 +92,7 @@ impl FilesystemService for FilesystemApi {
             .await
             .map_err(|e| Status::internal(format!("failed to read dir entry: {e}")))?
         {
-            let name = de
-                .file_name()
-                .to_string_lossy()
-                .to_string();
+            let name = de.file_name().to_string_lossy().to_string();
             let m = de
                 .metadata()
                 .await

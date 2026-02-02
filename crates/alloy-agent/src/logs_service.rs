@@ -73,10 +73,7 @@ fn parse_cursor(cursor: &str) -> Result<u64, ()> {
 fn split_lines_from_tail(buf: &[u8], max_lines: usize) -> Vec<String> {
     // Best-effort UTF-8: drop invalid sequences.
     let text = String::from_utf8_lossy(buf);
-    let mut out: Vec<String> = text
-        .lines()
-        .map(|l| l.to_string())
-        .collect();
+    let mut out: Vec<String> = text.lines().map(|l| l.to_string()).collect();
 
     // Drop a trailing empty line if the file ends with a newline.
     if out.last().is_some_and(|l| l.is_empty()) {
@@ -115,8 +112,8 @@ impl LogsService for LogsApi {
         // Cursor semantics:
         // - empty/"0": tail from end (bounded by limit_bytes)
         // - otherwise: treated as a byte offset to continue reading forward
-        let mut cursor = parse_cursor(&req.cursor)
-            .map_err(|_| Status::invalid_argument("invalid cursor"))?;
+        let mut cursor =
+            parse_cursor(&req.cursor).map_err(|_| Status::invalid_argument("invalid cursor"))?;
         if cursor == 0 {
             cursor = size.saturating_sub(limit_bytes);
         }
