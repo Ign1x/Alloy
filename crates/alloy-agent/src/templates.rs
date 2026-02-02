@@ -32,6 +32,14 @@ pub fn list_templates() -> Vec<ProcessTemplate> {
             args: vec![],
             graceful_stdin: Some("stop\n".to_string()),
         },
+        ProcessTemplate {
+            template_id: "terraria:vanilla".to_string(),
+            display_name: "Terraria: Vanilla".to_string(),
+            // Placeholder; spawn spec is prepared by the terraria module.
+            command: "./TerrariaServer.bin.x86_64".to_string(),
+            args: vec![],
+            graceful_stdin: Some("exit\n".to_string()),
+        },
     ]
 }
 
@@ -62,6 +70,10 @@ pub fn apply_params(
     if t.template_id == "minecraft:vanilla" {
         // Contract-only commit: validate params early; runtime wiring is in later commits.
         let _ = crate::minecraft::validate_vanilla_params(params)?;
+    }
+
+    if t.template_id == "terraria:vanilla" {
+        let _ = crate::terraria::validate_vanilla_params(params)?;
     }
 
     Ok(t)

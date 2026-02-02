@@ -238,6 +238,14 @@ function App() {
   const [mcPort, setMcPort] = createSignal('25565')
   const [mcError, setMcError] = createSignal<string | null>(null)
 
+  const [trVersion, setTrVersion] = createSignal('1453')
+  const [trPort, setTrPort] = createSignal('7777')
+  const [trMaxPlayers, setTrMaxPlayers] = createSignal('8')
+  const [trWorldName, setTrWorldName] = createSignal('world')
+  const [trWorldSize, setTrWorldSize] = createSignal('1')
+  const [trPassword, setTrPassword] = createSignal('')
+  const [trError, setTrError] = createSignal<string | null>(null)
+
   const mcVersionOptions = createMemo(() => [
     { value: 'latest_release', label: 'Latest release', meta: 'recommended' },
     { value: 'latest_snapshot', label: 'Latest snapshot', meta: 'unstable' },
@@ -391,8 +399,8 @@ function App() {
   return (
     <div class="h-screen w-screen overflow-hidden bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-200">
       <div class="flex h-full">
-        <nav class="hidden sm:flex w-14 flex-none flex-col items-center gap-3 border-r border-slate-200 bg-white px-2 py-3 dark:border-slate-800 dark:bg-slate-950">
-          <img src="/logo.svg" class="mt-1 h-8 w-8 rounded-xl" alt="Alloy" />
+  <nav class="hidden sm:flex w-16 flex-none flex-col items-center gap-3 border-r border-slate-200 bg-white px-2 py-4 dark:border-slate-800 dark:bg-slate-950">
+  <img src="/logo.svg" class="mt-1 h-9 w-9 rounded-xl" alt="Alloy" />
 
           <div class="mt-2 flex w-full flex-col items-center gap-2">
             <button
@@ -474,12 +482,12 @@ function App() {
         </nav>
 
         <div class="flex min-w-0 flex-1 flex-col">
-          <header class="flex h-12 flex-none items-center justify-between border-b border-slate-200 bg-white/70 px-4 backdrop-blur dark:border-slate-800 dark:bg-slate-950/70">
+  <header class="flex h-14 flex-none items-center justify-between border-b border-slate-200 bg-white/70 px-5 backdrop-blur dark:border-slate-800 dark:bg-slate-950/70">
             <div class="flex items-center gap-4">
               <div class="flex items-center gap-2">
-                <img src="/logo.svg" class="h-6 w-6 rounded-lg" alt="Alloy" />
+  <img src="/logo.svg" class="h-7 w-7 rounded-lg" alt="Alloy" />
                 <div class="leading-none">
-                  <div class="text-sm font-semibold tracking-tight text-slate-900 dark:text-slate-100">ALLOY</div>
+  <div class="text-base font-semibold tracking-tight text-slate-900 dark:text-slate-100">ALLOY</div>
                   <div class="text-[10px] uppercase tracking-[0.2em] text-slate-500">control plane</div>
                 </div>
               </div>
@@ -748,6 +756,77 @@ function App() {
                         </div>
                       </Show>
 
+                      <Show when={selectedTemplate() === 'terraria:vanilla'}>
+                        <div class="space-y-3 border-t border-slate-200 pt-3 dark:border-slate-800">
+                          <div class="grid grid-cols-2 gap-3">
+                            <label class="block text-sm text-slate-700 dark:text-slate-400">
+                              Version (server package)
+                              <input
+                                class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-amber-500/40 focus:outline-none focus:ring-1 focus:ring-amber-500/20 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200"
+                                value={trVersion()}
+                                onInput={(e) => setTrVersion(e.currentTarget.value)}
+                                placeholder="e.g. 1453"
+                              />
+                            </label>
+                            <label class="block text-sm text-slate-700 dark:text-slate-400">
+                              Port
+                              <input
+                                type="number"
+                                class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-amber-500/40 focus:outline-none focus:ring-1 focus:ring-amber-500/20 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200"
+                                value={trPort()}
+                                onInput={(e) => setTrPort(e.currentTarget.value)}
+                              />
+                            </label>
+                          </div>
+
+                          <div class="grid grid-cols-2 gap-3">
+                            <label class="block text-sm text-slate-700 dark:text-slate-400">
+                              Max players
+                              <input
+                                type="number"
+                                class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-amber-500/40 focus:outline-none focus:ring-1 focus:ring-amber-500/20 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200"
+                                value={trMaxPlayers()}
+                                onInput={(e) => setTrMaxPlayers(e.currentTarget.value)}
+                              />
+                            </label>
+                            <label class="block text-sm text-slate-700 dark:text-slate-400">
+                              World name
+                              <input
+                                class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-amber-500/40 focus:outline-none focus:ring-1 focus:ring-amber-500/20 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200"
+                                value={trWorldName()}
+                                onInput={(e) => setTrWorldName(e.currentTarget.value)}
+                              />
+                            </label>
+                          </div>
+
+                          <div class="grid grid-cols-2 gap-3">
+                            <label class="block text-sm text-slate-700 dark:text-slate-400">
+                              World size (1/2/3)
+                              <input
+                                type="number"
+                                class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-amber-500/40 focus:outline-none focus:ring-1 focus:ring-amber-500/20 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200"
+                                value={trWorldSize()}
+                                onInput={(e) => setTrWorldSize(e.currentTarget.value)}
+                              />
+                            </label>
+                            <label class="block text-sm text-slate-700 dark:text-slate-400">
+                              Password (optional)
+                              <input
+                                class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-amber-500/40 focus:outline-none focus:ring-1 focus:ring-amber-500/20 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200"
+                                value={trPassword()}
+                                onInput={(e) => setTrPassword(e.currentTarget.value)}
+                              />
+                            </label>
+                          </div>
+
+                          <Show when={trError()}>
+                            <div class="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-200">
+                              {trError()}
+                            </div>
+                          </Show>
+                        </div>
+                      </Show>
+
                       <button
                         class="w-full rounded-xl bg-slate-900 px-3 py-2 text-sm font-medium text-slate-100 ring-1 ring-inset ring-slate-800 hover:bg-slate-800 disabled:opacity-50"
                         disabled={createInstance.isPending}
@@ -767,6 +846,14 @@ function App() {
                             params.version = mcVersion() || 'latest_release'
                             params.memory_mb = mcMemory() || '2048'
                             params.port = mcPort() || '25565'
+                          } else if (template_id === 'terraria:vanilla') {
+                            setTrError(null)
+                            params.version = trVersion() || '1453'
+                            params.port = trPort() || '7777'
+                            params.max_players = trMaxPlayers() || '8'
+                            params.world_name = trWorldName() || 'world'
+                            params.world_size = trWorldSize() || '1'
+                            if (trPassword().trim()) params.password = trPassword().trim()
                           }
 
                           await createInstance.mutateAsync({ template_id, params })

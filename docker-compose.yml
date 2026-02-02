@@ -20,6 +20,7 @@ services:
     # Publish the Minecraft server port to the host.
     ports:
       - "25565:25565"
+      - "7777:7777"
     environment:
       - RUST_LOG=info
       - ALLOY_DATA_ROOT=/data

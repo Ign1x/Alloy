@@ -6,14 +6,16 @@ use alloy_proto::agent_v1::agent_health_service_server::{
 use alloy_proto::agent_v1::{HealthCheckRequest, HealthCheckResponse};
 use tonic::{Request, Response, Status, transport::Server};
 
+mod filesystem_service;
+mod instance_service;
+mod logs_service;
 mod minecraft;
 mod minecraft_download;
-mod filesystem_service;
-mod logs_service;
-mod instance_service;
 mod process_manager;
 mod process_service;
 mod templates;
+mod terraria;
+mod terraria_download;
 
 #[derive(Debug, Default)]
 struct AgentHealth;

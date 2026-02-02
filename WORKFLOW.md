@@ -145,3 +145,29 @@ TODO:
 - [x] Update Docker agent image to include Java 21 and mount `/data`
 - [x] Update web UI: add minecraft start form (version/port/memory/eula)
 - [x] Verify end-to-end in docker-compose and check off this section
+
+---
+
+## Milestone 2 - Terraria Vanilla (real)
+Definition of Done (must be true):
+- Agent exposes a template `terraria:vanilla` (no arbitrary cmd from web/control)
+- Agent downloads Terraria dedicated server for Linux, verifies checksum (if available), and caches it under a persistent data root
+- Agent creates an instance dir under `ALLOY_DATA_ROOT`, writes `serverconfig.txt`, and places/creates a world file under the instance
+- Start/stop works end-to-end from web UI, logs are visible via tail, and stop is graceful (stdin `exit\n`) with TERM/KILL fallback
+- Docker compose mounts persistent `/data` for agent (instance+cache) and publishes port `7777`
+
+Defaults (recorded):
+- Port: 7777 (configurable in params)
+- Max players: 8 (configurable in params)
+- World: auto-create if missing (configurable: name/size)
+- Password: optional
+
+TODO:
+- [ ] Add `terraria:vanilla` template and param validation in agent
+- [ ] Implement Terraria server package resolve + download/cache (+ checksum verify if available)
+- [ ] Create instance layout under `ALLOY_DATA_ROOT` (world dir + `serverconfig.txt` + log file target)
+- [ ] Start server from instance dir via `./TerrariaServer.bin.x86_64 -config serverconfig.txt` (or equivalent)
+- [ ] Stop via stdin `exit\n` then TERM/KILL fallback
+- [ ] Update Docker agent image/runtime prerequisites if needed and mount `/data`
+- [ ] Update web UI: add terraria start form (version/port/max_players/world/password)
+- [ ] Verify end-to-end in docker-compose and check off this section

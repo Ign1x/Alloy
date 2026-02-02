@@ -15,6 +15,7 @@ tokio = { workspace = true, features = ["fs", "io-util", "process", "time"] }
 tonic = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+zip = "2"
 
 alloy-proto = { path = "../alloy-proto" }
 alloy-process = { path = "../alloy-process" }

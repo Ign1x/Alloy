@@ -43,11 +43,11 @@ export function Dropdown(props: DropdownProps) {
   return (
     <div class="relative" ref={(el) => (rootEl = el)}>
       <Show when={props.label.length > 0}>
-        <div class="text-xs text-slate-700 dark:text-slate-300">{props.label}</div>
+        <div class="text-sm text-slate-700 dark:text-slate-300">{props.label}</div>
       </Show>
       <button
         type="button"
-        class={`${props.label.length > 0 ? 'mt-1' : ''} flex w-full items-center justify-between gap-3 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm transition-colors hover:bg-slate-50 focus:border-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-300 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:hover:bg-slate-950/80 dark:focus:border-slate-600 dark:focus:ring-slate-600`}
+        class={`${props.label.length > 0 ? 'mt-1' : ''} flex w-full items-center justify-between gap-3 rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-base text-slate-900 shadow-sm transition-colors hover:bg-slate-50 focus:border-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-300 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:hover:bg-slate-950/80 dark:focus:border-slate-600 dark:focus:ring-slate-600`}
         disabled={props.disabled}
         aria-expanded={open()}
         onClick={() => setOpen((v) => !v)}
@@ -60,7 +60,7 @@ export function Dropdown(props: DropdownProps) {
             <div class="truncate">{selected()!.label}</div>
           </Show>
         </div>
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4 text-slate-500">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-5 w-5 text-slate-500">
           <path
             fill-rule="evenodd"
             d="M5.23 7.21a.75.75 0 011.06.02L10 10.94l3.71-3.71a.75.75 0 111.06 1.06l-4.24 4.24a.75.75 0 01-1.06 0L5.21 8.29a.75.75 0 01.02-1.08z"
@@ -76,7 +76,7 @@ export function Dropdown(props: DropdownProps) {
               {(opt) => (
                 <button
                   type="button"
-                  class={`flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left text-sm hover:bg-slate-100 dark:hover:bg-slate-900/50 ${
+                  class={`flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2.5 text-left text-base hover:bg-slate-100 dark:hover:bg-slate-900/50 ${
                     opt.value === props.value ? 'bg-slate-100 dark:bg-slate-900/50' : ''
                   }`}
                   onClick={() => {
@@ -87,7 +87,7 @@ export function Dropdown(props: DropdownProps) {
                   <div class="min-w-0">
                     <div class="truncate text-slate-900 dark:text-slate-100">{opt.label}</div>
                     <Show when={opt.meta}>
-                      <div class="mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400">{opt.meta}</div>
+                      <div class="mt-0.5 truncate text-sm text-slate-500 dark:text-slate-400">{opt.meta}</div>
                     </Show>
                   </div>
                   <Show when={opt.value === props.value}>
@@ -95,7 +95,7 @@ export function Dropdown(props: DropdownProps) {
                       xmlns="http://www.w3.org/2000/svg"
                       viewBox="0 0 20 20"
                       fill="currentColor"
-                      class="h-4 w-4 text-amber-600 dark:text-amber-400"
+                      class="h-5 w-5 text-amber-600 dark:text-amber-400"
                     >
                       <path
                         fill-rule="evenodd"

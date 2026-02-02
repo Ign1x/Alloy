@@ -13,6 +13,7 @@ Default host ports (via compose):
 - web: `http://localhost:3000`
 - control: `http://localhost:8080`
 - minecraft: `localhost:25565`
+- terraria: `localhost:7777`
 
 ## Quick start
 
@@ -71,6 +72,26 @@ Web (same-origin `/rspc`):
 ```bash
 curl -fsS http://localhost:3000/ > /dev/null
 curl -fsS "http://localhost:3000/rspc/control.ping?input=null"
+
+## Terraria (vanilla)
+
+Milestone 2 template id: `terraria:vanilla`
+
+Optional params:
+- `version` (default: 1453)
+- `port` (default: 7777)
+- `max_players` (default: 8)
+- `world_name` (default: world)
+- `world_size` (default: 1)
+- `password` (optional)
+
+Start (rspc):
+
+```bash
+curl -fsS -X POST -H 'content-type: application/json' \
+  --data '{"template_id":"terraria:vanilla","params":{"version":"1453","port":"7777","max_players":"8","world_name":"world","world_size":"1"}}' \
+  http://localhost:8080/rspc/process.start
+```
 ```
 
 ## Configuration

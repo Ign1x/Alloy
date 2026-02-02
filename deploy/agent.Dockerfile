@@ -46,4 +46,7 @@ EXPOSE 50051
 # Vanilla Minecraft default port (published via docker-compose).
 EXPOSE 25565
 
+# Vanilla Terraria default port (published via docker-compose).
+EXPOSE 7777
+
 ENTRYPOINT ["/usr/local/bin/alloy-agent"]

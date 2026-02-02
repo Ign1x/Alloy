@@ -15,6 +15,8 @@ use tokio::{
 use crate::minecraft;
 use crate::minecraft_download;
 use crate::templates;
+use crate::terraria;
+use crate::terraria_download;
 
 const LOG_MAX_LINES: usize = 1000;
 
@@ -202,7 +204,10 @@ impl ProcessManager {
         {
             let mut inner = self.inner.lock().await;
             if let Some(existing) = inner.get(process_id)
-                && matches!(existing.state, ProcessState::Running | ProcessState::Starting | ProcessState::Stopping)
+                && matches!(
+                    existing.state,
+                    ProcessState::Running | ProcessState::Starting | ProcessState::Stopping
+                )
             {
                 anyhow::bail!("process_id already running: {process_id}");
             }
@@ -252,6 +257,127 @@ impl ProcessManager {
                 .arg("-jar")
                 .arg("server.jar")
                 .arg("nogui")
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped());
+
+            #[cfg(unix)]
+            {
+                unsafe {
+                    cmd.pre_exec(|| {
+                        if libc::setsid() == -1 {
+                            return Err(std::io::Error::last_os_error());
+                        }
+                        Ok(())
+                    });
+                }
+            }
+
+            let mut child = cmd.spawn()?;
+            let pid_u32 = child.id();
+            let pgid = pid_u32.map(|p| p as i32);
+
+            let stdin = child.stdin.take();
+            let stdout = child.stdout.take();
+            let stderr = child.stderr.take();
+
+            if let Some(out) = stdout {
+                let logs = logs.clone();
+                tokio::spawn(async move {
+                    let mut lines = BufReader::new(out).lines();
+                    while let Ok(Some(line)) = lines.next_line().await {
+                        logs.lock().await.push_line(line);
+                    }
+                });
+            }
+            if let Some(err) = stderr {
+                let logs = logs.clone();
+                tokio::spawn(async move {
+                    let mut lines = BufReader::new(err).lines();
+                    while let Ok(Some(line)) = lines.next_line().await {
+                        logs.lock().await.push_line(line);
+                    }
+                });
+            }
+
+            {
+                let mut inner = self.inner.lock().await;
+                inner.insert(
+                    id.0.clone(),
+                    ProcessEntry {
+                        template_id: ProcessTemplateId(t.template_id.clone()),
+                        state: ProcessState::Running,
+                        pid: pid_u32,
+                        exit_code: None,
+                        message: None,
+                        stdin,
+                        graceful_stdin: t.graceful_stdin.clone(),
+                        pgid,
+                        logs: logs.clone(),
+                    },
+                );
+            }
+
+            let inner = self.inner.clone();
+            let id_str = id.0.clone();
+            tokio::spawn(async move {
+                let res = child.wait().await;
+                let mut map = inner.lock().await;
+                if let Some(e) = map.get_mut(&id_str) {
+                    match res {
+                        Ok(status) => {
+                            e.state = ProcessState::Exited;
+                            e.exit_code = status.code();
+                            e.message = Some("exited".to_string());
+                        }
+                        Err(err) => {
+                            e.state = ProcessState::Failed;
+                            e.message = Some(format!("wait failed: {err}"));
+                        }
+                    }
+                    e.stdin = None;
+                }
+            });
+
+            return Ok(ProcessStatus {
+                id: id.clone(),
+                template_id: ProcessTemplateId(t.template_id),
+                state: ProcessState::Running,
+                pid: pid_u32,
+                exit_code: None,
+                message: None,
+            });
+        }
+
+        if t.template_id == "terraria:vanilla" {
+            let tr = terraria::validate_vanilla_params(&params)?;
+            let dir = terraria::instance_dir(&id.0);
+            terraria::ensure_vanilla_instance_layout(&dir, &tr)?;
+
+            let resolved = terraria_download::resolve_server_zip(&tr.version)?;
+            let zip_path = terraria_download::ensure_server_zip(&resolved).await?;
+            let extracted =
+                terraria_download::extract_linux_x64_to_cache(&zip_path, &resolved.version_id)?;
+
+            // Terraria expects monoconfig/assemblies/Content next to the binary.
+            // Run from the extracted server root, but use instance-local config/world paths.
+            let mut cmd = if let Some(launcher) = extracted.launcher.as_ref() {
+                Command::new(launcher)
+            } else {
+                Command::new(&extracted.bin_x86_64)
+            };
+            cmd.current_dir(&extracted.server_root)
+                .env("TERM", "xterm")
+                .env(
+                    "LD_LIBRARY_PATH",
+                    format!(
+                        "{}:{}",
+                        extracted.server_root.display(),
+                        std::env::var("LD_LIBRARY_PATH").unwrap_or_default()
+                    ),
+                )
+                .arg("-config")
+                .arg(dir.join("serverconfig.txt"))
                 .stdin(std::process::Stdio::piped())
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped());
