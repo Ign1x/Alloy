@@ -915,10 +915,23 @@ pub fn router() -> Router<Ctx> {
             ),
         );
 
+    let minecraft = Router::new().procedure(
+        "versions",
+        Procedure::builder::<ApiError>().query(|_, _: ()| async move {
+            let v = crate::minecraft_versions::get_versions()
+                .await
+                .map_err(|e| ApiError {
+                    message: format!("minecraft.versions failed: {e}"),
+                })?;
+            Ok(v)
+        }),
+    );
+
     Router::new()
         .nest("control", control)
         .nest("agent", agent)
         .nest("process", process)
+        .nest("minecraft", minecraft)
         .nest("fs", fs)
         .nest("log", log)
         .nest("instance", instance)

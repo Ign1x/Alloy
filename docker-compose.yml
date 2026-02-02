@@ -17,7 +17,7 @@ services:
     # gRPC is used only inside the compose network by default.
     expose:
       - "50051"
-    # Publish the Minecraft server port to the host.
+    # Publish game ports to host.
     ports:
       - "25565:25565"
       - "7777:7777"

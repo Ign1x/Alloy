@@ -47,7 +47,7 @@ export function Dropdown(props: DropdownProps) {
       </Show>
       <button
         type="button"
-        class={`${props.label.length > 0 ? 'mt-1' : ''} flex w-full items-center justify-between gap-3 rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-base text-slate-900 shadow-sm transition-colors hover:bg-slate-50 focus:border-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-300 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:hover:bg-slate-950/80 dark:focus:border-slate-600 dark:focus:ring-slate-600`}
+        class={`${props.label.length > 0 ? 'mt-1' : ''} flex w-full items-center justify-between gap-3 rounded-xl border border-slate-300 bg-white/80 px-3 py-2.5 text-base text-slate-900 shadow-sm backdrop-blur-sm transition-all duration-150 hover:bg-white hover:shadow active:scale-[0.99] focus:border-amber-500/40 focus:outline-none focus:ring-2 focus:ring-amber-500/20 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:hover:bg-slate-950/80 dark:focus:border-amber-500/40 dark:focus:ring-amber-500/20`}
         disabled={props.disabled}
         aria-expanded={open()}
         onClick={() => setOpen((v) => !v)}
@@ -70,13 +70,13 @@ export function Dropdown(props: DropdownProps) {
       </button>
 
       <Show when={open()}>
-        <div class="absolute left-0 right-0 z-50 mt-2 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl shadow-slate-900/5 dark:border-slate-800 dark:bg-slate-950">
+        <div class="absolute left-0 right-0 z-50 mt-3 overflow-hidden rounded-2xl border border-slate-200 bg-white/90 shadow-2xl shadow-slate-900/10 backdrop-blur dark:border-slate-800 dark:bg-slate-950/90">
           <div class="max-h-64 overflow-auto p-1">
             <For each={props.options}>
               {(opt) => (
                 <button
                   type="button"
-                  class={`flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2.5 text-left text-base hover:bg-slate-100 dark:hover:bg-slate-900/50 ${
+                  class={`flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2.5 text-left text-base transition-all hover:bg-slate-100 active:scale-[0.99] dark:hover:bg-slate-900/50 ${
                     opt.value === props.value ? 'bg-slate-100 dark:bg-slate-900/50' : ''
                   }`}
                   onClick={() => {

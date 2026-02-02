@@ -94,6 +94,7 @@ dependencies = [
  "hex",
  "jsonwebtoken",
  "rand 0.8.5",
+ "reqwest",
  "rspc",
  "rspc-axum",
  "sea-orm",

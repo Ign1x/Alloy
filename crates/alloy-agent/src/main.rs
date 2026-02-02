@@ -11,6 +11,7 @@ mod instance_service;
 mod logs_service;
 mod minecraft;
 mod minecraft_download;
+mod port_alloc;
 mod process_manager;
 mod process_service;
 mod templates;

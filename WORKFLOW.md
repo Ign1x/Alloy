@@ -116,6 +116,53 @@ Notes:
   - [x] Log viewer (log.tailFile)
   - [x] Instance -> Files shortcuts (open instance dir / latest.log)
 
+### Phase 4.1 - Web UX / UI Revamp (no feature regressions)
+Definition of Done (must be true):
+- No behavior regressions: login/session, instances, files, logs, nodes all work
+- App is split into pages/components (no 1k+ LOC single file)
+- Minimal/no manual Refresh buttons; data stays correct via auto-refetch + invalidation
+- Visual polish: consistent spacing/typography/colors, better first impression (top-left nav/header)
+
+TODO:
+- [ ] Refactor structure: split `web/src/App.tsx` into Layout + pages + shared UI components
+- [ ] Remove redundant Refresh buttons; switch to rspc query invalidation on mutations
+- [ ] Improve loading/empty/error states (skeletons, inline errors, disable states)
+- [ ] Polish UI primitives: buttons/inputs/dropdowns/modals consistency
+  - [ ] End-to-end verification: `npm run build` (and keep rspc bindings unchanged)
+
+### Phase 4.2 - Web UI/UX Overhaul (aesthetic + interaction quality)
+Definition of Done (must be true):
+- Instances list no longer looks like long, flat “rows”; uses responsive cards/grid and clear hierarchy
+- Game version selection is real-time and not hard-coded:
+  - Minecraft versions come from Mojang piston-meta manifest (cached)
+  - UI does not require manual version typing for common flows
+- Richer palette + typography: display font for headings, keep code font, consistent tokens
+- Microinteractions everywhere: hover/active/focus/disabled states feel “clicky” and intentional
+
+TODO:
+- [ ] Redesign Instances list: responsive card/grid layout + better action grouping
+- [ ] Add control-plane rspc `minecraft.versions` (cached via ETag/Last-Modified) and wire UI dropdown (no manual entry)
+- [ ] Decide Terraria versions strategy (if no official list endpoint: curated list + advanced override) and wire UI
+- [ ] Color + typography refresh (add display font for headings; keep IBM Plex Mono for code)
+- [ ] Microinteractions pass (buttons, cards, nav, dropdown, loading states)
+- [ ] Verify: `npm run build`, rspc bindings unchanged, `cargo fmt/clippy/test`
+
+### Phase 4.3 - Instance UX + Multi-instance ergonomics
+Definition of Done (must be true):
+- Creating an instance feels “product-grade”: name, presets, sensible defaults
+- Ports: user can leave port blank and the system assigns an available port automatically
+- Multiple instances can run concurrently without port conflicts (compose dev supports this)
+- Memory selection uses presets (2G/4G/8G/16G) with optional custom override
+- Account/Admin chip in top-right is elegant and consistent with the new design
+
+TODO:
+- [ ] Instance naming: allow user-provided display name; show it in instances list
+- [ ] Auto port assignment in agent for Minecraft/Terraria when port is omitted
+- [ ] Memory presets dropdown for Minecraft (2G/4G/8G/16G + custom)
+- [ ] Docker compose: run alloy-agent in host network mode (dev) and adjust control->agent endpoint
+- [ ] Redesign account/admin chip (top-right)
+- [ ] Verify: web build, rspc bindings clean, cargo fmt/clippy/test
+
 ### Phase 5 - Game plugins
 - [ ] Minecraft adapter (parity with legacy core features)
 - [ ] Terraria adapter (prove multi-game extensibility)

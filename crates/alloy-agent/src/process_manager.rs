@@ -14,6 +14,7 @@ use tokio::{
 
 use crate::minecraft;
 use crate::minecraft_download;
+use crate::port_alloc;
 use crate::templates;
 use crate::terraria;
 use crate::terraria_download;
@@ -224,6 +225,14 @@ impl ProcessManager {
 
         if t.template_id == "minecraft:vanilla" {
             let mc = minecraft::validate_vanilla_params(&params)?;
+
+            // Allow auto port assignment (port=0 means "auto").
+            let mc_port = port_alloc::allocate_tcp_port(mc.port)?;
+            let mc = minecraft::VanillaParams {
+                port: mc_port,
+                ..mc
+            };
+
             let dir = minecraft::instance_dir(&id.0);
             minecraft::ensure_vanilla_instance_layout(&dir, &mc)?;
 
@@ -351,6 +360,13 @@ impl ProcessManager {
 
         if t.template_id == "terraria:vanilla" {
             let tr = terraria::validate_vanilla_params(&params)?;
+
+            let tr_port = port_alloc::allocate_tcp_port(tr.port)?;
+            let tr = terraria::VanillaParams {
+                port: tr_port,
+                ..tr
+            };
+
             let dir = terraria::instance_dir(&id.0);
             terraria::ensure_vanilla_instance_layout(&dir, &tr)?;
 

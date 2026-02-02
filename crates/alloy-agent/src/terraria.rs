@@ -21,15 +21,19 @@ pub fn validate_vanilla_params(params: &BTreeMap<String, String>) -> anyhow::Res
         anyhow::bail!("invalid version: {version}");
     }
 
-    let port = params
-        .get("port")
-        .map(|v| v.parse::<u16>())
-        .transpose()
-        .map_err(|_| anyhow::anyhow!("invalid port"))?
-        .unwrap_or(7777);
-    if port < 1024 {
-        anyhow::bail!("port out of range: {port}");
-    }
+    let port = match params.get("port") {
+        None => 0,
+        Some(v) if v.trim().is_empty() => 0,
+        Some(v) => {
+            let p = v
+                .parse::<u16>()
+                .map_err(|_| anyhow::anyhow!("invalid port"))?;
+            if p < 1024 {
+                anyhow::bail!("port out of range: {p}");
+            }
+            p
+        }
+    };
 
     let max_players = params
         .get("max_players")
