@@ -18,7 +18,13 @@ struct ErrorBody {
 }
 
 fn json_error(code: StatusCode, message: impl Into<String>) -> Response {
-    (code, axum::Json(ErrorBody { message: message.into() })).into_response()
+    (
+        code,
+        axum::Json(ErrorBody {
+            message: message.into(),
+        }),
+    )
+        .into_response()
 }
 
 fn is_unsafe_method(method: &Method) -> bool {
@@ -34,9 +40,8 @@ fn parse_allowed_origins() -> Vec<String> {
     // Examples:
     // - ALLOY_ALLOWED_ORIGINS=http://localhost:5173
     // - ALLOY_ALLOWED_ORIGINS=https://panel.example.com,https://control.example.com
-    let raw = std::env::var("ALLOY_ALLOWED_ORIGINS").unwrap_or_else(|_| {
-        "http://localhost:5173,http://127.0.0.1:5173".to_string()
-    });
+    let raw = std::env::var("ALLOY_ALLOWED_ORIGINS")
+        .unwrap_or_else(|_| "http://localhost:5173,http://127.0.0.1:5173".to_string());
     raw.split(',')
         .map(|s| s.trim())
         .filter(|s| !s.is_empty())

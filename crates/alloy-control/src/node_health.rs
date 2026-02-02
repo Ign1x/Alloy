@@ -3,8 +3,8 @@ use std::time::Duration;
 use alloy_db::entities::nodes;
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
 
-use alloy_proto::agent_v1::agent_health_service_client::AgentHealthServiceClient;
 use alloy_proto::agent_v1::HealthCheckRequest;
+use alloy_proto::agent_v1::agent_health_service_client::AgentHealthServiceClient;
 use tonic::Request;
 
 #[derive(Clone)]
@@ -29,7 +29,11 @@ impl NodeHealthPoller {
     async fn tick(&self) {
         let db = &*self.db;
 
-        let rows = match nodes::Entity::find().filter(nodes::Column::Enabled.eq(true)).all(db).await {
+        let rows = match nodes::Entity::find()
+            .filter(nodes::Column::Enabled.eq(true))
+            .all(db)
+            .await
+        {
             Ok(v) => v,
             Err(_) => return,
         };

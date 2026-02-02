@@ -1,5 +1,5 @@
-pub mod rpc;
-pub mod state;
 pub mod auth;
-pub mod security;
 pub mod node_health;
+pub mod rpc;
+pub mod security;
+pub mod state;

@@ -1,15 +1,18 @@
 use std::net::SocketAddr;
 
-use alloy_control::rpc;
-use alloy_control::state::AppState;
 use alloy_control::auth;
-use alloy_control::security;
 use alloy_control::node_health::NodeHealthPoller;
-use axum::{Json, Router, routing::{get, post}};
+use alloy_control::rpc;
+use alloy_control::security;
+use alloy_control::state::AppState;
 use axum::middleware;
-use serde::Serialize;
-use sea_orm_migration::MigratorTrait;
+use axum::{
+    Json, Router,
+    routing::{get, post},
+};
 use sea_orm::EntityTrait;
+use sea_orm_migration::MigratorTrait;
+use serde::Serialize;
 
 #[derive(Debug, Serialize)]
 struct HealthzResponse {
@@ -25,8 +28,8 @@ async fn healthz() -> Json<HealthzResponse> {
 }
 
 async fn init_db_and_migrate() -> anyhow::Result<AppState> {
-    let database_url = std::env::var("DATABASE_URL")
-        .map_err(|_| anyhow::anyhow!("DATABASE_URL is required"))?;
+    let database_url =
+        std::env::var("DATABASE_URL").map_err(|_| anyhow::anyhow!("DATABASE_URL is required"))?;
     let db = alloy_db::connect(&database_url).await?;
 
     // Apply migrations on boot (idempotent).
@@ -47,11 +50,9 @@ async fn init_db_and_migrate() -> anyhow::Result<AppState> {
             updated_at: sea_orm::Set(chrono::Utc::now().into()),
         })
         .on_conflict(
-            sea_orm::sea_query::OnConflict::columns([
-                alloy_db::entities::nodes::Column::Name,
-            ])
-            .do_nothing()
-            .to_owned(),
+            sea_orm::sea_query::OnConflict::columns([alloy_db::entities::nodes::Column::Name])
+                .do_nothing()
+                .to_owned(),
         )
         .exec(&db)
         .await;

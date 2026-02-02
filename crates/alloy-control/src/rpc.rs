@@ -1,14 +1,11 @@
 use alloy_proto::agent_v1::{
-    ListDirRequest, ReadFileRequest,
-    GetStatusRequest, HealthCheckRequest, ListProcessesRequest, ListTemplatesRequest,
-    StartFromTemplateRequest, StopProcessRequest, TailLogsRequest,
+    CreateInstanceRequest, DeleteInstanceRequest, GetInstanceRequest, GetStatusRequest,
+    HealthCheckRequest, ListDirRequest, ListInstancesRequest, ListProcessesRequest,
+    ListTemplatesRequest, ReadFileRequest, StartFromTemplateRequest, StartInstanceRequest,
+    StopInstanceRequest, StopProcessRequest, TailFileRequest, TailLogsRequest,
     agent_health_service_client::AgentHealthServiceClient,
     filesystem_service_client::FilesystemServiceClient,
-    instance_service_client::InstanceServiceClient,
-    CreateInstanceRequest, DeleteInstanceRequest, GetInstanceRequest, ListInstancesRequest,
-    StartInstanceRequest, StopInstanceRequest,
-    logs_service_client::LogsServiceClient,
-    TailFileRequest,
+    instance_service_client::InstanceServiceClient, logs_service_client::LogsServiceClient,
     process_service_client::ProcessServiceClient,
 };
 use rspc::{Procedure, ProcedureError, ResolverError, Router};
@@ -206,12 +203,12 @@ fn map_instance_config(cfg: alloy_proto::agent_v1::InstanceConfig) -> InstanceCo
     }
 }
 
-fn map_instance_info(info: alloy_proto::agent_v1::InstanceInfo) -> Result<InstanceInfoDto, ApiError> {
-    let cfg = info
-        .config
-        .ok_or_else(|| ApiError {
-            message: "missing instance config".to_string(),
-        })?;
+fn map_instance_info(
+    info: alloy_proto::agent_v1::InstanceInfo,
+) -> Result<InstanceInfoDto, ApiError> {
+    let cfg = info.config.ok_or_else(|| ApiError {
+        message: "missing instance config".to_string(),
+    })?;
 
     Ok(InstanceInfoDto {
         config: map_instance_config(cfg),
@@ -220,8 +217,16 @@ fn map_instance_info(info: alloy_proto::agent_v1::InstanceInfo) -> Result<Instan
             template_id: p.template_id.clone(),
             state: p.state().as_str_name().to_string(),
             pid: if p.has_pid { Some(p.pid) } else { None },
-            exit_code: if p.has_exit_code { Some(p.exit_code) } else { None },
-            message: if p.message.is_empty() { None } else { Some(p.message) },
+            exit_code: if p.has_exit_code {
+                Some(p.exit_code)
+            } else {
+                None
+            },
+            message: if p.message.is_empty() {
+                None
+            } else {
+                Some(p.message)
+            },
         }),
     })
 }
@@ -585,10 +590,9 @@ pub fn router() -> Router<Ctx> {
                     })?
                     .into_inner();
 
-                let text = String::from_utf8(resp.data)
-                    .map_err(|_| ApiError {
-                        message: "file is not valid utf-8".to_string(),
-                    })?;
+                let text = String::from_utf8(resp.data).map_err(|_| ApiError {
+                    message: "file is not valid utf-8".to_string(),
+                })?;
 
                 Ok(ReadFileOutput {
                     text,
@@ -651,11 +655,9 @@ pub fn router() -> Router<Ctx> {
                     })?
                     .into_inner();
 
-                let cfg = resp
-                    .config
-                    .ok_or_else(|| ApiError {
-                        message: "missing instance config".to_string(),
-                    })?;
+                let cfg = resp.config.ok_or_else(|| ApiError {
+                    message: "missing instance config".to_string(),
+                })?;
 
                 Ok(map_instance_config(cfg))
             }),
@@ -681,11 +683,9 @@ pub fn router() -> Router<Ctx> {
                     })?
                     .into_inner();
 
-                let info = resp
-                    .info
-                    .ok_or_else(|| ApiError {
-                        message: "missing instance info".to_string(),
-                    })?;
+                let info = resp.info.ok_or_else(|| ApiError {
+                    message: "missing instance info".to_string(),
+                })?;
 
                 map_instance_info(info)
             }),
@@ -737,17 +737,19 @@ pub fn router() -> Router<Ctx> {
                     })?
                     .into_inner();
 
-                let status = resp
-                    .status
-                    .ok_or_else(|| ApiError {
-                        message: "missing status".to_string(),
-                    })?;
+                let status = resp.status.ok_or_else(|| ApiError {
+                    message: "missing status".to_string(),
+                })?;
 
                 Ok(ProcessStatusDto {
                     process_id: status.process_id.clone(),
                     template_id: status.template_id.clone(),
                     state: status.state().as_str_name().to_string(),
-                    pid: if status.has_pid { Some(status.pid) } else { None },
+                    pid: if status.has_pid {
+                        Some(status.pid)
+                    } else {
+                        None
+                    },
                     exit_code: if status.has_exit_code {
                         Some(status.exit_code)
                     } else {
@@ -783,17 +785,19 @@ pub fn router() -> Router<Ctx> {
                     })?
                     .into_inner();
 
-                let status = resp
-                    .status
-                    .ok_or_else(|| ApiError {
-                        message: "missing status".to_string(),
-                    })?;
+                let status = resp.status.ok_or_else(|| ApiError {
+                    message: "missing status".to_string(),
+                })?;
 
                 Ok(ProcessStatusDto {
                     process_id: status.process_id.clone(),
                     template_id: status.template_id.clone(),
                     state: status.state().as_str_name().to_string(),
-                    pid: if status.has_pid { Some(status.pid) } else { None },
+                    pid: if status.has_pid {
+                        Some(status.pid)
+                    } else {
+                        None
+                    },
                     exit_code: if status.has_exit_code {
                         Some(status.exit_code)
                     } else {
@@ -832,79 +836,84 @@ pub fn router() -> Router<Ctx> {
             }),
         );
 
-    let node = Router::new().procedure(
-        "list",
-        Procedure::builder::<ApiError>().query(|ctx: Ctx, _: ()| async move {
-            use alloy_db::entities::nodes;
-            use sea_orm::EntityTrait;
+    let node = Router::new()
+        .procedure(
+            "list",
+            Procedure::builder::<ApiError>().query(|ctx: Ctx, _: ()| async move {
+                use alloy_db::entities::nodes;
+                use sea_orm::EntityTrait;
 
-            let rows = nodes::Entity::find()
-                .all(&*ctx.db)
-                .await
-                .map_err(|e| ApiError {
-                    message: format!("db error: {e}"),
-                })?;
+                let rows = nodes::Entity::find()
+                    .all(&*ctx.db)
+                    .await
+                    .map_err(|e| ApiError {
+                        message: format!("db error: {e}"),
+                    })?;
 
-            Ok(rows
-                .into_iter()
-                .map(|n| NodeDto {
-                    id: n.id.to_string(),
-                    name: n.name,
-                    endpoint: n.endpoint,
-                    enabled: n.enabled,
-                    last_seen_at: n.last_seen_at.map(|t| t.to_rfc3339()),
-                    agent_version: n.agent_version,
-                    last_error: n.last_error,
-                })
-                .collect::<Vec<_>>())
-        }),
-    )
-    .procedure(
-        "setEnabled",
-        Procedure::builder::<ApiError>().mutation(|ctx: Ctx, input: NodeSetEnabledInput| async move {
-            use alloy_db::entities::nodes;
-            use sea_orm::{ActiveModelTrait, EntityTrait, Set};
+                Ok(rows
+                    .into_iter()
+                    .map(|n| NodeDto {
+                        id: n.id.to_string(),
+                        name: n.name,
+                        endpoint: n.endpoint,
+                        enabled: n.enabled,
+                        last_seen_at: n.last_seen_at.map(|t| t.to_rfc3339()),
+                        agent_version: n.agent_version,
+                        last_error: n.last_error,
+                    })
+                    .collect::<Vec<_>>())
+            }),
+        )
+        .procedure(
+            "setEnabled",
+            Procedure::builder::<ApiError>().mutation(
+                |ctx: Ctx, input: NodeSetEnabledInput| async move {
+                    use alloy_db::entities::nodes;
+                    use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 
-            let user = ctx.user.ok_or_else(|| ApiError {
-                message: "unauthorized".to_string(),
-            })?;
-            if !user.is_admin {
-                return Err(ApiError {
-                    message: "forbidden".to_string(),
-                });
-            }
+                    let user = ctx.user.ok_or_else(|| ApiError {
+                        message: "unauthorized".to_string(),
+                    })?;
+                    if !user.is_admin {
+                        return Err(ApiError {
+                            message: "forbidden".to_string(),
+                        });
+                    }
 
-            let id = sea_orm::prelude::Uuid::parse_str(&input.node_id).map_err(|_| ApiError {
-                message: "invalid node_id".to_string(),
-            })?;
+                    let id = sea_orm::prelude::Uuid::parse_str(&input.node_id).map_err(|_| {
+                        ApiError {
+                            message: "invalid node_id".to_string(),
+                        }
+                    })?;
 
-            let model = nodes::Entity::find_by_id(id)
-                .one(&*ctx.db)
-                .await
-                .map_err(|e| ApiError {
-                    message: format!("db error: {e}"),
-                })?
-                .ok_or_else(|| ApiError {
-                    message: "node not found".to_string(),
-                })?;
+                    let model = nodes::Entity::find_by_id(id)
+                        .one(&*ctx.db)
+                        .await
+                        .map_err(|e| ApiError {
+                            message: format!("db error: {e}"),
+                        })?
+                        .ok_or_else(|| ApiError {
+                            message: "node not found".to_string(),
+                        })?;
 
-            let mut active: nodes::ActiveModel = model.into();
-            active.enabled = Set(input.enabled);
-            let updated = active.update(&*ctx.db).await.map_err(|e| ApiError {
-                message: format!("db error: {e}"),
-            })?;
+                    let mut active: nodes::ActiveModel = model.into();
+                    active.enabled = Set(input.enabled);
+                    let updated = active.update(&*ctx.db).await.map_err(|e| ApiError {
+                        message: format!("db error: {e}"),
+                    })?;
 
-            Ok(NodeDto {
-                id: updated.id.to_string(),
-                name: updated.name,
-                endpoint: updated.endpoint,
-                enabled: updated.enabled,
-                last_seen_at: updated.last_seen_at.map(|t| t.to_rfc3339()),
-                agent_version: updated.agent_version,
-                last_error: updated.last_error,
-            })
-        }),
-    );
+                    Ok(NodeDto {
+                        id: updated.id.to_string(),
+                        name: updated.name,
+                        endpoint: updated.endpoint,
+                        enabled: updated.enabled,
+                        last_seen_at: updated.last_seen_at.map(|t| t.to_rfc3339()),
+                        agent_version: updated.agent_version,
+                        last_error: updated.last_error,
+                    })
+                },
+            ),
+        );
 
     Router::new()
         .nest("control", control)

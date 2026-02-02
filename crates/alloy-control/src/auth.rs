@@ -4,7 +4,9 @@ use serde::{Deserialize, Serialize};
 
 use base64::Engine;
 
-use alloy_db::sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
+use alloy_db::sea_orm::{
+    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set,
+};
 use sea_orm::prelude::Expr;
 use sea_orm::prelude::Uuid;
 
@@ -20,7 +22,12 @@ pub struct ErrorBody {
 }
 
 fn json_error(code: StatusCode, message: impl Into<String>) -> impl IntoResponse {
-    (code, Json(ErrorBody { message: message.into() }))
+    (
+        code,
+        Json(ErrorBody {
+            message: message.into(),
+        }),
+    )
 }
 
 fn cookie_base(name: &'static str, value: String, path: &'static str) -> Cookie<'static> {
@@ -93,7 +100,9 @@ fn hash_password(password: &str) -> Result<String, argon2::password_hash::Error>
     use argon2::password_hash::{PasswordHasher, SaltString};
     let salt = SaltString::generate(&mut rand::rngs::OsRng);
     let argon2 = argon2::Argon2::default();
-    Ok(argon2.hash_password(password.as_bytes(), &salt)?.to_string())
+    Ok(argon2
+        .hash_password(password.as_bytes(), &salt)?
+        .to_string())
 }
 
 fn verify_password(hash: &str, password: &str) -> bool {
@@ -215,8 +224,11 @@ pub async fn login(
 ) -> impl IntoResponse {
     let db = &*state.db;
     if let Err(e) = ensure_admin_user(db).await {
-        return json_error(StatusCode::INTERNAL_SERVER_ERROR, format!("bootstrap failed: {e}"))
-            .into_response();
+        return json_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("bootstrap failed: {e}"),
+        )
+        .into_response();
     }
 
     let user = match alloy_db::entities::users::Entity::find()
@@ -225,10 +237,12 @@ pub async fn login(
         .await
     {
         Ok(Some(u)) => u,
-        Ok(None) => return json_error(StatusCode::UNAUTHORIZED, "invalid credentials").into_response(),
+        Ok(None) => {
+            return json_error(StatusCode::UNAUTHORIZED, "invalid credentials").into_response();
+        }
         Err(e) => {
             return json_error(StatusCode::INTERNAL_SERVER_ERROR, format!("db error: {e}"))
-                .into_response()
+                .into_response();
         }
     };
 
@@ -238,8 +252,10 @@ pub async fn login(
 
     let access = match make_access_jwt(&user) {
         Ok(v) => v,
-        Err(e) => return json_error(StatusCode::INTERNAL_SERVER_ERROR, format!("jwt error: {e}"))
-            .into_response(),
+        Err(e) => {
+            return json_error(StatusCode::INTERNAL_SERVER_ERROR, format!("jwt error: {e}"))
+                .into_response();
+        }
     };
 
     let refresh_raw = random_token(32);
@@ -255,7 +271,10 @@ pub async fn login(
         revoked_at: Set(None),
         rotated_at: Set(None),
     };
-    if let Err(e) = alloy_db::entities::refresh_tokens::Entity::insert(token).exec(db).await {
+    if let Err(e) = alloy_db::entities::refresh_tokens::Entity::insert(token)
+        .exec(db)
+        .await
+    {
         return json_error(StatusCode::INTERNAL_SERVER_ERROR, format!("db error: {e}"))
             .into_response();
     }
@@ -264,18 +283,23 @@ pub async fn login(
         .add(build_access_cookie(access))
         .add(build_refresh_cookie(refresh_raw));
 
-    (jar, Json(WhoamiResponse {
-        user_id: user.id.to_string(),
-        username: user.username,
-        is_admin: user.is_admin,
-    }))
+    (
+        jar,
+        Json(WhoamiResponse {
+            user_id: user.id.to_string(),
+            username: user.username,
+            is_admin: user.is_admin,
+        }),
+    )
         .into_response()
 }
 
 pub async fn whoami(State(_state): State<AppState>, jar: CookieJar) -> impl IntoResponse {
     let token = match jar.get(ACCESS_COOKIE_NAME) {
         Some(c) => c.value().to_string(),
-        None => return json_error(StatusCode::UNAUTHORIZED, "missing access token").into_response(),
+        None => {
+            return json_error(StatusCode::UNAUTHORIZED, "missing access token").into_response();
+        }
     };
 
     match validate_access_jwt(&token) {
@@ -284,10 +308,7 @@ pub async fn whoami(State(_state): State<AppState>, jar: CookieJar) -> impl Into
     }
 }
 
-pub async fn logout(
-    State(state): State<AppState>,
-    jar: CookieJar,
-) -> impl IntoResponse {
+pub async fn logout(State(state): State<AppState>, jar: CookieJar) -> impl IntoResponse {
     let db = &*state.db;
     if let Some(refresh) = jar.get(REFRESH_COOKIE_NAME) {
         let h = hash_refresh_token(refresh.value());
@@ -307,14 +328,13 @@ pub async fn logout(
     (jar, StatusCode::NO_CONTENT).into_response()
 }
 
-pub async fn refresh(
-    State(state): State<AppState>,
-    jar: CookieJar,
-) -> impl IntoResponse {
+pub async fn refresh(State(state): State<AppState>, jar: CookieJar) -> impl IntoResponse {
     let db = &*state.db;
     let refresh_cookie = match jar.get(REFRESH_COOKIE_NAME) {
         Some(c) => c.value().to_string(),
-        None => return json_error(StatusCode::UNAUTHORIZED, "missing refresh token").into_response(),
+        None => {
+            return json_error(StatusCode::UNAUTHORIZED, "missing refresh token").into_response();
+        }
     };
     let h = hash_refresh_token(&refresh_cookie);
 
@@ -325,9 +345,13 @@ pub async fn refresh(
         .await
     {
         Ok(Some(t)) => t,
-        Ok(None) => return json_error(StatusCode::UNAUTHORIZED, "invalid refresh token").into_response(),
-        Err(e) => return json_error(StatusCode::INTERNAL_SERVER_ERROR, format!("db error: {e}"))
-            .into_response(),
+        Ok(None) => {
+            return json_error(StatusCode::UNAUTHORIZED, "invalid refresh token").into_response();
+        }
+        Err(e) => {
+            return json_error(StatusCode::INTERNAL_SERVER_ERROR, format!("db error: {e}"))
+                .into_response();
+        }
     };
 
     if token.revoked_at.is_some() {
@@ -360,8 +384,10 @@ pub async fn refresh(
 
     let access = match make_access_jwt(&user) {
         Ok(v) => v,
-        Err(e) => return json_error(StatusCode::INTERNAL_SERVER_ERROR, format!("jwt error: {e}"))
-            .into_response(),
+        Err(e) => {
+            return json_error(StatusCode::INTERNAL_SERVER_ERROR, format!("jwt error: {e}"))
+                .into_response();
+        }
     };
 
     let refresh_raw = random_token(32);
@@ -376,7 +402,10 @@ pub async fn refresh(
         revoked_at: Set(None),
         rotated_at: Set(None),
     };
-    if let Err(e) = alloy_db::entities::refresh_tokens::Entity::insert(new_token).exec(db).await {
+    if let Err(e) = alloy_db::entities::refresh_tokens::Entity::insert(new_token)
+        .exec(db)
+        .await
+    {
         return json_error(StatusCode::INTERNAL_SERVER_ERROR, format!("db error: {e}"))
             .into_response();
     }
