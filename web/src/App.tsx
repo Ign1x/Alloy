@@ -1,4 +1,4 @@
-import { onAuthEvent, queryClient, rspc } from './rspc'
+import { isAlloyApiError, onAuthEvent, queryClient, rspc } from './rspc'
 import { createEffect, createMemo, createSignal, For, Show } from 'solid-js'
 import { Portal } from 'solid-js/web'
 import type { ProcessStatusDto } from './bindings'
@@ -12,6 +12,77 @@ function statusDotClass(state: { loading: boolean; error: boolean }) {
   if (state.loading) return 'bg-slate-600 animate-pulse'
   if (state.error) return 'bg-rose-500'
   return 'bg-emerald-400'
+}
+
+const AGENT_ERROR_PREFIX = 'ALLOY_ERROR_JSON:'
+type AgentErrorPayload = {
+  code: string
+  message: string
+  field_errors?: Record<string, string> | null
+  hint?: string | null
+}
+
+function parseAgentErrorPayload(raw: string | null | undefined): AgentErrorPayload | null {
+  if (!raw) return null
+  const s = raw.trim()
+  if (!s.startsWith(AGENT_ERROR_PREFIX)) return null
+  try {
+    const parsed = JSON.parse(s.slice(AGENT_ERROR_PREFIX.length)) as unknown
+    if (!parsed || typeof parsed !== 'object') return null
+    const p = parsed as Record<string, unknown>
+    if (typeof p.code !== 'string' || typeof p.message !== 'string') return null
+    return {
+      code: p.code,
+      message: p.message,
+      field_errors: typeof p.field_errors === 'object' ? (p.field_errors as Record<string, string>) : null,
+      hint: typeof p.hint === 'string' ? p.hint : null,
+    }
+  } catch {
+    return null
+  }
+}
+
+function formatBytes(bytes: number | null | undefined): string {
+  if (bytes == null || !Number.isFinite(bytes)) return '—'
+  const sign = bytes < 0 ? '-' : ''
+  let v = Math.abs(bytes)
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'] as const
+  let i = 0
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024
+    i++
+  }
+  const decimals = i === 0 ? 0 : v >= 10 ? 1 : 2
+  return `${sign}${v.toFixed(decimals)}${units[i]}`
+}
+
+function parseU64(s: string | null | undefined): number | null {
+  if (!s) return null
+  const n = Number(s)
+  if (!Number.isFinite(n)) return null
+  return n
+}
+
+function formatCpuPercent(cpuX100: number | null | undefined): string {
+  if (cpuX100 == null || !Number.isFinite(cpuX100)) return '—'
+  const pct = cpuX100 / 100
+  if (pct >= 10) return `${pct.toFixed(1)}%`
+  if (pct >= 1) return `${pct.toFixed(2)}%`
+  return `${pct.toFixed(2)}%`
+}
+
+function formatRelativeTime(unixMs: number | null | undefined): string {
+  if (!unixMs || !Number.isFinite(unixMs) || unixMs <= 0) return '—'
+  const deltaMs = Date.now() - unixMs
+  const sec = Math.floor(deltaMs / 1000)
+  if (sec < 10) return 'just now'
+  if (sec < 60) return `${sec}s ago`
+  const min = Math.floor(sec / 60)
+  if (min < 60) return `${min}m ago`
+  const hr = Math.floor(min / 60)
+  if (hr < 48) return `${hr}h ago`
+  const day = Math.floor(hr / 24)
+  return `${day}d ago`
 }
 
 function StatusPill(props: {
@@ -63,6 +134,23 @@ async function safeCopy(text: string) {
   }
 }
 
+function downloadJson(filename: string, value: unknown) {
+  const blob = new Blob([JSON.stringify(value, null, 2)], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+function statusMessageParts(status: ProcessStatusDto | null): { text: string | null; code: string | null; hint: string | null } {
+  const raw = status?.message ?? null
+  const payload = parseAgentErrorPayload(raw)
+  if (payload) return { text: payload.message, code: payload.code, hint: payload.hint ?? null }
+  return { text: raw, code: null, hint: null }
+}
+
 function defaultPortForTemplate(templateId: string): number | null {
   if (templateId === 'minecraft:vanilla') return 25565
   if (templateId === 'terraria:vanilla') return 7777
@@ -91,6 +179,14 @@ function connectHost() {
 
 type UiTab = 'instances' | 'files' | 'nodes'
 
+type ToastVariant = 'info' | 'success' | 'error'
+type Toast = {
+  id: string
+  variant: ToastVariant
+  title: string
+  message?: string
+  requestId?: string
+}
 
 function App() {
   // Ensure CSRF cookie exists early so authenticated POSTs (auth/rspc mutations)
@@ -106,6 +202,10 @@ function App() {
   const [loginPass, setLoginPass] = createSignal('admin')
   const [showLoginModal, setShowLoginModal] = createSignal(false)
   const [confirmDeleteInstanceId, setConfirmDeleteInstanceId] = createSignal<string | null>(null)
+  const [confirmDeleteText, setConfirmDeleteText] = createSignal('')
+  const [editingInstanceId, setEditingInstanceId] = createSignal<string | null>(null)
+  const [showDiagnosticsModal, setShowDiagnosticsModal] = createSignal(false)
+  const [toasts, setToasts] = createSignal<Toast[]>([])
   const [showAccountMenu, setShowAccountMenu] = createSignal(false)
   // Account menu uses a fixed overlay; refs are not needed.
 
@@ -136,6 +236,29 @@ function App() {
 
   // Prevent out-of-order session fetches from clobbering newer state.
   let sessionFetchToken = 0
+
+  function pushToast(variant: ToastVariant, title: string, message?: string, requestId?: string) {
+    const id = (() => {
+      try {
+        return crypto.randomUUID()
+      } catch {
+        return Math.random().toString(36).slice(2)
+      }
+    })()
+
+    setToasts((prev) => [...prev, { id, variant, title, message, requestId }].slice(-4))
+    window.setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id))
+    }, 6500)
+  }
+
+  function toastError(title: string, err: unknown) {
+    if (isAlloyApiError(err)) {
+      pushToast('error', title, err.data.message, err.data.request_id)
+      return
+    }
+    pushToast('error', title, err instanceof Error ? err.message : 'unknown error')
+  }
 
   async function refreshSession() {
     const token = ++sessionFetchToken
@@ -244,42 +367,278 @@ function App() {
       setSelectedTemplate(opts[0].value)
     }
   })
+
+  const [instancesPollMs, setInstancesPollMs] = createSignal<number | false>(false)
+  const [instancesPollErrorStreak, setInstancesPollErrorStreak] = createSignal(0)
   const instances = rspc.createQuery(
     () => ['instance.list', null],
-    () => ({ enabled: isAuthed() }),
+    () => ({ enabled: isAuthed(), refetchInterval: instancesPollMs(), refetchOnWindowFocus: false }),
   )
+
+  createEffect(() => {
+    if (!isAuthed()) {
+      setInstancesPollMs(false)
+      setInstancesPollErrorStreak(0)
+      return
+    }
+
+    const list = instances.data ?? []
+    const count = list.length
+    const anyStartingOrStopping = list.some((i: { status?: { state?: string } | null }) => {
+      const s = i.status?.state
+      return s === 'PROCESS_STATE_STARTING' || s === 'PROCESS_STATE_STOPPING'
+    })
+    const anyRunning = list.some((i: { status?: { state?: string } | null }) => i.status?.state === 'PROCESS_STATE_RUNNING')
+
+    let base = anyStartingOrStopping ? 800 : anyRunning ? 2000 : 5000
+    if (count >= 20) base = Math.min(base * 2, 15_000)
+    if (count >= 60) base = Math.min(base * 2, 30_000)
+
+    const nextStreak = instances.isError ? Math.min(instancesPollErrorStreak() + 1, 6) : 0
+    setInstancesPollErrorStreak(nextStreak)
+    const backoff = Math.min(base * Math.pow(2, nextStreak), 30_000)
+
+    // Add a small jitter to avoid thundering herd.
+    const jitter = Math.floor(Math.random() * 200)
+    setInstancesPollMs(backoff + jitter)
+  })
 
   async function invalidateInstances() {
     await queryClient.invalidateQueries({ queryKey: ['instance.list', null] })
   }
 
+  function closeEditModal() {
+    setEditingInstanceId(null)
+    setEditBase(null)
+    setEditFormError(null)
+    setEditFieldErrors({})
+    setEditTrPasswordVisible(false)
+  }
 
-	  const createInstance = rspc.createMutation(() => 'instance.create')
-	  const startInstance = rspc.createMutation(() => 'instance.start')
-	  const restartInstance = rspc.createMutation(() => 'instance.restart')
-	  const stopInstance = rspc.createMutation(() => 'instance.stop')
-	  const deleteInstance = rspc.createMutation(() => 'instance.delete')
-	  const instanceDiagnostics = rspc.createMutation(() => 'instance.diagnostics')
+  function openEditModal(inst: { config: { instance_id: string; template_id: string; params: unknown; display_name: string | null } }) {
+    const params = (inst.config.params as Record<string, string> | null | undefined) ?? {}
+    const base = {
+      instance_id: inst.config.instance_id,
+      template_id: inst.config.template_id,
+      display_name: inst.config.display_name ?? null,
+      params: { ...params },
+    }
+
+    setEditingInstanceId(inst.config.instance_id)
+    setEditBase(base)
+    setEditFormError(null)
+    setEditFieldErrors({})
+
+    setEditDisplayName(base.display_name ?? '')
+
+    if (base.template_id === 'demo:sleep') {
+      setEditSleepSeconds(params.seconds ?? '60')
+    }
+
+    if (base.template_id === 'minecraft:vanilla') {
+      const v = (params.version ?? 'latest_release').trim() || 'latest_release'
+      const known = mcVersionOptions().some((o) => o.value === v)
+      setEditMcVersion(v)
+      setEditMcVersionAdvanced(!known && v !== 'latest_release' && v !== 'latest_snapshot')
+      setEditMcVersionCustom(!known && v !== 'latest_release' && v !== 'latest_snapshot' ? v : '')
+
+      const mem = (params.memory_mb ?? '2048').trim() || '2048'
+      const preset = mcMemoryOptions().some((o) => o.value === mem) ? mem : 'custom'
+      setEditMcMemoryPreset(preset)
+      setEditMcMemory(mem)
+
+      setEditMcPort((params.port ?? '').trim())
+    }
+
+    if (base.template_id === 'terraria:vanilla') {
+      const v = (params.version ?? '1453').trim() || '1453'
+      const known = ['1453', '1452', '1451', '1450', '1449', '1448', '1447', '1436', '1435', '1434', '1423'].includes(v)
+      setEditTrVersion(v)
+      setEditTrVersionAdvanced(!known)
+      setEditTrVersionCustom(!known ? v : '')
+
+      setEditTrPort((params.port ?? '').trim())
+      setEditTrMaxPlayers((params.max_players ?? '8').trim() || '8')
+      setEditTrWorldName((params.world_name ?? 'world').trim() || 'world')
+      setEditTrWorldSize((params.world_size ?? '1').trim() || '1')
+      setEditTrPassword(params.password ?? '')
+      setEditTrPasswordVisible(false)
+    }
+  }
+
+  const editTemplateId = createMemo(() => editBase()?.template_id ?? null)
+
+  const editMcEffectiveVersion = createMemo(() => {
+    if (!editMcVersionAdvanced()) return editMcVersion()
+    return editMcVersionCustom().trim() || editMcVersion()
+  })
+
+  const editTrEffectiveVersion = createMemo(() => {
+    if (!editTrVersionAdvanced()) return editTrVersion()
+    return editTrVersionCustom().trim() || editTrVersion()
+  })
+
+  const editMcEffectiveMemory = createMemo(() => {
+    if (editMcMemoryPreset() === 'custom') return editMcMemory()
+    return editMcMemoryPreset()
+  })
+
+  const editOutgoingParams = createMemo(() => {
+    const base = editBase()
+    if (!base) return null
+    const out: Record<string, string> = { ...base.params }
+
+    if (base.template_id === 'demo:sleep') {
+      out.seconds = editSleepSeconds().trim() || out.seconds || '60'
+    }
+
+    if (base.template_id === 'minecraft:vanilla') {
+      out.accept_eula = 'true'
+      out.version = editMcEffectiveVersion().trim() || out.version || 'latest_release'
+      out.memory_mb = editMcEffectiveMemory().trim() || out.memory_mb || '2048'
+      out.port = editMcPort().trim() || out.port || ''
+    }
+
+    if (base.template_id === 'terraria:vanilla') {
+      out.version = editTrEffectiveVersion().trim() || out.version || '1453'
+      out.port = editTrPort().trim() || out.port || ''
+      out.max_players = editTrMaxPlayers().trim() || out.max_players || '8'
+      out.world_name = editTrWorldName().trim() || out.world_name || 'world'
+      out.world_size = editTrWorldSize().trim() || out.world_size || '1'
+      // Keep existing password unless explicitly changed/cleared.
+      if (editTrPassword().trim()) out.password = editTrPassword()
+      if (!editTrPassword().trim() && 'password' in base.params && base.params.password) out.password = base.params.password
+      if (!editTrPassword().trim() && !('password' in base.params)) delete out.password
+    }
+
+    return out
+  })
+
+  const editChangedKeys = createMemo(() => {
+    const base = editBase()
+    const out = editOutgoingParams()
+    if (!base || !out) return []
+    const keys = new Set([...Object.keys(base.params), ...Object.keys(out)])
+    const changed: string[] = []
+    for (const k of keys) {
+      if ((base.params[k] ?? '') !== (out[k] ?? '')) changed.push(k)
+    }
+    if ((base.display_name ?? '') !== editDisplayName().trim()) changed.push('display_name')
+    changed.sort()
+    return changed
+  })
+
+  const editHasChanges = createMemo(() => editChangedKeys().length > 0)
+
+  const editRisk = createMemo(() => {
+    const template = editTemplateId()
+    const changed = editChangedKeys()
+    const risky = new Set<string>()
+    if (template === 'minecraft:vanilla') {
+      if (changed.includes('version')) risky.add('Changing Minecraft version may trigger downloads and mod/world incompatibilities.')
+      if (changed.includes('memory_mb')) risky.add('Changing memory affects JVM heap; take care on low-RAM hosts.')
+      if (changed.includes('port')) risky.add('Changing port affects client connection address.')
+    }
+    if (template === 'terraria:vanilla') {
+      if (changed.includes('version')) risky.add('Changing Terraria version may require a re-download and can affect world compatibility.')
+      if (changed.includes('world_name')) risky.add('Changing world name may switch to a different world file (old world is not deleted).')
+      if (changed.includes('port')) risky.add('Changing port affects client connection address.')
+    }
+    return Array.from(risky)
+  })
+
+  const createInstance = rspc.createMutation(() => 'instance.create')
+  const updateInstance = rspc.createMutation(() => 'instance.update')
+  const startInstance = rspc.createMutation(() => 'instance.start')
+  const restartInstance = rspc.createMutation(() => 'instance.restart')
+  const stopInstance = rspc.createMutation(() => 'instance.stop')
+  const deleteInstance = rspc.createMutation(() => 'instance.delete')
+  const instanceDiagnostics = rspc.createMutation(() => 'instance.diagnostics')
+  const controlDiagnostics = rspc.createQuery(
+    () => ['control.diagnostics', null],
+    () => ({ enabled: isAuthed() && showDiagnosticsModal(), refetchOnWindowFocus: false }),
+  )
+  const [cacheSelection, setCacheSelection] = createSignal<Record<string, boolean>>({})
+
+  const instanceDeletePreview = rspc.createQuery(
+    () => [
+      'instance.deletePreview',
+      {
+        instance_id: confirmDeleteInstanceId() ?? '',
+      },
+    ],
+    () => ({
+      enabled: isAuthed() && !!confirmDeleteInstanceId(),
+      refetchOnWindowFocus: false,
+    }),
+  )
+
+  const warmCache = rspc.createMutation(() => 'process.warmCache')
+  const clearCache = rspc.createMutation(() => 'process.clearCache')
 
   const [selectedTemplate, setSelectedTemplate] = createSignal<string>('demo:sleep')
   const [instanceName, setInstanceName] = createSignal<string>('')
   const [sleepSeconds, setSleepSeconds] = createSignal<string>('60')
+  const [createFormError, setCreateFormError] = createSignal<{ message: string; requestId?: string } | null>(null)
+  const [createFieldErrors, setCreateFieldErrors] = createSignal<Record<string, string>>({})
+  const [editFormError, setEditFormError] = createSignal<{ message: string; requestId?: string } | null>(null)
+  const [editFieldErrors, setEditFieldErrors] = createSignal<Record<string, string>>({})
+  const [editBase, setEditBase] = createSignal<{
+    instance_id: string
+    template_id: string
+    display_name: string | null
+    params: Record<string, string>
+  } | null>(null)
+
+  const [editDisplayName, setEditDisplayName] = createSignal('')
+
+  const [editSleepSeconds, setEditSleepSeconds] = createSignal('60')
+
+  const [editMcVersion, setEditMcVersion] = createSignal('latest_release')
+  const [editMcVersionAdvanced, setEditMcVersionAdvanced] = createSignal(false)
+  const [editMcVersionCustom, setEditMcVersionCustom] = createSignal('')
+  const [editMcMemoryPreset, setEditMcMemoryPreset] = createSignal('2048')
+  const [editMcMemory, setEditMcMemory] = createSignal('2048')
+  const [editMcPort, setEditMcPort] = createSignal('')
+
+  const [editTrVersion, setEditTrVersion] = createSignal('1453')
+  const [editTrVersionAdvanced, setEditTrVersionAdvanced] = createSignal(false)
+  const [editTrVersionCustom, setEditTrVersionCustom] = createSignal('')
+  const [editTrPort, setEditTrPort] = createSignal('')
+  const [editTrMaxPlayers, setEditTrMaxPlayers] = createSignal('8')
+  const [editTrWorldName, setEditTrWorldName] = createSignal('world')
+  const [editTrWorldSize, setEditTrWorldSize] = createSignal('1')
+  const [editTrPassword, setEditTrPassword] = createSignal('')
+  const [editTrPasswordVisible, setEditTrPasswordVisible] = createSignal(false)
 
   const [mcEula, setMcEula] = createSignal(false)
   const [mcVersion, setMcVersion] = createSignal('latest_release')
+  const [mcVersionAdvanced, setMcVersionAdvanced] = createSignal(false)
+  const [mcVersionCustom, setMcVersionCustom] = createSignal('')
   const [mcMemoryPreset, setMcMemoryPreset] = createSignal('2048')
   const [mcMemory, setMcMemory] = createSignal('2048')
   const [mcPort, setMcPort] = createSignal('')
   const [mcError, setMcError] = createSignal<string | null>(null)
 
   const [trVersion, setTrVersion] = createSignal('1453')
+  const [trVersionAdvanced, setTrVersionAdvanced] = createSignal(false)
+  const [trVersionCustom, setTrVersionCustom] = createSignal('')
   const [trPort, setTrPort] = createSignal('')
   const [trMaxPlayers, setTrMaxPlayers] = createSignal('8')
 	  const [trWorldName, setTrWorldName] = createSignal('world')
 	  const [trWorldSize, setTrWorldSize] = createSignal('1')
-	  const [trPassword, setTrPassword] = createSignal('')
+  const [trPassword, setTrPassword] = createSignal('')
 	  const [trPasswordVisible, setTrPasswordVisible] = createSignal(false)
 	  const [trError, setTrError] = createSignal<string | null>(null)
+
+  createEffect(() => {
+    // Clear create-form errors when switching templates.
+    selectedTemplate()
+    setCreateFormError(null)
+    setCreateFieldErrors({})
+    setMcError(null)
+    setTrError(null)
+  })
 
   const trVersionOptions = createMemo(() => [
     { value: '1453', label: '1.4.5.3 (1453)', meta: 'latest' },
@@ -441,6 +800,30 @@ function App() {
     if (!selectedFilePath()) return ''
     if (logTail.data?.lines) return logTail.data.lines.join('\n')
     return fileText.data?.text ?? ''
+  })
+
+  const selectedInstanceError = createMemo(() => parseAgentErrorPayload(selectedInstanceStatus()?.message ?? null))
+  const selectedInstanceMessage = createMemo(() => selectedInstanceError()?.message ?? selectedInstanceStatus()?.message ?? null)
+
+  createEffect(() => {
+    const id = confirmDeleteInstanceId()
+    if (!id) {
+      setConfirmDeleteText('')
+      return
+    }
+    setConfirmDeleteText('')
+  })
+
+  createEffect(() => {
+    if (!showDiagnosticsModal()) return
+    const entries = controlDiagnostics.data?.cache?.entries ?? []
+    setCacheSelection((prev) => {
+      const next = { ...prev }
+      for (const e of entries) {
+        if (typeof next[e.key] !== 'boolean') next[e.key] = false
+      }
+      return next
+    })
   })
 
   function openInFiles(path: string) {
@@ -652,6 +1035,18 @@ function App() {
                               type="button"
                               class="flex w-full items-center justify-between px-3 py-2 text-sm text-slate-700 transition-colors hover:bg-slate-50 active:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-900/50 dark:active:bg-slate-900"
                               onPointerDown={(e) => e.stopPropagation()}
+                              onClick={() => {
+                                setShowAccountMenu(false)
+                                setShowDiagnosticsModal(true)
+                              }}
+                            >
+                              <span>Diagnostics</span>
+                              <span class="text-xs text-slate-400">⌘</span>
+                            </button>
+                            <button
+                              type="button"
+                              class="flex w-full items-center justify-between px-3 py-2 text-sm text-slate-700 transition-colors hover:bg-slate-50 active:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-900/50 dark:active:bg-slate-900"
+                              onPointerDown={(e) => e.stopPropagation()}
                               onClick={async () => {
                                 setShowAccountMenu(false)
                                 await handleLogout()
@@ -734,6 +1129,9 @@ function App() {
                             value={sleepSeconds()}
                             onInput={(e) => setSleepSeconds(e.currentTarget.value)}
                           />
+                          <Show when={createFieldErrors().seconds}>
+                            <div class="mt-1 text-xs text-rose-700 dark:text-rose-300">{createFieldErrors().seconds}</div>
+                          </Show>
                         </label>
                       </Show>
 
@@ -760,20 +1158,57 @@ function App() {
                               <span class="block text-xs text-slate-500 mt-0.5">Required to start server</span>
                             </label>
                           </div>
+                          <Show when={createFieldErrors().accept_eula}>
+                            <div class="-mt-1 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-[12px] text-rose-800 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-200">
+                              {createFieldErrors().accept_eula}
+                            </div>
+                          </Show>
 
                           <div class="grid grid-cols-2 gap-3">
                             <div>
-                              <div class="text-sm text-slate-700 dark:text-slate-400">Version</div>
-                              <div class="mt-1">
-                                <Dropdown
-                                  label=""
-                                  value={mcVersion()}
-                                  options={mcVersionOptions()}
-                                  onChange={(v) => {
-                                    setMcVersion(v)
-                                  }}
-                                />
+                              <div class="flex items-center justify-between">
+                                <div class="text-sm text-slate-700 dark:text-slate-400">Version</div>
+                                <button
+                                  type="button"
+                                  class={`rounded-full border px-2 py-0.5 text-[10px] font-semibold tracking-wide transition-all ${
+                                    mcVersionAdvanced()
+                                      ? 'border-amber-300 bg-amber-500/10 text-amber-800 dark:border-amber-500/30 dark:text-amber-200'
+                                      : 'border-slate-300 bg-white/60 text-slate-600 hover:bg-white dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-300 dark:hover:bg-slate-900'
+                                  }`}
+                                  onClick={() =>
+                                    setMcVersionAdvanced((v) => {
+                                      const next = !v
+                                      if (next && !mcVersionCustom().trim()) setMcVersionCustom(mcVersion())
+                                      return next
+                                    })
+                                  }
+                                  title="Advanced: type any Mojang version id"
+                                >
+                                  ADV
+                                </button>
                               </div>
+                              <div class="mt-1">
+                                <Show
+                                  when={mcVersionAdvanced()}
+                                  fallback={<Dropdown label="" value={mcVersion()} options={mcVersionOptions()} onChange={setMcVersion} />}
+                                >
+                                  <input
+                                    class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-amber-500/40 focus:outline-none focus:ring-1 focus:ring-amber-500/20 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200"
+                                    value={mcVersionCustom()}
+                                    onInput={(e) => setMcVersionCustom(e.currentTarget.value)}
+                                    placeholder="e.g. 1.20.4"
+                                    list="mc-version-suggest"
+                                    spellcheck={false}
+                                  />
+                                  <datalist id="mc-version-suggest">
+                                    <For each={(mcVersionOptions() ?? []).map((o) => o.value)}>{(v) => <option value={v} />}</For>
+                                  </datalist>
+                                  <div class="mt-1 text-xs text-slate-500">Advanced: enter any Mojang version id.</div>
+                                </Show>
+                              </div>
+                              <Show when={createFieldErrors().version}>
+                                <div class="mt-1 text-xs text-rose-700 dark:text-rose-300">{createFieldErrors().version}</div>
+                              </Show>
                             </div>
                             <div>
                               <div class="text-sm text-slate-700 dark:text-slate-400">Memory</div>
@@ -796,6 +1231,9 @@ function App() {
                                   onInput={(e) => setMcMemory(e.currentTarget.value)}
                                 />
                               </Show>
+                              <Show when={createFieldErrors().memory_mb}>
+                                <div class="mt-1 text-xs text-rose-700 dark:text-rose-300">{createFieldErrors().memory_mb}</div>
+                              </Show>
                             </div>
                           </div>
 
@@ -808,6 +1246,9 @@ function App() {
                                 onInput={(e) => setMcPort(e.currentTarget.value)}
                                 placeholder="25565"
                             />
+                            <Show when={createFieldErrors().port}>
+                              <div class="mt-1 text-xs text-rose-700 dark:text-rose-300">{createFieldErrors().port}</div>
+                            </Show>
                           </label>
 
                           <Show when={mcError()}>
@@ -822,10 +1263,49 @@ function App() {
                         <div class="space-y-3 border-t border-slate-200 pt-3 dark:border-slate-800">
                           <div class="grid grid-cols-2 gap-3">
                             <div>
-                              <div class="text-sm text-slate-700 dark:text-slate-400">Version</div>
-                              <div class="mt-1">
-                                <Dropdown label="" value={trVersion()} options={trVersionOptions()} onChange={setTrVersion} />
+                              <div class="flex items-center justify-between">
+                                <div class="text-sm text-slate-700 dark:text-slate-400">Version</div>
+                                <button
+                                  type="button"
+                                  class={`rounded-full border px-2 py-0.5 text-[10px] font-semibold tracking-wide transition-all ${
+                                    trVersionAdvanced()
+                                      ? 'border-amber-300 bg-amber-500/10 text-amber-800 dark:border-amber-500/30 dark:text-amber-200'
+                                      : 'border-slate-300 bg-white/60 text-slate-600 hover:bg-white dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-300 dark:hover:bg-slate-900'
+                                  }`}
+                                  onClick={() =>
+                                    setTrVersionAdvanced((v) => {
+                                      const next = !v
+                                      if (next && !trVersionCustom().trim()) setTrVersionCustom(trVersion())
+                                      return next
+                                    })
+                                  }
+                                  title="Advanced: type any terraria.org package version id"
+                                >
+                                  ADV
+                                </button>
                               </div>
+                              <div class="mt-1">
+                                <Show
+                                  when={trVersionAdvanced()}
+                                  fallback={<Dropdown label="" value={trVersion()} options={trVersionOptions()} onChange={setTrVersion} />}
+                                >
+                                  <input
+                                    class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-amber-500/40 focus:outline-none focus:ring-1 focus:ring-amber-500/20 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200"
+                                    value={trVersionCustom()}
+                                    onInput={(e) => setTrVersionCustom(e.currentTarget.value)}
+                                    placeholder="e.g. 1453"
+                                    list="tr-version-suggest"
+                                    spellcheck={false}
+                                  />
+                                  <datalist id="tr-version-suggest">
+                                    <For each={(trVersionOptions() ?? []).map((o) => o.value)}>{(v) => <option value={v} />}</For>
+                                  </datalist>
+                                  <div class="mt-1 text-xs text-slate-500">Advanced: enter any package id (e.g. 1453).</div>
+                                </Show>
+                              </div>
+                              <Show when={createFieldErrors().version}>
+                                <div class="mt-1 text-xs text-rose-700 dark:text-rose-300">{createFieldErrors().version}</div>
+                              </Show>
                               <div class="mt-1 text-xs text-slate-500">Uses official terraria.org dedicated-server packages.</div>
                             </div>
                             <label class="block text-sm text-slate-700 dark:text-slate-400">
@@ -837,6 +1317,9 @@ function App() {
                                 onInput={(e) => setTrPort(e.currentTarget.value)}
                                 placeholder="7777"
                               />
+                              <Show when={createFieldErrors().port}>
+                                <div class="mt-1 text-xs text-rose-700 dark:text-rose-300">{createFieldErrors().port}</div>
+                              </Show>
                             </label>
                           </div>
 
@@ -849,6 +1332,9 @@ function App() {
                                 value={trMaxPlayers()}
                                 onInput={(e) => setTrMaxPlayers(e.currentTarget.value)}
                               />
+                              <Show when={createFieldErrors().max_players}>
+                                <div class="mt-1 text-xs text-rose-700 dark:text-rose-300">{createFieldErrors().max_players}</div>
+                              </Show>
                             </label>
                             <label class="block text-sm text-slate-700 dark:text-slate-400">
                               World name
@@ -857,6 +1343,9 @@ function App() {
                                 value={trWorldName()}
                                 onInput={(e) => setTrWorldName(e.currentTarget.value)}
                               />
+                              <Show when={createFieldErrors().world_name}>
+                                <div class="mt-1 text-xs text-rose-700 dark:text-rose-300">{createFieldErrors().world_name}</div>
+                              </Show>
                             </label>
                           </div>
 
@@ -869,6 +1358,9 @@ function App() {
                                 value={trWorldSize()}
                                 onInput={(e) => setTrWorldSize(e.currentTarget.value)}
                               />
+                              <Show when={createFieldErrors().world_size}>
+                                <div class="mt-1 text-xs text-rose-700 dark:text-rose-300">{createFieldErrors().world_size}</div>
+                              </Show>
                             </label>
 	                            <label class="block text-sm text-slate-700 dark:text-slate-400">
 	                              Password (optional)
@@ -901,6 +1393,9 @@ function App() {
 	                                  COPY
 	                                </button>
 	                              </div>
+                              <Show when={createFieldErrors().password}>
+                                <div class="mt-1 text-xs text-rose-700 dark:text-rose-300">{createFieldErrors().password}</div>
+                              </Show>
 	                            </label>
                           </div>
 
@@ -912,42 +1407,107 @@ function App() {
                         </div>
                       </Show>
 
-                      <button
-                        class="w-full rounded-xl bg-slate-900 px-3 py-2 text-sm font-medium text-slate-100 ring-1 ring-inset ring-slate-800 hover:bg-slate-800 disabled:opacity-50"
-                        disabled={createInstance.isPending}
-	                        onClick={async () => {
-	                          const template_id = selectedTemplate()
-	                          const params: Record<string, string> = {}
-	                          const display_name = instanceName().trim() ? instanceName().trim() : null
+                      <div class="grid grid-cols-2 gap-2">
+                        <button
+                          class="w-full rounded-xl bg-slate-900 px-3 py-2 text-sm font-medium text-slate-100 ring-1 ring-inset ring-slate-800 hover:bg-slate-800 disabled:opacity-50"
+                          disabled={createInstance.isPending}
+                          onClick={async () => {
+                            const template_id = selectedTemplate()
+                            const params: Record<string, string> = {}
+                            const display_name = instanceName().trim() ? instanceName().trim() : null
 
-	                          if (template_id === 'demo:sleep') {
-	                            params.seconds = sleepSeconds()
-	                          } else if (template_id === 'minecraft:vanilla') {
-                            if (!mcEula()) {
-                              setMcError('You must accept the EULA')
-                              return
+                            if (template_id === 'demo:sleep') {
+                              params.seconds = sleepSeconds()
+                            } else if (template_id === 'minecraft:vanilla') {
+                              if (!mcEula()) {
+                                setMcError('You must accept the EULA')
+                                return
+                              }
+                              setMcError(null)
+                              params.accept_eula = 'true'
+                              const v = mcVersionAdvanced() ? mcVersionCustom().trim() : mcVersion()
+                              params.version = v || 'latest_release'
+                              params.memory_mb = mcMemory() || '2048'
+                              if (mcPort().trim()) params.port = mcPort().trim()
+                            } else if (template_id === 'terraria:vanilla') {
+                              setTrError(null)
+                              const v = trVersionAdvanced() ? trVersionCustom().trim() : trVersion()
+                              params.version = v || '1453'
+                              if (trPort().trim()) params.port = trPort().trim()
+                              params.max_players = trMaxPlayers() || '8'
+                              params.world_name = trWorldName() || 'world'
+                              params.world_size = trWorldSize() || '1'
+                              if (trPassword().trim()) params.password = trPassword().trim()
                             }
-                            setMcError(null)
-                            params.accept_eula = 'true'
-                            params.version = mcVersion() || 'latest_release'
-                            params.memory_mb = mcMemory() || '2048'
-                            if (mcPort().trim()) params.port = mcPort().trim()
-                          } else if (template_id === 'terraria:vanilla') {
-                            setTrError(null)
-                            params.version = trVersion() || '1453'
-                            if (trPort().trim()) params.port = trPort().trim()
-                            params.max_players = trMaxPlayers() || '8'
-                            params.world_name = trWorldName() || 'world'
-	                            params.world_size = trWorldSize() || '1'
-	                            if (trPassword().trim()) params.password = trPassword().trim()
-	                          }
 
-	                          await createInstance.mutateAsync({ template_id, params, display_name })
-	                          await invalidateInstances()
-	                        }}
-	                      >
-                        {createInstance.isPending ? 'CREATING...' : 'CREATE_INSTANCE'}
-                      </button>
+                            setCreateFormError(null)
+                            setCreateFieldErrors({})
+                            try {
+                              await createInstance.mutateAsync({ template_id, params, display_name })
+                              pushToast('success', 'Instance created', display_name ?? undefined)
+                              await invalidateInstances()
+                            } catch (e) {
+                              if (isAlloyApiError(e)) {
+                                setCreateFieldErrors(e.data.field_errors ?? {})
+                                setCreateFormError({ message: e.data.message, requestId: e.data.request_id })
+                                if (e.data.hint) pushToast('info', 'Hint', e.data.hint, e.data.request_id)
+                              } else {
+                                setCreateFormError({ message: e instanceof Error ? e.message : 'unknown error' })
+                              }
+                            }
+                          }}
+                        >
+                          {createInstance.isPending ? 'CREATING…' : 'CREATE'}
+                        </button>
+
+                        <button
+                          class="w-full rounded-xl border border-slate-200 bg-white/70 px-3 py-2 text-sm font-medium text-slate-800 shadow-sm transition-all hover:bg-white hover:shadow active:scale-[0.99] disabled:opacity-50 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-200 dark:shadow-none dark:hover:bg-slate-950/60"
+                          disabled={
+                            warmCache.isPending ||
+                            createInstance.isPending ||
+                            !['minecraft:vanilla', 'terraria:vanilla'].includes(selectedTemplate())
+                          }
+                          onClick={async () => {
+                            const template_id = selectedTemplate()
+                            const params: Record<string, string> = {}
+                            if (template_id === 'minecraft:vanilla') {
+                              const v = mcVersionAdvanced() ? mcVersionCustom().trim() : mcVersion()
+                              params.version = v || 'latest_release'
+                            }
+                            if (template_id === 'terraria:vanilla') {
+                              const v = trVersionAdvanced() ? trVersionCustom().trim() : trVersion()
+                              params.version = v || '1453'
+                            }
+                            try {
+                              const out = await warmCache.mutateAsync({ template_id, params })
+                              pushToast('success', 'Cache warmed', out.message)
+                            } catch (e) {
+                              toastError('Warm cache failed', e)
+                            }
+                          }}
+                          title="Only download required files (no start)"
+                        >
+                          {warmCache.isPending ? 'WARMING…' : 'WARM'}
+                        </button>
+                      </div>
+                      <Show when={createFormError()}>
+                        <div class="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-900 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-200">
+                          <div class="font-semibold">Create failed</div>
+                          <div class="mt-1 text-xs text-rose-800/90 dark:text-rose-200/90">{createFormError()!.message}</div>
+                          <Show when={createFormError()!.requestId}>
+                            <div class="mt-2 flex items-center justify-between gap-2">
+                              <div class="text-[11px] text-rose-700/80 dark:text-rose-200/70 font-mono">req {createFormError()!.requestId}</div>
+                              <button
+                                type="button"
+                                class="rounded-lg border border-rose-200 bg-white/70 px-2 py-1 text-[11px] font-medium text-rose-800 hover:bg-white dark:border-rose-900/40 dark:bg-rose-950/30 dark:text-rose-200 dark:hover:bg-rose-950/40"
+                                onClick={() => safeCopy(createFormError()!.requestId ?? '')}
+                              >
+                                COPY
+                              </button>
+                            </div>
+                          </Show>
+                        </div>
+                      </Show>
                     </div>
                   }
                   right={
@@ -1025,11 +1585,34 @@ function App() {
 	                                      exit {i.status?.exit_code}
 	                                    </Show>
 	                                    <Show when={i.status?.message != null}>
-	                                      <span class="ml-2">{i.status?.message}</span>
+	                                      <span class="ml-2">{statusMessageParts(i.status).text}</span>
 	                                    </Show>
 	                                  </span>
+	                                  <Show when={statusMessageParts(i.status).hint}>
+	                                    {(hint) => (
+	                                      <div class="mt-1 text-[11px] text-rose-700/80 dark:text-rose-200/70">
+	                                        {hint()}
+	                                      </div>
+	                                    )}
+	                                  </Show>
 	                                </div>
 	                              </Show>
+
+                              <Show when={i.status?.resources}>
+                                {(r) => (
+                                  <div class="mt-3 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+                                    <span class="rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 font-mono dark:border-slate-800 dark:bg-slate-950/40">
+                                      cpu {formatCpuPercent(r().cpu_percent_x100)}
+                                    </span>
+                                    <span class="rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 font-mono dark:border-slate-800 dark:bg-slate-950/40">
+                                      rss {formatBytes(parseU64(r().rss_bytes))}
+                                    </span>
+                                    <span class="rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 font-mono dark:border-slate-800 dark:bg-slate-950/40">
+                                      io {formatBytes(parseU64(r().read_bytes))}↓ {formatBytes(parseU64(r().write_bytes))}↑
+                                    </span>
+                                  </div>
+                                )}
+                              </Show>
 
 	                              <div class="mt-3 flex flex-wrap items-center gap-2">
                                 <Show
@@ -1095,6 +1678,15 @@ function App() {
                                   onClick={() => setConfirmDeleteInstanceId(i.config.instance_id)}
                                 >
                                   DEL
+                                </button>
+
+                                <button
+                                  class="rounded-xl border border-slate-200 bg-white/70 px-3 py-2 text-xs font-medium text-slate-800 shadow-sm transition-all hover:bg-white hover:shadow active:scale-[0.98] disabled:opacity-50 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:shadow-none dark:hover:bg-slate-900"
+                                  disabled={!canStartInstance(i.status)}
+                                  title={!canStartInstance(i.status) ? 'Stop the instance before editing' : 'Edit instance parameters'}
+                                  onClick={() => openEditModal(i)}
+                                >
+                                  EDIT
                                 </button>
 
                                 <button
@@ -1521,6 +2113,59 @@ function App() {
                   </div>
                 </div>
 
+                <div class="mt-4 rounded-xl border border-slate-200 bg-slate-50/60 p-3 text-[12px] text-slate-700 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-200">
+                  <div class="flex items-center justify-between gap-3">
+                    <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Delete preview</div>
+                    <Show
+                      when={!instanceDeletePreview.isPending}
+                      fallback={<div class="text-[11px] text-slate-400">loading…</div>}
+                    >
+                      <Show
+                        when={!instanceDeletePreview.isError}
+                        fallback={<div class="text-[11px] text-rose-600 dark:text-rose-300">failed to load</div>}
+                      >
+                        <div class="text-[11px] text-slate-500 dark:text-slate-400">ok</div>
+                      </Show>
+                    </Show>
+                  </div>
+
+                  <Show when={instanceDeletePreview.data}>
+                    {(d) => (
+                      <div class="mt-2 space-y-1">
+                        <div class="flex items-center justify-between gap-3">
+                          <div class="text-slate-500 dark:text-slate-400">Path</div>
+                          <div class="min-w-0 truncate font-mono text-[11px]" title={d().path}>
+                            {d().path}
+                          </div>
+                        </div>
+                        <div class="flex items-center justify-between gap-3">
+                          <div class="text-slate-500 dark:text-slate-400">Estimated size</div>
+                          <div class="font-mono text-[11px]">{formatBytes(Number(d().size_bytes))}</div>
+                        </div>
+                      </div>
+                    )}
+                  </Show>
+
+                  <Show when={instanceDeletePreview.isError && (instanceDeletePreview.error as unknown)}>
+                    <div class="mt-2 text-[11px] text-rose-700/80 dark:text-rose-200/70">
+                      Preview unavailable. You can still delete after confirmation.
+                    </div>
+                  </Show>
+                </div>
+
+                <div class="mt-4">
+                  <div class="text-xs font-medium text-slate-700 dark:text-slate-300">Type the instance id to confirm</div>
+                  <input
+                    class="mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-rose-500/50 focus:outline-none focus:ring-2 focus:ring-rose-500/20 dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-200"
+                    value={confirmDeleteText()}
+                    onInput={(e) => setConfirmDeleteText(e.currentTarget.value)}
+                    placeholder={confirmDeleteInstanceId() ?? ''}
+                  />
+                  <div class="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                    Tip: copy/paste the id above to avoid typos.
+                  </div>
+                </div>
+
                 <div class="mt-6 flex gap-3">
                   <button
                     type="button"
@@ -1532,7 +2177,11 @@ function App() {
                   <button
                     type="button"
                     class="flex-1 rounded-lg bg-rose-600 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-rose-700 disabled:opacity-50 dark:bg-rose-500 dark:hover:bg-rose-400"
-                    disabled={deleteInstance.isPending}
+                    disabled={
+                      deleteInstance.isPending ||
+                      confirmDeleteText().trim() !== (confirmDeleteInstanceId() ?? '') ||
+                      !confirmDeleteInstanceId()
+                    }
                     onClick={async () => {
                       const id = confirmDeleteInstanceId()
                       if (!id) return
@@ -1549,6 +2198,641 @@ function App() {
                     Delete
                   </button>
                 </div>
+              </div>
+            </div>
+          </div>
+        </Show>
+
+        <Show when={editingInstanceId() != null && editBase() != null}>
+          <div class="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div
+              class="absolute inset-0 bg-slate-900/30 backdrop-blur-sm dark:bg-slate-950/70"
+              onClick={() => closeEditModal()}
+            />
+
+            <div
+              class="relative w-full max-w-2xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-900"
+              role="dialog"
+              aria-modal="true"
+            >
+              <div class="px-6 py-6">
+                <div class="flex items-start gap-3">
+                  <div class="mt-0.5 flex h-9 w-9 items-center justify-center rounded-full bg-amber-500/10 text-amber-700 dark:bg-amber-500/15 dark:text-amber-200">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-5 w-5">
+                      <path d="M5.433 13.69A4.5 4.5 0 0110 6.5h.25a.75.75 0 000-1.5H10a6 6 0 00-5.9 4.91.75.75 0 00.58.88.75.75 0 00.88-.58 4.5 4.5 0 01-.127 3.5z" />
+                      <path d="M14.567 6.31A4.5 4.5 0 0110 13.5h-.25a.75.75 0 000 1.5H10a6 6 0 005.9-4.91.75.75 0 00-.58-.88.75.75 0 00-.88.58 4.5 4.5 0 01.127-3.5z" />
+                    </svg>
+                  </div>
+                  <div class="min-w-0">
+                    <h3 class="text-base font-semibold text-slate-900 dark:text-slate-100">Edit instance</h3>
+                    <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                      <span class="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[12px] text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                        {editBase()!.instance_id}
+                      </span>
+                      <span class="mx-2 text-slate-300 dark:text-slate-700">/</span>
+                      <span class="font-mono text-[12px] text-slate-600 dark:text-slate-300">{editBase()!.template_id}</span>
+                    </p>
+                  </div>
+                  <div class="ml-auto flex items-center gap-2">
+                    <span
+                      class={`rounded-full border px-2 py-1 text-[11px] font-semibold tracking-wide ${
+                        editHasChanges()
+                          ? 'border-amber-300 bg-amber-500/10 text-amber-800 dark:border-amber-500/30 dark:text-amber-200'
+                          : 'border-slate-200 bg-white/60 text-slate-500 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-400'
+                      }`}
+                    >
+                      {editHasChanges() ? `${editChangedKeys().length} change(s)` : 'No changes'}
+                    </span>
+                  </div>
+                </div>
+
+                <div class="mt-4 rounded-xl border border-slate-200 bg-slate-50/60 p-3 text-[12px] text-slate-700 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-200">
+                  <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Notes</div>
+                  <ul class="mt-2 space-y-1 text-[12px] text-slate-600 dark:text-slate-300">
+                    <li>Changes apply on next start.</li>
+                    <li>Stop the instance before editing (required).</li>
+                  </ul>
+                  <Show when={editRisk().length > 0}>
+                    <div class="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-200">
+                      <div class="text-xs font-semibold uppercase tracking-wider text-amber-700/80 dark:text-amber-200/80">Risk</div>
+                      <ul class="mt-1 space-y-1">
+                        <For each={editRisk()}>{(r) => <li>{r}</li>}</For>
+                      </ul>
+                    </div>
+                  </Show>
+                </div>
+
+                <div class="mt-5 space-y-3">
+                  <label class="block text-sm text-slate-700 dark:text-slate-300">
+                    Display name (optional)
+                    <input
+                      class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-amber-500/40 focus:outline-none focus:ring-1 focus:ring-amber-500/20 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200"
+                      value={editDisplayName()}
+                      onInput={(e) => setEditDisplayName(e.currentTarget.value)}
+                      placeholder="e.g. friends-survival"
+                    />
+                    <Show when={editFieldErrors().display_name}>
+                      <div class="mt-1 text-xs text-rose-700 dark:text-rose-300">{editFieldErrors().display_name}</div>
+                    </Show>
+                  </label>
+
+                  <Show when={editTemplateId() === 'demo:sleep'}>
+                    <label class="block text-sm text-slate-700 dark:text-slate-300">
+                      seconds
+                      <input
+                        class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-amber-500/40 focus:outline-none focus:ring-1 focus:ring-amber-500/20 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200"
+                        value={editSleepSeconds()}
+                        onInput={(e) => setEditSleepSeconds(e.currentTarget.value)}
+                      />
+                      <Show when={editFieldErrors().seconds}>
+                        <div class="mt-1 text-xs text-rose-700 dark:text-rose-300">{editFieldErrors().seconds}</div>
+                      </Show>
+                    </label>
+                  </Show>
+
+                  <Show when={editTemplateId() === 'minecraft:vanilla'}>
+                    <div class="space-y-3 rounded-xl border border-slate-200 bg-white/60 p-3 dark:border-slate-800 dark:bg-slate-950/40">
+                      <div class="flex items-center justify-between">
+                        <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Minecraft</div>
+                        <span class="rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 text-[11px] font-mono text-slate-600 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-300">
+                          EULA accepted
+                        </span>
+                      </div>
+
+                      <div class="grid grid-cols-2 gap-3">
+                        <div>
+                          <div class="flex items-center justify-between">
+                            <div class="text-sm text-slate-700 dark:text-slate-300">Version</div>
+                            <button
+                              type="button"
+                              class={`rounded-full border px-2 py-0.5 text-[10px] font-semibold tracking-wide transition-all ${
+                                editMcVersionAdvanced()
+                                  ? 'border-amber-300 bg-amber-500/10 text-amber-800 dark:border-amber-500/30 dark:text-amber-200'
+                                  : 'border-slate-300 bg-white/60 text-slate-600 hover:bg-white dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-300 dark:hover:bg-slate-900'
+                              }`}
+                              onClick={() =>
+                                setEditMcVersionAdvanced((v) => {
+                                  const next = !v
+                                  if (next && !editMcVersionCustom().trim()) setEditMcVersionCustom(editMcVersion())
+                                  return next
+                                })
+                              }
+                              title="Advanced: type any Mojang version id"
+                            >
+                              ADV
+                            </button>
+                          </div>
+                          <div class="mt-1">
+                            <Show
+                              when={!editMcVersionAdvanced()}
+                              fallback={
+                                <input
+                                  class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-amber-500/40 focus:outline-none focus:ring-1 focus:ring-amber-500/20 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200"
+                                  value={editMcVersionCustom()}
+                                  onInput={(e) => setEditMcVersionCustom(e.currentTarget.value)}
+                                  placeholder="e.g. 1.20.4"
+                                />
+                              }
+                            >
+                              <Dropdown label="" value={editMcVersion()} options={mcVersionOptions()} onChange={setEditMcVersion} />
+                            </Show>
+                            <Show when={editFieldErrors().version}>
+                              <div class="mt-1 text-xs text-rose-700 dark:text-rose-300">{editFieldErrors().version}</div>
+                            </Show>
+                          </div>
+                        </div>
+
+                        <div>
+                          <div class="text-sm text-slate-700 dark:text-slate-300">Memory</div>
+                          <div class="mt-1">
+                            <Dropdown label="" value={editMcMemoryPreset()} options={mcMemoryOptions()} onChange={setEditMcMemoryPreset} />
+                          </div>
+                          <Show when={editMcMemoryPreset() === 'custom'}>
+                            <input
+                              class="mt-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-amber-500/40 focus:outline-none focus:ring-1 focus:ring-amber-500/20 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200"
+                              value={editMcMemory()}
+                              onInput={(e) => setEditMcMemory(e.currentTarget.value)}
+                              placeholder="2048"
+                            />
+                          </Show>
+                          <Show when={editFieldErrors().memory_mb}>
+                            <div class="mt-1 text-xs text-rose-700 dark:text-rose-300">{editFieldErrors().memory_mb}</div>
+                          </Show>
+                        </div>
+                      </div>
+
+                      <div class="grid grid-cols-2 gap-3">
+                        <label class="block text-sm text-slate-700 dark:text-slate-300">
+                          Port
+                          <input
+                            class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-amber-500/40 focus:outline-none focus:ring-1 focus:ring-amber-500/20 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200"
+                            value={editMcPort()}
+                            onInput={(e) => setEditMcPort(e.currentTarget.value)}
+                            placeholder="0 for auto"
+                          />
+                          <Show when={editFieldErrors().port}>
+                            <div class="mt-1 text-xs text-rose-700 dark:text-rose-300">{editFieldErrors().port}</div>
+                          </Show>
+                        </label>
+                        <div class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[12px] text-slate-600 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-300">
+                          <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Tip</div>
+                          <div class="mt-1">Use port 0 to auto-assign a free port on next start.</div>
+                        </div>
+                      </div>
+                    </div>
+                  </Show>
+
+                  <Show when={editTemplateId() === 'terraria:vanilla'}>
+                    <div class="space-y-3 rounded-xl border border-slate-200 bg-white/60 p-3 dark:border-slate-800 dark:bg-slate-950/40">
+                      <div class="flex items-center justify-between">
+                        <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Terraria</div>
+                        <button
+                          type="button"
+                          class={`rounded-full border px-2 py-0.5 text-[10px] font-semibold tracking-wide transition-all ${
+                            editTrVersionAdvanced()
+                              ? 'border-amber-300 bg-amber-500/10 text-amber-800 dark:border-amber-500/30 dark:text-amber-200'
+                              : 'border-slate-300 bg-white/60 text-slate-600 hover:bg-white dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-300 dark:hover:bg-slate-900'
+                          }`}
+                          onClick={() =>
+                            setEditTrVersionAdvanced((v) => {
+                              const next = !v
+                              if (next && !editTrVersionCustom().trim()) setEditTrVersionCustom(editTrVersion())
+                              return next
+                            })
+                          }
+                          title="Advanced: type any package id (e.g. 1453)"
+                        >
+                          ADV
+                        </button>
+                      </div>
+
+                      <div class="grid grid-cols-2 gap-3">
+                        <label class="block text-sm text-slate-700 dark:text-slate-300">
+                          Version
+                          <Show
+                            when={!editTrVersionAdvanced()}
+                            fallback={
+                              <input
+                                class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-amber-500/40 focus:outline-none focus:ring-1 focus:ring-amber-500/20 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200"
+                                value={editTrVersionCustom()}
+                                onInput={(e) => setEditTrVersionCustom(e.currentTarget.value)}
+                                placeholder="1453"
+                              />
+                            }
+                          >
+                            <input
+                              class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-amber-500/40 focus:outline-none focus:ring-1 focus:ring-amber-500/20 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200"
+                              value={editTrVersion()}
+                              onInput={(e) => setEditTrVersion(e.currentTarget.value)}
+                              placeholder="1453"
+                            />
+                          </Show>
+                          <Show when={editFieldErrors().version}>
+                            <div class="mt-1 text-xs text-rose-700 dark:text-rose-300">{editFieldErrors().version}</div>
+                          </Show>
+                        </label>
+                        <label class="block text-sm text-slate-700 dark:text-slate-300">
+                          Port
+                          <input
+                            class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-amber-500/40 focus:outline-none focus:ring-1 focus:ring-amber-500/20 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200"
+                            value={editTrPort()}
+                            onInput={(e) => setEditTrPort(e.currentTarget.value)}
+                            placeholder="0 for auto"
+                          />
+                          <Show when={editFieldErrors().port}>
+                            <div class="mt-1 text-xs text-rose-700 dark:text-rose-300">{editFieldErrors().port}</div>
+                          </Show>
+                        </label>
+                      </div>
+
+                      <div class="grid grid-cols-2 gap-3">
+                        <label class="block text-sm text-slate-700 dark:text-slate-300">
+                          Max players
+                          <input
+                            class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-amber-500/40 focus:outline-none focus:ring-1 focus:ring-amber-500/20 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200"
+                            value={editTrMaxPlayers()}
+                            onInput={(e) => setEditTrMaxPlayers(e.currentTarget.value)}
+                            placeholder="8"
+                          />
+                          <Show when={editFieldErrors().max_players}>
+                            <div class="mt-1 text-xs text-rose-700 dark:text-rose-300">{editFieldErrors().max_players}</div>
+                          </Show>
+                        </label>
+                        <label class="block text-sm text-slate-700 dark:text-slate-300">
+                          World size (1/2/3)
+                          <input
+                            class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-amber-500/40 focus:outline-none focus:ring-1 focus:ring-amber-500/20 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200"
+                            value={editTrWorldSize()}
+                            onInput={(e) => setEditTrWorldSize(e.currentTarget.value)}
+                            placeholder="1"
+                          />
+                          <Show when={editFieldErrors().world_size}>
+                            <div class="mt-1 text-xs text-rose-700 dark:text-rose-300">{editFieldErrors().world_size}</div>
+                          </Show>
+                        </label>
+                      </div>
+
+                      <div class="grid grid-cols-2 gap-3">
+                        <label class="block text-sm text-slate-700 dark:text-slate-300">
+                          World name
+                          <input
+                            class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-amber-500/40 focus:outline-none focus:ring-1 focus:ring-amber-500/20 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200"
+                            value={editTrWorldName()}
+                            onInput={(e) => setEditTrWorldName(e.currentTarget.value)}
+                            placeholder="world"
+                          />
+                          <Show when={editFieldErrors().world_name}>
+                            <div class="mt-1 text-xs text-rose-700 dark:text-rose-300">{editFieldErrors().world_name}</div>
+                          </Show>
+                        </label>
+
+                        <label class="block text-sm text-slate-700 dark:text-slate-300">
+                          Password (optional)
+                          <div class="mt-1 flex gap-2">
+                            <input
+                              type={editTrPasswordVisible() ? 'text' : 'password'}
+                              class="w-full flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-amber-500/40 focus:outline-none focus:ring-1 focus:ring-amber-500/20 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200"
+                              value={editTrPassword()}
+                              onInput={(e) => setEditTrPassword(e.currentTarget.value)}
+                              placeholder="(empty)"
+                            />
+                            <button
+                              type="button"
+                              class="rounded-lg border border-slate-300 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-900"
+                              onClick={() => setEditTrPasswordVisible((v) => !v)}
+                            >
+                              {editTrPasswordVisible() ? 'HIDE' : 'SHOW'}
+                            </button>
+                            <button
+                              type="button"
+                              class="rounded-lg border border-slate-300 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-900"
+                              disabled={!editTrPassword()}
+                              onClick={async () => safeCopy(editTrPassword())}
+                            >
+                              COPY
+                            </button>
+                          </div>
+                          <Show when={editFieldErrors().password}>
+                            <div class="mt-1 text-xs text-rose-700 dark:text-rose-300">{editFieldErrors().password}</div>
+                          </Show>
+                        </label>
+                      </div>
+                    </div>
+                  </Show>
+
+                  <Show when={editFormError()}>
+                    <div class="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-200">
+                      <div class="font-semibold">Update failed</div>
+                      <div class="mt-1">{editFormError()!.message}</div>
+                      <Show when={editFormError()!.requestId}>
+                        <div class="mt-2 flex items-center justify-between gap-2">
+                          <div class="text-[11px] text-rose-700/80 dark:text-rose-200/70 font-mono">req {editFormError()!.requestId}</div>
+                          <button
+                            type="button"
+                            class="rounded-lg border border-rose-200 bg-white/70 px-2 py-1 text-[11px] font-medium text-rose-800 hover:bg-white dark:border-rose-900/40 dark:bg-rose-950/30 dark:text-rose-200 dark:hover:bg-rose-950/40"
+                            onClick={() => safeCopy(editFormError()!.requestId ?? '')}
+                          >
+                            COPY
+                          </button>
+                        </div>
+                      </Show>
+                    </div>
+                  </Show>
+                </div>
+
+                <div class="mt-6 flex gap-3">
+                  <button
+                    type="button"
+                    class="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                    onClick={() => closeEditModal()}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    class="flex-1 rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-slate-800 disabled:opacity-50 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white"
+                    disabled={updateInstance.isPending || !editHasChanges() || editOutgoingParams() == null}
+                    onClick={async () => {
+                      const base = editBase()
+                      const params = editOutgoingParams()
+                      if (!base || !params) return
+
+                      setEditFormError(null)
+                      setEditFieldErrors({})
+                      try {
+                        await updateInstance.mutateAsync({
+                          instance_id: base.instance_id,
+                          params,
+                          display_name: editDisplayName().trim() ? editDisplayName().trim() : null,
+                        })
+                        pushToast('success', 'Updated', 'Instance parameters saved.')
+                        closeEditModal()
+                        await invalidateInstances()
+                      } catch (err) {
+                        if (isAlloyApiError(err)) {
+                          setEditFormError({ message: err.data.message, requestId: err.data.request_id })
+                          setEditFieldErrors(err.data.field_errors ?? {})
+                        } else {
+                          setEditFormError({ message: err instanceof Error ? err.message : 'unknown error' })
+                        }
+                      }
+                    }}
+                  >
+                    Save changes
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </Show>
+
+        <Show when={showDiagnosticsModal()}>
+          <div class="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div
+              class="absolute inset-0 bg-slate-900/30 backdrop-blur-sm dark:bg-slate-950/70"
+              onClick={() => setShowDiagnosticsModal(false)}
+            />
+
+            <div
+              class="relative w-full max-w-5xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-950"
+              role="dialog"
+              aria-modal="true"
+            >
+              <div class="flex items-center justify-between gap-3 border-b border-slate-200 bg-white/70 px-4 py-3 backdrop-blur dark:border-slate-800 dark:bg-slate-950/70">
+                <div class="min-w-0">
+                  <div class="text-xs font-semibold uppercase tracking-wider text-slate-500">Diagnostics</div>
+                  <div class="mt-0.5 truncate font-mono text-[11px] text-slate-500">
+                    <Show when={controlDiagnostics.data?.request_id} fallback="loading…">
+                      req {controlDiagnostics.data?.request_id}
+                    </Show>
+                  </div>
+                </div>
+
+                <div class="flex items-center gap-2">
+                  <button
+                    class="rounded-lg border border-slate-200 bg-white/70 px-3 py-1.5 text-xs font-medium text-slate-800 shadow-sm transition-all hover:bg-white hover:shadow active:scale-[0.98] disabled:opacity-50 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:shadow-none dark:hover:bg-slate-900"
+                    disabled={controlDiagnostics.isPending}
+                    onClick={async () => {
+                      await queryClient.invalidateQueries({ queryKey: ['control.diagnostics', null] })
+                    }}
+                  >
+                    Refresh
+                  </button>
+                  <button
+                    class="rounded-lg border border-slate-200 bg-white/70 px-3 py-1.5 text-xs font-medium text-slate-800 shadow-sm transition-all hover:bg-white hover:shadow active:scale-[0.98] disabled:opacity-50 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:shadow-none dark:hover:bg-slate-900"
+                    disabled={!controlDiagnostics.data}
+                    onClick={async () => {
+                      if (!controlDiagnostics.data) return
+                      await safeCopy(JSON.stringify(controlDiagnostics.data, null, 2))
+                      pushToast('success', 'Copied', 'Diagnostics copied to clipboard.')
+                    }}
+                  >
+                    Copy
+                  </button>
+                  <button
+                    class="rounded-lg border border-slate-200 bg-white/70 px-3 py-1.5 text-xs font-medium text-slate-800 shadow-sm transition-all hover:bg-white hover:shadow active:scale-[0.98] disabled:opacity-50 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:shadow-none dark:hover:bg-slate-900"
+                    disabled={!controlDiagnostics.data}
+                    onClick={() => {
+                      if (!controlDiagnostics.data) return
+                      downloadJson(`alloy-control-diagnostics.json`, { type: 'alloy-control-diagnostics', ...controlDiagnostics.data })
+                    }}
+                  >
+                    Download
+                  </button>
+                  <button
+                    class="rounded-lg border border-slate-200 bg-white/70 px-3 py-1.5 text-xs font-medium text-slate-800 shadow-sm transition-all hover:bg-white hover:shadow active:scale-[0.98] dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:shadow-none dark:hover:bg-slate-900"
+                    onClick={() => setShowDiagnosticsModal(false)}
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+
+              <div class="max-h-[80vh] overflow-auto bg-slate-50 p-4 dark:bg-slate-950">
+                <Show when={controlDiagnostics.isPending}>
+                  <div class="grid gap-3 sm:grid-cols-2">
+                    <div class="h-28 animate-pulse rounded-2xl bg-slate-200 dark:bg-slate-800" />
+                    <div class="h-28 animate-pulse rounded-2xl bg-slate-200 dark:bg-slate-800" />
+                  </div>
+                </Show>
+
+                <Show when={controlDiagnostics.isError}>
+                  <div class="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-200">
+                    Failed to load diagnostics.
+                  </div>
+                </Show>
+
+                <Show when={controlDiagnostics.data}>
+                  {(d) => (
+                    <div class="grid gap-4 lg:grid-cols-3">
+                      <div class="space-y-4 lg:col-span-2">
+                        <div class="rounded-2xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
+                          <div class="flex flex-wrap items-center justify-between gap-2">
+                            <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Control</div>
+                            <div class="flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+                              <span class="rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 font-mono dark:border-slate-800 dark:bg-slate-950/40">
+                                v{d().control_version}
+                              </span>
+                              <span
+                                class={`rounded-full border px-2 py-0.5 font-mono ${
+                                  d().read_only
+                                    ? 'border-amber-300 bg-amber-500/10 text-amber-800 dark:border-amber-500/30 dark:text-amber-200'
+                                    : 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/20 dark:text-emerald-200'
+                                }`}
+                              >
+                                {d().read_only ? 'read-only' : 'writable'}
+                              </span>
+                              <span class="rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 font-mono dark:border-slate-800 dark:bg-slate-950/40">
+                                fs-write {d().fs.write_enabled ? 'on' : 'off'}
+                              </span>
+                            </div>
+                          </div>
+                          <div class="mt-3 text-[12px] text-slate-600 dark:text-slate-300">
+                            fetched {new Date(Number(d().fetched_at_unix_ms)).toLocaleString()}
+                          </div>
+                        </div>
+
+                        <div class="rounded-2xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
+                          <div class="flex items-center justify-between">
+                            <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Agent</div>
+                            <span
+                              class={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${
+                                d().agent.ok
+                                  ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/20 dark:text-emerald-200'
+                                  : 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-200'
+                              }`}
+                            >
+                              {d().agent.ok ? 'connected' : 'offline'}
+                            </span>
+                          </div>
+
+                          <div class="mt-3 space-y-2 text-[12px] text-slate-600 dark:text-slate-300">
+                            <div class="flex items-center justify-between gap-3">
+                              <div class="text-slate-500 dark:text-slate-400">Endpoint</div>
+                              <div class="min-w-0 truncate font-mono text-[11px]" title={d().agent.endpoint}>
+                                {d().agent.endpoint}
+                              </div>
+                            </div>
+                            <Show when={d().agent.agent_version}>
+                              <div class="flex items-center justify-between gap-3">
+                                <div class="text-slate-500 dark:text-slate-400">Version</div>
+                                <div class="font-mono text-[11px]">{d().agent.agent_version}</div>
+                              </div>
+                            </Show>
+                            <Show when={d().agent.data_root}>
+                              <div class="flex items-center justify-between gap-3">
+                                <div class="text-slate-500 dark:text-slate-400">Data root</div>
+                                <div class="min-w-0 truncate font-mono text-[11px]" title={d().agent.data_root ?? ''}>
+                                  {d().agent.data_root}
+                                </div>
+                              </div>
+                            </Show>
+                            <Show when={d().agent.data_root_free_bytes}>
+                              <div class="flex items-center justify-between gap-3">
+                                <div class="text-slate-500 dark:text-slate-400">Free space</div>
+                                <div class="font-mono text-[11px]">{formatBytes(Number(d().agent.data_root_free_bytes))}</div>
+                              </div>
+                            </Show>
+                            <Show when={d().agent.error}>
+                              <div class="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-[12px] text-rose-800 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-200">
+                                {d().agent.error}
+                              </div>
+                            </Show>
+                          </div>
+                        </div>
+
+                        <div class="rounded-2xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
+                          <div class="flex items-center justify-between gap-3">
+                            <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Cache</div>
+                            <button
+                              class="rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-medium text-rose-800 shadow-sm transition-all hover:bg-rose-100 hover:shadow active:scale-[0.98] disabled:opacity-50 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-200 dark:shadow-none dark:hover:bg-rose-950/30"
+                              disabled={clearCache.isPending}
+                              onClick={async () => {
+                                const keys = Object.entries(cacheSelection())
+                                  .filter(([, v]) => v)
+                                  .map(([k]) => k)
+                                if (!keys.length) {
+                                  pushToast('info', 'No selection', 'Select caches to clear first.')
+                                  return
+                                }
+                                try {
+                                  const out = await clearCache.mutateAsync({ keys })
+                                  pushToast('success', 'Cache cleared', `Freed ${formatBytes(Number(out.freed_bytes))}`)
+                                  await queryClient.invalidateQueries({ queryKey: ['control.diagnostics', null] })
+                                  await queryClient.invalidateQueries({ queryKey: ['process.cacheStats', null] })
+                                } catch (e) {
+                                  toastError('Clear cache failed', e)
+                                }
+                              }}
+                            >
+                              Clear selected
+                            </button>
+                          </div>
+
+                          <div class="mt-3 space-y-2">
+                            <For each={d().cache.entries}>
+                              {(e) => (
+                                <div class="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white/60 px-3 py-2 dark:border-slate-800 dark:bg-slate-950/40">
+                                  <label class="flex items-center gap-2 text-[12px] text-slate-700 dark:text-slate-200">
+                                    <input
+                                      type="checkbox"
+                                      class="h-4 w-4 rounded border-slate-300 bg-white text-rose-600 focus:ring-rose-400 dark:border-slate-700 dark:bg-slate-950/60 dark:text-rose-400"
+                                      checked={cacheSelection()[e.key] ?? false}
+                                      onChange={(ev) =>
+                                        setCacheSelection((prev) => ({ ...prev, [e.key]: ev.currentTarget.checked }))
+                                      }
+                                    />
+                                    <span class="font-mono text-[11px]">{e.key}</span>
+                                  </label>
+                                  <div class="flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+                                    <span class="rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 font-mono dark:border-slate-800 dark:bg-slate-950/40">
+                                      {formatBytes(Number(e.size_bytes))}
+                                    </span>
+                                    <span
+                                      class="rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 font-mono dark:border-slate-800 dark:bg-slate-950/40"
+                                      title={new Date(Number(e.last_used_unix_ms)).toLocaleString()}
+                                    >
+                                      {formatRelativeTime(Number(e.last_used_unix_ms))}
+                                    </span>
+                                  </div>
+                                </div>
+                              )}
+                            </For>
+                            <div class="text-[11px] text-slate-500 dark:text-slate-400">
+                              Clearing cache removes downloaded jars/zips. Next start will re-download.
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div class="space-y-4">
+                        <div class="rounded-2xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
+                          <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Agent log (tail)</div>
+                          <Show
+                            when={(d().agent_log_lines ?? []).length > 0}
+                            fallback={<div class="mt-3 text-[12px] text-slate-500">(no log data)</div>}
+                          >
+                            <pre class="mt-3 max-h-64 overflow-auto rounded-xl bg-slate-950 px-3 py-2 text-[11px] leading-relaxed text-slate-100">
+                              <For each={d().agent_log_lines}>{(l) => <div class="whitespace-pre-wrap">{l}</div>}</For>
+                            </pre>
+                          </Show>
+                          <Show when={d().agent_log_path}>
+                            <div class="mt-2 flex items-center justify-between gap-2 text-[11px] text-slate-500 dark:text-slate-400">
+                              <span class="truncate font-mono">{d().agent_log_path}</span>
+                              <button
+                                type="button"
+                                class="rounded-lg border border-slate-200 bg-white/70 px-2 py-1 text-[11px] font-medium text-slate-700 hover:bg-white dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:hover:bg-slate-900"
+                                onClick={() => safeCopy(d().agent_log_path ?? '')}
+                              >
+                                COPY
+                              </button>
+                            </div>
+                          </Show>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </Show>
               </div>
             </div>
           </div>
@@ -1583,7 +2867,7 @@ function App() {
 	                        </span>
 	                      </Show>
 	                      <Show when={selectedInstanceStatus()?.message != null}>
-	                        <span class="truncate">{selectedInstanceStatus()?.message}</span>
+	                        <span class="truncate">{selectedInstanceMessage()}</span>
 	                      </Show>
 	                    </div>
 	                  </Show>
@@ -1674,6 +2958,65 @@ function App() {
             </div>
           </div>
         </Show>
+
+        <Portal>
+          <div class="pointer-events-none fixed bottom-4 right-4 z-[9999] flex w-[360px] flex-col gap-2">
+            <For each={toasts()}>
+              {(t) => (
+                <div
+                  class={`pointer-events-auto overflow-hidden rounded-2xl border bg-white/80 shadow-2xl shadow-slate-900/10 backdrop-blur transition-all duration-150 animate-in fade-in zoom-in-95 dark:bg-slate-950/80 ${
+                    t.variant === 'success'
+                      ? 'border-emerald-200 dark:border-emerald-900/40'
+                      : t.variant === 'error'
+                        ? 'border-rose-200 dark:border-rose-900/40'
+                        : 'border-slate-200 dark:border-slate-800'
+                  }`}
+                >
+                  <div class="p-3">
+                    <div class="flex items-start justify-between gap-3">
+                      <div class="min-w-0">
+                        <div
+                          class={`text-sm font-semibold ${
+                            t.variant === 'success'
+                              ? 'text-emerald-900 dark:text-emerald-200'
+                              : t.variant === 'error'
+                                ? 'text-rose-900 dark:text-rose-200'
+                                : 'text-slate-900 dark:text-slate-100'
+                          }`}
+                        >
+                          {t.title}
+                        </div>
+                        <Show when={t.message}>
+                          <div class="mt-1 text-[12px] text-slate-600 dark:text-slate-300">{t.message}</div>
+                        </Show>
+                      </div>
+                      <button
+                        type="button"
+                        class="rounded-lg border border-slate-200 bg-white/70 px-2 py-1 text-[11px] font-medium text-slate-700 hover:bg-white dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:hover:bg-slate-900"
+                        onClick={() => setToasts((prev) => prev.filter((x) => x.id !== t.id))}
+                      >
+                        Close
+                      </button>
+                    </div>
+
+                    <Show when={t.requestId}>
+                      <div class="mt-2 flex items-center justify-between gap-2">
+                        <div class="truncate font-mono text-[11px] text-slate-500 dark:text-slate-400">req {t.requestId}</div>
+                        <button
+                          type="button"
+                          class="rounded-lg border border-slate-200 bg-white/70 px-2 py-1 text-[11px] font-medium text-slate-700 hover:bg-white dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:hover:bg-slate-900"
+                          onClick={() => safeCopy(t.requestId ?? '')}
+                        >
+                          COPY
+                        </button>
+                      </div>
+                    </Show>
+                  </div>
+                </div>
+              )}
+            </For>
+          </div>
+        </Portal>
 
     </div>
   )
