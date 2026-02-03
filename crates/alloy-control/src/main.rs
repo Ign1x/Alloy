@@ -17,6 +17,13 @@ use sea_orm_migration::MigratorTrait;
 use serde::Serialize;
 
 #[derive(Debug, Serialize)]
+struct HealthzPort {
+    port: u32,
+    available: bool,
+    error: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
 struct HealthzAgent {
     endpoint: String,
     ok: bool,
@@ -25,6 +32,7 @@ struct HealthzAgent {
     data_root: Option<String>,
     data_root_writable: Option<bool>,
     data_root_free_bytes: Option<u64>,
+    ports: Option<Vec<HealthzPort>>,
     error: Option<String>,
 }
 
@@ -62,6 +70,20 @@ async fn healthz(State(_state): State<AppState>) -> Json<HealthzResponse> {
                         data_root: Some(resp.data_root),
                         data_root_writable: Some(resp.data_root_writable),
                         data_root_free_bytes: Some(resp.data_root_free_bytes),
+                        ports: Some(
+                            resp.ports
+                                .into_iter()
+                                .map(|p| HealthzPort {
+                                    port: p.port,
+                                    available: p.available,
+                                    error: if p.error.is_empty() {
+                                        None
+                                    } else {
+                                        Some(p.error)
+                                    },
+                                })
+                                .collect(),
+                        ),
                         error: None,
                     }
                 }
@@ -73,6 +95,7 @@ async fn healthz(State(_state): State<AppState>) -> Json<HealthzResponse> {
                     data_root: None,
                     data_root_writable: None,
                     data_root_free_bytes: None,
+                    ports: None,
                     error: Some(format!("health check failed: {e}")),
                 },
             },
@@ -84,6 +107,7 @@ async fn healthz(State(_state): State<AppState>) -> Json<HealthzResponse> {
                 data_root: None,
                 data_root_writable: None,
                 data_root_free_bytes: None,
+                ports: None,
                 error: Some(format!("connect failed: {e}")),
             },
         };

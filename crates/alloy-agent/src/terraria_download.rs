@@ -31,6 +31,16 @@ pub fn cache_dir() -> PathBuf {
         .join("vanilla")
 }
 
+fn mark_last_used(entry_dir: &std::path::Path) {
+    let path = entry_dir.join(".last_used");
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    // Best-effort.
+    let _ = std::fs::write(path, format!("{now_ms}\n"));
+}
+
 fn download_locks() -> &'static std::sync::Mutex<HashMap<String, Arc<Mutex<()>>>> {
     static LOCKS: OnceLock<std::sync::Mutex<HashMap<String, Arc<Mutex<()>>>>> = OnceLock::new();
     LOCKS.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
@@ -74,6 +84,9 @@ pub async fn ensure_server_zip(resolved: &ResolvedServerZip) -> anyhow::Result<P
         .join(&resolved.version_id)
         .join(format!("terraria-server-{}.zip", resolved.version_id));
     if zip_path.exists() {
+        if let Some(dir) = zip_path.parent() {
+            mark_last_used(dir);
+        }
         return Ok(zip_path);
     }
 
@@ -81,6 +94,9 @@ pub async fn ensure_server_zip(resolved: &ResolvedServerZip) -> anyhow::Result<P
     let lock = lock_for(&lock_key);
     let _guard = lock.lock().await;
     if zip_path.exists() {
+        if let Some(dir) = zip_path.parent() {
+            mark_last_used(dir);
+        }
         return Ok(zip_path);
     }
 
@@ -134,6 +150,9 @@ pub async fn ensure_server_zip(resolved: &ResolvedServerZip) -> anyhow::Result<P
     f.write_all(&bytes)?;
     f.sync_all()?;
     fs::rename(tmp_path, &zip_path)?;
+    if let Some(dir) = zip_path.parent() {
+        mark_last_used(dir);
+    }
     Ok(zip_path)
 }
 
@@ -158,6 +177,7 @@ pub fn extract_linux_x64_to_cache(
             || server_root.join("FNA.dll").is_file()
             || server_root.join("TerrariaServer.exe").is_file());
     if looks_complete {
+        mark_last_used(&cache_dir().join(version_id));
         return Ok(ExtractedLinuxServer {
             server_root,
             bin_x86_64,
@@ -248,6 +268,7 @@ pub fn extract_linux_x64_to_cache(
         );
     }
 
+    mark_last_used(&cache_dir().join(version_id));
     Ok(ExtractedLinuxServer {
         server_root,
         bin_x86_64,

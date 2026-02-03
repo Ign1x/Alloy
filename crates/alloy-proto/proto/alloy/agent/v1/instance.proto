@@ -15,6 +15,7 @@ service InstanceService {
   rpc Start(StartInstanceRequest) returns (StartInstanceResponse);
   rpc Stop(StopInstanceRequest) returns (StopInstanceResponse);
   rpc Update(UpdateInstanceRequest) returns (UpdateInstanceResponse);
+  rpc DeletePreview(DeleteInstancePreviewRequest) returns (DeleteInstancePreviewResponse);
   rpc Delete(DeleteInstanceRequest) returns (DeleteInstanceResponse);
 }
 
@@ -78,6 +79,16 @@ message DeleteInstanceRequest {
 
 message DeleteInstanceResponse {
   bool ok = 1;
+}
+
+message DeleteInstancePreviewRequest {
+  string instance_id = 1;
+}
+
+message DeleteInstancePreviewResponse {
+  string instance_id = 1;
+  string path = 2;
+  uint64 size_bytes = 3;
 }
 
 message UpdateInstanceRequest {

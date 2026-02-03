@@ -13,41 +13,85 @@ pub struct VanillaParams {
 }
 
 pub fn validate_vanilla_params(params: &BTreeMap<String, String>) -> anyhow::Result<VanillaParams> {
+    let mut field_errors = BTreeMap::<String, String>::new();
+
     // EULA must be accepted explicitly (legal + UX).
-    match params.get("accept_eula").map(|v| v.as_str()) {
+    match params.get("accept_eula").map(|v| v.trim()) {
         Some("true") => {}
-        _ => anyhow::bail!("missing required param: accept_eula=true"),
+        _ => {
+            field_errors.insert(
+                "accept_eula".to_string(),
+                "Required. You must accept the Minecraft EULA.".to_string(),
+            );
+        }
     }
 
     let version = params
         .get("version")
-        .cloned()
-        .unwrap_or_else(|| "latest_release".to_string());
+        .map(|v| v.trim())
+        .filter(|v| !v.is_empty())
+        .unwrap_or("latest_release")
+        .to_string();
 
-    let memory_mb = params
+    let memory_mb = match params
         .get("memory_mb")
-        .map(|v| v.parse::<u32>())
-        .transpose()
-        .map_err(|_| anyhow::anyhow!("invalid memory_mb"))?
-        .unwrap_or(2048);
+        .map(|v| v.trim())
+        .filter(|v| !v.is_empty())
+    {
+        None => 2048,
+        Some(raw) => match raw.parse::<u32>() {
+            Ok(v) => v,
+            Err(_) => {
+                field_errors.insert(
+                    "memory_mb".to_string(),
+                    "Must be an integer (MiB), e.g. 2048.".to_string(),
+                );
+                2048
+            }
+        },
+    };
     if !(512..=65536).contains(&memory_mb) {
-        anyhow::bail!("memory_mb out of range: {memory_mb}");
+        field_errors.insert(
+            "memory_mb".to_string(),
+            "Must be between 512 and 65536 (MiB).".to_string(),
+        );
     }
 
-    let port = match params.get("port") {
-        // Allow omitting port for allocation.
+    // Port: allow empty/0 for auto allocation.
+    let port = match params
+        .get("port")
+        .map(|v| v.trim())
+        .filter(|v| !v.is_empty())
+    {
         None => 0,
-        Some(v) if v.trim().is_empty() => 0,
-        Some(v) => {
-            let p = v
-                .parse::<u16>()
-                .map_err(|_| anyhow::anyhow!("invalid port"))?;
-            if p < 1024 {
-                anyhow::bail!("port out of range: {p}");
+        Some(raw) => match raw.parse::<u16>() {
+            Ok(0) => 0,
+            Ok(v) if v >= 1024 => v,
+            Ok(v) => {
+                field_errors.insert(
+                    "port".to_string(),
+                    format!("Must be 0 (auto) or in 1024..65535 (got {v})."),
+                );
+                v
             }
-            p
-        }
+            Err(_) => {
+                field_errors.insert(
+                    "port".to_string(),
+                    "Must be an integer (0 for auto, or 1024..65535).".to_string(),
+                );
+                0
+            }
+        },
     };
+
+    if !field_errors.is_empty() {
+        return Err(crate::error_payload::anyhow(
+            "invalid_param",
+            "invalid minecraft params",
+            Some(field_errors),
+            Some("Fix the highlighted fields, then try again.".to_string()),
+        ));
+    }
 
     Ok(VanillaParams {
         version,
@@ -80,16 +124,59 @@ pub fn ensure_vanilla_instance_layout(
     params: &VanillaParams,
 ) -> anyhow::Result<()> {
     fs::create_dir_all(instance_dir)?;
+    fs::create_dir_all(instance_dir.join("config"))?;
+    fs::create_dir_all(instance_dir.join("worlds"))?;
+    fs::create_dir_all(instance_dir.join("mods"))?;
+    fs::create_dir_all(instance_dir.join("logs"))?;
+
+    let config_dir = instance_dir.join("config");
+
+    fn migrate_into_config_dir(instance_dir: &Path, config_dir: &Path, name: &str) {
+        let src = instance_dir.join(name);
+        let dst = config_dir.join(name);
+        if dst.exists() {
+            return;
+        }
+        if src.exists() {
+            let _ = fs::rename(&src, &dst);
+        }
+    }
+
+    migrate_into_config_dir(instance_dir, &config_dir, "eula.txt");
+    migrate_into_config_dir(instance_dir, &config_dir, "server.properties");
 
     // EULA gate is handled by validate_vanilla_params(); writing eula=true is the
     // explicit acceptance action.
-    fs::write(instance_dir.join("eula.txt"), b"eula=true\n")?;
+    fs::write(config_dir.join("eula.txt"), b"eula=true\n")?;
+
+    // Ensure root-level config files exist for the Minecraft server by symlinking into config/.
+    #[cfg(unix)]
+    fn ensure_link(instance_dir: &Path, name: &str) -> anyhow::Result<()> {
+        let root_path = instance_dir.join(name);
+        let target_rel = PathBuf::from("config").join(name);
+        if root_path.exists() {
+            let _ = fs::remove_file(&root_path);
+        }
+        std::os::unix::fs::symlink(target_rel, root_path)?;
+        Ok(())
+    }
+
+    #[cfg(not(unix))]
+    fn ensure_link(instance_dir: &Path, name: &str) -> anyhow::Result<()> {
+        let root_path = instance_dir.join(name);
+        let target = instance_dir.join("config").join(name);
+        fs::copy(target, root_path)?;
+        Ok(())
+    }
+
+    ensure_link(instance_dir, "eula.txt")?;
 
     // Minimal `server.properties` management: ensure server-port is set.
-    let props_path = instance_dir.join("server.properties");
+    let props_path = config_dir.join("server.properties");
     let existing = fs::read_to_string(&props_path).unwrap_or_default();
     let mut out = String::new();
     let mut wrote_port = false;
+    let mut wrote_level_name = false;
     for line in existing.lines() {
         if let Some((_k, _v)) = line.split_once('=')
             && line.starts_with("server-port=")
@@ -98,13 +185,27 @@ pub fn ensure_vanilla_instance_layout(
             wrote_port = true;
             continue;
         }
+        if let Some((_k, _v)) = line.split_once('=')
+            && line.starts_with("level-name=")
+        {
+            // Keep existing world location if the user already set one.
+            // For new instances, we default to `worlds/world` for a consistent layout.
+            wrote_level_name = true;
+            out.push_str(line);
+            out.push('\n');
+            continue;
+        }
         out.push_str(line);
         out.push('\n');
     }
     if !wrote_port {
         out.push_str(&format!("server-port={}\n", params.port));
     }
+    if !wrote_level_name {
+        out.push_str("level-name=worlds/world\n");
+    }
     fs::write(props_path, out.as_bytes())?;
+    ensure_link(instance_dir, "server.properties")?;
 
     Ok(())
 }

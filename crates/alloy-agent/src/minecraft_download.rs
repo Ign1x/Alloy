@@ -119,6 +119,16 @@ pub fn cache_dir() -> PathBuf {
         .join("vanilla")
 }
 
+fn mark_last_used(entry_dir: &std::path::Path) {
+    let path = entry_dir.join(".last_used");
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    // Best-effort.
+    let _ = std::fs::write(path, format!("{now_ms}\n"));
+}
+
 fn download_locks() -> &'static std::sync::Mutex<HashMap<String, Arc<Mutex<()>>>> {
     static LOCKS: OnceLock<std::sync::Mutex<HashMap<String, Arc<Mutex<()>>>>> = OnceLock::new();
     LOCKS.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
@@ -146,6 +156,9 @@ pub async fn ensure_server_jar(resolved: &ResolvedServerJar) -> anyhow::Result<P
     let sha1_hex = &resolved.sha1;
     let jar_path = cache_dir().join(sha1_hex).join("server.jar");
     if jar_path.exists() {
+        if let Some(dir) = jar_path.parent() {
+            mark_last_used(dir);
+        }
         return Ok(jar_path);
     }
 
@@ -153,6 +166,9 @@ pub async fn ensure_server_jar(resolved: &ResolvedServerJar) -> anyhow::Result<P
     let lock = lock_for(&lock_key);
     let _guard = lock.lock().await;
     if jar_path.exists() {
+        if let Some(dir) = jar_path.parent() {
+            mark_last_used(dir);
+        }
         return Ok(jar_path);
     }
 
@@ -220,5 +236,8 @@ pub async fn ensure_server_jar(resolved: &ResolvedServerJar) -> anyhow::Result<P
     f.write_all(&bytes)?;
     f.sync_all()?;
     fs::rename(tmp_path, &jar_path)?;
+    if let Some(dir) = jar_path.parent() {
+        mark_last_used(dir);
+    }
     Ok(jar_path)
 }

@@ -31,6 +31,17 @@ pub enum ProcessState {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Type)]
+pub struct ProcessResources {
+    // CPU usage over the last sampling interval, in basis points (1/100 of a percent).
+    pub cpu_percent_x100: u32,
+    // Resident set size in bytes (best-effort).
+    pub rss_bytes: u64,
+    // Best-effort IO totals.
+    pub read_bytes: u64,
+    pub write_bytes: u64,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Type)]
 pub struct ProcessStatus {
     pub id: ProcessId,
     pub template_id: ProcessTemplateId,
@@ -38,6 +49,7 @@ pub struct ProcessStatus {
     pub pid: Option<u32>,
     pub exit_code: Option<i32>,
     pub message: Option<String>,
+    pub resources: Option<ProcessResources>,
 }
 
 #[cfg(test)]

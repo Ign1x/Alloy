@@ -1,7 +1,7 @@
 use std::{
     collections::{BTreeMap, HashMap, VecDeque},
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{Arc, OnceLock},
     time::Duration,
 };
 
@@ -123,6 +123,117 @@ fn port_probe_timeout() -> Duration {
             .map(|v| v.clamp(1000, 10 * 60 * 1000))
             .unwrap_or(90_000),
     )
+}
+
+fn resource_sample_interval() -> Duration {
+    Duration::from_millis(
+        env_u64("ALLOY_RESOURCE_SAMPLE_INTERVAL_MS")
+            .map(|v| v.clamp(250, 60_000))
+            .unwrap_or(2000),
+    )
+}
+
+#[cfg(target_os = "linux")]
+fn ticks_per_sec() -> u64 {
+    static TICKS: OnceLock<u64> = OnceLock::new();
+    *TICKS.get_or_init(|| unsafe {
+        let v = libc::sysconf(libc::_SC_CLK_TCK);
+        if v <= 0 { 100 } else { v as u64 }
+    })
+}
+
+#[cfg(not(target_os = "linux"))]
+fn ticks_per_sec() -> u64 {
+    100
+}
+
+#[cfg(target_os = "linux")]
+fn page_size() -> u64 {
+    static PAGE: OnceLock<u64> = OnceLock::new();
+    *PAGE.get_or_init(|| unsafe {
+        let v = libc::sysconf(libc::_SC_PAGESIZE);
+        if v <= 0 { 4096 } else { v as u64 }
+    })
+}
+
+#[cfg(not(target_os = "linux"))]
+fn page_size() -> u64 {
+    4096
+}
+
+#[cfg(target_os = "linux")]
+async fn read_proc_cpu_ticks(pid: u32) -> Option<u64> {
+    let stat_path = format!("/proc/{pid}/stat");
+    let s = tokio::fs::read_to_string(stat_path).await.ok()?;
+    let end = s.rfind(')')?;
+    let rest = s.get((end + 2)..)?;
+    let parts: Vec<&str> = rest.split_whitespace().collect();
+    let utime: u64 = parts.get(11)?.parse().ok()?;
+    let stime: u64 = parts.get(12)?.parse().ok()?;
+    Some(utime.saturating_add(stime))
+}
+
+#[cfg(not(target_os = "linux"))]
+async fn read_proc_cpu_ticks(_pid: u32) -> Option<u64> {
+    None
+}
+
+#[cfg(target_os = "linux")]
+async fn read_proc_rss_bytes(pid: u32) -> Option<u64> {
+    let statm_path = format!("/proc/{pid}/statm");
+    let s = tokio::fs::read_to_string(statm_path).await.ok()?;
+    let mut it = s.split_whitespace();
+    let _size_pages = it.next()?;
+    let resident_pages: u64 = it.next()?.parse().ok()?;
+    Some(resident_pages.saturating_mul(page_size()))
+}
+
+#[cfg(not(target_os = "linux"))]
+async fn read_proc_rss_bytes(_pid: u32) -> Option<u64> {
+    None
+}
+
+#[cfg(target_os = "linux")]
+async fn read_proc_io_bytes(pid: u32) -> Option<(u64, u64)> {
+    let io_path = format!("/proc/{pid}/io");
+    let s = tokio::fs::read_to_string(io_path).await.ok()?;
+    let mut read_bytes: u64 = 0;
+    let mut write_bytes: u64 = 0;
+    for line in s.lines() {
+        let line = line.trim();
+        if let Some(v) = line.strip_prefix("read_bytes:") {
+            read_bytes = v.trim().parse().unwrap_or(0);
+        } else if let Some(v) = line.strip_prefix("write_bytes:") {
+            write_bytes = v.trim().parse().unwrap_or(0);
+        }
+    }
+    Some((read_bytes, write_bytes))
+}
+
+#[cfg(not(target_os = "linux"))]
+async fn read_proc_io_bytes(_pid: u32) -> Option<(u64, u64)> {
+    None
+}
+
+fn cpu_percent_x100(
+    prev_ticks: u64,
+    prev_at: tokio::time::Instant,
+    ticks: u64,
+    now: tokio::time::Instant,
+) -> u32 {
+    let dt = now.duration_since(prev_at).as_secs_f64();
+    if dt <= 0.0 {
+        return 0;
+    }
+    let delta_ticks = ticks.saturating_sub(prev_ticks) as f64;
+    let cpu = (delta_ticks / ticks_per_sec() as f64) / dt * 100.0;
+    // 1/100 of a percent.
+    let x100 = (cpu * 100.0).round();
+    if x100.is_finite() {
+        x100.clamp(0.0, u32::MAX as f64) as u32
+    } else {
+        0
+    }
 }
 
 const DEFAULT_MIN_FREE_SPACE_BYTES: u64 = 1024 * 1024 * 1024; // 1 GiB
@@ -538,6 +649,7 @@ struct ProcessEntry {
     template_id: ProcessTemplateId,
     state: ProcessState,
     pid: Option<u32>,
+    resources: Option<alloy_process::ProcessResources>,
     exit_code: Option<i32>,
     message: Option<String>,
     restart: RestartConfig,
@@ -555,6 +667,46 @@ pub struct ProcessManager {
 }
 
 impl ProcessManager {
+    fn spawn_resource_sampler(&self, process_id: String, pid: u32) {
+        let inner = self.inner.clone();
+        tokio::spawn(async move {
+            let mut last: Option<(u64, tokio::time::Instant)> = None;
+            let interval = resource_sample_interval();
+
+            loop {
+                let now = tokio::time::Instant::now();
+                let Some(ticks) = read_proc_cpu_ticks(pid).await else {
+                    break;
+                };
+                let rss_bytes = read_proc_rss_bytes(pid).await.unwrap_or(0);
+                let (read_bytes, write_bytes) = read_proc_io_bytes(pid).await.unwrap_or((0, 0));
+
+                let cpu_percent_x100 = last
+                    .map(|(prev_ticks, prev_at)| cpu_percent_x100(prev_ticks, prev_at, ticks, now))
+                    .unwrap_or(0);
+                last = Some((ticks, now));
+
+                {
+                    let mut map = inner.lock().await;
+                    let Some(e) = map.get_mut(&process_id) else {
+                        break;
+                    };
+                    if e.pid != Some(pid) {
+                        break;
+                    }
+                    e.resources = Some(alloy_process::ProcessResources {
+                        cpu_percent_x100,
+                        rss_bytes,
+                        read_bytes,
+                        write_bytes,
+                    });
+                }
+
+                tokio::time::sleep(interval).await;
+            }
+        });
+    }
+
     pub async fn start_from_template_with_process_id(
         &self,
         process_id: &str,
@@ -630,12 +782,31 @@ impl ProcessManager {
 
         let result: anyhow::Result<ProcessStatus> = async {
             if t.template_id == "minecraft:vanilla" {
-                ensure_min_free_space(&minecraft::data_root())?;
+                ensure_min_free_space(&minecraft::data_root()).map_err(|e| {
+                    crate::error_payload::anyhow(
+                        "insufficient_disk",
+                        e.to_string(),
+                        None,
+                        Some("Free up disk space under ALLOY_DATA_ROOT and try again.".to_string()),
+                    )
+                })?;
 
                 let mc = minecraft::validate_vanilla_params(&params)?;
 
                 // Allow auto port assignment (port=0 means "auto").
-                let mc_port = port_alloc::allocate_tcp_port(mc.port)?;
+                let mc_port = port_alloc::allocate_tcp_port(mc.port).map_err(|e| {
+                    let mut fields = BTreeMap::new();
+                    fields.insert("port".to_string(), e.to_string());
+                    crate::error_payload::anyhow(
+                        "invalid_param",
+                        "invalid port",
+                        Some(fields),
+                        Some(
+                            "Pick another port, or leave it blank (0) to auto-assign a free port."
+                                .to_string(),
+                        ),
+                    )
+                })?;
                 let mc = minecraft::VanillaParams {
                     port: mc_port,
                     ..mc
@@ -646,17 +817,44 @@ impl ProcessManager {
                 let dir = minecraft::instance_dir(&id.0);
                 minecraft::ensure_vanilla_instance_layout(&dir, &mc)?;
 
-                let resolved = minecraft_download::resolve_server_jar(&mc.version).await?;
+                let resolved = minecraft_download::resolve_server_jar(&mc.version)
+                    .await
+                    .map_err(|e| {
+                        crate::error_payload::anyhow(
+                            "download_failed",
+                            format!("failed to resolve minecraft server jar: {e}"),
+                            None,
+                            Some(
+                                "Check network connectivity to Mojang piston-meta endpoints."
+                                    .to_string(),
+                            ),
+                        )
+                    })?;
                 let have_java = detect_java_major()?;
                 if have_java != resolved.java_major {
-                    anyhow::bail!(
-                        "java major mismatch: need {} (minecraft version {}), but runtime has {}",
-                        resolved.java_major,
-                        resolved.version_id,
-                        have_java
-                    );
+                    return Err(crate::error_payload::anyhow(
+                        "java_major_mismatch",
+                        format!(
+                            "Need Java {} for Minecraft {}, but runtime has Java {}.",
+                            resolved.java_major, resolved.version_id, have_java
+                        ),
+                        None,
+                        Some(format!(
+                            "Install Java {} (Temurin recommended), or use the Alloy agent Docker image.",
+                            resolved.java_major
+                        )),
+                    ));
                 }
-                let cached_jar = minecraft_download::ensure_server_jar(&resolved).await?;
+                let cached_jar = minecraft_download::ensure_server_jar(&resolved)
+                    .await
+                    .map_err(|e| {
+                        crate::error_payload::anyhow(
+                            "download_failed",
+                            format!("failed to download minecraft server jar: {e}"),
+                            None,
+                            Some("Try again; if it persists, clear cache and retry.".to_string()),
+                        )
+                    })?;
 
                 let instance_jar = dir.join("server.jar");
                 if !instance_jar.exists() {
@@ -729,7 +927,18 @@ impl ProcessManager {
 
                 let mut child = cmd
                     .spawn()
-                    .with_context(|| format!("spawn minecraft server (cwd {})", dir.display()))?;
+                    .with_context(|| format!("spawn minecraft server (cwd {})", dir.display()))
+                    .map_err(|e| {
+                        crate::error_payload::anyhow(
+                            "spawn_failed",
+                            e.to_string(),
+                            None,
+                            Some(
+                                "Ensure Java is installed and the instance directory is writable."
+                                    .to_string(),
+                            ),
+                        )
+                    })?;
                 let started = tokio::time::Instant::now();
                 let pid_u32 = child.id();
                 let pgid = pid_u32.map(|p| p as i32);
@@ -769,6 +978,7 @@ impl ProcessManager {
                             template_id: ProcessTemplateId(t.template_id.clone()),
                             state: ProcessState::Starting,
                             pid: pid_u32,
+                            resources: None,
                             exit_code: None,
                             message: None,
                             restart,
@@ -780,6 +990,10 @@ impl ProcessManager {
                             log_file_tx: Some(log_tx.clone()),
                         },
                     );
+                }
+
+                if let Some(pid) = pid_u32 {
+                    self.spawn_resource_sampler(id.0.clone(), pid);
                 }
 
                 let manager = self.clone();
@@ -975,15 +1189,35 @@ impl ProcessManager {
                     pid: pid_u32,
                     exit_code: None,
                     message: None,
+                    resources: None,
                 });
             }
 
             if t.template_id == "terraria:vanilla" {
-                ensure_min_free_space(&terraria::data_root())?;
+                ensure_min_free_space(&terraria::data_root()).map_err(|e| {
+                    crate::error_payload::anyhow(
+                        "insufficient_disk",
+                        e.to_string(),
+                        None,
+                        Some("Free up disk space under ALLOY_DATA_ROOT and try again.".to_string()),
+                    )
+                })?;
 
                 let tr = terraria::validate_vanilla_params(&params)?;
 
-                let tr_port = port_alloc::allocate_tcp_port(tr.port)?;
+                let tr_port = port_alloc::allocate_tcp_port(tr.port).map_err(|e| {
+                    let mut fields = BTreeMap::new();
+                    fields.insert("port".to_string(), e.to_string());
+                    crate::error_payload::anyhow(
+                        "invalid_param",
+                        "invalid port",
+                        Some(fields),
+                        Some(
+                            "Pick another port, or leave it blank (0) to auto-assign a free port."
+                                .to_string(),
+                        ),
+                    )
+                })?;
                 let tr = terraria::VanillaParams {
                     port: tr_port,
                     ..tr
@@ -995,16 +1229,42 @@ impl ProcessManager {
                 terraria::ensure_vanilla_instance_layout(&dir, &tr)?;
                 let world_path = dir.join("worlds").join(format!("{}.wld", tr.world_name));
                 let creating_world = !world_path.exists();
-                let config_path = std::fs::canonicalize(dir.join("serverconfig.txt"))
+                let config_path = std::fs::canonicalize(dir.join("config").join("serverconfig.txt"))
                     .unwrap_or_else(|_| {
                         // Best-effort; even if canonicalize fails, pass the path we wrote.
-                        dir.join("serverconfig.txt")
+                        dir.join("config").join("serverconfig.txt")
                     });
 
-                let resolved = terraria_download::resolve_server_zip(&tr.version)?;
-                let zip_path = terraria_download::ensure_server_zip(&resolved).await?;
-                let extracted =
-                    terraria_download::extract_linux_x64_to_cache(&zip_path, &resolved.version_id)?;
+                let resolved = terraria_download::resolve_server_zip(&tr.version).map_err(|e| {
+                    crate::error_payload::anyhow(
+                        "download_failed",
+                        format!("failed to resolve terraria server zip: {e}"),
+                        None,
+                        Some("Check network connectivity, then try again.".to_string()),
+                    )
+                })?;
+                let zip_path = terraria_download::ensure_server_zip(&resolved)
+                    .await
+                    .map_err(|e| {
+                        crate::error_payload::anyhow(
+                            "download_failed",
+                            format!("failed to download terraria server zip: {e}"),
+                            None,
+                            Some("Try again; if it persists, clear cache and retry.".to_string()),
+                        )
+                    })?;
+                let extracted = terraria_download::extract_linux_x64_to_cache(
+                    &zip_path,
+                    &resolved.version_id,
+                )
+                .map_err(|e| {
+                    crate::error_payload::anyhow(
+                        "download_failed",
+                        format!("failed to extract terraria server: {e}"),
+                        None,
+                        Some("Clear cache and retry extraction.".to_string()),
+                    )
+                })?;
 
                 // Terraria expects sidecar files next to the binary.
                 // Run from the extracted server root, but use instance-local config/world paths.
@@ -1012,10 +1272,15 @@ impl ProcessManager {
                 let exec_path = &extracted.bin_x86_64;
                 let missing = check_ldd_missing(exec_path)?;
                 if !missing.is_empty() {
-                    anyhow::bail!(
-                        "terraria runtime dependencies missing (try updating the Docker image or installing libs on the host):\n{}",
-                        missing.join("\n")
-                    );
+                    return Err(crate::error_payload::anyhow(
+                        "missing_dependency",
+                        format!("terraria runtime dependencies missing:\n{}", missing.join("\n")),
+                        None,
+                        Some(
+                            "Update the Docker image, or install the listed libraries on the host."
+                                .to_string(),
+                        ),
+                    ));
                 }
 
                 let mut cmd = Command::new(exec_path);
@@ -1081,13 +1346,26 @@ impl ProcessManager {
                     }
                 }
 
-                let mut child = cmd.spawn().with_context(|| {
-                    format!(
-                        "spawn terraria server: exec={} (cwd {})",
-                        exec_path.display(),
-                        extracted.server_root.display()
-                    )
-                })?;
+                let mut child = cmd
+                    .spawn()
+                    .with_context(|| {
+                        format!(
+                            "spawn terraria server: exec={} (cwd {})",
+                            exec_path.display(),
+                            extracted.server_root.display()
+                        )
+                    })
+                    .map_err(|e| {
+                        crate::error_payload::anyhow(
+                            "spawn_failed",
+                            e.to_string(),
+                            None,
+                            Some(
+                                "Ensure the Terraria server binary is executable and dependencies are installed."
+                                    .to_string(),
+                            ),
+                        )
+                    })?;
                 let started = tokio::time::Instant::now();
                 let pid_u32 = child.id();
                 let pgid = pid_u32.map(|p| p as i32);
@@ -1127,6 +1405,7 @@ impl ProcessManager {
                             template_id: ProcessTemplateId(t.template_id.clone()),
                             state: ProcessState::Starting,
                             pid: pid_u32,
+                            resources: None,
                             exit_code: None,
                             message: None,
                             restart,
@@ -1138,6 +1417,10 @@ impl ProcessManager {
                             log_file_tx: Some(log_tx.clone()),
                         },
                     );
+                }
+
+                if let Some(pid) = pid_u32 {
+                    self.spawn_resource_sampler(id.0.clone(), pid);
                 }
 
                 let manager = self.clone();
@@ -1341,6 +1624,7 @@ impl ProcessManager {
                     pid: pid_u32,
                     exit_code: None,
                     message: None,
+                    resources: None,
                 });
             }
 
@@ -1400,7 +1684,15 @@ impl ProcessManager {
 
             let mut child = cmd
                 .spawn()
-                .with_context(|| format!("spawn process: exec={exec} (cwd {cwd})"))?;
+                .with_context(|| format!("spawn process: exec={exec} (cwd {cwd})"))
+                .map_err(|e| {
+                    crate::error_payload::anyhow(
+                        "spawn_failed",
+                        e.to_string(),
+                        None,
+                        Some("Ensure the command exists and is executable.".to_string()),
+                    )
+                })?;
             let started = tokio::time::Instant::now();
             let pid_u32 = child.id();
             let pgid = pid_u32.map(|p| p as i32);
@@ -1440,6 +1732,7 @@ impl ProcessManager {
                         template_id: ProcessTemplateId(t.template_id.clone()),
                         state: ProcessState::Running,
                         pid: pid_u32,
+                        resources: None,
                         exit_code: None,
                         message: None,
                         restart,
@@ -1451,6 +1744,10 @@ impl ProcessManager {
                         log_file_tx: Some(log_tx.clone()),
                     },
                 );
+            }
+
+            if let Some(pid) = pid_u32 {
+                self.spawn_resource_sampler(id.0.clone(), pid);
             }
 
             let manager = self.clone();
@@ -1588,6 +1885,7 @@ impl ProcessManager {
                 pid: pid_u32,
                 exit_code: None,
                 message: None,
+                resources: None,
             })
         }
         .await;
@@ -1609,6 +1907,7 @@ impl ProcessManager {
                             template_id: ProcessTemplateId(t.template_id.clone()),
                             state: ProcessState::Failed,
                             pid: None,
+                            resources: None,
                             exit_code: None,
                             message: Some(msg.clone()),
                             restart,
@@ -1629,6 +1928,7 @@ impl ProcessManager {
                     pid: None,
                     exit_code: None,
                     message: Some(msg),
+                    resources: None,
                 })
             }
         }
@@ -1649,6 +1949,7 @@ impl ProcessManager {
                 pid: e.pid,
                 exit_code: e.exit_code,
                 message: e.message.clone(),
+                resources: e.resources.clone(),
             })
             .collect()
     }
@@ -1662,6 +1963,7 @@ impl ProcessManager {
             pid: e.pid,
             exit_code: e.exit_code,
             message: e.message.clone(),
+            resources: e.resources.clone(),
         })
     }
 
@@ -1683,6 +1985,7 @@ impl ProcessManager {
 
         let mut graceful_sent = false;
         let mut term_sent = false;
+        let template_id: String;
         let pgid: Option<i32>;
         let logs: Arc<Mutex<LogBuffer>>;
         let log_tx: Option<mpsc::UnboundedSender<String>>;
@@ -1702,9 +2005,11 @@ impl ProcessManager {
                     pid: e.pid,
                     exit_code: e.exit_code,
                     message: e.message.clone(),
+                    resources: e.resources.clone(),
                 });
             }
 
+            template_id = e.template_id.0.clone();
             pgid = e.pgid;
             logs = e.logs.clone();
             log_tx = e.log_file_tx.clone();
@@ -1776,6 +2081,25 @@ impl ProcessManager {
             start
         };
 
+        let mut save_cursor = if graceful_sent {
+            logs.lock().await.next_seq.saturating_sub(1)
+        } else {
+            0
+        };
+        let mut save_confirmed = false;
+        let mut save_timeout_warned = false;
+
+        let save_keywords: &[&str] = match template_id.as_str() {
+            "minecraft:vanilla" => &[
+                "saved the game",
+                "saving chunks for level",
+                "all chunks are saved",
+                "saving players",
+            ],
+            "terraria:vanilla" => &["saving world", "world saved"],
+            _ => &[],
+        };
+
         loop {
             if let Some(status) = self.get_status(process_id).await
                 && matches!(status.state, ProcessState::Exited | ProcessState::Failed)
@@ -1784,6 +2108,49 @@ impl ProcessManager {
             }
 
             let now = tokio::time::Instant::now();
+
+            if graceful_sent && !save_keywords.is_empty() && !save_confirmed {
+                if now < term_deadline {
+                    let (lines, next) = logs.lock().await.tail_after(save_cursor, 200);
+                    save_cursor = next;
+                    for line in &lines {
+                        let lower = line.to_ascii_lowercase();
+                        if save_keywords.iter().any(|k| lower.contains(k)) {
+                            save_confirmed = true;
+                            emit(
+                                format!(
+                                    "[alloy-agent] stop: world save confirmed ({})",
+                                    save_keywords
+                                        .iter()
+                                        .find(|k| lower.contains(*k))
+                                        .unwrap_or(&"matched")
+                                ),
+                                logs.clone(),
+                                log_tx.clone(),
+                            )
+                            .await;
+                            let mut inner = self.inner.lock().await;
+                            if let Some(e) = inner.get_mut(process_id) {
+                                e.message = Some("stopping (world saved)".to_string());
+                            }
+                            break;
+                        }
+                    }
+                } else if !save_timeout_warned {
+                    save_timeout_warned = true;
+                    emit(
+                        "[alloy-agent] stop: world save not confirmed before timeout window; shutdown may risk data loss"
+                            .to_string(),
+                        logs.clone(),
+                        log_tx.clone(),
+                    )
+                    .await;
+                    let mut inner = self.inner.lock().await;
+                    if let Some(e) = inner.get_mut(process_id) {
+                        e.message = Some("stopping (save not confirmed)".to_string());
+                    }
+                }
+            }
 
             if !term_sent
                 && now >= term_deadline

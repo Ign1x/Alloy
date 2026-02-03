@@ -9,6 +9,12 @@ service AgentHealthService {
 
 message HealthCheckRequest {}
 
+message PortAvailability {
+  uint32 port = 1;
+  bool available = 2;
+  string error = 3;
+}
+
 message HealthCheckResponse {
   string status = 1;
   string agent_version = 2;
@@ -18,4 +24,6 @@ message HealthCheckResponse {
   bool data_root_writable = 4;
   // Best-effort free bytes at data_root filesystem.
   uint64 data_root_free_bytes = 5;
+  // Best-effort TCP port availability checks (server-selected list).
+  repeated PortAvailability ports = 6;
 }

@@ -10,6 +10,9 @@ package alloy.agent.v1;
 service ProcessService {
   rpc ListTemplates(ListTemplatesRequest) returns (ListTemplatesResponse);
   rpc StartFromTemplate(StartFromTemplateRequest) returns (StartFromTemplateResponse);
+  rpc WarmTemplateCache(WarmTemplateCacheRequest) returns (WarmTemplateCacheResponse);
+  rpc GetCacheStats(GetCacheStatsRequest) returns (GetCacheStatsResponse);
+  rpc ClearCache(ClearCacheRequest) returns (ClearCacheResponse);
   rpc Stop(StopProcessRequest) returns (StopProcessResponse);
   rpc ListProcesses(ListProcessesRequest) returns (ListProcessesResponse);
   rpc GetStatus(GetStatusRequest) returns (GetStatusResponse);
@@ -18,9 +21,36 @@ service ProcessService {
 
 message ListTemplatesRequest {}
 
+enum ParamType {
+  PARAM_TYPE_UNSPECIFIED = 0;
+  PARAM_TYPE_STRING = 1;
+  PARAM_TYPE_INT = 2;
+  PARAM_TYPE_BOOL = 3;
+}
+
+message TemplateParam {
+  string key = 1;
+  string label = 2;
+  ParamType type = 3;
+  bool required = 4;
+  string default_value = 5;
+  // Only used for int params.
+  int64 min_int = 6;
+  int64 max_int = 7;
+  // Optional enum values (for string params).
+  repeated string enum_values = 8;
+  // Whether the param is considered sensitive (e.g. password).
+  bool secret = 9;
+  string placeholder = 10;
+  string help = 11;
+  // Advanced params are hidden unless the user opts in.
+  bool advanced = 12;
+}
+
 message ProcessTemplate {
   string template_id = 1;
   string display_name = 2;
+  repeated TemplateParam params = 3;
 }
 
 message ListTemplatesResponse {
@@ -45,6 +75,17 @@ message ProcessStatus {
   int32 exit_code = 6;
   bool has_exit_code = 7;
   string message = 8;
+  ProcessResources resources = 9;
+}
+
+message ProcessResources {
+  // CPU usage over the last sampling interval, in basis points (1/100 of a percent).
+  uint32 cpu_percent_x100 = 1;
+  // Resident set size in bytes (best-effort).
+  uint64 rss_bytes = 2;
+  // Best-effort IO totals from /proc.
+  uint64 read_bytes = 3;
+  uint64 write_bytes = 4;
 }
 
 message StartFromTemplateRequest {
@@ -54,6 +95,40 @@ message StartFromTemplateRequest {
 
 message StartFromTemplateResponse {
   ProcessStatus status = 1;
+}
+
+message WarmTemplateCacheRequest {
+  string template_id = 1;
+  map<string, string> params = 2;
+}
+
+message WarmTemplateCacheResponse {
+  bool ok = 1;
+  string message = 2;
+}
+
+message CacheEntry {
+  string key = 1;
+  string path = 2;
+  uint64 size_bytes = 3;
+  uint64 last_used_unix_ms = 4;
+}
+
+message GetCacheStatsRequest {}
+
+message GetCacheStatsResponse {
+  repeated CacheEntry entries = 1;
+}
+
+message ClearCacheRequest {
+  // If empty, clear all caches.
+  repeated string keys = 1;
+}
+
+message ClearCacheResponse {
+  bool ok = 1;
+  uint64 freed_bytes = 2;
+  repeated CacheEntry cleared = 3;
 }
 
 message StopProcessRequest {

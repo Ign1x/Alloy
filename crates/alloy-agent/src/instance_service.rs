@@ -2,7 +2,8 @@ use std::{collections::BTreeMap, path::PathBuf};
 
 use alloy_proto::agent_v1::instance_service_server::{InstanceService, InstanceServiceServer};
 use alloy_proto::agent_v1::{
-    CreateInstanceRequest, CreateInstanceResponse, DeleteInstanceRequest, DeleteInstanceResponse,
+    CreateInstanceRequest, CreateInstanceResponse, DeleteInstancePreviewRequest,
+    DeleteInstancePreviewResponse, DeleteInstanceRequest, DeleteInstanceResponse,
     GetInstanceRequest, GetInstanceResponse, InstanceConfig, InstanceInfo, ListInstancesRequest,
     ListInstancesResponse, StartInstanceRequest, StartInstanceResponse, StopInstanceRequest,
     StopInstanceResponse, UpdateInstanceRequest, UpdateInstanceResponse,
@@ -328,6 +329,71 @@ impl InstanceService for InstanceApi {
             .map_err(|e| Status::internal(format!("failed to delete instance: {e}")))?;
 
         Ok(Response::new(DeleteInstanceResponse { ok: true }))
+    }
+
+    async fn delete_preview(
+        &self,
+        request: Request<DeleteInstancePreviewRequest>,
+    ) -> Result<Response<DeleteInstancePreviewResponse>, Status> {
+        let req = request.into_inner();
+        let id = normalize_instance_id(&req.instance_id).map_err(Status::from)?;
+
+        // If running, refuse preview to avoid races and to force explicit stop first.
+        if let Some(st) = self.manager.get_status(&id).await
+            && matches!(
+                st.state,
+                alloy_process::ProcessState::Running
+                    | alloy_process::ProcessState::Starting
+                    | alloy_process::ProcessState::Stopping
+            )
+        {
+            return Err(Status::failed_precondition("instance is running"));
+        }
+
+        let dir = instance_dir(&id).map_err(Status::from)?;
+        if tokio::fs::metadata(&dir).await.is_err() {
+            return Err(Status::not_found("instance not found"));
+        }
+
+        let size_bytes = tokio::task::spawn_blocking({
+            let dir = dir.clone();
+            move || -> u64 {
+                fn walk(path: &std::path::Path) -> u64 {
+                    let meta = match std::fs::symlink_metadata(path) {
+                        Ok(m) => m,
+                        Err(_) => return 0,
+                    };
+                    // Count symlink itself, but don't traverse outside.
+                    if meta.file_type().is_symlink() {
+                        return meta.len();
+                    }
+                    if meta.is_file() {
+                        return meta.len();
+                    }
+                    if !meta.is_dir() {
+                        return 0;
+                    }
+                    let mut sum = 0u64;
+                    let rd = match std::fs::read_dir(path) {
+                        Ok(v) => v,
+                        Err(_) => return 0,
+                    };
+                    for e in rd.flatten() {
+                        sum = sum.saturating_add(walk(&e.path()));
+                    }
+                    sum
+                }
+                walk(&dir)
+            }
+        })
+        .await
+        .unwrap_or(0);
+
+        Ok(Response::new(DeleteInstancePreviewResponse {
+            instance_id: id,
+            path: dir.display().to_string(),
+            size_bytes,
+        }))
     }
 
     async fn update(

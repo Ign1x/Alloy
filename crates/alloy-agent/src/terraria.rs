@@ -12,66 +12,127 @@ pub struct VanillaParams {
 }
 
 pub fn validate_vanilla_params(params: &BTreeMap<String, String>) -> anyhow::Result<VanillaParams> {
+    let mut field_errors = BTreeMap::<String, String>::new();
+
     // Version is currently a server package version like "1453".
     let version = params
         .get("version")
-        .cloned()
-        .unwrap_or_else(|| "1453".to_string());
+        .map(|v| v.trim())
+        .filter(|v| !v.is_empty())
+        .unwrap_or("1453")
+        .to_string();
     if !version.chars().all(|c| c.is_ascii_digit()) {
-        anyhow::bail!("invalid version: {version}");
+        field_errors.insert(
+            "version".to_string(),
+            "Must be a numeric package id like 1453 (1.4.5.3).".to_string(),
+        );
     }
 
-    let port = match params.get("port") {
+    let port = match params
+        .get("port")
+        .map(|v| v.trim())
+        .filter(|v| !v.is_empty())
+    {
         None => 0,
-        Some(v) if v.trim().is_empty() => 0,
-        Some(v) => {
-            let p = v
-                .parse::<u16>()
-                .map_err(|_| anyhow::anyhow!("invalid port"))?;
-            if p < 1024 {
-                anyhow::bail!("port out of range: {p}");
+        Some(raw) => match raw.parse::<u16>() {
+            Ok(0) => 0,
+            Ok(v) if v >= 1024 => v,
+            Ok(v) => {
+                field_errors.insert(
+                    "port".to_string(),
+                    format!("Must be 0 (auto) or in 1024..65535 (got {v})."),
+                );
+                v
             }
-            p
-        }
+            Err(_) => {
+                field_errors.insert(
+                    "port".to_string(),
+                    "Must be an integer (0 for auto, or 1024..65535).".to_string(),
+                );
+                0
+            }
+        },
     };
 
-    let max_players = params
+    let max_players = match params
         .get("max_players")
-        .map(|v| v.parse::<u32>())
-        .transpose()
-        .map_err(|_| anyhow::anyhow!("invalid max_players"))?
-        .unwrap_or(8);
+        .map(|v| v.trim())
+        .filter(|v| !v.is_empty())
+    {
+        None => 8,
+        Some(raw) => match raw.parse::<u32>() {
+            Ok(v) => v,
+            Err(_) => {
+                field_errors.insert(
+                    "max_players".to_string(),
+                    "Must be an integer between 1 and 255.".to_string(),
+                );
+                8
+            }
+        },
+    };
     if !(1..=255).contains(&max_players) {
-        anyhow::bail!("max_players out of range: {max_players}");
+        field_errors.insert(
+            "max_players".to_string(),
+            "Must be between 1 and 255.".to_string(),
+        );
     }
 
     let world_name = params
         .get("world_name")
-        .cloned()
-        .unwrap_or_else(|| "world".to_string());
+        .map(|v| v.trim())
+        .filter(|v| !v.is_empty())
+        .unwrap_or("world")
+        .to_string();
     if world_name.trim().is_empty() {
-        anyhow::bail!("world_name must be non-empty");
+        field_errors.insert("world_name".to_string(), "Must be non-empty.".to_string());
     }
     // Keep world name safe for paths.
     if !world_name
         .chars()
         .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
     {
-        anyhow::bail!("invalid world_name: {world_name}");
+        field_errors.insert(
+            "world_name".to_string(),
+            "Only letters, digits, '-', '_' and '.' are allowed.".to_string(),
+        );
     }
 
     // Terraria uses: 1=Small, 2=Medium, 3=Large.
-    let world_size = params
+    let world_size = match params
         .get("world_size")
-        .map(|v| v.parse::<u8>())
-        .transpose()
-        .map_err(|_| anyhow::anyhow!("invalid world_size"))?
-        .unwrap_or(1);
+        .map(|v| v.trim())
+        .filter(|v| !v.is_empty())
+    {
+        None => 1,
+        Some(raw) => match raw.parse::<u8>() {
+            Ok(v) => v,
+            Err(_) => {
+                field_errors.insert(
+                    "world_size".to_string(),
+                    "Must be 1 (Small), 2 (Medium), or 3 (Large).".to_string(),
+                );
+                1
+            }
+        },
+    };
     if !(1..=3).contains(&world_size) {
-        anyhow::bail!("world_size out of range: {world_size}");
+        field_errors.insert(
+            "world_size".to_string(),
+            "Must be 1 (Small), 2 (Medium), or 3 (Large).".to_string(),
+        );
     }
 
     let password = params.get("password").cloned().filter(|s| !s.is_empty());
+
+    if !field_errors.is_empty() {
+        return Err(crate::error_payload::anyhow(
+            "invalid_param",
+            "invalid terraria params",
+            Some(field_errors),
+            Some("Fix the highlighted fields, then try again.".to_string()),
+        ));
+    }
 
     Ok(VanillaParams {
         version,
@@ -97,7 +158,9 @@ pub fn ensure_vanilla_instance_layout(
     params: &VanillaParams,
 ) -> anyhow::Result<()> {
     fs::create_dir_all(instance_dir)?;
+    fs::create_dir_all(instance_dir.join("config"))?;
     fs::create_dir_all(instance_dir.join("worlds"))?;
+    fs::create_dir_all(instance_dir.join("mods"))?;
 
     // NOTE: The Terraria server is executed from the extracted server root
     // (to keep `monoconfig/assemblies/Content` adjacent to the binary).
@@ -113,9 +176,11 @@ pub fn ensure_vanilla_instance_layout(
     };
     let instance_dir_abs = fs::canonicalize(&instance_dir_abs).unwrap_or(instance_dir_abs);
 
+    let config_dir_abs = instance_dir_abs.join("config");
     let world_path = instance_dir_abs
         .join("worlds")
         .join(format!("{}.wld", params.world_name));
+    let banlist_path = config_dir_abs.join("banlist.txt");
 
     // Minimal, deterministic serverconfig.
     // NOTE: Terraria will autocreate if the world file does not exist.
@@ -124,6 +189,9 @@ pub fn ensure_vanilla_instance_layout(
     cfg.push_str("upnp=0\n");
     cfg.push_str(&format!("port={}\n", params.port));
     cfg.push_str(&format!("maxplayers={}\n", params.max_players));
+    cfg.push_str("npcstream=60\n");
+    cfg.push_str("motd=Alloy Terraria server\n");
+    cfg.push_str(&format!("banlist={}\n", banlist_path.display()));
     if let Some(pw) = &params.password {
         cfg.push_str(&format!("password={}\n", pw));
     }
@@ -134,6 +202,14 @@ pub fn ensure_vanilla_instance_layout(
         cfg.push_str("difficulty=0\n");
     }
 
-    fs::write(instance_dir.join("serverconfig.txt"), cfg.as_bytes())?;
+    // Persist config and banlist under instance config/.
+    let config_dir = instance_dir.join("config");
+    if !config_dir.exists() {
+        fs::create_dir_all(&config_dir)?;
+    }
+    fs::write(config_dir.join("serverconfig.txt"), cfg.as_bytes())?;
+    if !banlist_path.exists() {
+        let _ = fs::write(config_dir.join("banlist.txt"), b"");
+    }
     Ok(())
 }

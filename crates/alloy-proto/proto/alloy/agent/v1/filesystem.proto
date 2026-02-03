@@ -7,8 +7,20 @@ package alloy.agent.v1;
 // This is intentionally scoped to a server-selected root (e.g. ALLOY_DATA_ROOT)
 // and only supports relative paths. No arbitrary host filesystem access.
 service FilesystemService {
+  rpc GetCapabilities(GetCapabilitiesRequest) returns (GetCapabilitiesResponse);
   rpc ListDir(ListDirRequest) returns (ListDirResponse);
   rpc ReadFile(ReadFileRequest) returns (ReadFileResponse);
+  rpc Mkdir(MkdirRequest) returns (MkdirResponse);
+  rpc WriteFile(WriteFileRequest) returns (WriteFileResponse);
+  rpc Rename(RenameRequest) returns (RenameResponse);
+  rpc Remove(RemoveRequest) returns (RemoveResponse);
+}
+
+message GetCapabilitiesRequest {}
+
+message GetCapabilitiesResponse {
+  // Filesystem write operations are disabled by default and must be explicitly enabled.
+  bool write_enabled = 1;
 }
 
 message ListDirRequest {
@@ -39,4 +51,46 @@ message ReadFileResponse {
   bytes data = 1;
   // Total file size in bytes (best-effort).
   uint64 size_bytes = 2;
+}
+
+message MkdirRequest {
+  // Relative path under the scoped root.
+  string path = 1;
+  // Create missing parents.
+  bool recursive = 2;
+}
+
+message MkdirResponse {
+  bool ok = 1;
+}
+
+message WriteFileRequest {
+  // Relative path under the scoped root.
+  string path = 1;
+  bytes data = 2;
+}
+
+message WriteFileResponse {
+  bool ok = 1;
+}
+
+message RenameRequest {
+  // Relative path under the scoped root.
+  string from_path = 1;
+  string to_path = 2;
+}
+
+message RenameResponse {
+  bool ok = 1;
+}
+
+message RemoveRequest {
+  // Relative path under the scoped root.
+  string path = 1;
+  // If true and target is a directory, remove recursively.
+  bool recursive = 2;
+}
+
+message RemoveResponse {
+  bool ok = 1;
 }
