@@ -799,7 +799,11 @@ pub fn router() -> Router<Ctx> {
             // Container-safe: do not hardcode localhost.
             //
             // Local dev default is http://127.0.0.1:50051.
-            // In docker-compose, set ALLOY_AGENT_ENDPOINT=http://alloy-agent:50051.
+            // In this repo's docker-compose (host-networked agent), set:
+            //   ALLOY_AGENT_ENDPOINT=http://host.docker.internal:50051
+            //
+            // If you run both services on the same Docker bridge network, you can also use:
+            //   ALLOY_AGENT_ENDPOINT=http://alloy-agent:50051
             let agent_endpoint = std::env::var("ALLOY_AGENT_ENDPOINT")
                 .unwrap_or_else(|_| "http://127.0.0.1:50051".to_string());
 
