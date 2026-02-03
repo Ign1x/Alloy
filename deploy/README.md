@@ -22,10 +22,36 @@ Build and start:
 docker compose up -d --build
 ```
 
-Stop:
+Stop (keep data):
+
+```bash
+docker compose down
+```
+
+Reset (⚠️ wipes `alloy-agent` `/data` + Postgres volume):
 
 ```bash
 docker compose down -v
+```
+
+## Persistent data (`/data`)
+
+The agent stores **everything** under `ALLOY_DATA_ROOT` (default: `/data` in the Docker image):
+- `instances/<instance_id>/` (worlds/config/logs for each instance)
+- `cache/` (downloaded Minecraft jars / Terraria zips + extracted server roots)
+- `logs/agent.log*` (agent tracing logs)
+
+In `docker-compose.yml`, `/data` is backed by the `alloy-agent-data` volume, so it **persists across container restarts/upgrades**.
+
+Important:
+- `docker compose down -v` deletes volumes, including `alloy-agent-data`, and will permanently remove worlds/instances/cache.
+- For explicit persistence/backups, bind-mount a host directory instead of a named volume, e.g.:
+
+```yaml
+services:
+  alloy-agent:
+    volumes:
+      - ./alloy-data:/data
 ```
 
 ## Verification
@@ -85,6 +111,16 @@ Optional params:
 - `world_size` (default: 1)
 - `password` (optional)
 
+### Terraria version notes
+
+`version` is the **package id** used by Alloy's downloader (not a dotted semver string).
+Examples:
+- `1453` = Terraria `1.4.5.3`
+- `1452` = Terraria `1.4.5.2`
+- `1449` = Terraria `1.4.4.9`
+
+If you know a valid package id, you can use the UI “ADV” switch to type it directly.
+
 Start (rspc):
 
 ```bash
@@ -92,6 +128,17 @@ curl -fsS -X POST -H 'content-type: application/json' \
   --data '{"template_id":"terraria:vanilla","params":{"version":"1453","port":"7777","max_players":"8","world_name":"world","world_size":"1"}}' \
   http://localhost:8080/rspc/process.start
 ```
+
+## Troubleshooting (common)
+
+| What you see | Likely cause | Fix |
+| --- | --- | --- |
+| `download_failed` | No network / upstream blocked | Check DNS + outbound HTTPS connectivity, then retry. |
+| `java_major_mismatch` | Minecraft requires Java X but runtime has Y | Install the required Java (Temurin recommended) or use the provided `alloy-agent` Docker image. |
+| `insufficient_disk` | Low free space under `ALLOY_DATA_ROOT` | Free disk space or mount a larger volume for `/data`. |
+| `spawn_failed` | Missing deps / non-executable server binary | Use Docker image (recommended) or install runtime deps (see `deploy/agent.Dockerfile`: `libicu`, `libssl`, `zlib`, etc). |
+| `read_only` | Control is in read-only mode | Unset `ALLOY_READ_ONLY` and restart `alloy-control`. |
+| FS write operations unavailable | FS write is disabled by default | Set `ALLOY_FS_WRITE_ENABLED=true` on `alloy-agent` (still scoped to `ALLOY_DATA_ROOT`). |
 
 ## Configuration
 

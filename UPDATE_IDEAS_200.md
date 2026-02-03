@@ -13,7 +13,7 @@
 - [x] 008 [P0] agent 退出/崩溃时清理子进程树（避免孤儿进程占端口/写盘）
 - [x] 009 [P0] 端口分配持久化与冲突检测：启动前检查端口占用并给出明确提示
 - [x] 010 [P0] UI 直接展示并复制连接信息（`host:port`）以及默认端口/公网映射提示
-- [ ] 011 [P0] 支持实例参数编辑（端口/内存/世界名等）+ 后端统一校验 + 变更风险提示
+- [x] 011 [P0] 支持实例参数编辑（端口/内存/世界名等）+ 后端统一校验 + 变更风险提示
 - [x] 012 [P0] Terraria 运行依赖自检（缺少动态库/权限时给出明确错误与建议）
 - [x] 013 [P0] Docker runtime 镜像补齐 Terraria 运行依赖库并加一个最小 smoke check（启动后立刻退出也要有日志）
 - [x] 014 [P0] 下载/解压/spawn 错误链路完整透出到 control/web（避免“无日志/没反应”）
@@ -21,38 +21,38 @@
 - [x] 016 [P0] Terraria zip 下载增加重试、超时与原子写入（可选断点续传）
 - [x] 017 [P0] Terraria 解压后校验关键目录/文件（`Content/` `monoconfig/` `assemblies/` `TerrariaServer*`）
 - [x] 018 [P0] 统一 `ALLOY_DATA_ROOT` 解析为绝对路径，避免 cwd 变化导致配置/世界路径错误
-- [ ] 019 [P0] FS API 加强 path traversal 防护（禁止 `..`、禁止访问 data root 外）
-- [ ] 020 [P0] FS API 权限分级（只读 vs 读写），默认只读并可在配置里显式开启写
+- [x] 019 [P0] FS API 加强 path traversal 防护（禁止 `..`、禁止访问 data root 外）
+- [x] 020 [P0] FS API 权限分级（只读 vs 读写），默认只读并可在配置里显式开启写
 - [x] 021 [P0] 在实例目录写入 `run.json`（模板、参数、启动时间、exec、cwd、版本等）便于诊断
 - [x] 022 [P0] 实例增加可编辑的 `display_name`（UI 显示更友好，默认用 instance_id）
-- [ ] 023 [P0] UI 自动刷新做节流/退避（大量实例时避免高频轮询压垮 control/agent）
+- [x] 023 [P0] UI 自动刷新做节流/退避（大量实例时避免高频轮询压垮 control/agent）
 - [x] 024 [P0] 所有 RPC/HTTP 请求加 request-id，并贯穿 tracing 日志便于关联一次操作的全链路
-- [ ] 025 [P0] agent/tracing 日志写文件并支持一键下载“诊断包”（包含版本、配置、最近日志）
-- [ ] 026 [P0] Minecraft Java major 不匹配时，在 UI 给出“需要 Java X/当前 X”的可行动提示
+- [x] 025 [P0] agent/tracing 日志写文件并支持一键下载“诊断包”（包含版本、配置、最近日志）
+- [x] 026 [P0] Minecraft Java major 不匹配时，在 UI 给出“需要 Java X/当前 X”的可行动提示
 - [x] 027 [P0] Minecraft jar 下载失败时显示来源 URL、期望 hash、实际 hash、缓存路径
-- [ ] 028 [P0] 实例删除二次确认：展示将删除的路径/估算大小，避免误删
-- [ ] 029 [P0] stop 后等待“世界保存完成”的 UX（基于日志关键字或等待窗口）并在超时后提示风险
-- [ ] 030 [P0] 进程资源使用采样（CPU/RSS/IO）写入 status，UI 展示基础指标
+- [x] 028 [P0] 实例删除二次确认：展示将删除的路径/估算大小，避免误删
+- [x] 029 [P0] stop 后等待“世界保存完成”的 UX（基于日志关键字或等待窗口）并在超时后提示风险
+- [x] 030 [P0] 进程资源使用采样（CPU/RSS/IO）写入 status，UI 展示基础指标
 - [x] 031 [P0] start 后增加端口监听探测（TCP listen 成功才算 running，否则标记 failed）
-- [ ] 032 [P0] control `/healthz` 扩展：agent 连通性、磁盘空间、data root 权限、端口可用性
-- [ ] 033 [P0] 增加“只下载不启动”按钮（预热缓存，适合离线/快速启动）
-- [ ] 034 [P0] 版本选择防呆：默认只允许下拉；提供“高级模式”才允许手动输入版本
-- [ ] 035 [P0] Terraria `serverconfig.txt` 生成补全更多安全默认值（可选：motd、banlist、npcstream 等）
+- [x] 032 [P0] control `/healthz` 扩展：agent 连通性、磁盘空间、data root 权限、端口可用性
+- [x] 033 [P0] 增加“只下载不启动”按钮（预热缓存，适合离线/快速启动）
+- [x] 034 [P0] 版本选择防呆：默认只允许下拉；提供“高级模式”才允许手动输入版本
+- [x] 035 [P0] Terraria `serverconfig.txt` 生成补全更多安全默认值（可选：motd、banlist、npcstream 等）
 - [x] 036 [P0] UI 对 password/secret 字段默认隐藏（显示/复制按钮），避免肩窥与误分享截图
 - [x] 037 [P0] 持久化审计日志（谁在什么时候 start/stop/delete/改参数），便于追溯
-- [ ] 038 [P0] 为模板引入参数 schema（类型/范围/默认值/secret 标记），后端输出机器可读错误
-- [ ] 039 [P0] Web 表单错误提示定位到具体字段（而不是只有 toast 一行）
+- [x] 038 [P0] 为模板引入参数 schema（类型/范围/默认值/secret 标记），后端输出机器可读错误
+- [x] 039 [P0] Web 表单错误提示定位到具体字段（而不是只有 toast 一行）
 - [x] 040 [P0] 日志 tail 改为增量 cursor（UI 不再每秒拉全量），减少带宽与渲染压力
 - [x] 041 [P0] 日志上限/截断策略可配置（防止高输出进程导致内存膨胀）
 - [x] 042 [P0] 增加 “Download logs/diagnostics” 按钮：导出最近 N 行 + run.json + instance.json
-- [ ] 043 [P0] 统一实例目录结构（如 `worlds/` `config/` `mods/`），跨游戏一致便于通用 UI
+- [x] 043 [P0] 统一实例目录结构（如 `worlds/` `config/` `mods/`），跨游戏一致便于通用 UI
 - [x] 044 [P0] 实例启动前检查磁盘剩余空间，低于阈值直接拒绝并给出阈值/现状
-- [ ] 045 [P0] RSPC/HTTP 层统一错误码（invalid_param/download_failed/spawn_failed/permission_denied…）
+- [x] 045 [P0] RSPC/HTTP 层统一错误码（invalid_param/download_failed/spawn_failed/permission_denied…）
 - [x] 046 [P0] control 支持“只读模式”（维护时禁止 start/stop/delete，仅查看）
 - [x] 047 [P0] 关键操作加速率限制（频繁 start/stop 造成端口抖动、写盘压力）
-- [ ] 048 [P0] 一键“清理缓存”（Minecraft jars / Terraria zips）并显示占用空间与最近使用时间
-- [ ] 049 [P0] docker-compose 文档明确 `/data` 挂载与持久化策略，避免误以为数据在容器内
-- [ ] 050 [P0] 补齐文档：Terraria 版本号说明 + 常见依赖/报错对照表（以本项目运维为中心）
+- [x] 048 [P0] 一键“清理缓存”（Minecraft jars / Terraria zips）并显示占用空间与最近使用时间
+- [x] 049 [P0] docker-compose 文档明确 `/data` 挂载与持久化策略，避免误以为数据在容器内
+- [x] 050 [P0] 补齐文档：Terraria 版本号说明 + 常见依赖/报错对照表（以本项目运维为中心）
 
 ## P1（推荐 / 计划内）
 - [ ] 051 [P1] Terraria 支持更多可选参数（seed/difficulty/journey 等）并映射到 serverconfig
