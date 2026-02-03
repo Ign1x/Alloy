@@ -25,9 +25,222 @@
         }
       })()
     </script>
+    <style>
+      :root {
+        color-scheme: light;
+        --boot-bg: #f8fafc;
+        --boot-fg: #0f172a;
+        --boot-muted: #475569;
+        --boot-card: rgba(255, 255, 255, 0.9);
+        --boot-border: rgba(15, 23, 42, 0.12);
+        --boot-shadow: 0 24px 70px rgba(15, 23, 42, 0.14);
+        --boot-error-bg: rgba(239, 68, 68, 0.08);
+        --boot-error-border: rgba(239, 68, 68, 0.25);
+        --boot-btn-bg: rgba(15, 23, 42, 0.08);
+        --boot-btn-bg-hover: rgba(15, 23, 42, 0.12);
+      }
+
+      html.dark {
+        color-scheme: dark;
+        --boot-bg: #0b1220;
+        --boot-fg: #e2e8f0;
+        --boot-muted: #94a3b8;
+        --boot-card: rgba(15, 23, 42, 0.65);
+        --boot-border: rgba(148, 163, 184, 0.18);
+        --boot-shadow: 0 24px 70px rgba(0, 0, 0, 0.52);
+        --boot-btn-bg: rgba(226, 232, 240, 0.1);
+        --boot-btn-bg-hover: rgba(226, 232, 240, 0.14);
+      }
+
+      #boot {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 32px;
+        background: radial-gradient(1200px 700px at 12% 18%, rgba(59, 130, 246, 0.16), transparent 55%),
+          radial-gradient(900px 600px at 88% 10%, rgba(168, 85, 247, 0.12), transparent 55%), var(--boot-bg);
+        color: var(--boot-fg);
+      }
+
+      #boot .boot-card {
+        width: min(560px, 100%);
+        border-radius: 18px;
+        border: 1px solid var(--boot-border);
+        background: var(--boot-card);
+        box-shadow: var(--boot-shadow);
+        backdrop-filter: blur(14px);
+        -webkit-backdrop-filter: blur(14px);
+        padding: 20px 20px 16px;
+      }
+
+      #boot .boot-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+
+      #boot .boot-title {
+        font-family: Sora, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, sans-serif;
+        font-size: 18px;
+        font-weight: 600;
+        letter-spacing: 0.2px;
+      }
+
+      #boot .boot-subtitle {
+        margin-top: 6px;
+        color: var(--boot-muted);
+        font-family: Manrope, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, sans-serif;
+        font-size: 14px;
+      }
+
+      #boot .boot-error {
+        margin-top: 12px;
+        padding: 12px;
+        border-radius: 14px;
+        border: 1px solid var(--boot-error-border);
+        background: var(--boot-error-bg);
+        font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+        font-size: 12px;
+        line-height: 1.45;
+        white-space: pre-wrap;
+        overflow: auto;
+        max-height: 240px;
+      }
+
+      #boot .boot-actions {
+        margin-top: 12px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+      }
+
+      #boot button {
+        border: 1px solid var(--boot-border);
+        background: var(--boot-btn-bg);
+        color: var(--boot-fg);
+        border-radius: 12px;
+        padding: 8px 10px;
+        font: 600 12px/1.2 Manrope, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, sans-serif;
+        cursor: pointer;
+      }
+
+      #boot button:hover {
+        background: var(--boot-btn-bg-hover);
+      }
+
+      #boot button:focus-visible {
+        outline: 2px solid rgba(59, 130, 246, 0.65);
+        outline-offset: 2px;
+      }
+
+      #boot .boot-hint {
+        margin-top: 12px;
+        color: var(--boot-muted);
+        font-family: Manrope, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, sans-serif;
+        font-size: 12px;
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        #boot {
+          background-attachment: initial;
+        }
+      }
+    </style>
   </head>
   <body>
+    <div id="boot">
+      <div class="boot-card">
+        <div class="boot-row">
+          <div class="boot-title">Alloy</div>
+        </div>
+        <div class="boot-subtitle">Loading…</div>
+        <pre id="boot-error" class="boot-error" hidden></pre>
+        <div id="boot-actions" class="boot-actions" hidden>
+          <button type="button" id="boot-copy">Copy details</button>
+          <button type="button" id="boot-reload">Reload</button>
+        </div>
+        <div class="boot-hint">
+          If this screen stays here, open DevTools Console for details (or rebuild the Docker image to ensure the latest
+          web bundle is running).
+        </div>
+      </div>
+    </div>
     <div id="root"></div>
+    <script>
+      ;(() => {
+        try {
+          const boot = document.getElementById('boot')
+          const errorEl = document.getElementById('boot-error')
+          const actionsEl = document.getElementById('boot-actions')
+          const copyBtn = document.getElementById('boot-copy')
+          const reloadBtn = document.getElementById('boot-reload')
+
+          let lastText = ''
+
+          const normalize = (value) => {
+            if (value == null) return String(value)
+            if (typeof value === 'string') return value
+            if (value instanceof Error) return value.stack || `${value.name}: ${value.message}`
+            try {
+              return JSON.stringify(value, null, 2)
+            } catch {
+              return String(value)
+            }
+          }
+
+          const show = (reason) => {
+            if (!boot || !errorEl || !actionsEl) return
+            const text = normalize(reason)
+            lastText = text
+            errorEl.textContent = text
+            errorEl.hidden = false
+            actionsEl.hidden = false
+            boot.style.display = 'flex'
+          }
+
+          const copy = async (text) => {
+            try {
+              await navigator.clipboard.writeText(text)
+              return
+            } catch {
+              // Fallback: best-effort copy (works in many browsers even without Clipboard API).
+              const ta = document.createElement('textarea')
+              ta.value = text
+              ta.setAttribute('readonly', 'true')
+              ta.style.position = 'fixed'
+              ta.style.top = '-1000px'
+              ta.style.left = '-1000px'
+              document.body.appendChild(ta)
+              ta.select()
+              document.execCommand('copy')
+              document.body.removeChild(ta)
+            }
+          }
+
+          if (copyBtn) {
+            copyBtn.addEventListener('click', () => {
+              if (!lastText) return
+              void copy(lastText)
+            })
+          }
+          if (reloadBtn) reloadBtn.addEventListener('click', () => window.location.reload())
+
+          window.__ALLOY_SHOW_BOOT_ERROR__ = show
+
+          window.addEventListener('error', (ev) => {
+            show(ev.error || ev.message || ev)
+          })
+          window.addEventListener('unhandledrejection', (ev) => {
+            show(ev.reason)
+          })
+        } catch {
+          // Never let the bootstrapper be the reason for a blank screen.
+        }
+      })()
+    </script>
     <script type="module" src="/src/index.tsx"></script>
   </body>
 </html>
