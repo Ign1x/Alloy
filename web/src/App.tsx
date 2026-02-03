@@ -466,6 +466,70 @@ function App() {
     }
   }
 
+  const createInstance = rspc.createMutation(() => 'instance.create')
+  const updateInstance = rspc.createMutation(() => 'instance.update')
+  const startInstance = rspc.createMutation(() => 'instance.start')
+  const restartInstance = rspc.createMutation(() => 'instance.restart')
+  const stopInstance = rspc.createMutation(() => 'instance.stop')
+  const deleteInstance = rspc.createMutation(() => 'instance.delete')
+  const instanceDiagnostics = rspc.createMutation(() => 'instance.diagnostics')
+  const controlDiagnostics = rspc.createQuery(
+    () => ['control.diagnostics', null],
+    () => ({ enabled: isAuthed() && showDiagnosticsModal(), refetchOnWindowFocus: false }),
+  )
+  const [cacheSelection, setCacheSelection] = createSignal<Record<string, boolean>>({})
+
+  const instanceDeletePreview = rspc.createQuery(
+    () => [
+      'instance.deletePreview',
+      {
+        instance_id: confirmDeleteInstanceId() ?? '',
+      },
+    ],
+    () => ({
+      enabled: isAuthed() && !!confirmDeleteInstanceId(),
+      refetchOnWindowFocus: false,
+    }),
+  )
+
+  const warmCache = rspc.createMutation(() => 'process.warmCache')
+  const clearCache = rspc.createMutation(() => 'process.clearCache')
+
+  const [selectedTemplate, setSelectedTemplate] = createSignal<string>('demo:sleep')
+  const [instanceName, setInstanceName] = createSignal<string>('')
+  const [sleepSeconds, setSleepSeconds] = createSignal<string>('60')
+  const [createFormError, setCreateFormError] = createSignal<{ message: string; requestId?: string } | null>(null)
+  const [createFieldErrors, setCreateFieldErrors] = createSignal<Record<string, string>>({})
+  const [editFormError, setEditFormError] = createSignal<{ message: string; requestId?: string } | null>(null)
+  const [editFieldErrors, setEditFieldErrors] = createSignal<Record<string, string>>({})
+  const [editBase, setEditBase] = createSignal<{
+    instance_id: string
+    template_id: string
+    display_name: string | null
+    params: Record<string, string>
+  } | null>(null)
+
+  const [editDisplayName, setEditDisplayName] = createSignal('')
+
+  const [editSleepSeconds, setEditSleepSeconds] = createSignal('60')
+
+  const [editMcVersion, setEditMcVersion] = createSignal('latest_release')
+  const [editMcVersionAdvanced, setEditMcVersionAdvanced] = createSignal(false)
+  const [editMcVersionCustom, setEditMcVersionCustom] = createSignal('')
+  const [editMcMemoryPreset, setEditMcMemoryPreset] = createSignal('2048')
+  const [editMcMemory, setEditMcMemory] = createSignal('2048')
+  const [editMcPort, setEditMcPort] = createSignal('')
+
+  const [editTrVersion, setEditTrVersion] = createSignal('1453')
+  const [editTrVersionAdvanced, setEditTrVersionAdvanced] = createSignal(false)
+  const [editTrVersionCustom, setEditTrVersionCustom] = createSignal('')
+  const [editTrPort, setEditTrPort] = createSignal('')
+  const [editTrMaxPlayers, setEditTrMaxPlayers] = createSignal('8')
+  const [editTrWorldName, setEditTrWorldName] = createSignal('world')
+  const [editTrWorldSize, setEditTrWorldSize] = createSignal('1')
+  const [editTrPassword, setEditTrPassword] = createSignal('')
+  const [editTrPasswordVisible, setEditTrPasswordVisible] = createSignal(false)
+
   const editTemplateId = createMemo(() => editBase()?.template_id ?? null)
 
   const editMcEffectiveVersion = createMemo(() => {
@@ -546,70 +610,6 @@ function App() {
     }
     return Array.from(risky)
   })
-
-  const createInstance = rspc.createMutation(() => 'instance.create')
-  const updateInstance = rspc.createMutation(() => 'instance.update')
-  const startInstance = rspc.createMutation(() => 'instance.start')
-  const restartInstance = rspc.createMutation(() => 'instance.restart')
-  const stopInstance = rspc.createMutation(() => 'instance.stop')
-  const deleteInstance = rspc.createMutation(() => 'instance.delete')
-  const instanceDiagnostics = rspc.createMutation(() => 'instance.diagnostics')
-  const controlDiagnostics = rspc.createQuery(
-    () => ['control.diagnostics', null],
-    () => ({ enabled: isAuthed() && showDiagnosticsModal(), refetchOnWindowFocus: false }),
-  )
-  const [cacheSelection, setCacheSelection] = createSignal<Record<string, boolean>>({})
-
-  const instanceDeletePreview = rspc.createQuery(
-    () => [
-      'instance.deletePreview',
-      {
-        instance_id: confirmDeleteInstanceId() ?? '',
-      },
-    ],
-    () => ({
-      enabled: isAuthed() && !!confirmDeleteInstanceId(),
-      refetchOnWindowFocus: false,
-    }),
-  )
-
-  const warmCache = rspc.createMutation(() => 'process.warmCache')
-  const clearCache = rspc.createMutation(() => 'process.clearCache')
-
-  const [selectedTemplate, setSelectedTemplate] = createSignal<string>('demo:sleep')
-  const [instanceName, setInstanceName] = createSignal<string>('')
-  const [sleepSeconds, setSleepSeconds] = createSignal<string>('60')
-  const [createFormError, setCreateFormError] = createSignal<{ message: string; requestId?: string } | null>(null)
-  const [createFieldErrors, setCreateFieldErrors] = createSignal<Record<string, string>>({})
-  const [editFormError, setEditFormError] = createSignal<{ message: string; requestId?: string } | null>(null)
-  const [editFieldErrors, setEditFieldErrors] = createSignal<Record<string, string>>({})
-  const [editBase, setEditBase] = createSignal<{
-    instance_id: string
-    template_id: string
-    display_name: string | null
-    params: Record<string, string>
-  } | null>(null)
-
-  const [editDisplayName, setEditDisplayName] = createSignal('')
-
-  const [editSleepSeconds, setEditSleepSeconds] = createSignal('60')
-
-  const [editMcVersion, setEditMcVersion] = createSignal('latest_release')
-  const [editMcVersionAdvanced, setEditMcVersionAdvanced] = createSignal(false)
-  const [editMcVersionCustom, setEditMcVersionCustom] = createSignal('')
-  const [editMcMemoryPreset, setEditMcMemoryPreset] = createSignal('2048')
-  const [editMcMemory, setEditMcMemory] = createSignal('2048')
-  const [editMcPort, setEditMcPort] = createSignal('')
-
-  const [editTrVersion, setEditTrVersion] = createSignal('1453')
-  const [editTrVersionAdvanced, setEditTrVersionAdvanced] = createSignal(false)
-  const [editTrVersionCustom, setEditTrVersionCustom] = createSignal('')
-  const [editTrPort, setEditTrPort] = createSignal('')
-  const [editTrMaxPlayers, setEditTrMaxPlayers] = createSignal('8')
-  const [editTrWorldName, setEditTrWorldName] = createSignal('world')
-  const [editTrWorldSize, setEditTrWorldSize] = createSignal('1')
-  const [editTrPassword, setEditTrPassword] = createSignal('')
-  const [editTrPasswordVisible, setEditTrPasswordVisible] = createSignal(false)
 
   const [mcEula, setMcEula] = createSignal(false)
   const [mcVersion, setMcVersion] = createSignal('latest_release')
