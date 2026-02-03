@@ -766,7 +766,11 @@ function App() {
       },
     ],
     () => ({
-      enabled: isAuthed() && tab() === 'files' && !!selectedFilePath(),
+      enabled:
+        isAuthed() &&
+        tab() === 'files' &&
+        !!selectedFilePath() &&
+        !(selectedFilePath() ?? '').toLowerCase().endsWith('.log'),
       refetchOnWindowFocus: false,
       staleTime: 0,
     }),
@@ -774,6 +778,8 @@ function App() {
 
   const [logCursor, setLogCursor] = createSignal<string | null>(null)
   const [liveTail, setLiveTail] = createSignal(true)
+  const MAX_LOG_LINES = 2000
+  const [logLines, setLogLines] = createSignal<string[]>([])
   const logTail = rspc.createQuery(
     () => [
       'log.tailFile',
@@ -791,14 +797,35 @@ function App() {
   )
 
   createEffect(() => {
+    if (logCursor() !== null) return
+    setLogLines([])
+  })
+
+  createEffect(() => {
+    const lines = logTail.data?.lines
+    if (!lines || lines.length === 0) return
+    setLogLines((prev) => {
+      const next = [...prev, ...lines]
+      if (next.length <= MAX_LOG_LINES) return next
+      return next.slice(next.length - MAX_LOG_LINES)
+    })
+  })
+
+  createEffect(() => {
     if (!liveTail()) return
     const next = logTail.data?.next_cursor
     if (next) setLogCursor(next)
   })
 
   const visibleText = createMemo(() => {
-    if (!selectedFilePath()) return ''
-    if (logTail.data?.lines) return logTail.data.lines.join('\n')
+    const path = selectedFilePath()
+    if (!path) return ''
+    if (path.toLowerCase().endsWith('.log')) {
+      const lines = logLines()
+      if (lines.length > 0) return lines.join('\n')
+      if (logTail.isPending) return 'loading...'
+      return '(no log output yet)'
+    }
     return fileText.data?.text ?? ''
   })
 
@@ -1553,6 +1580,44 @@ function App() {
                                           pid {i.status?.pid}
                                         </span>
                                       </Show>
+                                      <Show when={instancePort(i)}>
+                                        {(p) => {
+                                          const addr = `${connectHost()}:${p()}`
+                                          return (
+                                            <span
+                                              class="group inline-flex max-w-full items-center gap-1 rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 font-mono text-slate-700 transition-colors hover:bg-white dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-200 dark:hover:bg-slate-900"
+                                              title="Click to copy connection address"
+                                              role="button"
+                                              tabIndex={0}
+                                              onClick={(e) => {
+                                                e.preventDefault()
+                                                e.stopPropagation()
+                                                void safeCopy(addr)
+                                                pushToast('success', 'Copied address', addr)
+                                              }}
+                                              onKeyDown={(e) => {
+                                                if (e.key !== 'Enter' && e.key !== ' ') return
+                                                e.preventDefault()
+                                                e.stopPropagation()
+                                                void safeCopy(addr)
+                                                pushToast('success', 'Copied address', addr)
+                                              }}
+                                            >
+                                              <span class="truncate">{addr}</span>
+                                              <svg
+                                                xmlns="http://www.w3.org/2000/svg"
+                                                viewBox="0 0 20 20"
+                                                fill="currentColor"
+                                                class="h-3 w-3 flex-none opacity-60 group-hover:opacity-100"
+                                                aria-hidden="true"
+                                              >
+                                                <path d="M5.75 2A2.75 2.75 0 003 4.75v9.5A2.75 2.75 0 005.75 17h1.5a.75.75 0 000-1.5h-1.5c-.69 0-1.25-.56-1.25-1.25v-9.5c0-.69.56-1.25 1.25-1.25h5.5c.69 0 1.25.56 1.25 1.25v1a.75.75 0 001.5 0v-1A2.75 2.75 0 0011.25 2h-5.5z" />
+                                                <path d="M8.75 6A2.75 2.75 0 006 8.75v6.5A2.75 2.75 0 008.75 18h5.5A2.75 2.75 0 0017 15.25v-6.5A2.75 2.75 0 0014.25 6h-5.5z" />
+                                              </svg>
+                                            </span>
+                                          )
+                                        }}
+                                      </Show>
                                     </div>
                                   </div>
 	                                  <span
@@ -1658,18 +1723,6 @@ function App() {
 	                                  >
 	                                    RESTART
 	                                  </button>
-	                                </Show>
-
-	                                <Show when={instancePort(i)}>
-	                                  {(p) => (
-	                                    <button
-	                                      class="rounded-xl border border-slate-200 bg-white/70 px-3 py-2 text-xs font-medium text-slate-800 shadow-sm transition-all duration-150 hover:bg-white hover:shadow active:scale-[0.98] disabled:opacity-50 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:shadow-none dark:hover:bg-slate-900"
-	                                      title={`Copy ${connectHost()}:${p()}`}
-	                                      onClick={() => safeCopy(`${connectHost()}:${p()}`)}
-	                                    >
-	                                      ADDR
-	                                    </button>
-	                                  )}
 	                                </Show>
 
 	                                <button
