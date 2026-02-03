@@ -255,7 +255,7 @@ impl InstanceService for InstanceApi {
         let id = normalize_instance_id(&req.instance_id).map_err(Status::from)?;
         let mut inst = load_instance(&id).await?;
 
-        // If port was omitted (blank/AUTO), assign once and persist.
+        // If port was omitted/blank, assign once and persist.
         ensure_persisted_port(&mut inst).await?;
 
         let status = self
@@ -359,7 +359,7 @@ impl InstanceService for InstanceApi {
         )
         .map_err(|e| Status::invalid_argument(e.to_string()))?;
 
-        // If port was omitted (blank/AUTO), assign once and persist.
+        // If port was omitted/blank, assign once and persist.
         ensure_persisted_port(&mut inst).await?;
 
         save_instance(&inst).await?;

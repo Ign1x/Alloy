@@ -763,7 +763,7 @@ function App() {
                               class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-amber-500/40 focus:outline-none focus:ring-1 focus:ring-amber-500/20 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200"
                                 value={mcPort()}
                                 onInput={(e) => setMcPort(e.currentTarget.value)}
-                                placeholder="AUTO"
+                                placeholder="25565"
                             />
                           </label>
 
@@ -792,7 +792,7 @@ function App() {
                                 class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-amber-500/40 focus:outline-none focus:ring-1 focus:ring-amber-500/20 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200"
                                 value={trPort()}
                                 onInput={(e) => setTrPort(e.currentTarget.value)}
-                                placeholder="AUTO"
+                                placeholder="7777"
                               />
                             </label>
                           </div>
@@ -867,7 +867,6 @@ function App() {
                             params.accept_eula = 'true'
                             params.version = mcVersion() || 'latest_release'
                             params.memory_mb = mcMemory() || '2048'
-                            // Blank port means auto-allocate on agent.
                             if (mcPort().trim()) params.port = mcPort().trim()
                           } else if (template_id === 'terraria:vanilla') {
                             setTrError(null)
@@ -891,7 +890,6 @@ function App() {
                     <>
                       <div class="flex items-center justify-between">
                         <div class="text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">Instances</div>
-                        <div class="text-xs text-slate-500">auto</div>
                       </div>
 
                       <div class="mt-3 grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">

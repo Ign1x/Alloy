@@ -35,7 +35,7 @@ pub fn validate_vanilla_params(params: &BTreeMap<String, String>) -> anyhow::Res
     }
 
     let port = match params.get("port") {
-        // Allow omitting port for auto-allocation.
+        // Allow omitting port for allocation.
         None => 0,
         Some(v) if v.trim().is_empty() => 0,
         Some(v) => {
