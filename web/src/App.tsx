@@ -213,22 +213,63 @@ function App() {
   let loginUsernameEl: HTMLInputElement | undefined
 
   const THEME_STORAGE_KEY = 'alloy.theme'
-  const [theme, setTheme] = createSignal<'light' | 'dark'>((() => {
+  type ThemePreference = 'system' | 'light' | 'dark'
+  const [themePref, setThemePref] = createSignal<ThemePreference>((() => {
     try {
       const saved = localStorage.getItem(THEME_STORAGE_KEY)
-      if (saved === 'light' || saved === 'dark') return saved
+      if (saved === 'light' || saved === 'dark' || saved === 'system') return saved
     } catch {
       // ignore
     }
-    const systemDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
-    return systemDark ? 'dark' : 'light'
+    return 'system'
+  })())
+
+  const [systemPrefersDark, setSystemPrefersDark] = createSignal<boolean>((() => {
+    try {
+      return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+    } catch {
+      return false
+    }
   })())
 
   createEffect(() => {
-    const next = theme()
-    document.documentElement.classList.toggle('dark', next === 'dark')
+    const mql = window.matchMedia?.('(prefers-color-scheme: dark)')
+    if (!mql) return
+
+    const onChange = (ev: MediaQueryListEvent) => setSystemPrefersDark(ev.matches)
+    setSystemPrefersDark(mql.matches)
+
     try {
-      localStorage.setItem(THEME_STORAGE_KEY, next)
+      mql.addEventListener('change', onChange)
+      return () => mql.removeEventListener('change', onChange)
+    } catch {
+      mql.addListener(onChange)
+      return () => mql.removeListener(onChange)
+    }
+  })
+
+  const theme = createMemo<'light' | 'dark'>(() => {
+    const pref = themePref()
+    if (pref === 'system') return systemPrefersDark() ? 'dark' : 'light'
+    return pref
+  })
+
+  const themeButtonTitle = createMemo(() => {
+    const pref = themePref()
+    const applied = theme()
+    const appliedLabel = applied === 'dark' ? 'Dark' : 'Light'
+    const current = pref === 'system' ? `System (${appliedLabel})` : pref === 'dark' ? 'Dark' : 'Light'
+    const next = pref === 'system' ? 'Light' : pref === 'light' ? 'Dark' : 'System'
+    return `Theme: ${current}. Click to switch to ${next}.`
+  })
+
+  createEffect(() => {
+    document.documentElement.classList.toggle('dark', theme() === 'dark')
+  })
+
+  createEffect(() => {
+    try {
+      localStorage.setItem(THEME_STORAGE_KEY, themePref())
     } catch {
       // ignore
     }
@@ -934,21 +975,12 @@ function App() {
           <div class="mt-auto flex w-full flex-col items-center gap-2 pb-2">
             <button
               class="rounded-xl border border-slate-200 bg-white/70 p-2 text-slate-700 shadow-sm transition-colors hover:bg-white dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-300 dark:hover:bg-slate-900"
-              title={theme() === 'dark' ? 'Switch to light' : 'Switch to dark'}
-              onClick={() => setTheme(theme() === 'dark' ? 'light' : 'dark')}
+              title={themeButtonTitle()}
+              onClick={() =>
+                setThemePref((prev) => (prev === 'system' ? 'light' : prev === 'light' ? 'dark' : 'system'))
+              }
             >
-              <Show
-                when={theme() === 'dark'}
-                fallback={
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-                    <path
-                      fill-rule="evenodd"
-                      d="M10 6.5a3.5 3.5 0 100 7 3.5 3.5 0 000-7zM5 10a5 5 0 1110 0 5 5 0 01-10 0z"
-                      clip-rule="evenodd"
-                    />
-                  </svg>
-                }
-              >
+              {themePref() === 'dark' ? (
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
                   <path
                     fill-rule="evenodd"
@@ -956,7 +988,23 @@ function App() {
                     clip-rule="evenodd"
                   />
                 </svg>
-              </Show>
+              ) : themePref() === 'light' ? (
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
+                  <path
+                    fill-rule="evenodd"
+                    d="M10 2a.75.75 0 01.75.75V4a.75.75 0 01-1.5 0V2.75A.75.75 0 0110 2zm0 12a4 4 0 100-8 4 4 0 000 8zm0 3a.75.75 0 01.75.75V18a.75.75 0 01-1.5 0v-1.25A.75.75 0 0110 17zm8-7a.75.75 0 01-.75.75H16a.75.75 0 010-1.5h1.25A.75.75 0 0118 10zm-14.5 0a.75.75 0 01-.75.75H2.75a.75.75 0 010-1.5H3.5A.75.75 0 014.25 10zm10.657-5.657a.75.75 0 010 1.06l-.884.884a.75.75 0 11-1.06-1.06l.884-.884a.75.75 0 011.06 0zM6.287 14.713a.75.75 0 010 1.06l-.884.884a.75.75 0 11-1.06-1.06l.884-.884a.75.75 0 011.06 0zm9.37 0a.75.75 0 01-1.06 0l-.884-.884a.75.75 0 111.06-1.06l.884.884a.75.75 0 010 1.06zm-9.37-9.37a.75.75 0 01-1.06 0l-.884-.884a.75.75 0 011.06-1.06l.884.884a.75.75 0 010 1.06z"
+                    clip-rule="evenodd"
+                  />
+                </svg>
+              ) : (
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
+                  <path
+                    fill-rule="evenodd"
+                    d="M4.75 3A2.75 2.75 0 002 5.75v6.5A2.75 2.75 0 004.75 15H9v1.25H7.75a.75.75 0 000 1.5h4.5a.75.75 0 000-1.5H11V15h4.25A2.75 2.75 0 0018 12.25v-6.5A2.75 2.75 0 0015.25 3H4.75zm-.25 2.75c0-.69.56-1.25 1.25-1.25h8.5c.69 0 1.25.56 1.25 1.25v6.5c0 .69-.56 1.25-1.25 1.25h-8.5c-.69 0-1.25-.56-1.25-1.25v-6.5z"
+                    clip-rule="evenodd"
+                  />
+                </svg>
+              )}
             </button>
           </div>
         </nav>
@@ -981,21 +1029,12 @@ function App() {
             <div class="flex items-center gap-3">
               <button
                 class="sm:hidden rounded-xl border border-slate-200 bg-white/70 p-2 text-slate-700 shadow-sm transition-colors hover:bg-white dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-300 dark:hover:bg-slate-900"
-                title={theme() === 'dark' ? 'Switch to light' : 'Switch to dark'}
-                onClick={() => setTheme(theme() === 'dark' ? 'light' : 'dark')}
+                title={themeButtonTitle()}
+                onClick={() =>
+                  setThemePref((prev) => (prev === 'system' ? 'light' : prev === 'light' ? 'dark' : 'system'))
+                }
               >
-                <Show
-                  when={theme() === 'dark'}
-                  fallback={
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-                      <path
-                        fill-rule="evenodd"
-                        d="M10 6.5a3.5 3.5 0 100 7 3.5 3.5 0 000-7zM5 10a5 5 0 1110 0 5 5 0 01-10 0z"
-                        clip-rule="evenodd"
-                      />
-                    </svg>
-                  }
-                >
+                {themePref() === 'dark' ? (
                   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
                     <path
                       fill-rule="evenodd"
@@ -1003,7 +1042,23 @@ function App() {
                       clip-rule="evenodd"
                     />
                   </svg>
-                </Show>
+                ) : themePref() === 'light' ? (
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
+                    <path
+                      fill-rule="evenodd"
+                      d="M10 2a.75.75 0 01.75.75V4a.75.75 0 01-1.5 0V2.75A.75.75 0 0110 2zm0 12a4 4 0 100-8 4 4 0 000 8zm0 3a.75.75 0 01.75.75V18a.75.75 0 01-1.5 0v-1.25A.75.75 0 0110 17zm8-7a.75.75 0 01-.75.75H16a.75.75 0 010-1.5h1.25A.75.75 0 0118 10zm-14.5 0a.75.75 0 01-.75.75H2.75a.75.75 0 010-1.5H3.5A.75.75 0 014.25 10zm10.657-5.657a.75.75 0 010 1.06l-.884.884a.75.75 0 11-1.06-1.06l.884-.884a.75.75 0 011.06 0zM6.287 14.713a.75.75 0 010 1.06l-.884.884a.75.75 0 11-1.06-1.06l.884-.884a.75.75 0 011.06 0zm9.37 0a.75.75 0 01-1.06 0l-.884-.884a.75.75 0 111.06-1.06l.884.884a.75.75 0 010 1.06zm-9.37-9.37a.75.75 0 01-1.06 0l-.884-.884a.75.75 0 011.06-1.06l.884.884a.75.75 0 010 1.06z"
+                      clip-rule="evenodd"
+                    />
+                  </svg>
+                ) : (
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
+                    <path
+                      fill-rule="evenodd"
+                      d="M4.75 3A2.75 2.75 0 002 5.75v6.5A2.75 2.75 0 004.75 15H9v1.25H7.75a.75.75 0 000 1.5h4.5a.75.75 0 000-1.5H11V15h4.25A2.75 2.75 0 0018 12.25v-6.5A2.75 2.75 0 0015.25 3H4.75zm-.25 2.75c0-.69.56-1.25 1.25-1.25h8.5c.69 0 1.25.56 1.25 1.25v6.5c0 .69-.56 1.25-1.25 1.25h-8.5c-.69 0-1.25-.56-1.25-1.25v-6.5z"
+                      clip-rule="evenodd"
+                    />
+                  </svg>
+                )}
               </button>
 
               <Show when={!authLoading()} fallback={<div class="h-8 w-28 animate-pulse rounded-lg bg-slate-200 dark:bg-slate-800" />}>
