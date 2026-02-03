@@ -149,7 +149,11 @@ async fn init_db_and_migrate() -> anyhow::Result<AppState> {
         })
         .on_conflict(
             sea_orm::sea_query::OnConflict::columns([alloy_db::entities::nodes::Column::Name])
-                .do_nothing()
+                .update_columns([
+                    alloy_db::entities::nodes::Column::Endpoint,
+                    alloy_db::entities::nodes::Column::Enabled,
+                    alloy_db::entities::nodes::Column::UpdatedAt,
+                ])
                 .to_owned(),
         )
         .exec(&db)
