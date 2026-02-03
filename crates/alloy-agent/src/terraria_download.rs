@@ -1,9 +1,17 @@
 #![allow(dead_code)]
 
-use std::{fs, io::Write, path::PathBuf};
+use std::{
+    collections::HashMap,
+    fs,
+    io::Write,
+    path::PathBuf,
+    sync::{Arc, OnceLock},
+    time::Duration,
+};
 
 use anyhow::Context;
 use reqwest::Url;
+use tokio::sync::Mutex;
 
 pub struct ResolvedServerZip {
     pub version_id: String,
@@ -21,6 +29,29 @@ pub fn cache_dir() -> PathBuf {
         .join("cache")
         .join("terraria")
         .join("vanilla")
+}
+
+fn download_locks() -> &'static std::sync::Mutex<HashMap<String, Arc<Mutex<()>>>> {
+    static LOCKS: OnceLock<std::sync::Mutex<HashMap<String, Arc<Mutex<()>>>>> = OnceLock::new();
+    LOCKS.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
+}
+
+fn lock_for(key: &str) -> Arc<Mutex<()>> {
+    let mut map = download_locks().lock().unwrap_or_else(|e| e.into_inner());
+    map.entry(key.to_string())
+        .or_insert_with(|| Arc::new(Mutex::new(())))
+        .clone()
+}
+
+fn http_client() -> &'static reqwest::Client {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .user_agent("alloy-agent")
+            .timeout(Duration::from_secs(15 * 60))
+            .build()
+            .expect("failed to build reqwest client")
+    })
 }
 
 pub fn resolve_server_zip(version: &str) -> anyhow::Result<ResolvedServerZip> {
@@ -46,16 +77,54 @@ pub async fn ensure_server_zip(resolved: &ResolvedServerZip) -> anyhow::Result<P
         return Ok(zip_path);
     }
 
+    let lock_key = format!("terraria:vanilla:{}", resolved.version_id);
+    let lock = lock_for(&lock_key);
+    let _guard = lock.lock().await;
+    if zip_path.exists() {
+        return Ok(zip_path);
+    }
+
     fs::create_dir_all(zip_path.parent().unwrap())?;
 
     let url = Url::parse(&resolved.zip_url)?;
-    let bytes = reqwest::get(url)
-        .await
-        .context("download terraria server zip")?
-        .error_for_status()?
-        .bytes()
-        .await
-        .context("read terraria server zip body")?;
+    let mut last_err: Option<anyhow::Error> = None;
+    let mut bytes: Option<Vec<u8>> = None;
+    for attempt in 1..=3_u32 {
+        let res: anyhow::Result<Vec<u8>> = (async {
+            let resp = http_client()
+                .get(url.clone())
+                .send()
+                .await
+                .context("download terraria server zip")?
+                .error_for_status()
+                .context("download terraria server zip (status)")?;
+            let b = resp
+                .bytes()
+                .await
+                .context("read terraria server zip body")?;
+            Ok(b.to_vec())
+        })
+        .await;
+
+        match res {
+            Ok(b) => {
+                bytes = Some(b);
+                break;
+            }
+            Err(e) => {
+                last_err = Some(e);
+                if attempt < 3 {
+                    tokio::time::sleep(Duration::from_millis(
+                        200_u64.saturating_mul(2_u64.pow(attempt - 1)),
+                    ))
+                    .await;
+                }
+            }
+        }
+    }
+
+    let bytes =
+        bytes.ok_or_else(|| last_err.unwrap_or_else(|| anyhow::anyhow!("download failed")))?;
 
     // No official first-party checksums are provided by Re-Logic for the ZIP.
     // We store the bytes as-is and rely on TLS + stable URL pattern.
@@ -81,6 +150,10 @@ pub fn extract_linux_x64_to_cache(
     // Best-effort cache validation: ensure we didn't leave a half-extracted directory behind.
     // (Terraria's server package layout has changed over time; keep the check loose.)
     let looks_complete = bin_x86_64.exists()
+        && server_root.join("Content").is_dir()
+        && (server_root.join("monoconfig").is_dir()
+            || server_root.join("assemblies").is_dir()
+            || server_root.join("lib64").is_dir())
         && (server_root.join("lib64").is_dir()
             || server_root.join("FNA.dll").is_file()
             || server_root.join("TerrariaServer.exe").is_file());
@@ -163,6 +236,14 @@ pub fn extract_linux_x64_to_cache(
     if !bin_x86_64.exists() {
         anyhow::bail!(
             "terraria server Linux binary not found after extract: {}",
+            zip_path.display()
+        );
+    }
+
+    if !server_root.join("Content").is_dir() {
+        let _ = fs::remove_dir_all(&server_root);
+        anyhow::bail!(
+            "terraria server extraction missing Content/ directory: {}",
             zip_path.display()
         );
     }

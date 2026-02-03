@@ -100,15 +100,15 @@ Notes:
 
 ### Phase 3 - Control plane (Axum + rspc + DB)
 - [ ] DB schema design (SeaORM): users, nodes, instances, games, tokens (DEFERRED)
-  - [ ] Auth/session model (cookie/JWT) and security policy
-  - [ ] rspc router skeleton + TS bindings generation strategy
+  - [x] Auth/session model (cookie/JWT) and security policy
+  - [x] rspc router skeleton + TS bindings generation strategy
   - [x] Implement basic Axum server + `/healthz`
   - [x] Add cookie-based auth endpoints (`/auth/*`) with refresh rotation + CSRF middleware
   - [x] Protect `/rspc` procedures with access-JWT cookie (allowlist ping/health)
 
 ### Phase 4 - Web UI (SolidJS)
 - [x] Scaffold SolidJS + Tailwind v4 (Vite)
-- [ ] Login + dashboard + node list
+- [x] Login + dashboard + node list
   - [x] Login UI + session chip + modal
   - [x] Auto-refresh access token on rspc 401 (single retry) + auth-expired UX
   - [x] Instance manager (create/list/start/stop/delete)
@@ -165,7 +165,7 @@ TODO:
 
 ### Phase 5 - Game plugins
 - [ ] Minecraft adapter (parity with legacy core features)
-- [ ] Terraria adapter (prove multi-game extensibility)
+- [x] Terraria adapter (prove multi-game extensibility)
 
 ---
 
@@ -210,11 +210,11 @@ Defaults (recorded):
 - Password: optional
 
 TODO:
-- [ ] Add `terraria:vanilla` template and param validation in agent
-- [ ] Implement Terraria server package resolve + download/cache (+ checksum verify if available)
-- [ ] Create instance layout under `ALLOY_DATA_ROOT` (world dir + `serverconfig.txt` + log file target)
-- [ ] Start server from instance dir via `./TerrariaServer.bin.x86_64 -config serverconfig.txt` (or equivalent)
-- [ ] Stop via stdin `exit\n` then TERM/KILL fallback
-- [ ] Update Docker agent image/runtime prerequisites if needed and mount `/data`
-- [ ] Update web UI: add terraria start form (version/port/max_players/world/password)
-- [ ] Verify end-to-end in docker-compose and check off this section
+- [x] Add `terraria:vanilla` template and param validation in agent
+- [x] Implement Terraria server package resolve + download/cache (+ checksum verify if available)
+- [x] Create instance layout under `ALLOY_DATA_ROOT` (world dir + `serverconfig.txt` + log file target)
+- [x] Start server from instance dir via `./TerrariaServer.bin.x86_64 -config serverconfig.txt` (or equivalent)
+- [x] Stop via stdin `exit\n` then TERM/KILL fallback
+- [x] Update Docker agent image/runtime prerequisites if needed and mount `/data`
+- [x] Update web UI: add terraria start form (version/port/max_players/world/password)
+- [x] Verify end-to-end in docker-compose and check off this section

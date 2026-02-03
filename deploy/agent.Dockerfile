@@ -23,7 +23,14 @@ FROM debian:bookworm-slim AS runtime
 WORKDIR /app
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates \
+  && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    libcurl4 \
+    libgcc-s1 \
+    libicu72 \
+    libssl3 \
+    libstdc++6 \
+    zlib1g \
   && rm -rf /var/lib/apt/lists/*
 
 # Ship Java 21 without relying on Debian packages (bookworm doesn't include 21).

@@ -1,10 +1,18 @@
 #![allow(dead_code)]
 
-use std::{fs, io::Write, path::PathBuf};
+use std::{
+    collections::HashMap,
+    fs,
+    io::Write,
+    path::PathBuf,
+    sync::{Arc, OnceLock},
+    time::Duration,
+};
 
 use anyhow::Context;
 use reqwest::Url;
 use sha1::Digest;
+use tokio::sync::Mutex;
 
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct VersionManifestV2 {
@@ -111,6 +119,29 @@ pub fn cache_dir() -> PathBuf {
         .join("vanilla")
 }
 
+fn download_locks() -> &'static std::sync::Mutex<HashMap<String, Arc<Mutex<()>>>> {
+    static LOCKS: OnceLock<std::sync::Mutex<HashMap<String, Arc<Mutex<()>>>>> = OnceLock::new();
+    LOCKS.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
+}
+
+fn lock_for(key: &str) -> Arc<Mutex<()>> {
+    let mut map = download_locks().lock().unwrap_or_else(|e| e.into_inner());
+    map.entry(key.to_string())
+        .or_insert_with(|| Arc::new(Mutex::new(())))
+        .clone()
+}
+
+fn http_client() -> &'static reqwest::Client {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .user_agent("alloy-agent")
+            .timeout(Duration::from_secs(15 * 60))
+            .build()
+            .expect("failed to build reqwest client")
+    })
+}
+
 pub async fn ensure_server_jar(resolved: &ResolvedServerJar) -> anyhow::Result<PathBuf> {
     let sha1_hex = &resolved.sha1;
     let jar_path = cache_dir().join(sha1_hex).join("server.jar");
@@ -118,29 +149,70 @@ pub async fn ensure_server_jar(resolved: &ResolvedServerJar) -> anyhow::Result<P
         return Ok(jar_path);
     }
 
+    let lock_key = format!("minecraft:vanilla:{sha1_hex}");
+    let lock = lock_for(&lock_key);
+    let _guard = lock.lock().await;
+    if jar_path.exists() {
+        return Ok(jar_path);
+    }
+
     fs::create_dir_all(jar_path.parent().unwrap())?;
 
     let url = Url::parse(&resolved.jar_url)?;
-    let bytes = reqwest::get(url)
-        .await
-        .context("download server.jar")?
-        .error_for_status()?
-        .bytes()
-        .await
-        .context("read server.jar body")?;
+    let mut last_err: Option<anyhow::Error> = None;
+    let mut bytes: Option<Vec<u8>> = None;
+    for attempt in 1..=3_u32 {
+        let res: anyhow::Result<Vec<u8>> = (async {
+            let resp = http_client()
+                .get(url.clone())
+                .send()
+                .await
+                .context("download server.jar")?
+                .error_for_status()
+                .context("download server.jar (status)")?;
+            let b = resp.bytes().await.context("read server.jar body")?;
+            Ok(b.to_vec())
+        })
+        .await;
+
+        match res {
+            Ok(b) => {
+                bytes = Some(b);
+                break;
+            }
+            Err(e) => {
+                last_err = Some(e);
+                if attempt < 3 {
+                    tokio::time::sleep(Duration::from_millis(
+                        200_u64.saturating_mul(2_u64.pow(attempt - 1)),
+                    ))
+                    .await;
+                }
+            }
+        }
+    }
+
+    let bytes =
+        bytes.ok_or_else(|| last_err.unwrap_or_else(|| anyhow::anyhow!("download failed")))?;
 
     if bytes.len() as u64 != resolved.size {
         anyhow::bail!(
-            "size mismatch: expected {}, got {}",
+            "minecraft server.jar size mismatch: expected {} bytes, got {} bytes (url={} cache_path={})",
             resolved.size,
-            bytes.len()
+            bytes.len(),
+            resolved.jar_url,
+            jar_path.display()
         );
     }
 
-    let got = sha1::Sha1::digest(bytes.as_ref());
+    let got = sha1::Sha1::digest(bytes.as_slice());
     let got_hex = hex::encode(got);
     if got_hex != *sha1_hex {
-        anyhow::bail!("sha1 mismatch: expected {sha1_hex}, got {got_hex}");
+        anyhow::bail!(
+            "minecraft server.jar sha1 mismatch: expected {sha1_hex}, got {got_hex} (url={} cache_path={})",
+            resolved.jar_url,
+            jar_path.display()
+        );
     }
 
     let tmp_path = jar_path.with_extension("tmp");

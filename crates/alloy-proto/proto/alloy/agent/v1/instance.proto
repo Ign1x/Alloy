@@ -34,6 +34,7 @@ message InstanceInfo {
 message CreateInstanceRequest {
   string template_id = 1;
   map<string, string> params = 2;
+  string display_name = 3;
 }
 
 message CreateInstanceResponse {

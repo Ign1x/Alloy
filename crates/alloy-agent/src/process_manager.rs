@@ -125,6 +125,70 @@ fn port_probe_timeout() -> Duration {
     )
 }
 
+const DEFAULT_MIN_FREE_SPACE_BYTES: u64 = 1024 * 1024 * 1024; // 1 GiB
+
+fn min_free_space_bytes() -> u64 {
+    env_u64("ALLOY_MIN_FREE_SPACE_BYTES")
+        .map(|v| v.clamp(0, 1024_u64 * 1024 * 1024 * 1024))
+        .unwrap_or(DEFAULT_MIN_FREE_SPACE_BYTES)
+}
+
+#[cfg(unix)]
+fn free_bytes(p: &Path) -> Option<u64> {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+
+    let c = CString::new(p.as_os_str().as_bytes()).ok()?;
+    let mut s: libc::statvfs = unsafe { std::mem::zeroed() };
+    let rc = unsafe { libc::statvfs(c.as_ptr(), &mut s) };
+    if rc != 0 {
+        return None;
+    }
+    Some(s.f_bsize.saturating_mul(s.f_bavail))
+}
+
+#[cfg(not(unix))]
+fn free_bytes(_p: &Path) -> Option<u64> {
+    None
+}
+
+fn ensure_min_free_space(path: &Path) -> anyhow::Result<()> {
+    let min = min_free_space_bytes();
+    if min == 0 {
+        return Ok(());
+    }
+
+    let Some(free) = free_bytes(path) else {
+        return Ok(());
+    };
+    if free < min {
+        anyhow::bail!(
+            "insufficient disk space: free {} bytes < required {} bytes at {} (set ALLOY_MIN_FREE_SPACE_BYTES=0 to disable)",
+            free,
+            min,
+            path.display()
+        );
+    }
+    Ok(())
+}
+
+fn check_ldd_missing(path: &Path) -> anyhow::Result<Vec<String>> {
+    let out = match std::process::Command::new("ldd").arg(path).output() {
+        Ok(v) => v,
+        Err(_) => return Ok(Vec::new()),
+    };
+
+    // ldd output format varies; treat any "not found" line as missing dep.
+    let text = String::from_utf8_lossy(&out.stdout);
+    let mut missing = Vec::new();
+    for line in text.lines() {
+        if line.contains("not found") {
+            missing.push(line.trim().to_string());
+        }
+    }
+    Ok(missing)
+}
+
 fn graceful_term_grace() -> Duration {
     Duration::from_secs(
         env_u64("ALLOY_GRACEFUL_TERM_GRACE_SEC")
@@ -367,7 +431,7 @@ impl FileLogWriter {
             line.push('\n');
         }
 
-        let write_len = line.as_bytes().len() as u64;
+        let write_len = line.len() as u64;
         if self.max_bytes > 0 && self.bytes.saturating_add(write_len) > self.max_bytes {
             self.rotate().await.ok();
         }
@@ -384,6 +448,10 @@ struct RunInfo {
     template_id: String,
     started_at_unix_ms: u64,
     agent_version: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pid: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pgid: Option<i32>,
     exec: String,
     args: Vec<String>,
     cwd: String,
@@ -453,12 +521,9 @@ unsafe fn set_parent_death_signal() -> std::io::Result<()> {
 async fn wait_for_local_tcp_port(port: u16, timeout: Duration) -> bool {
     let deadline = tokio::time::Instant::now() + timeout;
     loop {
-        match tokio::net::TcpStream::connect(("127.0.0.1", port)).await {
-            Ok(s) => {
-                drop(s);
-                return true;
-            }
-            Err(_) => {}
+        if let Ok(s) = tokio::net::TcpStream::connect(("127.0.0.1", port)).await {
+            drop(s);
+            return true;
         }
 
         if tokio::time::Instant::now() >= deadline {
@@ -475,7 +540,6 @@ struct ProcessEntry {
     pid: Option<u32>,
     exit_code: Option<i32>,
     message: Option<String>,
-    params: BTreeMap<String, String>,
     restart: RestartConfig,
     restart_attempts: u32,
     stdin: Option<ChildStdin>,
@@ -566,6 +630,8 @@ impl ProcessManager {
 
         let result: anyhow::Result<ProcessStatus> = async {
             if t.template_id == "minecraft:vanilla" {
+                ensure_min_free_space(&minecraft::data_root())?;
+
                 let mc = minecraft::validate_vanilla_params(&params)?;
 
                 // Allow auto port assignment (port=0 means "auto").
@@ -623,11 +689,13 @@ impl ProcessManager {
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default()
                     .as_millis() as u64;
-                let run = RunInfo {
+                let mut run = RunInfo {
                     process_id: id.0.clone(),
                     template_id: t.template_id.clone(),
                     started_at_unix_ms,
                     agent_version: env!("CARGO_PKG_VERSION").to_string(),
+                    pid: None,
+                    pgid: None,
                     exec: exec.clone(),
                     args: args.clone(),
                     cwd: dir.display().to_string(),
@@ -666,6 +734,10 @@ impl ProcessManager {
                 let pid_u32 = child.id();
                 let pgid = pid_u32.map(|p| p as i32);
 
+                run.pid = pid_u32;
+                run.pgid = pgid;
+                let _ = write_run_json(&dir, &run).await;
+
                 let stdin = child.stdin.take();
                 let stdout = child.stdout.take();
                 let stderr = child.stderr.take();
@@ -699,7 +771,6 @@ impl ProcessManager {
                             pid: pid_u32,
                             exit_code: None,
                             message: None,
-                            params: params.clone(),
                             restart,
                             restart_attempts: reused_restart_attempts,
                             stdin,
@@ -878,22 +949,19 @@ impl ProcessManager {
                                         .message
                                         .filter(|s| !s.trim().is_empty())
                                         .unwrap_or_else(|| "unknown error".to_string());
-                                    let _ =
-                                        handle.block_on(wait_sink.emit(format!(
-                                            "[alloy-agent] auto-restart failed: {msg}"
-                                        )));
+                                    handle.block_on(wait_sink.emit(format!(
+                                        "[alloy-agent] auto-restart failed: {msg}"
+                                    )));
                                 }
                                 Ok(_) => {
-                                    let _ =
-                                        handle.block_on(wait_sink.emit(
-                                            "[alloy-agent] auto-restart triggered".to_string(),
-                                        ));
+                                    handle.block_on(wait_sink.emit(
+                                        "[alloy-agent] auto-restart triggered".to_string(),
+                                    ));
                                 }
                                 Err(err) => {
-                                    let _ =
-                                        handle.block_on(wait_sink.emit(format!(
-                                            "[alloy-agent] auto-restart failed: {err}"
-                                        )));
+                                    handle.block_on(wait_sink.emit(format!(
+                                        "[alloy-agent] auto-restart failed: {err}"
+                                    )));
                                 }
                             }
                         });
@@ -911,6 +979,8 @@ impl ProcessManager {
             }
 
             if t.template_id == "terraria:vanilla" {
+                ensure_min_free_space(&terraria::data_root())?;
+
                 let tr = terraria::validate_vanilla_params(&params)?;
 
                 let tr_port = port_alloc::allocate_tcp_port(tr.port)?;
@@ -940,6 +1010,14 @@ impl ProcessManager {
                 // Run from the extracted server root, but use instance-local config/world paths.
                 // Prefer the native binary over the launcher script to avoid shebang/CRLF issues.
                 let exec_path = &extracted.bin_x86_64;
+                let missing = check_ldd_missing(exec_path)?;
+                if !missing.is_empty() {
+                    anyhow::bail!(
+                        "terraria runtime dependencies missing (try updating the Docker image or installing libs on the host):\n{}",
+                        missing.join("\n")
+                    );
+                }
+
                 let mut cmd = Command::new(exec_path);
                 let ld_library_path = format!(
                     "{}:{}:{}",
@@ -965,11 +1043,13 @@ impl ProcessManager {
                 env.insert("LD_LIBRARY_PATH".to_string(), ld_library_path.clone());
 
                 let args = vec!["-config".to_string(), config_path.display().to_string()];
-                let run = RunInfo {
+                let mut run = RunInfo {
                     process_id: id.0.clone(),
                     template_id: t.template_id.clone(),
                     started_at_unix_ms,
                     agent_version: env!("CARGO_PKG_VERSION").to_string(),
+                    pid: None,
+                    pgid: None,
                     exec: exec_path.display().to_string(),
                     args: args.clone(),
                     cwd: extracted.server_root.display().to_string(),
@@ -1012,6 +1092,10 @@ impl ProcessManager {
                 let pid_u32 = child.id();
                 let pgid = pid_u32.map(|p| p as i32);
 
+                run.pid = pid_u32;
+                run.pgid = pgid;
+                let _ = write_run_json(&dir, &run).await;
+
                 let stdin = child.stdin.take();
                 let stdout = child.stdout.take();
                 let stderr = child.stderr.take();
@@ -1045,7 +1129,6 @@ impl ProcessManager {
                             pid: pid_u32,
                             exit_code: None,
                             message: None,
-                            params: params.clone(),
                             restart,
                             restart_attempts: reused_restart_attempts,
                             stdin,
@@ -1067,7 +1150,6 @@ impl ProcessManager {
                 tokio::spawn({
                     let inner = inner.clone();
                     let id_str = id_str.clone();
-                    let creating_world = creating_world;
                     async move {
                         let timeout = if creating_world {
                             Duration::from_millis(
@@ -1233,22 +1315,19 @@ impl ProcessManager {
                                         .message
                                         .filter(|s| !s.trim().is_empty())
                                         .unwrap_or_else(|| "unknown error".to_string());
-                                    let _ =
-                                        handle.block_on(wait_sink.emit(format!(
-                                            "[alloy-agent] auto-restart failed: {msg}"
-                                        )));
+                                    handle.block_on(wait_sink.emit(format!(
+                                        "[alloy-agent] auto-restart failed: {msg}"
+                                    )));
                                 }
                                 Ok(_) => {
-                                    let _ =
-                                        handle.block_on(wait_sink.emit(
-                                            "[alloy-agent] auto-restart triggered".to_string(),
-                                        ));
+                                    handle.block_on(wait_sink.emit(
+                                        "[alloy-agent] auto-restart triggered".to_string(),
+                                    ));
                                 }
                                 Err(err) => {
-                                    let _ =
-                                        handle.block_on(wait_sink.emit(format!(
-                                            "[alloy-agent] auto-restart failed: {err}"
-                                        )));
+                                    handle.block_on(wait_sink.emit(format!(
+                                        "[alloy-agent] auto-restart failed: {err}"
+                                    )));
                                 }
                             }
                         });
@@ -1282,11 +1361,13 @@ impl ProcessManager {
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_millis() as u64;
-            let run = RunInfo {
+            let mut run = RunInfo {
                 process_id: id.0.clone(),
                 template_id: t.template_id.clone(),
                 started_at_unix_ms,
                 agent_version: env!("CARGO_PKG_VERSION").to_string(),
+                pid: None,
+                pgid: None,
                 exec: exec.clone(),
                 args: args.clone(),
                 cwd: cwd.clone(),
@@ -1324,6 +1405,10 @@ impl ProcessManager {
             let pid_u32 = child.id();
             let pgid = pid_u32.map(|p| p as i32);
 
+            run.pid = pid_u32;
+            run.pgid = pgid;
+            let _ = write_run_json(&root_dir, &run).await;
+
             let stdin = child.stdin.take();
             let stdout = child.stdout.take();
             let stderr = child.stderr.take();
@@ -1357,7 +1442,6 @@ impl ProcessManager {
                         pid: pid_u32,
                         exit_code: None,
                         message: None,
-                        params: params.clone(),
                         restart,
                         restart_attempts: reused_restart_attempts,
                         stdin,
@@ -1475,19 +1559,19 @@ impl ProcessManager {
                                     .message
                                     .filter(|s| !s.trim().is_empty())
                                     .unwrap_or_else(|| "unknown error".to_string());
-                                let _ = handle.block_on(
+                                handle.block_on(
                                     wait_sink
                                         .emit(format!("[alloy-agent] auto-restart failed: {msg}")),
                                 );
                             }
                             Ok(_) => {
-                                let _ = handle.block_on(
+                                handle.block_on(
                                     wait_sink
                                         .emit("[alloy-agent] auto-restart triggered".to_string()),
                                 );
                             }
                             Err(err) => {
-                                let _ = handle.block_on(
+                                handle.block_on(
                                     wait_sink
                                         .emit(format!("[alloy-agent] auto-restart failed: {err}")),
                                 );
@@ -1527,7 +1611,6 @@ impl ProcessManager {
                             pid: None,
                             exit_code: None,
                             message: Some(msg.clone()),
-                            params: params.clone(),
                             restart,
                             restart_attempts: reused_restart_attempts,
                             stdin: None,

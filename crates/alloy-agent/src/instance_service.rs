@@ -168,11 +168,17 @@ impl InstanceService for InstanceApi {
         )
         .map_err(|e| Status::invalid_argument(e.to_string()))?;
 
+        let display_name = if req.display_name.trim().is_empty() {
+            None
+        } else {
+            Some(req.display_name)
+        };
+
         let inst = PersistedInstance {
             instance_id: instance_id.clone(),
             template_id: req.template_id,
             params,
-            display_name: None,
+            display_name,
         };
         save_instance(&inst).await?;
 

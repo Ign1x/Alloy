@@ -106,7 +106,7 @@ impl RateLimiter {
     fn allow(&self, key: &str) -> bool {
         let now = Instant::now();
         let mut map = self.hits.lock().unwrap_or_else(|e| e.into_inner());
-        let q = map.entry(key.to_string()).or_insert_with(VecDeque::new);
+        let q = map.entry(key.to_string()).or_default();
         while q
             .front()
             .is_some_and(|t| now.duration_since(*t) > self.window)
@@ -254,6 +254,7 @@ pub struct NodeDto {
 pub struct CreateInstanceInput {
     pub template_id: String,
     pub params: std::collections::BTreeMap<String, String>,
+    pub display_name: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, Type)]
@@ -279,6 +280,29 @@ pub struct InstanceIdInput {
 pub struct StopInstanceInput {
     pub instance_id: String,
     pub timeout_ms: Option<u32>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize, Type)]
+pub struct RestartInstanceInput {
+    pub instance_id: String,
+    pub timeout_ms: Option<u32>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize, Type)]
+pub struct InstanceDiagnosticsInput {
+    pub instance_id: String,
+    pub max_lines: Option<u32>,
+    pub limit_bytes: Option<u32>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, Type)]
+pub struct InstanceDiagnosticsOutput {
+    pub instance_id: String,
+    pub fetched_at_unix_ms: String,
+    pub request_id: String,
+    pub instance_json: Option<String>,
+    pub run_json: Option<String>,
+    pub console_log_lines: Vec<String>,
 }
 
 #[derive(Debug, Clone, serde::Deserialize, Type)]
@@ -833,6 +857,7 @@ pub fn router() -> Router<Ctx> {
                         .create(Request::new(CreateInstanceRequest {
                             template_id: input.template_id,
                             params: input.params.into_iter().collect(),
+                            display_name: input.display_name.unwrap_or_default(),
                         }))
                         .await
                         .map_err(|e| {
@@ -931,6 +956,181 @@ pub fn router() -> Router<Ctx> {
             }),
         )
         .procedure(
+            "diagnostics",
+            Procedure::builder::<ApiError>().mutation(
+                |ctx, input: InstanceDiagnosticsInput| async move {
+                    enforce_rate_limit(&ctx)?;
+
+                    let agent_endpoint = std::env::var("ALLOY_AGENT_ENDPOINT")
+                        .unwrap_or_else(|_| "http://127.0.0.1:50051".to_string());
+
+                    let mut fs_client = FilesystemServiceClient::connect(agent_endpoint.clone())
+                        .await
+                        .map_err(|e| {
+                            api_error(
+                                &ctx,
+                                "AGENT_CONNECT_FAILED",
+                                format!("failed to connect agent ({agent_endpoint}): {e}"),
+                            )
+                        })?;
+                    let mut logs_client = LogsServiceClient::connect(agent_endpoint.clone())
+                        .await
+                        .map_err(|e| {
+                            api_error(
+                                &ctx,
+                                "AGENT_CONNECT_FAILED",
+                                format!("failed to connect agent ({agent_endpoint}): {e}"),
+                            )
+                        })?;
+
+                    let instance_id = input.instance_id;
+                    let max_lines = input.max_lines.unwrap_or(400).clamp(1, 2000);
+                    let limit_bytes = input
+                        .limit_bytes
+                        .unwrap_or(256 * 1024)
+                        .clamp(1024, 1024 * 1024);
+
+                    let to_utf8 = |bytes: Vec<u8>| -> Result<String, ApiError> {
+                        String::from_utf8(bytes)
+                            .map_err(|_| api_error(&ctx, "INVALID_UTF8", "file is not valid utf-8"))
+                    };
+
+                    let instance_json = match fs_client
+                        .read_file(Request::new(ReadFileRequest {
+                            path: format!("instances/{}/instance.json", instance_id),
+                            offset: 0,
+                            limit: 1024 * 1024,
+                        }))
+                        .await
+                    {
+                        Ok(resp) => Some(to_utf8(resp.into_inner().data)?),
+                        Err(status) => {
+                            if status.code() == tonic::Code::NotFound {
+                                None
+                            } else {
+                                return Err(api_error(
+                                    &ctx,
+                                    "AGENT_RPC_FAILED",
+                                    format!("read instance.json failed: {status}"),
+                                ));
+                            }
+                        }
+                    };
+                    let instance_json = instance_json.map(|raw| {
+                        let Ok(mut v) = serde_json::from_str::<serde_json::Value>(&raw) else {
+                            return raw;
+                        };
+                        if let Some(params) = v.get_mut("params").and_then(|p| p.as_object_mut())
+                            && params.contains_key("password")
+                        {
+                            params.insert(
+                                "password".to_string(),
+                                serde_json::Value::String("<redacted>".to_string()),
+                            );
+                        }
+                        serde_json::to_string_pretty(&v).unwrap_or(raw)
+                    });
+
+                    let run_json = match fs_client
+                        .read_file(Request::new(ReadFileRequest {
+                            path: format!("instances/{}/run.json", instance_id),
+                            offset: 0,
+                            limit: 1024 * 1024,
+                        }))
+                        .await
+                    {
+                        Ok(resp) => Some(to_utf8(resp.into_inner().data)?),
+                        Err(status) => {
+                            if status.code() != tonic::Code::NotFound {
+                                return Err(api_error(
+                                    &ctx,
+                                    "AGENT_RPC_FAILED",
+                                    format!("read run.json failed: {status}"),
+                                ));
+                            }
+
+                            match fs_client
+                                .read_file(Request::new(ReadFileRequest {
+                                    path: format!("processes/{}/run.json", instance_id),
+                                    offset: 0,
+                                    limit: 1024 * 1024,
+                                }))
+                                .await
+                            {
+                                Ok(resp) => Some(to_utf8(resp.into_inner().data)?),
+                                Err(status) => {
+                                    if status.code() == tonic::Code::NotFound {
+                                        None
+                                    } else {
+                                        return Err(api_error(
+                                            &ctx,
+                                            "AGENT_RPC_FAILED",
+                                            format!("read run.json failed: {status}"),
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                    };
+
+                    let console_log_lines = match logs_client
+                        .tail_file(Request::new(TailFileRequest {
+                            path: format!("instances/{}/logs/console.log", instance_id),
+                            cursor: "0".to_string(),
+                            limit_bytes,
+                            max_lines,
+                        }))
+                        .await
+                    {
+                        Ok(resp) => resp.into_inner().lines,
+                        Err(status) => {
+                            if status.code() != tonic::Code::NotFound {
+                                return Err(api_error(
+                                    &ctx,
+                                    "AGENT_RPC_FAILED",
+                                    format!("tail console.log failed: {status}"),
+                                ));
+                            }
+
+                            match logs_client
+                                .tail_file(Request::new(TailFileRequest {
+                                    path: format!("processes/{}/logs/console.log", instance_id),
+                                    cursor: "0".to_string(),
+                                    limit_bytes,
+                                    max_lines,
+                                }))
+                                .await
+                            {
+                                Ok(resp) => resp.into_inner().lines,
+                                Err(status) => {
+                                    if status.code() == tonic::Code::NotFound {
+                                        Vec::new()
+                                    } else {
+                                        return Err(api_error(
+                                            &ctx,
+                                            "AGENT_RPC_FAILED",
+                                            format!("tail console.log failed: {status}"),
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                    };
+
+                    let fetched_at_unix_ms = chrono::Utc::now().timestamp_millis().to_string();
+
+                    Ok(InstanceDiagnosticsOutput {
+                        instance_id,
+                        fetched_at_unix_ms,
+                        request_id: ctx.request_id.clone(),
+                        instance_json,
+                        run_json,
+                        console_log_lines,
+                    })
+                },
+            ),
+        )
+        .procedure(
             "start",
             Procedure::builder::<ApiError>().mutation(|ctx, input: InstanceIdInput| async move {
                 ensure_writable(&ctx)?;
@@ -995,6 +1195,95 @@ pub fn router() -> Router<Ctx> {
                     },
                 })
             }),
+        )
+        .procedure(
+            "restart",
+            Procedure::builder::<ApiError>().mutation(
+                |ctx, input: RestartInstanceInput| async move {
+                    ensure_writable(&ctx)?;
+                    enforce_rate_limit(&ctx)?;
+
+                    let agent_endpoint = std::env::var("ALLOY_AGENT_ENDPOINT")
+                        .unwrap_or_else(|_| "http://127.0.0.1:50051".to_string());
+                    let mut client = InstanceServiceClient::connect(agent_endpoint.clone())
+                        .await
+                        .map_err(|e| {
+                            api_error(
+                                &ctx,
+                                "AGENT_CONNECT_FAILED",
+                                format!("failed to connect agent ({agent_endpoint}): {e}"),
+                            )
+                        })?;
+
+                    // Best-effort: if the instance isn't running, the stop call may return NOT_FOUND.
+                    // Treat that as "already stopped" and continue to start.
+                    match client
+                        .stop(Request::new(StopInstanceRequest {
+                            instance_id: input.instance_id.clone(),
+                            timeout_ms: input.timeout_ms.unwrap_or(30_000),
+                        }))
+                        .await
+                    {
+                        Ok(_) => {}
+                        Err(status) => {
+                            if status.code() != tonic::Code::NotFound {
+                                return Err(api_error(
+                                    &ctx,
+                                    "AGENT_RPC_FAILED",
+                                    format!("instance.stop failed: {status}"),
+                                ));
+                            }
+                        }
+                    }
+
+                    let resp = client
+                        .start(Request::new(StartInstanceRequest {
+                            instance_id: input.instance_id,
+                        }))
+                        .await
+                        .map_err(|e| {
+                            api_error(
+                                &ctx,
+                                "AGENT_RPC_FAILED",
+                                format!("instance.start failed: {e}"),
+                            )
+                        })?
+                        .into_inner();
+
+                    let status = resp
+                        .status
+                        .ok_or_else(|| api_error(&ctx, "INTERNAL", "missing status"))?;
+
+                    audit::record(
+                        &ctx,
+                        "instance.restart",
+                        &status.process_id,
+                        Some(serde_json::json!({ "template_id": status.template_id })),
+                    )
+                    .await;
+
+                    Ok(ProcessStatusDto {
+                        process_id: status.process_id.clone(),
+                        template_id: status.template_id.clone(),
+                        state: status.state().as_str_name().to_string(),
+                        pid: if status.has_pid {
+                            Some(status.pid)
+                        } else {
+                            None
+                        },
+                        exit_code: if status.has_exit_code {
+                            Some(status.exit_code)
+                        } else {
+                            None
+                        },
+                        message: if status.message.is_empty() {
+                            None
+                        } else {
+                            Some(status.message)
+                        },
+                    })
+                },
+            ),
         )
         .procedure(
             "stop",

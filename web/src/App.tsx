@@ -55,6 +55,40 @@ function isStopping(status: ProcessStatusDto | null) {
   return status?.state === 'PROCESS_STATE_STOPPING'
 }
 
+async function safeCopy(text: string) {
+  try {
+    await navigator.clipboard.writeText(text)
+  } catch {
+    // ignore clipboard errors
+  }
+}
+
+function defaultPortForTemplate(templateId: string): number | null {
+  if (templateId === 'minecraft:vanilla') return 25565
+  if (templateId === 'terraria:vanilla') return 7777
+  return null
+}
+
+function parsePort(value: unknown): number | null {
+  if (value == null) return null
+  const n = Number.parseInt(String(value), 10)
+  if (!Number.isFinite(n) || n <= 0) return null
+  return n
+}
+
+function instancePort(info: { config: { template_id: string; params: unknown } }): number | null {
+  const params = info.config.params as Record<string, unknown> | null | undefined
+  return parsePort(params?.port) ?? defaultPortForTemplate(info.config.template_id)
+}
+
+function connectHost() {
+  try {
+    return window.location.hostname || 'localhost'
+  } catch {
+    return 'localhost'
+  }
+}
+
 type UiTab = 'instances' | 'files' | 'nodes'
 
 
@@ -220,10 +254,12 @@ function App() {
   }
 
 
-  const createInstance = rspc.createMutation(() => 'instance.create')
-  const startInstance = rspc.createMutation(() => 'instance.start')
-  const stopInstance = rspc.createMutation(() => 'instance.stop')
-  const deleteInstance = rspc.createMutation(() => 'instance.delete')
+	  const createInstance = rspc.createMutation(() => 'instance.create')
+	  const startInstance = rspc.createMutation(() => 'instance.start')
+	  const restartInstance = rspc.createMutation(() => 'instance.restart')
+	  const stopInstance = rspc.createMutation(() => 'instance.stop')
+	  const deleteInstance = rspc.createMutation(() => 'instance.delete')
+	  const instanceDiagnostics = rspc.createMutation(() => 'instance.diagnostics')
 
   const [selectedTemplate, setSelectedTemplate] = createSignal<string>('demo:sleep')
   const [instanceName, setInstanceName] = createSignal<string>('')
@@ -239,10 +275,11 @@ function App() {
   const [trVersion, setTrVersion] = createSignal('1453')
   const [trPort, setTrPort] = createSignal('')
   const [trMaxPlayers, setTrMaxPlayers] = createSignal('8')
-  const [trWorldName, setTrWorldName] = createSignal('world')
-  const [trWorldSize, setTrWorldSize] = createSignal('1')
-  const [trPassword, setTrPassword] = createSignal('')
-  const [trError, setTrError] = createSignal<string | null>(null)
+	  const [trWorldName, setTrWorldName] = createSignal('world')
+	  const [trWorldSize, setTrWorldSize] = createSignal('1')
+	  const [trPassword, setTrPassword] = createSignal('')
+	  const [trPasswordVisible, setTrPasswordVisible] = createSignal(false)
+	  const [trError, setTrError] = createSignal<string | null>(null)
 
   const trVersionOptions = createMemo(() => [
     { value: '1453', label: '1.4.5.3 (1453)', meta: 'latest' },
@@ -297,11 +334,17 @@ function App() {
 
   // Nodes state/queries will be moved into NodesPage next.
 
-  const [selectedInstanceId, setSelectedInstanceId] = createSignal<string | null>(null)
+	  const [selectedInstanceId, setSelectedInstanceId] = createSignal<string | null>(null)
+	  const selectedInstance = createMemo(() => {
+	    const id = selectedInstanceId()
+	    if (!id) return null
+	    return (instances.data ?? []).find((x: { config: { instance_id: string } }) => x.config.instance_id === id) ?? null
+	  })
+	  const selectedInstanceStatus = createMemo(() => selectedInstance()?.status ?? null)
 
-  const logs = rspc.createQuery(
-    () => [
-      'process.logsTail',
+	  const logs = rspc.createQuery(
+	    () => [
+	      'process.logsTail',
       {
         process_id: selectedInstanceId() ?? '',
         cursor: null,
@@ -827,14 +870,38 @@ function App() {
                                 onInput={(e) => setTrWorldSize(e.currentTarget.value)}
                               />
                             </label>
-                            <label class="block text-sm text-slate-700 dark:text-slate-400">
-                              Password (optional)
-                              <input
-                                class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-amber-500/40 focus:outline-none focus:ring-1 focus:ring-amber-500/20 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200"
-                                value={trPassword()}
-                                onInput={(e) => setTrPassword(e.currentTarget.value)}
-                              />
-                            </label>
+	                            <label class="block text-sm text-slate-700 dark:text-slate-400">
+	                              Password (optional)
+	                              <div class="mt-1 flex gap-2">
+	                                <input
+	                                  type={trPasswordVisible() ? 'text' : 'password'}
+	                                  class="w-full flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-amber-500/40 focus:outline-none focus:ring-1 focus:ring-amber-500/20 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200"
+	                                  value={trPassword()}
+	                                  onInput={(e) => setTrPassword(e.currentTarget.value)}
+	                                />
+	                                <button
+	                                  type="button"
+	                                  class="rounded-lg border border-slate-300 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-900"
+	                                  onClick={() => setTrPasswordVisible((v) => !v)}
+	                                >
+	                                  {trPasswordVisible() ? 'HIDE' : 'SHOW'}
+	                                </button>
+	                                <button
+	                                  type="button"
+	                                  class="rounded-lg border border-slate-300 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-900"
+	                                  disabled={!trPassword()}
+	                                  onClick={async () => {
+	                                    try {
+	                                      await navigator.clipboard.writeText(trPassword())
+	                                    } catch {
+	                                      // ignore clipboard errors
+	                                    }
+	                                  }}
+	                                >
+	                                  COPY
+	                                </button>
+	                              </div>
+	                            </label>
                           </div>
 
                           <Show when={trError()}>
@@ -848,17 +915,14 @@ function App() {
                       <button
                         class="w-full rounded-xl bg-slate-900 px-3 py-2 text-sm font-medium text-slate-100 ring-1 ring-inset ring-slate-800 hover:bg-slate-800 disabled:opacity-50"
                         disabled={createInstance.isPending}
-                        onClick={async () => {
-                          const template_id = selectedTemplate()
-                          const params: Record<string, string> = {}
+	                        onClick={async () => {
+	                          const template_id = selectedTemplate()
+	                          const params: Record<string, string> = {}
+	                          const display_name = instanceName().trim() ? instanceName().trim() : null
 
-                           if (instanceName().trim()) {
-                             params.name = instanceName().trim()
-                           }
-
-                          if (template_id === 'demo:sleep') {
-                            params.seconds = sleepSeconds()
-                          } else if (template_id === 'minecraft:vanilla') {
+	                          if (template_id === 'demo:sleep') {
+	                            params.seconds = sleepSeconds()
+	                          } else if (template_id === 'minecraft:vanilla') {
                             if (!mcEula()) {
                               setMcError('You must accept the EULA')
                               return
@@ -874,14 +938,14 @@ function App() {
                             if (trPort().trim()) params.port = trPort().trim()
                             params.max_players = trMaxPlayers() || '8'
                             params.world_name = trWorldName() || 'world'
-                            params.world_size = trWorldSize() || '1'
-                            if (trPassword().trim()) params.password = trPassword().trim()
-                          }
+	                            params.world_size = trWorldSize() || '1'
+	                            if (trPassword().trim()) params.password = trPassword().trim()
+	                          }
 
-                          await createInstance.mutateAsync({ template_id, params })
-                          await invalidateInstances()
-                        }}
-                      >
+	                          await createInstance.mutateAsync({ template_id, params, display_name })
+	                          await invalidateInstances()
+	                        }}
+	                      >
                         {createInstance.isPending ? 'CREATING...' : 'CREATE_INSTANCE'}
                       </button>
                     </div>
@@ -911,9 +975,9 @@ function App() {
                               >
                                 <div class="flex items-start justify-between gap-3">
                                   <div class="min-w-0">
-                                    <div class="truncate font-mono text-sm font-semibold text-slate-900 dark:text-slate-100">
-                                      {(i.config.params?.name as unknown as string | undefined) ?? i.config.instance_id}
-                                    </div>
+	                                    <div class="truncate font-mono text-sm font-semibold text-slate-900 dark:text-slate-100">
+	                                      {i.config.display_name ?? (i.config.params?.name as unknown as string | undefined) ?? i.config.instance_id}
+	                                    </div>
                                     <div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
                                       <span class="rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 font-mono dark:border-slate-800 dark:bg-slate-950/40">
                                         {i.config.instance_id}
@@ -931,24 +995,43 @@ function App() {
                                       </Show>
                                     </div>
                                   </div>
-                                  <span
-                                    class={`mt-1 inline-flex h-2.5 w-2.5 flex-none rounded-full ${
-                                      i.status?.state === 'running'
-                                        ? 'bg-emerald-400'
-                                        : i.status?.state === 'starting'
-                                          ? 'bg-amber-400 animate-pulse'
-                                          : i.status?.state === 'stopping'
-                                            ? 'bg-amber-400 animate-pulse'
-                                            : i.status?.state === 'failed'
-                                              ? 'bg-rose-500'
-                                              : 'bg-slate-400'
-                                    }`}
-                                    title={i.status?.state ?? 'unknown'}
-                                  />
-                                </div>
-                              </button>
+	                                  <span
+	                                    class={`mt-1 inline-flex h-2.5 w-2.5 flex-none rounded-full ${
+	                                      i.status?.state === 'PROCESS_STATE_RUNNING'
+	                                        ? 'bg-emerald-400'
+	                                        : i.status?.state === 'PROCESS_STATE_STARTING'
+	                                          ? 'bg-amber-400 animate-pulse'
+	                                          : i.status?.state === 'PROCESS_STATE_STOPPING'
+	                                            ? 'bg-amber-400 animate-pulse'
+	                                            : i.status?.state === 'PROCESS_STATE_FAILED'
+	                                              ? 'bg-rose-500'
+	                                              : 'bg-slate-400'
+	                                    }`}
+	                                    title={i.status?.state ?? 'unknown'}
+	                                  />
+	                                </div>
+	                              </button>
 
-                              <div class="mt-3 flex flex-wrap items-center gap-2">
+	                              <Show
+	                                when={
+	                                  i.status?.state === 'PROCESS_STATE_FAILED' &&
+	                                  (i.status?.message != null || i.status?.exit_code != null)
+	                                }
+	                              >
+	                                <div class="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] text-rose-800 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-200">
+	                                  <span class="font-semibold">Failed:</span>
+	                                  <span class="ml-1">
+	                                    <Show when={i.status?.exit_code != null}>
+	                                      exit {i.status?.exit_code}
+	                                    </Show>
+	                                    <Show when={i.status?.message != null}>
+	                                      <span class="ml-2">{i.status?.message}</span>
+	                                    </Show>
+	                                  </span>
+	                                </div>
+	                              </Show>
+
+	                              <div class="mt-3 flex flex-wrap items-center gap-2">
                                 <Show
                                   when={canStartInstance(i.status)}
                                   fallback={
@@ -963,22 +1046,52 @@ function App() {
                                       STOP
                                     </button>
                                   }
-                                >
-                                  <button
-                                    class="rounded-xl border border-slate-200 bg-white/70 px-3 py-2 text-xs font-medium text-slate-800 shadow-sm transition-all duration-150 hover:bg-white hover:shadow active:scale-[0.98] disabled:opacity-50 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:shadow-none dark:hover:bg-slate-900"
-                                    disabled={startInstance.isPending}
-                                    onClick={async () => {
-                                      await startInstance.mutateAsync({ instance_id: i.config.instance_id })
-                                      await invalidateInstances()
-                                    }}
-                                  >
-                                    START
-                                  </button>
-                                </Show>
+	                                >
+	                                  <button
+	                                    class="rounded-xl border border-slate-200 bg-white/70 px-3 py-2 text-xs font-medium text-slate-800 shadow-sm transition-all duration-150 hover:bg-white hover:shadow active:scale-[0.98] disabled:opacity-50 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:shadow-none dark:hover:bg-slate-900"
+	                                    disabled={startInstance.isPending}
+	                                    onClick={async () => {
+	                                      await startInstance.mutateAsync({ instance_id: i.config.instance_id })
+	                                      await invalidateInstances()
+	                                    }}
+	                                  >
+	                                    START
+	                                  </button>
+	                                </Show>
 
-                                <button
-                                  class="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-800 shadow-sm transition-all hover:bg-rose-100 hover:shadow active:scale-[0.98] disabled:opacity-50 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-200 dark:shadow-none dark:hover:bg-rose-950/30"
-                                  disabled={deleteInstance.isPending || !canStartInstance(i.status)}
+	                                <Show when={i.status != null}>
+	                                  <button
+	                                    class="rounded-xl border border-slate-200 bg-white/70 px-3 py-2 text-xs font-medium text-slate-800 shadow-sm transition-all duration-150 hover:bg-white hover:shadow active:scale-[0.98] disabled:opacity-50 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:shadow-none dark:hover:bg-slate-900"
+	                                    disabled={
+	                                      restartInstance.isPending ||
+	                                      startInstance.isPending ||
+	                                      stopInstance.isPending ||
+	                                      isStopping(i.status)
+	                                    }
+	                                    onClick={async () => {
+	                                      await restartInstance.mutateAsync({ instance_id: i.config.instance_id, timeout_ms: 30_000 })
+	                                      await invalidateInstances()
+	                                    }}
+	                                  >
+	                                    RESTART
+	                                  </button>
+	                                </Show>
+
+	                                <Show when={instancePort(i)}>
+	                                  {(p) => (
+	                                    <button
+	                                      class="rounded-xl border border-slate-200 bg-white/70 px-3 py-2 text-xs font-medium text-slate-800 shadow-sm transition-all duration-150 hover:bg-white hover:shadow active:scale-[0.98] disabled:opacity-50 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:shadow-none dark:hover:bg-slate-900"
+	                                      title={`Copy ${connectHost()}:${p()}`}
+	                                      onClick={() => safeCopy(`${connectHost()}:${p()}`)}
+	                                    >
+	                                      ADDR
+	                                    </button>
+	                                  )}
+	                                </Show>
+
+	                                <button
+	                                  class="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-800 shadow-sm transition-all hover:bg-rose-100 hover:shadow active:scale-[0.98] disabled:opacity-50 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-200 dark:shadow-none dark:hover:bg-rose-950/30"
+	                                  disabled={deleteInstance.isPending || !canStartInstance(i.status)}
                                   onClick={() => setConfirmDeleteInstanceId(i.config.instance_id)}
                                 >
                                   DEL
@@ -1453,23 +1566,99 @@ function App() {
               role="dialog"
               aria-modal="true"
             >
-              <div class="flex items-center justify-between gap-3 border-b border-slate-200 bg-white/70 px-4 py-3 backdrop-blur dark:border-slate-800 dark:bg-slate-950/70">
-                <div class="min-w-0">
-                  <div class="text-xs font-semibold uppercase tracking-wider text-slate-500">Terminal</div>
-                  <div class="mt-0.5 truncate font-mono text-[11px] text-slate-500">{selectedInstanceId() ?? ''}</div>
-                </div>
-                <div class="flex items-center gap-2">
-                  <div class="flex items-center gap-2 text-[11px] text-slate-500">
-                    <span
+	              <div class="flex items-center justify-between gap-3 border-b border-slate-200 bg-white/70 px-4 py-3 backdrop-blur dark:border-slate-800 dark:bg-slate-950/70">
+	                <div class="min-w-0">
+	                  <div class="text-xs font-semibold uppercase tracking-wider text-slate-500">Terminal</div>
+	                  <div class="mt-0.5 truncate font-mono text-[11px] text-slate-500">
+	                    {selectedInstanceId() ?? ''}
+	                  </div>
+	                  <Show when={selectedInstanceStatus()}>
+	                    <div class="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+	                      <span class="rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 dark:border-slate-800 dark:bg-slate-950/40">
+	                        {instanceStateLabel(selectedInstanceStatus())}
+	                      </span>
+	                      <Show when={selectedInstanceStatus()?.exit_code != null}>
+	                        <span class="rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 font-mono dark:border-slate-800 dark:bg-slate-950/40">
+	                          exit {selectedInstanceStatus()?.exit_code}
+	                        </span>
+	                      </Show>
+	                      <Show when={selectedInstanceStatus()?.message != null}>
+	                        <span class="truncate">{selectedInstanceStatus()?.message}</span>
+	                      </Show>
+	                    </div>
+	                  </Show>
+	                </div>
+	                <div class="flex items-center gap-2">
+	                  <div class="flex items-center gap-2 text-[11px] text-slate-500">
+	                    <span
                       class={`h-1.5 w-1.5 rounded-full ${statusDotClass({ loading: logs.isPending, error: logs.isError })}`}
                       title={logs.isPending ? 'loading' : logs.isError ? 'error' : 'live'}
-                    />
-                    <span>{logs.isPending ? 'loading' : logs.isError ? 'error' : 'live'}</span>
-                  </div>
-                  <button
-                    class="rounded-lg border border-slate-200 bg-white/70 px-3 py-1.5 text-xs font-medium text-slate-800 shadow-sm transition-all hover:bg-white hover:shadow active:scale-[0.98] dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:shadow-none dark:hover:bg-slate-900"
-                    onClick={() => setShowLogsModal(false)}
-                  >
+	                    />
+	                    <span>{logs.isPending ? 'loading' : logs.isError ? 'error' : 'live'}</span>
+	                  </div>
+	                  <button
+	                    class="rounded-lg border border-slate-200 bg-white/70 px-3 py-1.5 text-xs font-medium text-slate-800 shadow-sm transition-all hover:bg-white hover:shadow active:scale-[0.98] disabled:opacity-50 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:shadow-none dark:hover:bg-slate-900"
+	                    disabled={instanceDiagnostics.isPending || selectedInstance() == null}
+	                    onClick={async () => {
+	                      const inst = selectedInstance()
+	                      if (!inst) return
+	                      const cfg = {
+	                        ...inst.config,
+	                        params: { ...(inst.config.params as Record<string, string>) },
+	                      }
+	                      if ('password' in cfg.params) cfg.params.password = '<redacted>'
+	                      const diag = await instanceDiagnostics.mutateAsync({
+	                        instance_id: inst.config.instance_id,
+	                        max_lines: 600,
+	                        limit_bytes: 512 * 1024,
+	                      })
+
+	                      const payload = {
+	                        type: 'alloy-instance-diagnostics',
+	                        ...diag,
+	                        config: cfg,
+	                        status: inst.status ?? null,
+	                        process_logs_tail: logs.data?.lines ?? [],
+	                      }
+
+	                      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
+	                      const url = URL.createObjectURL(blob)
+	                      const a = document.createElement('a')
+	                      a.href = url
+	                      a.download = `alloy-${inst.config.instance_id}-diagnostics.json`
+	                      a.click()
+	                      URL.revokeObjectURL(url)
+	                    }}
+	                  >
+	                    DIAG
+	                  </button>
+	                  <button
+	                    class="rounded-lg border border-slate-200 bg-white/70 px-3 py-1.5 text-xs font-medium text-slate-800 shadow-sm transition-all hover:bg-white hover:shadow active:scale-[0.98] disabled:opacity-50 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:shadow-none dark:hover:bg-slate-900"
+	                    disabled={selectedInstance() == null}
+	                    onClick={async () => {
+	                      const inst = selectedInstance()
+	                      if (!inst) return
+	                      const cfg = {
+	                        ...inst.config,
+	                        params: { ...(inst.config.params as Record<string, string>) },
+	                      }
+	                      if ('password' in cfg.params) cfg.params.password = '<redacted>'
+	                      const payload = {
+	                        instance_id: inst.config.instance_id,
+	                        template_id: inst.config.template_id,
+	                        config: cfg,
+	                        status: inst.status ?? null,
+	                        logs_tail: logs.data?.lines ?? [],
+	                      }
+	                      await safeCopy(JSON.stringify(payload, null, 2))
+	                    }}
+	                  >
+	                    COPY
+	                  </button>
+	                  <button
+	                    class="rounded-lg border border-slate-200 bg-white/70 px-3 py-1.5 text-xs font-medium text-slate-800 shadow-sm transition-all hover:bg-white hover:shadow active:scale-[0.98] dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:shadow-none dark:hover:bg-slate-900"
+	                    onClick={() => setShowLogsModal(false)}
+	                  >
                     Close
                   </button>
                 </div>
