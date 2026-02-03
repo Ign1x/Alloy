@@ -5,11 +5,12 @@ use alloy_proto::agent_v1::{
     CreateInstanceRequest, CreateInstanceResponse, DeleteInstanceRequest, DeleteInstanceResponse,
     GetInstanceRequest, GetInstanceResponse, InstanceConfig, InstanceInfo, ListInstancesRequest,
     ListInstancesResponse, StartInstanceRequest, StartInstanceResponse, StopInstanceRequest,
-    StopInstanceResponse,
+    StopInstanceResponse, UpdateInstanceRequest, UpdateInstanceResponse,
 };
 use tokio::io::AsyncWriteExt;
 use tonic::{Request, Response, Status};
 
+use crate::port_alloc;
 use crate::process_manager::ProcessManager;
 
 const INSTANCES_DIR: &str = "instances";
@@ -65,6 +66,8 @@ struct PersistedInstance {
     instance_id: String,
     template_id: String,
     params: BTreeMap<String, String>,
+    #[serde(default)]
+    display_name: Option<String>,
 }
 
 impl PersistedInstance {
@@ -73,6 +76,7 @@ impl PersistedInstance {
             instance_id: self.instance_id.clone(),
             template_id: self.template_id.clone(),
             params: self.params.clone().into_iter().collect(),
+            display_name: self.display_name.clone().unwrap_or_default(),
         }
     }
 }
@@ -114,6 +118,27 @@ async fn save_instance(inst: &PersistedInstance) -> Result<(), Status> {
     Ok(())
 }
 
+fn template_needs_port(template_id: &str) -> bool {
+    template_id == "minecraft:vanilla" || template_id == "terraria:vanilla"
+}
+
+async fn ensure_persisted_port(inst: &mut PersistedInstance) -> Result<(), Status> {
+    if !template_needs_port(&inst.template_id) {
+        return Ok(());
+    }
+
+    let current = inst.params.get("port").map(|s| s.trim()).unwrap_or("");
+    if !current.is_empty() && current != "0" {
+        return Ok(());
+    }
+
+    let port = port_alloc::allocate_tcp_port(0)
+        .map_err(|e| Status::internal(format!("failed to allocate port: {e}")))?;
+    inst.params.insert("port".to_string(), port.to_string());
+    save_instance(inst).await?;
+    Ok(())
+}
+
 #[derive(Debug, Clone)]
 pub struct InstanceApi {
     manager: ProcessManager,
@@ -147,6 +172,7 @@ impl InstanceService for InstanceApi {
             instance_id: instance_id.clone(),
             template_id: req.template_id,
             params,
+            display_name: None,
         };
         save_instance(&inst).await?;
 
@@ -227,7 +253,10 @@ impl InstanceService for InstanceApi {
     ) -> Result<Response<StartInstanceResponse>, Status> {
         let req = request.into_inner();
         let id = normalize_instance_id(&req.instance_id).map_err(Status::from)?;
-        let inst = load_instance(&id).await?;
+        let mut inst = load_instance(&id).await?;
+
+        // If port was omitted (blank/AUTO), assign once and persist.
+        ensure_persisted_port(&mut inst).await?;
 
         let status = self
             .manager
@@ -293,6 +322,51 @@ impl InstanceService for InstanceApi {
             .map_err(|e| Status::internal(format!("failed to delete instance: {e}")))?;
 
         Ok(Response::new(DeleteInstanceResponse { ok: true }))
+    }
+
+    async fn update(
+        &self,
+        request: Request<UpdateInstanceRequest>,
+    ) -> Result<Response<UpdateInstanceResponse>, Status> {
+        let req = request.into_inner();
+        let id = normalize_instance_id(&req.instance_id).map_err(Status::from)?;
+
+        // Refuse updates while running to avoid inconsistent config vs process.
+        if let Some(st) = self.manager.get_status(&id).await
+            && matches!(
+                st.state,
+                alloy_process::ProcessState::Running
+                    | alloy_process::ProcessState::Starting
+                    | alloy_process::ProcessState::Stopping
+            )
+        {
+            return Err(Status::failed_precondition("instance is running"));
+        }
+
+        let mut inst = load_instance(&id).await?;
+        inst.params = req.params.into_iter().collect();
+        inst.display_name = if req.display_name.trim().is_empty() {
+            None
+        } else {
+            Some(req.display_name)
+        };
+
+        // Validate by applying params through templates logic.
+        let _ = crate::templates::apply_params(
+            crate::templates::find_template(&inst.template_id)
+                .ok_or_else(|| Status::invalid_argument("unknown template_id"))?,
+            &inst.params,
+        )
+        .map_err(|e| Status::invalid_argument(e.to_string()))?;
+
+        // If port was omitted (blank/AUTO), assign once and persist.
+        ensure_persisted_port(&mut inst).await?;
+
+        save_instance(&inst).await?;
+
+        Ok(Response::new(UpdateInstanceResponse {
+            config: Some(inst.to_proto()),
+        }))
     }
 }
 

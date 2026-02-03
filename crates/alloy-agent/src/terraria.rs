@@ -99,7 +99,21 @@ pub fn ensure_vanilla_instance_layout(
     fs::create_dir_all(instance_dir)?;
     fs::create_dir_all(instance_dir.join("worlds"))?;
 
-    let world_path = instance_dir
+    // NOTE: The Terraria server is executed from the extracted server root
+    // (to keep `monoconfig/assemblies/Content` adjacent to the binary).
+    // That means any relative paths in `serverconfig.txt` will be resolved
+    // against the extracted server root, not this instance directory.
+    //
+    // Use absolute paths so world/config live under the instance directory
+    // regardless of the current working directory.
+    let instance_dir_abs = if instance_dir.is_absolute() {
+        instance_dir.to_path_buf()
+    } else {
+        std::env::current_dir()?.join(instance_dir)
+    };
+    let instance_dir_abs = fs::canonicalize(&instance_dir_abs).unwrap_or(instance_dir_abs);
+
+    let world_path = instance_dir_abs
         .join("worlds")
         .join(format!("{}.wld", params.world_name));
 

@@ -2,9 +2,11 @@ use std::net::SocketAddr;
 
 use alloy_control::auth;
 use alloy_control::node_health::NodeHealthPoller;
+use alloy_control::request_meta::RequestMeta;
 use alloy_control::rpc;
 use alloy_control::security;
 use alloy_control::state::AppState;
+use axum::extract::State;
 use axum::middleware;
 use axum::{
     Json, Router,
@@ -15,15 +17,87 @@ use sea_orm_migration::MigratorTrait;
 use serde::Serialize;
 
 #[derive(Debug, Serialize)]
+struct HealthzAgent {
+    endpoint: String,
+    ok: bool,
+    status: Option<String>,
+    agent_version: Option<String>,
+    data_root: Option<String>,
+    data_root_writable: Option<bool>,
+    data_root_free_bytes: Option<u64>,
+    error: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
 struct HealthzResponse {
     status: &'static str,
     version: &'static str,
+    read_only: bool,
+    agent: HealthzAgent,
 }
 
-async fn healthz() -> Json<HealthzResponse> {
+async fn healthz(State(_state): State<AppState>) -> Json<HealthzResponse> {
+    let agent_endpoint = std::env::var("ALLOY_AGENT_ENDPOINT")
+        .unwrap_or_else(|_| "http://127.0.0.1:50051".to_string());
+
+    let agent =
+        match alloy_proto::agent_v1::agent_health_service_client::AgentHealthServiceClient::connect(
+            agent_endpoint.clone(),
+        )
+        .await
+        {
+            Ok(mut client) => match client
+                .check(tonic::Request::new(
+                    alloy_proto::agent_v1::HealthCheckRequest {},
+                ))
+                .await
+            {
+                Ok(resp) => {
+                    let resp = resp.into_inner();
+                    HealthzAgent {
+                        endpoint: agent_endpoint,
+                        ok: true,
+                        status: Some(resp.status),
+                        agent_version: Some(resp.agent_version),
+                        data_root: Some(resp.data_root),
+                        data_root_writable: Some(resp.data_root_writable),
+                        data_root_free_bytes: Some(resp.data_root_free_bytes),
+                        error: None,
+                    }
+                }
+                Err(e) => HealthzAgent {
+                    endpoint: agent_endpoint,
+                    ok: false,
+                    status: None,
+                    agent_version: None,
+                    data_root: None,
+                    data_root_writable: None,
+                    data_root_free_bytes: None,
+                    error: Some(format!("health check failed: {e}")),
+                },
+            },
+            Err(e) => HealthzAgent {
+                endpoint: agent_endpoint,
+                ok: false,
+                status: None,
+                agent_version: None,
+                data_root: None,
+                data_root_writable: None,
+                data_root_free_bytes: None,
+                error: Some(format!("connect failed: {e}")),
+            },
+        };
+
     Json(HealthzResponse {
         status: "ok",
         version: env!("CARGO_PKG_VERSION"),
+        read_only: std::env::var("ALLOY_READ_ONLY").is_ok_and(|v| {
+            matches!(
+                v.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        }),
+        agent,
     })
 }
 
@@ -91,10 +165,12 @@ async fn main() -> anyhow::Result<()> {
     let rspc_router = rspc_axum::endpoint(
         procedures,
         |axum::extract::State(state): axum::extract::State<AppState>,
+         axum::extract::Extension(meta): axum::extract::Extension<RequestMeta>,
          user: Option<axum::Extension<rpc::AuthUser>>| {
             rpc::Ctx {
                 db: state.db.clone(),
                 user: user.map(|axum::Extension(u)| u),
+                request_id: meta.request_id,
             }
         },
     )
@@ -105,6 +181,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/auth/whoami", get(auth::whoami))
         .nest("/auth", auth_router)
         .nest("/rspc", rspc_router)
+        .layer(middleware::from_fn(security::request_id))
         .with_state(state);
     let addr: SocketAddr = ([0, 0, 0, 0], 8080).into();
     tracing::info!(%addr, "alloy-control HTTP listening");

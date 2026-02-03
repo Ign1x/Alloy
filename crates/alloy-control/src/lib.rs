@@ -1,6 +1,8 @@
+pub mod audit;
 pub mod auth;
 pub mod minecraft_versions;
 pub mod node_health;
+pub mod request_meta;
 pub mod rpc;
 pub mod security;
 pub mod state;

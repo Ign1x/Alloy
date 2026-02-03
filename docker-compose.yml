@@ -14,13 +14,12 @@ services:
     build:
       context: .
       dockerfile: deploy/agent.Dockerfile
-    # gRPC is used only inside the compose network by default.
-    expose:
-      - "50051"
-    # Publish game ports to host.
-    ports:
-      - "25565:25565"
-      - "7777:7777"
+    # Use host networking so game servers can bind arbitrary ports without
+    # needing explicit `ports:` mappings (best for multi-game + dynamic ports).
+    #
+    # NOTE: `network_mode: host` is Linux-only. On macOS/Windows, use bridge
+    # networking and explicit `ports:` mappings instead.
+    network_mode: "host"
     environment:
       - RUST_LOG=info
       - ALLOY_DATA_ROOT=/data
@@ -34,10 +33,13 @@ services:
       dockerfile: deploy/control.Dockerfile
     ports:
       - "8080:8080"
+    extra_hosts:
+      # Allow reaching the host network (and host-networked alloy-agent) from this container.
+      - "host.docker.internal:host-gateway"
     environment:
       - RUST_LOG=info
-      # gRPC target for alloy-agent inside the compose network.
-      - ALLOY_AGENT_ENDPOINT=http://alloy-agent:50051
+      # gRPC target for host-networked alloy-agent.
+      - ALLOY_AGENT_ENDPOINT=http://host.docker.internal:50051
       - DATABASE_URL=postgres://postgres:postgres@postgres:5432/alloy
       # Used by CSRF/Origin middleware for browser requests.
       - ALLOY_ALLOWED_ORIGINS=http://localhost:3000,http://localhost:5173,http://127.0.0.1:5173

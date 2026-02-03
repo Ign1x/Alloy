@@ -1,11 +1,21 @@
-use std::net::TcpListener;
+use std::{io::ErrorKind, net::TcpListener};
+
+use anyhow::Context;
 
 pub fn allocate_tcp_port(preferred: u16) -> anyhow::Result<u16> {
     if preferred != 0 {
         // Validate availability.
-        TcpListener::bind(("0.0.0.0", preferred))?
-            .set_nonblocking(true)
-            .ok();
+        match TcpListener::bind(("0.0.0.0", preferred)) {
+            Ok(l) => {
+                l.set_nonblocking(true).ok();
+            }
+            Err(e) if e.kind() == ErrorKind::AddrInUse => {
+                anyhow::bail!("port already in use: {preferred}");
+            }
+            Err(e) => {
+                return Err(e).context(format!("bind port {preferred}"));
+            }
+        }
         return Ok(preferred);
     }
 

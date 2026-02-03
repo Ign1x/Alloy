@@ -1,13 +1,16 @@
 use axum::{
     body::Body,
-    http::{HeaderMap, Method, Request, StatusCode},
+    http::{HeaderMap, HeaderValue, Method, Request, StatusCode},
     middleware::Next,
     response::{IntoResponse, Response},
 };
 use axum_extra::extract::cookie::CookieJar;
+use rand::RngCore;
 use serde::Serialize;
+use tracing::Instrument;
 
 use crate::auth::{ACCESS_COOKIE_NAME, CSRF_COOKIE_NAME, validate_access_jwt};
+use crate::request_meta::RequestMeta;
 use crate::rpc::AuthUser;
 
 const CSRF_HEADER_NAME: &str = "x-csrf-token";
@@ -142,4 +145,40 @@ pub async fn rspc_auth_guard(req: Request<Body>, next: Next) -> Response {
     let mut req = req;
     req.extensions_mut().insert(user);
     next.run(req).await
+}
+
+const REQUEST_ID_HEADER_NAME: &str = "x-request-id";
+
+fn generate_request_id() -> String {
+    let mut bytes = [0u8; 16];
+    rand::thread_rng().fill_bytes(&mut bytes);
+    hex::encode(bytes)
+}
+
+// Middleware: request id propagation.
+//
+// - If the client supplies `x-request-id`, keep it (best-effort).
+// - Otherwise generate one.
+// - Always echo `x-request-id` back in the response and expose it to handlers via extensions.
+pub async fn request_id(mut req: Request<Body>, next: Next) -> Response {
+    let rid = req
+        .headers()
+        .get(REQUEST_ID_HEADER_NAME)
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(generate_request_id);
+
+    req.extensions_mut().insert(RequestMeta {
+        request_id: rid.clone(),
+    });
+
+    let method = req.method().clone();
+    let path = req.uri().path().to_string();
+    let span = tracing::info_span!("http", request_id = %rid, %method, %path);
+    let mut resp = next.run(req).instrument(span).await;
+    if let Ok(v) = HeaderValue::from_str(&rid) {
+        resp.headers_mut().insert(REQUEST_ID_HEADER_NAME, v);
+    }
+    resp
 }

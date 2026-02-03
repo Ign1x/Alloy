@@ -12,4 +12,10 @@ message HealthCheckRequest {}
 message HealthCheckResponse {
   string status = 1;
   string agent_version = 2;
+  // Absolute path of the agent data root.
+  string data_root = 3;
+  // Best-effort: whether data_root appears writable.
+  bool data_root_writable = 4;
+  // Best-effort free bytes at data_root filesystem.
+  uint64 data_root_free_bytes = 5;
 }

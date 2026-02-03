@@ -57,9 +57,18 @@ pub fn validate_vanilla_params(params: &BTreeMap<String, String>) -> anyhow::Res
 }
 
 pub fn data_root() -> PathBuf {
-    std::env::var("ALLOY_DATA_ROOT")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("./data"))
+    let raw = std::env::var("ALLOY_DATA_ROOT").unwrap_or_else(|_| "./data".to_string());
+    let p = PathBuf::from(raw);
+    let abs = if p.is_absolute() {
+        p
+    } else {
+        std::env::current_dir()
+            .unwrap_or_else(|_| PathBuf::from("."))
+            .join(p)
+    };
+
+    // Best-effort canonicalization: don't fail if the directory doesn't exist yet.
+    std::fs::canonicalize(&abs).unwrap_or(abs)
 }
 
 pub fn instance_dir(process_id: &str) -> PathBuf {

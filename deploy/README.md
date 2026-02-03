@@ -5,15 +5,14 @@ This directory contains the Dockerized deployment for the current vertical slice
 
 ## Services
 - `alloy-agent` (gRPC): container port `50051`
-- `alloy-agent` (Minecraft): container port `25565` (published to host for server connections)
+- `alloy-agent` (Game servers): bind directly on the host (host networking)
 - `alloy-control` (HTTP): container port `8080` (serves `/healthz` and `/rspc`)
 - `web` (nginx): container port `80` (serves SPA + proxies `/rspc` to control)
 
 Default host ports (via compose):
 - web: `http://localhost:3000`
 - control: `http://localhost:8080`
-- minecraft: `localhost:25565`
-- terraria: `localhost:7777`
+- games: depends on instance `port` (e.g. Minecraft `25565`, Terraria `7777`)
 
 ## Quick start
 
@@ -72,6 +71,7 @@ Web (same-origin `/rspc`):
 ```bash
 curl -fsS http://localhost:3000/ > /dev/null
 curl -fsS "http://localhost:3000/rspc/control.ping?input=null"
+```
 
 ## Terraria (vanilla)
 
@@ -92,11 +92,10 @@ curl -fsS -X POST -H 'content-type: application/json' \
   --data '{"template_id":"terraria:vanilla","params":{"version":"1453","port":"7777","max_players":"8","world_name":"world","world_size":"1"}}' \
   http://localhost:8080/rspc/process.start
 ```
-```
 
 ## Configuration
 
 `alloy-control` uses `ALLOY_AGENT_ENDPOINT` to find the agent gRPC endpoint.
 
 - Local dev default: `http://127.0.0.1:50051`
-- docker-compose: `http://alloy-agent:50051`
+- docker-compose (host-networked agent): `http://host.docker.internal:50051` (via `extra_hosts: host-gateway`)

@@ -73,12 +73,18 @@ pub fn extract_linux_x64_to_cache(
     version_id: &str,
 ) -> anyhow::Result<ExtractedLinuxServer> {
     // IMPORTANT: do NOT extract only the native binary.
-    // Terraria expects sidecar files (monoconfig/assemblies/Content) to exist in its working dir.
+    // Terraria expects sidecar files (DLLs / native libs) to exist in its working dir.
     let server_root = cache_dir().join(version_id).join("linux-x64");
     let bin_x86_64 = server_root.join("TerrariaServer.bin.x86_64");
     let launcher = server_root.join("TerrariaServer");
 
-    if bin_x86_64.exists() {
+    // Best-effort cache validation: ensure we didn't leave a half-extracted directory behind.
+    // (Terraria's server package layout has changed over time; keep the check loose.)
+    let looks_complete = bin_x86_64.exists()
+        && (server_root.join("lib64").is_dir()
+            || server_root.join("FNA.dll").is_file()
+            || server_root.join("TerrariaServer.exe").is_file());
+    if looks_complete {
         return Ok(ExtractedLinuxServer {
             server_root,
             bin_x86_64,
@@ -90,6 +96,11 @@ pub fn extract_linux_x64_to_cache(
         });
     }
 
+    // If we have the binary but are missing key sidecars, wipe and re-extract.
+    if bin_x86_64.exists() {
+        let _ = fs::remove_dir_all(&server_root);
+    }
+
     fs::create_dir_all(&server_root)?;
 
     let f = fs::File::open(zip_path)?;
@@ -99,20 +110,26 @@ pub fn extract_linux_x64_to_cache(
     for i in 0..archive.len() {
         let mut file = archive.by_index(i).context("read zip entry")?;
         let name = file.name();
-        if !name.contains("/Linux/") {
-            continue;
-        }
 
-        // Strip the leading path up to and including "/Linux/".
-        let rel = match name.split_once("/Linux/") {
-            Some((_, rest)) => rest,
-            None => continue,
+        // Re-Logic server zips are typically "<version>/Linux/...", but may also be "Linux/...".
+        // Find the "Linux" directory segment and extract everything underneath it.
+        let rel = {
+            let trimmed = name.trim_end_matches('/');
+            if trimmed.is_empty() {
+                continue;
+            }
+            let parts: Vec<&str> = trimmed.split('/').collect();
+            let Some(idx) = parts.iter().position(|p| p.eq_ignore_ascii_case("Linux")) else {
+                continue;
+            };
+            let rest = &parts[(idx + 1)..];
+            if rest.is_empty() {
+                continue;
+            }
+            rest.join("/")
         };
-        if rel.is_empty() {
-            continue;
-        }
 
-        let out_path = server_root.join(rel);
+        let out_path = server_root.join(&rel);
         if name.ends_with('/') {
             fs::create_dir_all(&out_path)?;
             continue;

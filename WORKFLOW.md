@@ -124,11 +124,11 @@ Definition of Done (must be true):
 - Visual polish: consistent spacing/typography/colors, better first impression (top-left nav/header)
 
 TODO:
-- [ ] Refactor structure: split `web/src/App.tsx` into Layout + pages + shared UI components
-- [ ] Remove redundant Refresh buttons; switch to rspc query invalidation on mutations
-- [ ] Improve loading/empty/error states (skeletons, inline errors, disable states)
-- [ ] Polish UI primitives: buttons/inputs/dropdowns/modals consistency
-  - [ ] End-to-end verification: `npm run build` (and keep rspc bindings unchanged)
+- [x] Refactor structure: split `web/src/App.tsx` into Layout + pages + shared UI components
+- [x] Remove redundant Refresh buttons; switch to rspc query invalidation on mutations
+- [x] Improve loading/empty/error states (skeletons, inline errors, disable states)
+- [x] Polish UI primitives: buttons/inputs/dropdowns/modals consistency
+  - [x] End-to-end verification: `npm run build` (and keep rspc bindings unchanged)
 
 ### Phase 4.2 - Web UI/UX Overhaul (aesthetic + interaction quality)
 Definition of Done (must be true):
@@ -140,12 +140,12 @@ Definition of Done (must be true):
 - Microinteractions everywhere: hover/active/focus/disabled states feel “clicky” and intentional
 
 TODO:
-- [ ] Redesign Instances list: responsive card/grid layout + better action grouping
-- [ ] Add control-plane rspc `minecraft.versions` (cached via ETag/Last-Modified) and wire UI dropdown (no manual entry)
-- [ ] Decide Terraria versions strategy (if no official list endpoint: curated list + advanced override) and wire UI
-- [ ] Color + typography refresh (add display font for headings; keep IBM Plex Mono for code)
-- [ ] Microinteractions pass (buttons, cards, nav, dropdown, loading states)
-- [ ] Verify: `npm run build`, rspc bindings unchanged, `cargo fmt/clippy/test`
+- [x] Redesign Instances list: responsive card/grid layout + better action grouping
+- [x] Add control-plane rspc `minecraft.versions` (cached via ETag/Last-Modified) and wire UI dropdown (no manual entry)
+- [x] Decide Terraria versions strategy (if no official list endpoint: curated list + advanced override) and wire UI
+- [x] Color + typography refresh (add display font for headings; keep IBM Plex Mono for code)
+- [x] Microinteractions pass (buttons, cards, nav, dropdown, loading states)
+- [x] Verify: `npm run build`, rspc bindings unchanged, `cargo fmt/clippy/test`
 
 ### Phase 4.3 - Instance UX + Multi-instance ergonomics
 Definition of Done (must be true):
@@ -156,12 +156,12 @@ Definition of Done (must be true):
 - Account/Admin chip in top-right is elegant and consistent with the new design
 
 TODO:
-- [ ] Instance naming: allow user-provided display name; show it in instances list
-- [ ] Auto port assignment in agent for Minecraft/Terraria when port is omitted
-- [ ] Memory presets dropdown for Minecraft (2G/4G/8G/16G + custom)
-- [ ] Docker compose: run alloy-agent in host network mode (dev) and adjust control->agent endpoint
-- [ ] Redesign account/admin chip (top-right)
-- [ ] Verify: web build, rspc bindings clean, cargo fmt/clippy/test
+- [x] Instance naming: allow user-provided display name; show it in instances list
+- [x] Auto port assignment in agent for Minecraft/Terraria when port is omitted
+- [x] Memory presets dropdown for Minecraft (2G/4G/8G/16G + custom)
+- [x] Docker compose: run alloy-agent in host network mode (dev) and adjust control->agent endpoint
+- [x] Redesign account/admin chip (top-right)
+- [x] Verify: web build, rspc bindings clean, cargo fmt/clippy/test
 
 ### Phase 5 - Game plugins
 - [ ] Minecraft adapter (parity with legacy core features)

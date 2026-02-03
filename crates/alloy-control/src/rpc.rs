@@ -3,7 +3,7 @@ use alloy_proto::agent_v1::{
     HealthCheckRequest, ListDirRequest, ListInstancesRequest, ListProcessesRequest,
     ListTemplatesRequest, ReadFileRequest, StartFromTemplateRequest, StartInstanceRequest,
     StopInstanceRequest, StopProcessRequest, TailFileRequest, TailLogsRequest,
-    agent_health_service_client::AgentHealthServiceClient,
+    UpdateInstanceRequest, agent_health_service_client::AgentHealthServiceClient,
     filesystem_service_client::FilesystemServiceClient,
     instance_service_client::InstanceServiceClient, logs_service_client::LogsServiceClient,
     process_service_client::ProcessServiceClient,
@@ -12,7 +12,13 @@ use rspc::{Procedure, ProcedureError, ResolverError, Router};
 use tonic::Request;
 
 use specta::Type;
-use std::sync::Arc;
+use std::{
+    collections::{HashMap, VecDeque},
+    sync::{Arc, OnceLock},
+    time::{Duration, Instant},
+};
+
+use crate::audit;
 
 #[derive(Clone, Debug, serde::Serialize, Type)]
 pub struct AuthUser {
@@ -26,18 +32,108 @@ pub struct AuthUser {
 pub struct Ctx {
     pub db: Arc<alloy_db::sea_orm::DatabaseConnection>,
     pub user: Option<AuthUser>,
+    pub request_id: String,
 }
 
 #[derive(Debug, Clone, serde::Serialize, Type)]
 pub struct ApiError {
+    pub code: String,
     pub message: String,
+    pub request_id: String,
 }
 
 impl rspc::Error for ApiError {
     fn into_procedure_error(self) -> ProcedureError {
         // Keep error payload intentionally minimal/safe for frontend.
-        ResolverError::new(self.message, Option::<std::io::Error>::None).into()
+        ResolverError::new(self, Option::<std::io::Error>::None).into()
     }
+}
+
+fn api_error(ctx: &Ctx, code: &str, message: impl Into<String>) -> ApiError {
+    ApiError {
+        code: code.to_string(),
+        message: message.into(),
+        request_id: ctx.request_id.clone(),
+    }
+}
+
+fn is_read_only() -> bool {
+    matches!(
+        std::env::var("ALLOY_READ_ONLY")
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase()
+            .as_str(),
+        "1" | "true" | "yes" | "on"
+    )
+}
+
+fn ensure_writable(ctx: &Ctx) -> Result<(), ApiError> {
+    if is_read_only() {
+        return Err(api_error(ctx, "READ_ONLY", "control is in read-only mode"));
+    }
+    Ok(())
+}
+
+struct RateLimiter {
+    window: Duration,
+    max_hits: usize,
+    hits: std::sync::Mutex<HashMap<String, VecDeque<Instant>>>,
+}
+
+impl RateLimiter {
+    fn global() -> &'static RateLimiter {
+        static RL: OnceLock<RateLimiter> = OnceLock::new();
+        RL.get_or_init(|| {
+            let max_hits = std::env::var("ALLOY_RATE_LIMIT_MAX_HITS")
+                .ok()
+                .and_then(|v| v.parse::<usize>().ok())
+                .unwrap_or(30)
+                .clamp(1, 10_000);
+            let window_ms = std::env::var("ALLOY_RATE_LIMIT_WINDOW_MS")
+                .ok()
+                .and_then(|v| v.parse::<u64>().ok())
+                .unwrap_or(10_000)
+                .clamp(1000, 600_000);
+            RateLimiter {
+                window: Duration::from_millis(window_ms),
+                max_hits,
+                hits: std::sync::Mutex::new(HashMap::new()),
+            }
+        })
+    }
+
+    fn allow(&self, key: &str) -> bool {
+        let now = Instant::now();
+        let mut map = self.hits.lock().unwrap_or_else(|e| e.into_inner());
+        let q = map.entry(key.to_string()).or_insert_with(VecDeque::new);
+        while q
+            .front()
+            .is_some_and(|t| now.duration_since(*t) > self.window)
+        {
+            q.pop_front();
+        }
+        if q.len() >= self.max_hits {
+            return false;
+        }
+        q.push_back(now);
+        true
+    }
+}
+
+fn rate_limit_key(ctx: &Ctx) -> String {
+    ctx.user
+        .as_ref()
+        .map(|u| format!("user:{}", u.user_id))
+        .unwrap_or_else(|| "anon".to_string())
+}
+
+fn enforce_rate_limit(ctx: &Ctx) -> Result<(), ApiError> {
+    let key = rate_limit_key(ctx);
+    if !RateLimiter::global().allow(&key) {
+        return Err(api_error(ctx, "RATE_LIMITED", "too many requests"));
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, serde::Serialize, Type)]
@@ -165,6 +261,7 @@ pub struct InstanceConfigDto {
     pub instance_id: String,
     pub template_id: String,
     pub params: std::collections::BTreeMap<String, String>,
+    pub display_name: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, Type)]
@@ -184,6 +281,13 @@ pub struct StopInstanceInput {
     pub timeout_ms: Option<u32>,
 }
 
+#[derive(Debug, Clone, serde::Deserialize, Type)]
+pub struct UpdateInstanceInput {
+    pub instance_id: String,
+    pub params: std::collections::BTreeMap<String, String>,
+    pub display_name: Option<String>,
+}
+
 #[derive(Debug, Clone, serde::Serialize, Type)]
 pub struct DeleteInstanceOutput {
     pub ok: bool,
@@ -200,15 +304,21 @@ fn map_instance_config(cfg: alloy_proto::agent_v1::InstanceConfig) -> InstanceCo
         instance_id: cfg.instance_id,
         template_id: cfg.template_id,
         params: cfg.params.into_iter().collect(),
+        display_name: if cfg.display_name.trim().is_empty() {
+            None
+        } else {
+            Some(cfg.display_name)
+        },
     }
 }
 
 fn map_instance_info(
+    ctx: &Ctx,
     info: alloy_proto::agent_v1::InstanceInfo,
 ) -> Result<InstanceInfoDto, ApiError> {
-    let cfg = info.config.ok_or_else(|| ApiError {
-        message: "missing instance config".to_string(),
-    })?;
+    let cfg = info
+        .config
+        .ok_or_else(|| api_error(ctx, "INTERNAL", "missing instance config"))?;
 
     Ok(InstanceInfoDto {
         config: map_instance_config(cfg),
@@ -255,7 +365,7 @@ pub fn router() -> Router<Ctx> {
 
     let agent = Router::new().procedure(
         "health",
-        Procedure::builder::<ApiError>().query(|_, _: ()| async move {
+        Procedure::builder::<ApiError>().query(|ctx, _: ()| async move {
             // Container-safe: do not hardcode localhost.
             //
             // Local dev default is http://127.0.0.1:50051.
@@ -265,15 +375,23 @@ pub fn router() -> Router<Ctx> {
 
             let mut client = AgentHealthServiceClient::connect(agent_endpoint.clone())
                 .await
-                .map_err(|e| ApiError {
-                    message: format!("failed to connect agent ({agent_endpoint}): {e}"),
+                .map_err(|e| {
+                    api_error(
+                        &ctx,
+                        "AGENT_CONNECT_FAILED",
+                        format!("failed to connect agent ({agent_endpoint}): {e}"),
+                    )
                 })?;
 
             let resp = client
                 .check(Request::new(HealthCheckRequest {}))
                 .await
-                .map_err(|e| ApiError {
-                    message: format!("agent health check failed: {e}"),
+                .map_err(|e| {
+                    api_error(
+                        &ctx,
+                        "AGENT_RPC_FAILED",
+                        format!("agent health check failed: {e}"),
+                    )
                 })?;
 
             let resp = resp.into_inner();
@@ -287,20 +405,28 @@ pub fn router() -> Router<Ctx> {
     let process = Router::new()
         .procedure(
             "templates",
-            Procedure::builder::<ApiError>().query(|_, _: ()| async move {
+            Procedure::builder::<ApiError>().query(|ctx, _: ()| async move {
                 let agent_endpoint = std::env::var("ALLOY_AGENT_ENDPOINT")
                     .unwrap_or_else(|_| "http://127.0.0.1:50051".to_string());
                 let mut client = ProcessServiceClient::connect(agent_endpoint.clone())
                     .await
-                    .map_err(|e| ApiError {
-                        message: format!("failed to connect agent ({agent_endpoint}): {e}"),
+                    .map_err(|e| {
+                        api_error(
+                            &ctx,
+                            "AGENT_CONNECT_FAILED",
+                            format!("failed to connect agent ({agent_endpoint}): {e}"),
+                        )
                     })?;
 
                 let resp = client
                     .list_templates(Request::new(ListTemplatesRequest {}))
                     .await
-                    .map_err(|e| ApiError {
-                        message: format!("list_templates failed: {e}"),
+                    .map_err(|e| {
+                        api_error(
+                            &ctx,
+                            "AGENT_RPC_FAILED",
+                            format!("list_templates failed: {e}"),
+                        )
                     })?
                     .into_inner();
 
@@ -316,20 +442,28 @@ pub fn router() -> Router<Ctx> {
         )
         .procedure(
             "list",
-            Procedure::builder::<ApiError>().query(|_, _: ()| async move {
+            Procedure::builder::<ApiError>().query(|ctx, _: ()| async move {
                 let agent_endpoint = std::env::var("ALLOY_AGENT_ENDPOINT")
                     .unwrap_or_else(|_| "http://127.0.0.1:50051".to_string());
                 let mut client = ProcessServiceClient::connect(agent_endpoint.clone())
                     .await
-                    .map_err(|e| ApiError {
-                        message: format!("failed to connect agent ({agent_endpoint}): {e}"),
+                    .map_err(|e| {
+                        api_error(
+                            &ctx,
+                            "AGENT_CONNECT_FAILED",
+                            format!("failed to connect agent ({agent_endpoint}): {e}"),
+                        )
                     })?;
 
                 let resp = client
                     .list_processes(Request::new(ListProcessesRequest {}))
                     .await
-                    .map_err(|e| ApiError {
-                        message: format!("list_processes failed: {e}"),
+                    .map_err(|e| {
+                        api_error(
+                            &ctx,
+                            "AGENT_RPC_FAILED",
+                            format!("list_processes failed: {e}"),
+                        )
                     })?
                     .into_inner();
 
@@ -357,13 +491,20 @@ pub fn router() -> Router<Ctx> {
         )
         .procedure(
             "start",
-            Procedure::builder::<ApiError>().mutation(|_, input: StartProcessInput| async move {
+            Procedure::builder::<ApiError>().mutation(|ctx, input: StartProcessInput| async move {
+                ensure_writable(&ctx)?;
+                enforce_rate_limit(&ctx)?;
+
                 let agent_endpoint = std::env::var("ALLOY_AGENT_ENDPOINT")
                     .unwrap_or_else(|_| "http://127.0.0.1:50051".to_string());
                 let mut client = ProcessServiceClient::connect(agent_endpoint.clone())
                     .await
-                    .map_err(|e| ApiError {
-                        message: format!("failed to connect agent ({agent_endpoint}): {e}"),
+                    .map_err(|e| {
+                        api_error(
+                            &ctx,
+                            "AGENT_CONNECT_FAILED",
+                            format!("failed to connect agent ({agent_endpoint}): {e}"),
+                        )
                     })?;
 
                 let req = StartFromTemplateRequest {
@@ -374,14 +515,24 @@ pub fn router() -> Router<Ctx> {
                 let status = client
                     .start_from_template(Request::new(req))
                     .await
-                    .map_err(|e| ApiError {
-                        message: format!("start_from_template failed: {e}"),
+                    .map_err(|e| {
+                        api_error(
+                            &ctx,
+                            "AGENT_RPC_FAILED",
+                            format!("start_from_template failed: {e}"),
+                        )
                     })?
                     .into_inner()
                     .status
-                    .ok_or_else(|| ApiError {
-                        message: "missing status".to_string(),
-                    })?;
+                    .ok_or_else(|| api_error(&ctx, "INTERNAL", "missing status"))?;
+
+                audit::record(
+                    &ctx,
+                    "process.start",
+                    &status.process_id,
+                    Some(serde_json::json!({ "template_id": status.template_id })),
+                )
+                .await;
 
                 Ok(ProcessStatusDto {
                     process_id: status.process_id.clone(),
@@ -407,13 +558,20 @@ pub fn router() -> Router<Ctx> {
         )
         .procedure(
             "stop",
-            Procedure::builder::<ApiError>().mutation(|_, input: StopProcessInput| async move {
+            Procedure::builder::<ApiError>().mutation(|ctx, input: StopProcessInput| async move {
+                ensure_writable(&ctx)?;
+                enforce_rate_limit(&ctx)?;
+
                 let agent_endpoint = std::env::var("ALLOY_AGENT_ENDPOINT")
                     .unwrap_or_else(|_| "http://127.0.0.1:50051".to_string());
                 let mut client = ProcessServiceClient::connect(agent_endpoint.clone())
                     .await
-                    .map_err(|e| ApiError {
-                        message: format!("failed to connect agent ({agent_endpoint}): {e}"),
+                    .map_err(|e| {
+                        api_error(
+                            &ctx,
+                            "AGENT_CONNECT_FAILED",
+                            format!("failed to connect agent ({agent_endpoint}): {e}"),
+                        )
                     })?;
 
                 let req = StopProcessRequest {
@@ -424,14 +582,18 @@ pub fn router() -> Router<Ctx> {
                 let status = client
                     .stop(Request::new(req))
                     .await
-                    .map_err(|e| ApiError {
-                        message: format!("stop failed: {e}"),
-                    })?
+                    .map_err(|e| api_error(&ctx, "AGENT_RPC_FAILED", format!("stop failed: {e}")))?
                     .into_inner()
                     .status
-                    .ok_or_else(|| ApiError {
-                        message: "missing status".to_string(),
-                    })?;
+                    .ok_or_else(|| api_error(&ctx, "INTERNAL", "missing status"))?;
+
+                audit::record(
+                    &ctx,
+                    "process.stop",
+                    &status.process_id,
+                    Some(serde_json::json!({ "template_id": status.template_id })),
+                )
+                .await;
 
                 Ok(ProcessStatusDto {
                     process_id: status.process_id.clone(),
@@ -457,13 +619,17 @@ pub fn router() -> Router<Ctx> {
         )
         .procedure(
             "status",
-            Procedure::builder::<ApiError>().query(|_, input: GetStatusInput| async move {
+            Procedure::builder::<ApiError>().query(|ctx, input: GetStatusInput| async move {
                 let agent_endpoint = std::env::var("ALLOY_AGENT_ENDPOINT")
                     .unwrap_or_else(|_| "http://127.0.0.1:50051".to_string());
                 let mut client = ProcessServiceClient::connect(agent_endpoint.clone())
                     .await
-                    .map_err(|e| ApiError {
-                        message: format!("failed to connect agent ({agent_endpoint}): {e}"),
+                    .map_err(|e| {
+                        api_error(
+                            &ctx,
+                            "AGENT_CONNECT_FAILED",
+                            format!("failed to connect agent ({agent_endpoint}): {e}"),
+                        )
                     })?;
 
                 let status = client
@@ -471,14 +637,12 @@ pub fn router() -> Router<Ctx> {
                         process_id: input.process_id,
                     }))
                     .await
-                    .map_err(|e| ApiError {
-                        message: format!("get_status failed: {e}"),
+                    .map_err(|e| {
+                        api_error(&ctx, "AGENT_RPC_FAILED", format!("get_status failed: {e}"))
                     })?
                     .into_inner()
                     .status
-                    .ok_or_else(|| ApiError {
-                        message: "missing status".to_string(),
-                    })?;
+                    .ok_or_else(|| api_error(&ctx, "INTERNAL", "missing status"))?;
 
                 Ok(ProcessStatusDto {
                     process_id: status.process_id.clone(),
@@ -504,13 +668,17 @@ pub fn router() -> Router<Ctx> {
         )
         .procedure(
             "logsTail",
-            Procedure::builder::<ApiError>().query(|_, input: TailLogsInput| async move {
+            Procedure::builder::<ApiError>().query(|ctx, input: TailLogsInput| async move {
                 let agent_endpoint = std::env::var("ALLOY_AGENT_ENDPOINT")
                     .unwrap_or_else(|_| "http://127.0.0.1:50051".to_string());
                 let mut client = ProcessServiceClient::connect(agent_endpoint.clone())
                     .await
-                    .map_err(|e| ApiError {
-                        message: format!("failed to connect agent ({agent_endpoint}): {e}"),
+                    .map_err(|e| {
+                        api_error(
+                            &ctx,
+                            "AGENT_CONNECT_FAILED",
+                            format!("failed to connect agent ({agent_endpoint}): {e}"),
+                        )
                     })?;
 
                 let resp = client
@@ -520,8 +688,8 @@ pub fn router() -> Router<Ctx> {
                         cursor: input.cursor.unwrap_or_default(),
                     }))
                     .await
-                    .map_err(|e| ApiError {
-                        message: format!("tail_logs failed: {e}"),
+                    .map_err(|e| {
+                        api_error(&ctx, "AGENT_RPC_FAILED", format!("tail_logs failed: {e}"))
                     })?
                     .into_inner();
 
@@ -535,13 +703,17 @@ pub fn router() -> Router<Ctx> {
     let fs = Router::new()
         .procedure(
             "listDir",
-            Procedure::builder::<ApiError>().query(|_, input: ListDirInput| async move {
+            Procedure::builder::<ApiError>().query(|ctx, input: ListDirInput| async move {
                 let agent_endpoint = std::env::var("ALLOY_AGENT_ENDPOINT")
                     .unwrap_or_else(|_| "http://127.0.0.1:50051".to_string());
                 let mut client = FilesystemServiceClient::connect(agent_endpoint.clone())
                     .await
-                    .map_err(|e| ApiError {
-                        message: format!("failed to connect agent ({agent_endpoint}): {e}"),
+                    .map_err(|e| {
+                        api_error(
+                            &ctx,
+                            "AGENT_CONNECT_FAILED",
+                            format!("failed to connect agent ({agent_endpoint}): {e}"),
+                        )
                     })?;
 
                 let resp = client
@@ -549,8 +721,8 @@ pub fn router() -> Router<Ctx> {
                         path: input.path.unwrap_or_default(),
                     }))
                     .await
-                    .map_err(|e| ApiError {
-                        message: format!("list_dir failed: {e}"),
+                    .map_err(|e| {
+                        api_error(&ctx, "AGENT_RPC_FAILED", format!("list_dir failed: {e}"))
                     })?
                     .into_inner();
 
@@ -569,13 +741,17 @@ pub fn router() -> Router<Ctx> {
         )
         .procedure(
             "readFile",
-            Procedure::builder::<ApiError>().query(|_, input: ReadFileInput| async move {
+            Procedure::builder::<ApiError>().query(|ctx, input: ReadFileInput| async move {
                 let agent_endpoint = std::env::var("ALLOY_AGENT_ENDPOINT")
                     .unwrap_or_else(|_| "http://127.0.0.1:50051".to_string());
                 let mut client = FilesystemServiceClient::connect(agent_endpoint.clone())
                     .await
-                    .map_err(|e| ApiError {
-                        message: format!("failed to connect agent ({agent_endpoint}): {e}"),
+                    .map_err(|e| {
+                        api_error(
+                            &ctx,
+                            "AGENT_CONNECT_FAILED",
+                            format!("failed to connect agent ({agent_endpoint}): {e}"),
+                        )
                     })?;
 
                 let resp = client
@@ -585,14 +761,13 @@ pub fn router() -> Router<Ctx> {
                         limit: input.limit.unwrap_or(0) as u64,
                     }))
                     .await
-                    .map_err(|e| ApiError {
-                        message: format!("read_file failed: {e}"),
+                    .map_err(|e| {
+                        api_error(&ctx, "AGENT_RPC_FAILED", format!("read_file failed: {e}"))
                     })?
                     .into_inner();
 
-                let text = String::from_utf8(resp.data).map_err(|_| ApiError {
-                    message: "file is not valid utf-8".to_string(),
-                })?;
+                let text = String::from_utf8(resp.data)
+                    .map_err(|_| api_error(&ctx, "INVALID_UTF8", "file is not valid utf-8"))?;
 
                 Ok(ReadFileOutput {
                     text,
@@ -603,13 +778,17 @@ pub fn router() -> Router<Ctx> {
 
     let log = Router::new().procedure(
         "tailFile",
-        Procedure::builder::<ApiError>().query(|_, input: TailFileInput| async move {
+        Procedure::builder::<ApiError>().query(|ctx, input: TailFileInput| async move {
             let agent_endpoint = std::env::var("ALLOY_AGENT_ENDPOINT")
                 .unwrap_or_else(|_| "http://127.0.0.1:50051".to_string());
             let mut client = LogsServiceClient::connect(agent_endpoint.clone())
                 .await
-                .map_err(|e| ApiError {
-                    message: format!("failed to connect agent ({agent_endpoint}): {e}"),
+                .map_err(|e| {
+                    api_error(
+                        &ctx,
+                        "AGENT_CONNECT_FAILED",
+                        format!("failed to connect agent ({agent_endpoint}): {e}"),
+                    )
                 })?;
 
             let resp = client
@@ -620,9 +799,7 @@ pub fn router() -> Router<Ctx> {
                     max_lines: input.max_lines.unwrap_or(0),
                 }))
                 .await
-                .map_err(|e| ApiError {
-                    message: format!("tail_file failed: {e}"),
-                })?
+                .map_err(|e| api_error(&ctx, "AGENT_RPC_FAILED", format!("tail_file failed: {e}")))?
                 .into_inner();
 
             Ok(TailFileOutput {
@@ -635,42 +812,67 @@ pub fn router() -> Router<Ctx> {
     let instance = Router::new()
         .procedure(
             "create",
-            Procedure::builder::<ApiError>().mutation(|_, input: CreateInstanceInput| async move {
-                let agent_endpoint = std::env::var("ALLOY_AGENT_ENDPOINT")
-                    .unwrap_or_else(|_| "http://127.0.0.1:50051".to_string());
-                let mut client = InstanceServiceClient::connect(agent_endpoint.clone())
-                    .await
-                    .map_err(|e| ApiError {
-                        message: format!("failed to connect agent ({agent_endpoint}): {e}"),
-                    })?;
+            Procedure::builder::<ApiError>().mutation(
+                |ctx, input: CreateInstanceInput| async move {
+                    ensure_writable(&ctx)?;
+                    enforce_rate_limit(&ctx)?;
 
-                let resp = client
-                    .create(Request::new(CreateInstanceRequest {
-                        template_id: input.template_id,
-                        params: input.params.into_iter().collect(),
-                    }))
-                    .await
-                    .map_err(|e| ApiError {
-                        message: format!("instance.create failed: {e}"),
-                    })?
-                    .into_inner();
+                    let agent_endpoint = std::env::var("ALLOY_AGENT_ENDPOINT")
+                        .unwrap_or_else(|_| "http://127.0.0.1:50051".to_string());
+                    let mut client = InstanceServiceClient::connect(agent_endpoint.clone())
+                        .await
+                        .map_err(|e| {
+                            api_error(
+                                &ctx,
+                                "AGENT_CONNECT_FAILED",
+                                format!("failed to connect agent ({agent_endpoint}): {e}"),
+                            )
+                        })?;
 
-                let cfg = resp.config.ok_or_else(|| ApiError {
-                    message: "missing instance config".to_string(),
-                })?;
+                    let resp = client
+                        .create(Request::new(CreateInstanceRequest {
+                            template_id: input.template_id,
+                            params: input.params.into_iter().collect(),
+                        }))
+                        .await
+                        .map_err(|e| {
+                            api_error(
+                                &ctx,
+                                "AGENT_RPC_FAILED",
+                                format!("instance.create failed: {e}"),
+                            )
+                        })?
+                        .into_inner();
 
-                Ok(map_instance_config(cfg))
-            }),
+                    let cfg = resp
+                        .config
+                        .ok_or_else(|| api_error(&ctx, "INTERNAL", "missing instance config"))?;
+
+                    audit::record(
+                        &ctx,
+                        "instance.create",
+                        &cfg.instance_id,
+                        Some(serde_json::json!({ "template_id": cfg.template_id })),
+                    )
+                    .await;
+
+                    Ok(map_instance_config(cfg))
+                },
+            ),
         )
         .procedure(
             "get",
-            Procedure::builder::<ApiError>().query(|_, input: InstanceIdInput| async move {
+            Procedure::builder::<ApiError>().query(|ctx, input: InstanceIdInput| async move {
                 let agent_endpoint = std::env::var("ALLOY_AGENT_ENDPOINT")
                     .unwrap_or_else(|_| "http://127.0.0.1:50051".to_string());
                 let mut client = InstanceServiceClient::connect(agent_endpoint.clone())
                     .await
-                    .map_err(|e| ApiError {
-                        message: format!("failed to connect agent ({agent_endpoint}): {e}"),
+                    .map_err(|e| {
+                        api_error(
+                            &ctx,
+                            "AGENT_CONNECT_FAILED",
+                            format!("failed to connect agent ({agent_endpoint}): {e}"),
+                        )
                     })?;
 
                 let resp = client
@@ -678,53 +880,72 @@ pub fn router() -> Router<Ctx> {
                         instance_id: input.instance_id,
                     }))
                     .await
-                    .map_err(|e| ApiError {
-                        message: format!("instance.get failed: {e}"),
+                    .map_err(|e| {
+                        api_error(
+                            &ctx,
+                            "AGENT_RPC_FAILED",
+                            format!("instance.get failed: {e}"),
+                        )
                     })?
                     .into_inner();
 
-                let info = resp.info.ok_or_else(|| ApiError {
-                    message: "missing instance info".to_string(),
-                })?;
+                let info = resp
+                    .info
+                    .ok_or_else(|| api_error(&ctx, "INTERNAL", "missing instance info"))?;
 
-                map_instance_info(info)
+                map_instance_info(&ctx, info)
             }),
         )
         .procedure(
             "list",
-            Procedure::builder::<ApiError>().query(|_, _: ()| async move {
+            Procedure::builder::<ApiError>().query(|ctx, _: ()| async move {
                 let agent_endpoint = std::env::var("ALLOY_AGENT_ENDPOINT")
                     .unwrap_or_else(|_| "http://127.0.0.1:50051".to_string());
                 let mut client = InstanceServiceClient::connect(agent_endpoint.clone())
                     .await
-                    .map_err(|e| ApiError {
-                        message: format!("failed to connect agent ({agent_endpoint}): {e}"),
+                    .map_err(|e| {
+                        api_error(
+                            &ctx,
+                            "AGENT_CONNECT_FAILED",
+                            format!("failed to connect agent ({agent_endpoint}): {e}"),
+                        )
                     })?;
 
                 let resp = client
                     .list(Request::new(ListInstancesRequest {}))
                     .await
-                    .map_err(|e| ApiError {
-                        message: format!("instance.list failed: {e}"),
+                    .map_err(|e| {
+                        api_error(
+                            &ctx,
+                            "AGENT_RPC_FAILED",
+                            format!("instance.list failed: {e}"),
+                        )
                     })?
                     .into_inner();
 
                 let mut out = Vec::new();
                 for info in resp.instances {
-                    out.push(map_instance_info(info)?);
+                    out.push(map_instance_info(&ctx, info)?);
                 }
                 Ok(out)
             }),
         )
         .procedure(
             "start",
-            Procedure::builder::<ApiError>().mutation(|_, input: InstanceIdInput| async move {
+            Procedure::builder::<ApiError>().mutation(|ctx, input: InstanceIdInput| async move {
+                ensure_writable(&ctx)?;
+                enforce_rate_limit(&ctx)?;
+
                 let agent_endpoint = std::env::var("ALLOY_AGENT_ENDPOINT")
                     .unwrap_or_else(|_| "http://127.0.0.1:50051".to_string());
                 let mut client = InstanceServiceClient::connect(agent_endpoint.clone())
                     .await
-                    .map_err(|e| ApiError {
-                        message: format!("failed to connect agent ({agent_endpoint}): {e}"),
+                    .map_err(|e| {
+                        api_error(
+                            &ctx,
+                            "AGENT_CONNECT_FAILED",
+                            format!("failed to connect agent ({agent_endpoint}): {e}"),
+                        )
                     })?;
 
                 let resp = client
@@ -732,14 +953,26 @@ pub fn router() -> Router<Ctx> {
                         instance_id: input.instance_id,
                     }))
                     .await
-                    .map_err(|e| ApiError {
-                        message: format!("instance.start failed: {e}"),
+                    .map_err(|e| {
+                        api_error(
+                            &ctx,
+                            "AGENT_RPC_FAILED",
+                            format!("instance.start failed: {e}"),
+                        )
                     })?
                     .into_inner();
 
-                let status = resp.status.ok_or_else(|| ApiError {
-                    message: "missing status".to_string(),
-                })?;
+                let status = resp
+                    .status
+                    .ok_or_else(|| api_error(&ctx, "INTERNAL", "missing status"))?;
+
+                audit::record(
+                    &ctx,
+                    "instance.start",
+                    &status.process_id,
+                    Some(serde_json::json!({ "template_id": status.template_id })),
+                )
+                .await;
 
                 Ok(ProcessStatusDto {
                     process_id: status.process_id.clone(),
@@ -765,13 +998,20 @@ pub fn router() -> Router<Ctx> {
         )
         .procedure(
             "stop",
-            Procedure::builder::<ApiError>().mutation(|_, input: StopInstanceInput| async move {
+            Procedure::builder::<ApiError>().mutation(|ctx, input: StopInstanceInput| async move {
+                ensure_writable(&ctx)?;
+                enforce_rate_limit(&ctx)?;
+
                 let agent_endpoint = std::env::var("ALLOY_AGENT_ENDPOINT")
                     .unwrap_or_else(|_| "http://127.0.0.1:50051".to_string());
                 let mut client = InstanceServiceClient::connect(agent_endpoint.clone())
                     .await
-                    .map_err(|e| ApiError {
-                        message: format!("failed to connect agent ({agent_endpoint}): {e}"),
+                    .map_err(|e| {
+                        api_error(
+                            &ctx,
+                            "AGENT_CONNECT_FAILED",
+                            format!("failed to connect agent ({agent_endpoint}): {e}"),
+                        )
                     })?;
 
                 let resp = client
@@ -780,14 +1020,26 @@ pub fn router() -> Router<Ctx> {
                         timeout_ms: input.timeout_ms.unwrap_or(30_000),
                     }))
                     .await
-                    .map_err(|e| ApiError {
-                        message: format!("instance.stop failed: {e}"),
+                    .map_err(|e| {
+                        api_error(
+                            &ctx,
+                            "AGENT_RPC_FAILED",
+                            format!("instance.stop failed: {e}"),
+                        )
                     })?
                     .into_inner();
 
-                let status = resp.status.ok_or_else(|| ApiError {
-                    message: "missing status".to_string(),
-                })?;
+                let status = resp
+                    .status
+                    .ok_or_else(|| api_error(&ctx, "INTERNAL", "missing status"))?;
+
+                audit::record(
+                    &ctx,
+                    "instance.stop",
+                    &status.process_id,
+                    Some(serde_json::json!({ "template_id": status.template_id })),
+                )
+                .await;
 
                 Ok(ProcessStatusDto {
                     process_id: status.process_id.clone(),
@@ -812,25 +1064,92 @@ pub fn router() -> Router<Ctx> {
             }),
         )
         .procedure(
+            "update",
+            Procedure::builder::<ApiError>().mutation(
+                |ctx, input: UpdateInstanceInput| async move {
+                    ensure_writable(&ctx)?;
+                    enforce_rate_limit(&ctx)?;
+
+                    let agent_endpoint = std::env::var("ALLOY_AGENT_ENDPOINT")
+                        .unwrap_or_else(|_| "http://127.0.0.1:50051".to_string());
+                    let mut client = InstanceServiceClient::connect(agent_endpoint.clone())
+                        .await
+                        .map_err(|e| {
+                            api_error(
+                                &ctx,
+                                "AGENT_CONNECT_FAILED",
+                                format!("failed to connect agent ({agent_endpoint}): {e}"),
+                            )
+                        })?;
+
+                    let resp = client
+                        .update(Request::new(UpdateInstanceRequest {
+                            instance_id: input.instance_id.clone(),
+                            params: input.params.into_iter().collect(),
+                            display_name: input.display_name.unwrap_or_default(),
+                        }))
+                        .await
+                        .map_err(|e| {
+                            api_error(
+                                &ctx,
+                                "AGENT_RPC_FAILED",
+                                format!("instance.update failed: {e}"),
+                            )
+                        })?
+                        .into_inner();
+
+                    let cfg = resp
+                        .config
+                        .ok_or_else(|| api_error(&ctx, "INTERNAL", "missing instance config"))?;
+
+                    audit::record(
+                        &ctx,
+                        "instance.update",
+                        &cfg.instance_id,
+                        Some(serde_json::json!({ "template_id": cfg.template_id })),
+                    )
+                    .await;
+
+                    Ok(map_instance_config(cfg))
+                },
+            ),
+        )
+        .procedure(
             "delete",
-            Procedure::builder::<ApiError>().mutation(|_, input: InstanceIdInput| async move {
+            Procedure::builder::<ApiError>().mutation(|ctx, input: InstanceIdInput| async move {
+                ensure_writable(&ctx)?;
+                enforce_rate_limit(&ctx)?;
+
                 let agent_endpoint = std::env::var("ALLOY_AGENT_ENDPOINT")
                     .unwrap_or_else(|_| "http://127.0.0.1:50051".to_string());
                 let mut client = InstanceServiceClient::connect(agent_endpoint.clone())
                     .await
-                    .map_err(|e| ApiError {
-                        message: format!("failed to connect agent ({agent_endpoint}): {e}"),
+                    .map_err(|e| {
+                        api_error(
+                            &ctx,
+                            "AGENT_CONNECT_FAILED",
+                            format!("failed to connect agent ({agent_endpoint}): {e}"),
+                        )
                     })?;
 
+                let instance_id = input.instance_id;
                 let resp = client
                     .delete(Request::new(DeleteInstanceRequest {
-                        instance_id: input.instance_id,
+                        instance_id: instance_id.clone(),
                     }))
                     .await
-                    .map_err(|e| ApiError {
-                        message: format!("instance.delete failed: {e}"),
+                    .map_err(|e| {
+                        api_error(
+                            &ctx,
+                            "AGENT_RPC_FAILED",
+                            format!("instance.delete failed: {e}"),
+                        )
                     })?
                     .into_inner();
+
+                if resp.ok {
+                    audit::record(&ctx, "instance.delete", &instance_id, None).await;
+                }
 
                 Ok(DeleteInstanceOutput { ok: resp.ok })
             }),
@@ -846,9 +1165,7 @@ pub fn router() -> Router<Ctx> {
                 let rows = nodes::Entity::find()
                     .all(&*ctx.db)
                     .await
-                    .map_err(|e| ApiError {
-                        message: format!("db error: {e}"),
-                    })?;
+                    .map_err(|e| api_error(&ctx, "DB_ERROR", format!("db error: {e}")))?;
 
                 Ok(rows
                     .into_iter()
@@ -871,36 +1188,40 @@ pub fn router() -> Router<Ctx> {
                     use alloy_db::entities::nodes;
                     use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 
-                    let user = ctx.user.ok_or_else(|| ApiError {
-                        message: "unauthorized".to_string(),
-                    })?;
+                    ensure_writable(&ctx)?;
+                    enforce_rate_limit(&ctx)?;
+
+                    let user = ctx
+                        .user
+                        .clone()
+                        .ok_or_else(|| api_error(&ctx, "UNAUTHORIZED", "unauthorized"))?;
                     if !user.is_admin {
-                        return Err(ApiError {
-                            message: "forbidden".to_string(),
-                        });
+                        return Err(api_error(&ctx, "FORBIDDEN", "forbidden"));
                     }
 
-                    let id = sea_orm::prelude::Uuid::parse_str(&input.node_id).map_err(|_| {
-                        ApiError {
-                            message: "invalid node_id".to_string(),
-                        }
-                    })?;
+                    let id = sea_orm::prelude::Uuid::parse_str(&input.node_id)
+                        .map_err(|_| api_error(&ctx, "INVALID_ARGUMENT", "invalid node_id"))?;
 
                     let model = nodes::Entity::find_by_id(id)
                         .one(&*ctx.db)
                         .await
-                        .map_err(|e| ApiError {
-                            message: format!("db error: {e}"),
-                        })?
-                        .ok_or_else(|| ApiError {
-                            message: "node not found".to_string(),
-                        })?;
+                        .map_err(|e| api_error(&ctx, "DB_ERROR", format!("db error: {e}")))?
+                        .ok_or_else(|| api_error(&ctx, "NOT_FOUND", "node not found"))?;
 
                     let mut active: nodes::ActiveModel = model.into();
                     active.enabled = Set(input.enabled);
-                    let updated = active.update(&*ctx.db).await.map_err(|e| ApiError {
-                        message: format!("db error: {e}"),
-                    })?;
+                    let updated = active
+                        .update(&*ctx.db)
+                        .await
+                        .map_err(|e| api_error(&ctx, "DB_ERROR", format!("db error: {e}")))?;
+
+                    audit::record(
+                        &ctx,
+                        "node.setEnabled",
+                        &updated.id.to_string(),
+                        Some(serde_json::json!({ "enabled": updated.enabled })),
+                    )
+                    .await;
 
                     Ok(NodeDto {
                         id: updated.id.to_string(),
@@ -917,11 +1238,15 @@ pub fn router() -> Router<Ctx> {
 
     let minecraft = Router::new().procedure(
         "versions",
-        Procedure::builder::<ApiError>().query(|_, _: ()| async move {
+        Procedure::builder::<ApiError>().query(|ctx, _: ()| async move {
             let v = crate::minecraft_versions::get_versions()
                 .await
-                .map_err(|e| ApiError {
-                    message: format!("minecraft.versions failed: {e}"),
+                .map_err(|e| {
+                    api_error(
+                        &ctx,
+                        "UPSTREAM_ERROR",
+                        format!("minecraft.versions failed: {e}"),
+                    )
                 })?;
             Ok(v)
         }),

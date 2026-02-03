@@ -1,6 +1,7 @@
 import { onAuthEvent, queryClient, rspc } from './rspc'
 import { createEffect, createMemo, createSignal, For, Show } from 'solid-js'
-import type { InstanceConfigDto, ProcessStatusDto } from './bindings'
+import { Portal } from 'solid-js/web'
+import type { ProcessStatusDto } from './bindings'
 import { ensureCsrfCookie, login, logout, whoami } from './auth'
 import { Dropdown } from './components/Dropdown'
 import InstancesPage from './pages/InstancesPage'
@@ -11,6 +12,20 @@ function statusDotClass(state: { loading: boolean; error: boolean }) {
   if (state.loading) return 'bg-slate-600 animate-pulse'
   if (state.error) return 'bg-rose-500'
   return 'bg-emerald-400'
+}
+
+function StatusPill(props: {
+  label: string
+  status: string
+  state: { loading: boolean; error: boolean }
+}) {
+  return (
+    <div class="flex items-center gap-2 rounded-full border border-slate-200 bg-white/60 px-2.5 py-1 shadow-sm backdrop-blur-sm dark:border-slate-800 dark:bg-slate-950/60">
+      <span class={`h-1.5 w-1.5 rounded-full ${statusDotClass(props.state)}`} />
+      <span class="font-display text-[11px] tracking-wide text-slate-600 dark:text-slate-300">{props.label}</span>
+      <span class="font-mono text-[11px] text-slate-500">{props.status}</span>
+    </div>
+  )
 }
 
 function instanceStateLabel(status: ProcessStatusDto | null) {
@@ -58,6 +73,7 @@ function App() {
   const [showLoginModal, setShowLoginModal] = createSignal(false)
   const [confirmDeleteInstanceId, setConfirmDeleteInstanceId] = createSignal<string | null>(null)
   const [showAccountMenu, setShowAccountMenu] = createSignal(false)
+  // Account menu uses a fixed overlay; refs are not needed.
 
   const [focusLoginUsername, setFocusLoginUsername] = createSignal(false)
   let loginUsernameEl: HTMLInputElement | undefined
@@ -143,23 +159,11 @@ function App() {
 
   createEffect(() => {
     if (!showAccountMenu()) return
-    const onDoc = (ev: MouseEvent) => {
-      const t = ev.target as Node | null
-      if (!t) return
-      // Close on any outside click; menu is simple.
-      setShowAccountMenu(false)
-    }
     const onKey = (ev: KeyboardEvent) => {
       if (ev.key === 'Escape') setShowAccountMenu(false)
     }
-    // Use capture so clicks on menu still close after action.
-    // Use a plain listener (no options) for compatibility and easy cleanup.
-    document.addEventListener('mousedown', onDoc)
     window.addEventListener('keydown', onKey)
-    return () => {
-      document.removeEventListener('mousedown', onDoc)
-      window.removeEventListener('keydown', onKey)
-    }
+    return () => window.removeEventListener('keydown', onKey)
   })
 
   createEffect(() => {
@@ -229,11 +233,11 @@ function App() {
   const [mcVersion, setMcVersion] = createSignal('latest_release')
   const [mcMemoryPreset, setMcMemoryPreset] = createSignal('2048')
   const [mcMemory, setMcMemory] = createSignal('2048')
-  const [mcPort, setMcPort] = createSignal('25565')
+  const [mcPort, setMcPort] = createSignal('')
   const [mcError, setMcError] = createSignal<string | null>(null)
 
   const [trVersion, setTrVersion] = createSignal('1453')
-  const [trPort, setTrPort] = createSignal('7777')
+  const [trPort, setTrPort] = createSignal('')
   const [trMaxPlayers, setTrMaxPlayers] = createSignal('8')
   const [trWorldName, setTrWorldName] = createSignal('world')
   const [trWorldSize, setTrWorldSize] = createSignal('1')
@@ -241,10 +245,17 @@ function App() {
   const [trError, setTrError] = createSignal<string | null>(null)
 
   const trVersionOptions = createMemo(() => [
-    { value: '1453', label: '1.4.5.3 (1453)', meta: 'latest (known)' },
+    { value: '1453', label: '1.4.5.3 (1453)', meta: 'latest' },
+    { value: '1452', label: '1.4.5.2 (1452)' },
+    { value: '1451', label: '1.4.5.1 (1451)' },
+    { value: '1450', label: '1.4.5.0 (1450)' },
     { value: '1449', label: '1.4.4.9 (1449)' },
+    { value: '1448', label: '1.4.4.8 (1448)' },
+    { value: '1447', label: '1.4.4.7 (1447)' },
     { value: '1436', label: '1.4.3.6 (1436)' },
-    { value: '1405', label: '1.4.0.5 (1405)' },
+    { value: '1435', label: '1.4.3.5 (1435)' },
+    { value: '1434', label: '1.4.3.4 (1434)' },
+    { value: '1423', label: '1.4.2.3 (1423)' },
   ])
 
   const mcVersions = rspc.createQuery(
@@ -267,7 +278,7 @@ function App() {
     ]
 
     // Show a curated list of recent releases (no manual typing).
-    const releases = data.versions.filter((v: { kind: string }) => v.kind === 'release').slice(0, 30)
+    const releases = data.versions.filter((v: { kind: string }) => v.kind === 'release').slice(0, 60)
     for (const v of releases) {
       out.push({ value: v.id, label: v.id })
     }
@@ -302,6 +313,8 @@ function App() {
       refetchInterval: isAuthed() ? 1000 : false,
     }),
   )
+
+  const [showLogsModal, setShowLogsModal] = createSignal(false)
 
   const [selectedNodeId, setSelectedNodeId] = createSignal<string | null>(null)
 
@@ -406,15 +419,7 @@ function App() {
     setLiveTail(true)
   }
 
-  const selectedInstance = createMemo(() => {
-    const id = selectedInstanceId()
-    if (!id) return null
-    return (
-      (instances.data ?? []).find(
-        (i: { config: InstanceConfigDto; status: ProcessStatusDto | null }) => i.config.instance_id === id,
-      ) ?? null
-    )
-  })
+  // selectedInstance UI is handled by the terminal modal.
 
   // Files state/queries will be moved into FilesPage next.
 
@@ -504,7 +509,7 @@ function App() {
         </nav>
 
         <div class="flex min-w-0 flex-1 flex-col">
-  <header class="flex h-14 flex-none items-center justify-between border-b border-slate-200 bg-white/70 px-5 backdrop-blur dark:border-slate-800 dark:bg-slate-950/70">
+  <header class="relative z-50 flex h-14 flex-none items-center justify-between border-b border-slate-200 bg-white/70 px-5 backdrop-blur dark:border-slate-800 dark:bg-slate-950/70">
             <div class="flex items-center gap-4">
               <div class="flex items-center gap-2">
   <img src="/logo.svg" class="h-7 w-7 rounded-lg" alt="Alloy" />
@@ -514,21 +519,9 @@ function App() {
                 </div>
               </div>
 
-              <div class="hidden md:flex items-center gap-2 font-mono text-[10px] text-slate-400">
-                <div class="flex items-center gap-2 rounded-lg border border-slate-200 bg-white/60 px-2 py-1 dark:border-slate-800 dark:bg-slate-950/60">
-                  <span
-                    class={`h-1.5 w-1.5 rounded-full ${statusDotClass({ loading: ping.isPending, error: ping.isError })}`}
-                  />
-                  <span>BACKEND</span>
-                  <span class="text-slate-500">{ping.isError ? 'offline' : ping.isPending ? '...' : 'ok'}</span>
-                </div>
-                <div class="flex items-center gap-2 rounded-lg border border-slate-200 bg-white/60 px-2 py-1 dark:border-slate-800 dark:bg-slate-950/60">
-                  <span
-                    class={`h-1.5 w-1.5 rounded-full ${statusDotClass({ loading: agentHealth.isPending, error: agentHealth.isError })}`}
-                  />
-                  <span>AGENT</span>
-                  <span class="text-slate-500">{agentHealth.isError ? 'offline' : agentHealth.isPending ? '...' : 'ok'}</span>
-                </div>
+              <div class="hidden md:flex items-center gap-2 text-[11px] text-slate-500">
+                <StatusPill label="Backend" state={{ loading: ping.isPending, error: ping.isError }} status={ping.isError ? 'offline' : ping.isPending ? '...' : 'ok'} />
+                <StatusPill label="Agent" state={{ loading: agentHealth.isPending, error: agentHealth.isError }} status={agentHealth.isError ? 'offline' : agentHealth.isPending ? '...' : 'ok'} />
               </div>
             </div>
 
@@ -580,10 +573,8 @@ function App() {
                     <button
                       type="button"
                       class="group flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 py-1 pl-2 pr-2 shadow-sm backdrop-blur-sm transition-all hover:bg-white hover:shadow active:scale-[0.99] dark:border-slate-800 dark:bg-slate-950/60 dark:hover:bg-slate-950/80"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        setShowAccountMenu((v) => !v)
-                      }}
+                      onPointerDown={(ev) => ev.stopPropagation()}
+                      onClick={() => setShowAccountMenu((v) => !v)}
                       aria-expanded={showAccountMenu()}
                     >
                       <div class="flex h-7 w-7 items-center justify-center rounded-full bg-slate-900 text-xs font-semibold text-white shadow-sm dark:bg-slate-100 dark:text-slate-900">
@@ -608,19 +599,27 @@ function App() {
                     </button>
 
                     <Show when={showAccountMenu()}>
-                      <div class="absolute right-0 mt-2 w-44 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl shadow-slate-900/5 dark:border-slate-800 dark:bg-slate-950">
-                        <button
-                          type="button"
-                          class="flex w-full items-center justify-between px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-900/50"
-                          onClick={async () => {
-                            setShowAccountMenu(false)
-                            await handleLogout()
-                          }}
-                        >
-                          <span>Sign out</span>
-                          <span class="text-xs text-slate-400">logout</span>
-                        </button>
-                      </div>
+                      <Portal>
+                        <div class="fixed inset-0 z-[9999]" onPointerDown={() => setShowAccountMenu(false)}>
+                          <div
+                            class="absolute right-5 top-14 mt-2 w-36 origin-top-right overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-900/10 backdrop-blur transition-all duration-150 animate-in fade-in zoom-in-95 dark:border-slate-800 dark:bg-slate-950"
+                            onPointerDown={(e) => e.stopPropagation()}
+                          >
+                            <button
+                              type="button"
+                              class="flex w-full items-center justify-between px-3 py-2 text-sm text-slate-700 transition-colors hover:bg-slate-50 active:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-900/50 dark:active:bg-slate-900"
+                              onPointerDown={(e) => e.stopPropagation()}
+                              onClick={async () => {
+                                setShowAccountMenu(false)
+                                await handleLogout()
+                              }}
+                            >
+                              <span>Logout</span>
+                              <span class="text-xs text-slate-400">↩</span>
+                            </button>
+                          </div>
+                        </div>
+                      </Portal>
                     </Show>
                   </div>
                 </Show>
@@ -762,8 +761,9 @@ function App() {
                             <input
                               type="number"
                               class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-amber-500/40 focus:outline-none focus:ring-1 focus:ring-amber-500/20 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200"
-                              value={mcPort()}
-                              onInput={(e) => setMcPort(e.currentTarget.value)}
+                                value={mcPort()}
+                                onInput={(e) => setMcPort(e.currentTarget.value)}
+                                placeholder="AUTO"
                             />
                           </label>
 
@@ -792,6 +792,7 @@ function App() {
                                 class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-amber-500/40 focus:outline-none focus:ring-1 focus:ring-amber-500/20 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200"
                                 value={trPort()}
                                 onInput={(e) => setTrPort(e.currentTarget.value)}
+                                placeholder="AUTO"
                               />
                             </label>
                           </div>
@@ -866,11 +867,12 @@ function App() {
                             params.accept_eula = 'true'
                             params.version = mcVersion() || 'latest_release'
                             params.memory_mb = mcMemory() || '2048'
-                            params.port = mcPort() || '25565'
+                            // Blank port means auto-allocate on agent.
+                            if (mcPort().trim()) params.port = mcPort().trim()
                           } else if (template_id === 'terraria:vanilla') {
                             setTrError(null)
                             params.version = trVersion() || '1453'
-                            params.port = trPort() || '7777'
+                            if (trPort().trim()) params.port = trPort().trim()
                             params.max_players = trMaxPlayers() || '8'
                             params.world_name = trWorldName() || 'world'
                             params.world_size = trWorldSize() || '1'
@@ -903,8 +905,11 @@ function App() {
                                 }`}
                               >
                               <button
-                                class="w-full text-left"
-                                onClick={() => setSelectedInstanceId(i.config.instance_id)}
+                                class="w-full text-left hover:cursor-pointer"
+                                onClick={() => {
+                                  setSelectedInstanceId(i.config.instance_id)
+                                  setShowLogsModal(true)
+                                }}
                               >
                                 <div class="flex items-start justify-between gap-3">
                                   <div class="min-w-0">
@@ -1004,21 +1009,7 @@ function App() {
                         </For>
                       </div>
 
-                      <Show when={selectedInstance()}>
-                        {(i) => (
-                          <div class="mt-4 rounded-xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
-                            <div class="flex items-center justify-between">
-                              <div class="text-xs text-slate-600 dark:text-slate-400">
-                                logs: <span class="font-mono text-slate-900 dark:text-slate-200">{i().config.instance_id}</span>
-                              </div>
-                              <div class="text-xs text-slate-500">{logs.isPending ? 'loading...' : logs.isError ? 'error' : 'live'}</div>
-                            </div>
-                            <pre class="mt-2 max-h-72 overflow-auto rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-800 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200">
-                              <For each={logs.data?.lines ?? []}>{(l) => <div class="whitespace-pre-wrap">{l}</div>}</For>
-                            </pre>
-                          </div>
-                        )}
-                      </Show>
+                      {/* Logs are shown in the terminal modal; keep the main view clean. */}
                     </>
                   }
                 />
@@ -1447,6 +1438,51 @@ function App() {
                     Delete
                   </button>
                 </div>
+              </div>
+            </div>
+          </div>
+        </Show>
+
+        <Show when={showLogsModal() && selectedInstanceId() != null}>
+          <div class="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div
+              class="absolute inset-0 bg-slate-900/40 backdrop-blur-sm dark:bg-slate-950/70"
+              onClick={() => setShowLogsModal(false)}
+            />
+
+            <div
+              class="relative w-full max-w-5xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-950"
+              role="dialog"
+              aria-modal="true"
+            >
+              <div class="flex items-center justify-between gap-3 border-b border-slate-200 bg-white/70 px-4 py-3 backdrop-blur dark:border-slate-800 dark:bg-slate-950/70">
+                <div class="min-w-0">
+                  <div class="text-xs font-semibold uppercase tracking-wider text-slate-500">Terminal</div>
+                  <div class="mt-0.5 truncate font-mono text-[11px] text-slate-500">{selectedInstanceId() ?? ''}</div>
+                </div>
+                <div class="flex items-center gap-2">
+                  <div class="flex items-center gap-2 text-[11px] text-slate-500">
+                    <span
+                      class={`h-1.5 w-1.5 rounded-full ${statusDotClass({ loading: logs.isPending, error: logs.isError })}`}
+                      title={logs.isPending ? 'loading' : logs.isError ? 'error' : 'live'}
+                    />
+                    <span>{logs.isPending ? 'loading' : logs.isError ? 'error' : 'live'}</span>
+                  </div>
+                  <button
+                    class="rounded-lg border border-slate-200 bg-white/70 px-3 py-1.5 text-xs font-medium text-slate-800 shadow-sm transition-all hover:bg-white hover:shadow active:scale-[0.98] dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:shadow-none dark:hover:bg-slate-900"
+                    onClick={() => setShowLogsModal(false)}
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+
+              <div class="bg-slate-950">
+                <pre class="h-[70vh] overflow-auto px-4 py-3 text-[11px] leading-relaxed text-slate-100">
+                  <Show when={(logs.data?.lines ?? []).length > 0} fallback={<div class="text-slate-400">(no output yet)</div>}>
+                    <For each={logs.data?.lines ?? []}>{(l) => <div class="whitespace-pre-wrap">{l}</div>}</For>
+                  </Show>
+                </pre>
               </div>
             </div>
           </div>
