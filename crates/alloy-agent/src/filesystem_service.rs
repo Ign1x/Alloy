@@ -1,4 +1,5 @@
 use std::path::{Component, Path, PathBuf};
+use std::time::UNIX_EPOCH;
 
 use alloy_proto::agent_v1::filesystem_service_server::{
     FilesystemService, FilesystemServiceServer,
@@ -34,6 +35,19 @@ impl From<FsPathError> for Status {
             FsPathError::Traversal => Status::invalid_argument("path traversal is not allowed"),
             FsPathError::EscapesRoot => Status::invalid_argument("path escapes data root"),
         }
+    }
+}
+
+fn status_from_io(op: &'static str, err: std::io::Error) -> Status {
+    match err.kind() {
+        std::io::ErrorKind::NotFound => Status::not_found(format!("{op}: not found")),
+        std::io::ErrorKind::PermissionDenied => {
+            Status::permission_denied(format!("{op}: permission denied"))
+        }
+        std::io::ErrorKind::InvalidInput => {
+            Status::invalid_argument(format!("{op}: invalid input"))
+        }
+        _ => Status::internal(format!("{op}: {err}")),
     }
 }
 
@@ -77,7 +91,7 @@ async fn enforce_scoped_existing_path(p: &Path) -> Result<PathBuf, Status> {
     // canonicalize() resolves symlinks. This prevents escaping the data root via symlink chains.
     let canon = tokio::fs::canonicalize(p)
         .await
-        .map_err(|_| Status::not_found("path not found"))?;
+        .map_err(|e| status_from_io("failed to canonicalize path", e))?;
     if !canon.starts_with(&root) {
         return Err(Status::from(FsPathError::EscapesRoot));
     }
@@ -111,7 +125,7 @@ async fn ensure_scoped_parent_dir(rel_path: &str) -> Result<PathBuf, Status> {
 
     let meta = tokio::fs::metadata(&parent_scoped)
         .await
-        .map_err(|_| Status::not_found("parent directory not found"))?;
+        .map_err(|e| status_from_io("failed to stat parent directory", e))?;
     if !meta.is_dir() {
         return Err(Status::invalid_argument("parent is not a directory"));
     }
@@ -199,7 +213,7 @@ impl FilesystemService for FilesystemApi {
 
         let meta = tokio::fs::metadata(&dir)
             .await
-            .map_err(|_| Status::not_found("path not found"))?;
+            .map_err(|e| status_from_io("failed to stat path", e))?;
         if !meta.is_dir() {
             return Err(Status::invalid_argument("path is not a directory"));
         }
@@ -209,21 +223,35 @@ impl FilesystemService for FilesystemApi {
         let mut entries = Vec::new();
         let mut rd = tokio::fs::read_dir(&dir)
             .await
-            .map_err(|e| Status::internal(format!("failed to read dir: {e}")))?;
+            .map_err(|e| status_from_io("failed to read dir", e))?;
         while let Some(de) = rd
             .next_entry()
             .await
-            .map_err(|e| Status::internal(format!("failed to read dir entry: {e}")))?
+            .map_err(|e| status_from_io("failed to read dir entry", e))?
         {
             let name = de.file_name().to_string_lossy().to_string();
             let m = de
                 .metadata()
                 .await
-                .map_err(|e| Status::internal(format!("failed to stat dir entry: {e}")))?;
+                .map_err(|e| status_from_io("failed to stat dir entry", e))?;
+            let modified_unix_ms = m
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                .map(|d| {
+                    let ms = d.as_millis();
+                    if ms > u64::MAX as u128 {
+                        u64::MAX
+                    } else {
+                        ms as u64
+                    }
+                })
+                .unwrap_or(0);
             entries.push(DirEntry {
                 name,
                 is_dir: m.is_dir(),
                 size_bytes: if m.is_file() { m.len() } else { 0 },
+                modified_unix_ms,
             });
         }
 
@@ -240,7 +268,7 @@ impl FilesystemService for FilesystemApi {
 
         let meta = tokio::fs::metadata(&path)
             .await
-            .map_err(|_| Status::not_found("path not found"))?;
+            .map_err(|e| status_from_io("failed to stat path", e))?;
         if !meta.is_file() {
             return Err(Status::invalid_argument("path is not a file"));
         }
@@ -264,7 +292,7 @@ impl FilesystemService for FilesystemApi {
 
         let mut f = tokio::fs::File::open(&path)
             .await
-            .map_err(|e| Status::internal(format!("failed to open file: {e}")))?;
+            .map_err(|e| status_from_io("failed to open file", e))?;
         f.seek(std::io::SeekFrom::Start(offset))
             .await
             .map_err(|e| Status::internal(format!("failed to seek: {e}")))?;
@@ -320,14 +348,14 @@ impl FilesystemService for FilesystemApi {
         let tmp = path.with_extension("tmp");
         let mut f = tokio::fs::File::create(&tmp)
             .await
-            .map_err(|e| Status::internal(format!("failed to write temp file: {e}")))?;
+            .map_err(|e| status_from_io("failed to create temp file", e))?;
         f.write_all(&req.data)
             .await
             .map_err(|e| Status::internal(format!("failed to write: {e}")))?;
         f.flush().await.ok();
         tokio::fs::rename(&tmp, &path)
             .await
-            .map_err(|e| Status::internal(format!("failed to persist file: {e}")))?;
+            .map_err(|e| status_from_io("failed to persist file", e))?;
 
         Ok(Response::new(WriteFileResponse { ok: true }))
     }
@@ -354,7 +382,7 @@ impl FilesystemService for FilesystemApi {
 
         tokio::fs::rename(&from, &to)
             .await
-            .map_err(|e| Status::internal(format!("rename failed: {e}")))?;
+            .map_err(|e| status_from_io("rename failed", e))?;
         Ok(Response::new(RenameResponse { ok: true }))
     }
 
@@ -369,7 +397,7 @@ impl FilesystemService for FilesystemApi {
 
         let meta = tokio::fs::symlink_metadata(&path)
             .await
-            .map_err(|_| Status::not_found("path not found"))?;
+            .map_err(|e| status_from_io("failed to stat path", e))?;
         if meta.file_type().is_symlink() {
             return Err(Status::invalid_argument("refusing to remove symlink"));
         }
@@ -378,16 +406,16 @@ impl FilesystemService for FilesystemApi {
             if req.recursive {
                 tokio::fs::remove_dir_all(&path)
                     .await
-                    .map_err(|e| Status::internal(format!("remove failed: {e}")))?;
+                    .map_err(|e| status_from_io("remove failed", e))?;
             } else {
                 tokio::fs::remove_dir(&path)
                     .await
-                    .map_err(|e| Status::internal(format!("remove failed: {e}")))?;
+                    .map_err(|e| status_from_io("remove failed", e))?;
             }
         } else {
             tokio::fs::remove_file(&path)
                 .await
-                .map_err(|e| Status::internal(format!("remove failed: {e}")))?;
+                .map_err(|e| status_from_io("remove failed", e))?;
         }
 
         Ok(Response::new(RemoveResponse { ok: true }))

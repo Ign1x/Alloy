@@ -92,6 +92,7 @@ dependencies = [
  "axum-extra",
  "base64",
  "chrono",
+ "futures-util",
  "hex",
  "jsonwebtoken",
  "rand 0.8.5",

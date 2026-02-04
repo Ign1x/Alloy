@@ -63,21 +63,6 @@ fn api_error(ctx: &Ctx, code: &str, message: impl Into<String>) -> ApiError {
     }
 }
 
-fn api_error_with_fields(
-    ctx: &Ctx,
-    code: &str,
-    message: impl Into<String>,
-    field_errors: std::collections::BTreeMap<String, String>,
-) -> ApiError {
-    ApiError {
-        code: code.to_string(),
-        message: message.into(),
-        request_id: ctx.request_id.clone(),
-        field_errors,
-        hint: None,
-    }
-}
-
 fn is_read_only() -> bool {
     matches!(
         std::env::var("ALLOY_READ_ONLY")
@@ -357,6 +342,7 @@ pub struct DirEntryDto {
     pub name: String,
     pub is_dir: bool,
     pub size_bytes: u32,
+    pub modified_unix_ms: String,
 }
 
 #[derive(Debug, Clone, serde::Serialize, Type)]
@@ -1243,6 +1229,7 @@ pub fn router() -> Router<Ctx> {
                             name: e.name,
                             is_dir: e.is_dir,
                             size_bytes: clamp_u64_to_u32(e.size_bytes),
+                            modified_unix_ms: e.modified_unix_ms.to_string(),
                         })
                         .collect(),
                 })

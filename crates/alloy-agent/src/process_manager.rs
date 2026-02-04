@@ -644,6 +644,18 @@ async fn wait_for_local_tcp_port(port: u16, timeout: Duration) -> bool {
     }
 }
 
+async fn set_entry_message(
+    inner: &Arc<Mutex<HashMap<String, ProcessEntry>>>,
+    process_id: &str,
+    message: Option<String>,
+) {
+    let mut map = inner.lock().await;
+    let Some(e) = map.get_mut(process_id) else {
+        return;
+    };
+    e.message = message;
+}
+
 #[derive(Debug)]
 struct ProcessEntry {
     template_id: ProcessTemplateId,
@@ -780,6 +792,30 @@ impl ProcessManager {
         ))
         .await;
 
+        // Insert an entry early so the UI can show progress (download/extract/spawn) during long starts.
+        let initial_restart = parse_restart_config(&params);
+        {
+            let mut inner = self.inner.lock().await;
+            inner.insert(
+                id.0.clone(),
+                ProcessEntry {
+                    template_id: ProcessTemplateId(t.template_id.clone()),
+                    state: ProcessState::Starting,
+                    pid: None,
+                    resources: None,
+                    exit_code: None,
+                    message: Some("starting...".to_string()),
+                    restart: initial_restart,
+                    restart_attempts: reused_restart_attempts,
+                    stdin: None,
+                    graceful_stdin: t.graceful_stdin.clone(),
+                    pgid: None,
+                    logs: logs.clone(),
+                    log_file_tx: Some(log_tx.clone()),
+                },
+            );
+        }
+
         let result: anyhow::Result<ProcessStatus> = async {
             if t.template_id == "minecraft:vanilla" {
                 ensure_min_free_space(&minecraft::data_root()).map_err(|e| {
@@ -817,6 +853,14 @@ impl ProcessManager {
                 let dir = minecraft::instance_dir(&id.0);
                 minecraft::ensure_vanilla_instance_layout(&dir, &mc)?;
 
+                set_entry_message(
+                    &self.inner,
+                    &id.0,
+                    Some("resolving minecraft version metadata...".to_string()),
+                )
+                .await;
+                sink.emit("[alloy-agent] resolving minecraft version metadata".to_string())
+                    .await;
                 let resolved = minecraft_download::resolve_server_jar(&mc.version)
                     .await
                     .map_err(|e| {
@@ -845,6 +889,15 @@ impl ProcessManager {
                         )),
                     ));
                 }
+
+                set_entry_message(
+                    &self.inner,
+                    &id.0,
+                    Some("downloading minecraft server.jar...".to_string()),
+                )
+                .await;
+                sink.emit("[alloy-agent] downloading minecraft server.jar".to_string())
+                    .await;
                 let cached_jar = minecraft_download::ensure_server_jar(&resolved)
                     .await
                     .map_err(|e| {
@@ -910,6 +963,13 @@ impl ProcessManager {
                     mc.port,
                     resolved.version_id
                 ))
+                .await;
+
+                set_entry_message(
+                    &self.inner,
+                    &id.0,
+                    Some(format!("spawning minecraft server (port {})...", mc.port)),
+                )
                 .await;
 
                 #[cfg(unix)]
@@ -980,7 +1040,7 @@ impl ProcessManager {
                             pid: pid_u32,
                             resources: None,
                             exit_code: None,
-                            message: None,
+                            message: Some(format!("waiting for port {}...", mc.port)),
                             restart,
                             restart_attempts: reused_restart_attempts,
                             stdin,
@@ -1188,7 +1248,7 @@ impl ProcessManager {
                     state: ProcessState::Starting,
                     pid: pid_u32,
                     exit_code: None,
-                    message: None,
+                    message: Some(format!("waiting for port {}...", mc.port)),
                     resources: None,
                 });
             }
@@ -1235,6 +1295,14 @@ impl ProcessManager {
                         dir.join("config").join("serverconfig.txt")
                     });
 
+                set_entry_message(
+                    &self.inner,
+                    &id.0,
+                    Some("resolving terraria server zip...".to_string()),
+                )
+                .await;
+                sink.emit("[alloy-agent] resolving terraria server zip".to_string())
+                    .await;
                 let resolved = terraria_download::resolve_server_zip(&tr.version).map_err(|e| {
                     crate::error_payload::anyhow(
                         "download_failed",
@@ -1243,6 +1311,14 @@ impl ProcessManager {
                         Some("Check network connectivity, then try again.".to_string()),
                     )
                 })?;
+                set_entry_message(
+                    &self.inner,
+                    &id.0,
+                    Some("downloading terraria server zip...".to_string()),
+                )
+                .await;
+                sink.emit("[alloy-agent] downloading terraria server zip".to_string())
+                    .await;
                 let zip_path = terraria_download::ensure_server_zip(&resolved)
                     .await
                     .map_err(|e| {
@@ -1253,6 +1329,14 @@ impl ProcessManager {
                             Some("Try again; if it persists, clear cache and retry.".to_string()),
                         )
                     })?;
+                set_entry_message(
+                    &self.inner,
+                    &id.0,
+                    Some("extracting terraria server files...".to_string()),
+                )
+                .await;
+                sink.emit("[alloy-agent] extracting terraria server files".to_string())
+                    .await;
                 let extracted = terraria_download::extract_linux_x64_to_cache(
                     &zip_path,
                     &resolved.version_id,
@@ -1333,6 +1417,13 @@ impl ProcessManager {
                 ))
                 .await;
 
+                set_entry_message(
+                    &self.inner,
+                    &id.0,
+                    Some(format!("spawning terraria server (port {})...", tr.port)),
+                )
+                .await;
+
                 #[cfg(unix)]
                 {
                     unsafe {
@@ -1407,7 +1498,7 @@ impl ProcessManager {
                             pid: pid_u32,
                             resources: None,
                             exit_code: None,
-                            message: None,
+                            message: Some(format!("waiting for port {}...", tr.port)),
                             restart,
                             restart_attempts: reused_restart_attempts,
                             stdin,
@@ -1623,7 +1714,7 @@ impl ProcessManager {
                     state: ProcessState::Starting,
                     pid: pid_u32,
                     exit_code: None,
-                    message: None,
+                    message: Some(format!("waiting for port {}...", tr.port)),
                     resources: None,
                 });
             }

@@ -23,6 +23,9 @@ services:
     environment:
       - RUST_LOG=info
       - ALLOY_DATA_ROOT=/data
+      # Enable filesystem write operations (mkdir/write/rename/remove) via the agent FS service.
+      # Without this, the UI can only browse/read files.
+      - ALLOY_FS_WRITE_ENABLED=true
     volumes:
       - alloy-agent-data:/data
     restart: unless-stopped

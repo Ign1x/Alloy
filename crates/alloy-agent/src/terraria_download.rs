@@ -168,8 +168,9 @@ pub fn extract_linux_x64_to_cache(
 
     // Best-effort cache validation: ensure we didn't leave a half-extracted directory behind.
     // (Terraria's server package layout has changed over time; keep the check loose.)
+    //
+    // NOTE: Newer official dedicated-server ZIPs may not include a `Content/` directory at all.
     let looks_complete = bin_x86_64.exists()
-        && server_root.join("Content").is_dir()
         && (server_root.join("monoconfig").is_dir()
             || server_root.join("assemblies").is_dir()
             || server_root.join("lib64").is_dir())
@@ -256,14 +257,6 @@ pub fn extract_linux_x64_to_cache(
     if !bin_x86_64.exists() {
         anyhow::bail!(
             "terraria server Linux binary not found after extract: {}",
-            zip_path.display()
-        );
-    }
-
-    if !server_root.join("Content").is_dir() {
-        let _ = fs::remove_dir_all(&server_root);
-        anyhow::bail!(
-            "terraria server extraction missing Content/ directory: {}",
             zip_path.display()
         );
     }

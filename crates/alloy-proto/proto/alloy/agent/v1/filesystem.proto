@@ -32,6 +32,8 @@ message DirEntry {
   string name = 1;
   bool is_dir = 2;
   uint64 size_bytes = 3;
+  // Best-effort mtime in unix milliseconds (0 if unavailable).
+  uint64 modified_unix_ms = 4;
 }
 
 message ListDirResponse {
