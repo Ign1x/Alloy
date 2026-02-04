@@ -7,6 +7,27 @@
 /* Let the UA style built-in controls to match system theme. */
 :root {
   color-scheme: light dark;
+
+  /* Design tokens (RGB triplets for modern `rgb(var(--x) / <alpha>)`). */
+  --app-bg: 248 250 252; /* slate-50 */
+  --app-surface: 255 255 255; /* white */
+  --app-surface-2: 241 245 249; /* slate-100 */
+  --app-fg: 15 23 42; /* slate-900 */
+  --app-muted: 71 85 105; /* slate-600 */
+  --app-muted-2: 100 116 139; /* slate-500 */
+  --app-border: 226 232 240; /* slate-200 */
+  --app-primary: 245 158 11; /* amber-500 */
+  --app-danger: 244 63 94; /* rose-500 */
+  --app-success: 16 185 129; /* emerald-500 */
+  --app-info: 59 130 246; /* blue-500 */
+
+  --app-radius-sm: 10px;
+  --app-radius-md: 14px;
+  --app-radius-lg: 18px;
+
+  --app-shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.08), 0 1px 1px rgba(15, 23, 42, 0.04);
+  --app-shadow-md: 0 8px 30px rgba(15, 23, 42, 0.08);
+  --app-shadow-lg: 0 24px 70px rgba(15, 23, 42, 0.14);
 }
 
 html:not(.dark) {
@@ -15,6 +36,14 @@ html:not(.dark) {
 
 html.dark {
   color-scheme: dark;
+
+  --app-bg: 2 6 23; /* slate-950 */
+  --app-surface: 2 6 23; /* slate-950 */
+  --app-surface-2: 15 23 42; /* slate-900 */
+  --app-fg: 226 232 240; /* slate-200 */
+  --app-muted: 148 163 184; /* slate-400 */
+  --app-muted-2: 100 116 139; /* slate-500 */
+  --app-border: 30 41 59; /* slate-800 */
 }
 
 html,
@@ -25,12 +54,16 @@ body {
 body {
   font-family: "Manrope", ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Noto Sans",
     "Apple Color Emoji", "Segoe UI Emoji";
+  line-height: 1.5;
+  font-size: 14px;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-.font-display {
-  font-family: "Sora", ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Noto Sans";
+@layer utilities {
+  .font-display {
+    font-family: "Sora", ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Noto Sans";
+  }
 }
 
 button {
@@ -88,4 +121,35 @@ body {
 
 #root {
   min-height: 100%;
+}
+
+@layer base {
+  h1 {
+    @apply text-xl font-semibold tracking-tight text-slate-900 dark:text-slate-100;
+    font-family: "Sora", ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Noto Sans";
+  }
+  h2 {
+    @apply text-lg font-semibold tracking-tight text-slate-900 dark:text-slate-100;
+    font-family: "Sora", ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Noto Sans";
+  }
+  h3 {
+    @apply text-base font-semibold tracking-tight text-slate-900 dark:text-slate-100;
+    font-family: "Sora", ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Noto Sans";
+  }
+}
+
+@layer utilities {
+  .text-page-title {
+    @apply text-base font-semibold tracking-tight text-slate-900 dark:text-slate-100;
+    font-family: "Sora", ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Noto Sans";
+  }
+  .text-section-title {
+    @apply text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400;
+  }
+  .text-desc {
+    @apply text-[12px] text-slate-600 dark:text-slate-400;
+  }
+  .text-mono-muted {
+    @apply font-mono text-[11px] text-slate-500 dark:text-slate-400;
+  }
 }

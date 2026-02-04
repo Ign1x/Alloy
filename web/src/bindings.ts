@@ -8,7 +8,7 @@ export type CacheEntryDto = { key: string; path: string; size_bytes: string; las
 
 export type CacheStatsOutput = { entries: CacheEntryDto[] }
 
-export type DirEntryDto = { name: string; is_dir: boolean; size_bytes: number }
+export type DirEntryDto = { name: string; is_dir: boolean; size_bytes: number; modified_unix_ms: string }
 
 export type FsCapabilitiesOutput = { write_enabled: boolean }
 

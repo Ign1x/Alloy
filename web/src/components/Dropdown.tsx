@@ -47,7 +47,7 @@ export function Dropdown(props: DropdownProps) {
       </Show>
       <button
         type="button"
-        class={`${props.label.length > 0 ? 'mt-1' : ''} flex w-full items-center justify-between gap-3 rounded-xl border border-slate-300 bg-white/80 px-3 py-2.5 text-base text-slate-900 shadow-sm backdrop-blur-sm transition-all duration-150 hover:bg-white hover:shadow active:scale-[0.99] focus:border-amber-500/40 focus:outline-none focus:ring-2 focus:ring-amber-500/20 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:hover:bg-slate-950/80 dark:focus:border-amber-500/40 dark:focus:ring-amber-500/20`}
+        class={`${props.label.length > 0 ? 'mt-1' : ''} flex w-full items-center justify-between gap-3 rounded-xl border border-slate-300 bg-white/80 px-3 py-2 text-sm text-slate-900 shadow-sm backdrop-blur-sm transition-all duration-150 hover:bg-white hover:shadow active:scale-[0.99] focus-visible:border-amber-500/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/20 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:hover:bg-slate-950/80 dark:focus-visible:border-amber-500/40 dark:focus-visible:ring-amber-500/20 dark:focus-visible:ring-offset-slate-950`}
         disabled={props.disabled}
         aria-expanded={open()}
         onClick={() => setOpen((v) => !v)}
@@ -76,7 +76,7 @@ export function Dropdown(props: DropdownProps) {
               {(opt) => (
                 <button
                   type="button"
-                  class={`flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2.5 text-left text-base transition-all hover:bg-slate-100 active:scale-[0.99] dark:hover:bg-slate-900/50 ${
+                  class={`flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left text-sm transition-all hover:bg-slate-100 active:scale-[0.99] dark:hover:bg-slate-900/50 ${
                     opt.value === props.value ? 'bg-slate-100 dark:bg-slate-900/50' : ''
                   }`}
                   onClick={() => {
@@ -87,7 +87,7 @@ export function Dropdown(props: DropdownProps) {
                   <div class="min-w-0">
                     <div class="truncate text-slate-900 dark:text-slate-100">{opt.label}</div>
                     <Show when={opt.meta}>
-                      <div class="mt-0.5 truncate text-sm text-slate-500 dark:text-slate-400">{opt.meta}</div>
+                      <div class="mt-0.5 truncate text-[11px] text-slate-500 dark:text-slate-400">{opt.meta}</div>
                     </Show>
                   </div>
                   <Show when={opt.value === props.value}>
