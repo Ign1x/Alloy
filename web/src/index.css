@@ -68,6 +68,17 @@ body {
 
 button {
   cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:not(:disabled):active {
+  transform: translateY(0.5px) scale(0.99);
+  filter: brightness(0.97);
+}
+
+/* Ensure `transition-colors` buttons still animate press feedback. */
+button.transition-colors {
+  transition-property: color, background-color, border-color, text-decoration-color, fill, stroke, transform, filter;
 }
 
 button:disabled {
