@@ -7,7 +7,6 @@ import { Dropdown } from './components/Dropdown'
 import { Banner } from './components/ui/Banner'
 import { Badge } from './components/ui/Badge'
 import { Button } from './components/ui/Button'
-import { Breadcrumbs } from './components/ui/Breadcrumbs'
 import { Drawer } from './components/ui/Drawer'
 import { EmptyState } from './components/ui/EmptyState'
 import { ErrorState } from './components/ui/ErrorState'
@@ -4503,14 +4502,6 @@ function App() {
                 return 'neutral' as const
               }
 
-              const tabLabel = () => {
-                const t = instanceDetailTab()
-                if (t === 'overview') return 'Overview'
-                if (t === 'logs') return 'Logs'
-                if (t === 'files') return 'Files'
-                return 'Config'
-              }
-
               async function copyConnect() {
                 const c = connectInfo()
                 if (!c) return
@@ -4587,31 +4578,12 @@ function App() {
                   >
                     <div class="flex flex-wrap items-start justify-between gap-3">
                       <div class="min-w-0">
-	                        <Breadcrumbs
-	                          items={[
-	                            {
-	                              label: <span>Instances</span>,
-	                              onClick: () => {
-	                                setTab('instances')
-	                                setShowInstanceModal(false)
-	                              },
-	                            },
-	                            {
-	                              label: <span class="truncate">{uiName()}</span>,
-	                              title: id(),
-	                              onClick: () => setInstanceDetailTab('overview'),
-	                            },
-	                            { label: <span>{tabLabel()}</span> },
-	                          ]}
-	                        />
-	
 	                        <div class="mt-1 flex flex-wrap items-center gap-2">
 	                          <div class="truncate font-display text-base font-semibold text-slate-900 dark:text-slate-100">{uiName()}</div>
 	                          <Badge variant={statusVariant()} title={status()?.state ?? 'PROCESS_STATE_EXITED'}>
 	                            {instanceStateLabel(status())}
 	                          </Badge>
 	                          <Show when={version()}>{(v) => <Badge variant="neutral">v{v()}</Badge>}</Show>
-	                          <Show when={port()}>{(p) => <Badge variant="neutral">port {p()}</Badge>}</Show>
                           <Show when={connectInfo()}>
                             {(c) => (
                               <button
