@@ -1,4 +1,6 @@
+import type { JSX } from 'solid-js'
 import { For, Show, createEffect, createMemo, createSignal } from 'solid-js'
+import { cn } from './ui/cn'
 
 export type DropdownOption = {
   value: string
@@ -12,6 +14,11 @@ export type DropdownProps = {
   options: DropdownOption[]
   disabled?: boolean
   placeholder?: string
+  leftIcon?: JSX.Element
+  class?: string
+  buttonClass?: string
+  ariaLabel?: string
+  title?: string
   onChange: (value: string) => void
 }
 
@@ -41,18 +48,26 @@ export function Dropdown(props: DropdownProps) {
   })
 
   return (
-    <div class="relative" ref={(el) => (rootEl = el)}>
+    <div class={cn('relative', props.class)} ref={(el) => (rootEl = el)}>
       <Show when={props.label.length > 0}>
         <div class="text-sm text-slate-700 dark:text-slate-300">{props.label}</div>
       </Show>
       <button
         type="button"
-        class={`${props.label.length > 0 ? 'mt-1' : ''} flex w-full items-center justify-between gap-3 rounded-xl border border-slate-300 bg-white/80 px-3 py-2 text-sm text-slate-900 shadow-sm backdrop-blur-sm transition-all duration-150 hover:bg-white hover:shadow active:scale-[0.99] focus-visible:border-amber-500/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/20 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:hover:bg-slate-950/80 dark:focus-visible:border-amber-500/40 dark:focus-visible:ring-amber-500/20 dark:focus-visible:ring-offset-slate-950`}
+        class={cn(
+          `${props.label.length > 0 ? 'mt-1' : ''} flex w-full items-center justify-between gap-3 rounded-xl border border-slate-300 bg-white/80 px-3 py-2 text-sm text-slate-900 shadow-sm backdrop-blur-sm transition-all duration-150 hover:bg-white hover:shadow active:scale-[0.99] focus-visible:border-amber-500/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/20 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:hover:bg-slate-950/80 dark:focus-visible:border-amber-500/40 dark:focus-visible:ring-amber-500/20 dark:focus-visible:ring-offset-slate-950`,
+          props.buttonClass,
+        )}
         disabled={props.disabled}
         aria-expanded={open()}
+        aria-label={props.ariaLabel ?? (props.label.length > 0 ? props.label : undefined)}
+        title={props.title}
         onClick={() => setOpen((v) => !v)}
       >
-        <div class="min-w-0">
+        <div class="flex min-w-0 items-center gap-2">
+          <Show when={props.leftIcon}>
+            <div class="shrink-0 text-slate-500 dark:text-slate-400">{props.leftIcon}</div>
+          </Show>
           <Show
             when={selected()}
             fallback={<span class="text-slate-500 dark:text-slate-400">{props.placeholder ?? 'Select...'}</span>}
@@ -60,7 +75,12 @@ export function Dropdown(props: DropdownProps) {
             <div class="truncate">{selected()!.label}</div>
           </Show>
         </div>
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-5 w-5 text-slate-500">
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          viewBox="0 0 20 20"
+          fill="currentColor"
+          class="h-5 w-5 shrink-0 text-slate-500"
+        >
           <path
             fill-rule="evenodd"
             d="M5.23 7.21a.75.75 0 011.06.02L10 10.94l3.71-3.71a.75.75 0 111.06 1.06l-4.24 4.24a.75.75 0 01-1.06 0L5.21 8.29a.75.75 0 01.02-1.08z"

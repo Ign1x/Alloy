@@ -13,6 +13,7 @@ import { EmptyState } from './components/ui/EmptyState'
 import { ErrorState } from './components/ui/ErrorState'
 import { Field } from './components/ui/Field'
 import { IconButton } from './components/ui/IconButton'
+import { TemplateMark } from './components/ui/TemplateMark'
 import { Input } from './components/ui/Input'
 import { Link } from './components/ui/Link'
 import { Modal } from './components/ui/Modal'
@@ -2736,27 +2737,83 @@ function App() {
                         </div>
                       </div>
 
-                      <div class="mt-3 grid gap-2 lg:grid-cols-12">
-                        <div class="lg:col-span-6">
+                      <div class="mt-3 flex flex-wrap items-center gap-2">
+                        <div class="w-full sm:w-72 lg:w-80">
                           <Input
                             value={instanceSearchInput()}
                             onInput={(e) => setInstanceSearchInput(e.currentTarget.value)}
-                            placeholder="Search by name, id, template…"
+                            placeholder="Search…"
                             aria-label="Search instances"
                             spellcheck={false}
+                            leftIcon={
+                              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
+                                <path
+                                  fill-rule="evenodd"
+                                  d="M9 3.5a5.5 5.5 0 104.473 8.714l2.656 2.657a.75.75 0 101.061-1.06l-2.657-2.657A5.5 5.5 0 009 3.5zM5 9a4 4 0 117.999.001A4 4 0 015 9z"
+                                  clip-rule="evenodd"
+                                />
+                              </svg>
+                            }
+                            rightIcon={
+                              instanceSearchInput().length > 0 ? (
+                                <button
+                                  type="button"
+                                  class="rounded-md p-1 transition hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/30 dark:hover:bg-slate-900/60"
+                                  aria-label="Clear search"
+                                  title="Clear search"
+                                  onClick={() => {
+                                    setInstanceSearchInput('')
+                                    setInstanceSearch('')
+                                  }}
+                                >
+                                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
+                                    <path
+                                      fill-rule="evenodd"
+                                      d="M4.47 4.47a.75.75 0 011.06 0L10 8.94l4.47-4.47a.75.75 0 111.06 1.06L11.06 10l4.47 4.47a.75.75 0 11-1.06 1.06L10 11.06l-4.47 4.47a.75.75 0 11-1.06-1.06L8.94 10 4.47 5.53a.75.75 0 010-1.06z"
+                                      clip-rule="evenodd"
+                                    />
+                                  </svg>
+                                </button>
+                              ) : undefined
+                            }
                           />
                         </div>
-                        <div class="lg:col-span-3">
+                        <div class="w-full sm:w-44">
                           <Dropdown
                             label=""
+                            ariaLabel="Filter by status"
+                            title={instanceStatusFilter() === 'all' ? 'All statuses' : instanceStatusFilter()}
+                            leftIcon={
+                              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
+                                <path
+                                  fill-rule="evenodd"
+                                  d="M10 2.25a.75.75 0 01.75.75v6a.75.75 0 01-1.5 0V3a.75.75 0 01.75-.75z"
+                                  clip-rule="evenodd"
+                                />
+                                <path
+                                  fill-rule="evenodd"
+                                  d="M6.22 4.97a.75.75 0 011.06.08.75.75 0 01-.08 1.06 4.75 4.75 0 105.6 0 .75.75 0 01-.08-1.06.75.75 0 011.06-.08 6.25 6.25 0 11-7.48 0z"
+                                  clip-rule="evenodd"
+                                />
+                              </svg>
+                            }
                             value={instanceStatusFilter()}
                             options={instanceStatusFilterOptions()}
                             onChange={(v) => setInstanceStatusFilter(v as InstanceStatusFilter)}
                           />
                         </div>
-                        <div class="lg:col-span-3">
+                        <div class="w-full sm:w-60">
                           <Dropdown
                             label=""
+                            ariaLabel="Filter by template"
+                            title={instanceTemplateFilter() === 'all' ? 'All templates' : instanceTemplateFilter()}
+                            leftIcon={
+                              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
+                                <path d="M10 2.25l6.5 3.75v7.5L10 17.25 3.5 13.5V6L10 2.25z" />
+                                <path d="M10 9.75L3.5 6 10 2.25 16.5 6 10 9.75z" opacity="0.35" />
+                                <path d="M10 9.75v7.5l6.5-3.75V6L10 9.75z" opacity="0.35" />
+                              </svg>
+                            }
                             value={instanceTemplateFilter()}
                             options={instanceTemplateFilterOptions()}
                             onChange={setInstanceTemplateFilter}
@@ -2765,12 +2822,25 @@ function App() {
                       </div>
 
                       <div class="mt-2 flex flex-wrap items-center gap-2">
-                        <Dropdown
-                          label=""
-                          value={instanceSortKey()}
-                          options={instanceSortOptions()}
-                          onChange={(v) => setInstanceSortKey(v as InstanceSortKey)}
-                        />
+                        <div class="w-full sm:w-44">
+                          <Dropdown
+                            label=""
+                            ariaLabel="Sort instances"
+                            title="Sort"
+                            leftIcon={
+                              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
+                                <path
+                                  fill-rule="evenodd"
+                                  d="M6 4.25a.75.75 0 01.75.75v9.69l1.72-1.72a.75.75 0 111.06 1.06l-3 3a.75.75 0 01-1.06 0l-3-3a.75.75 0 111.06-1.06l1.72 1.72V5A.75.75 0 016 4.25zm8 0a.75.75 0 01.75.75v9.69l1.72-1.72a.75.75 0 111.06 1.06l-3 3a.75.75 0 01-1.06 0l-3-3a.75.75 0 111.06-1.06l1.72 1.72V5a.75.75 0 01.75-.75z"
+                                  clip-rule="evenodd"
+                                />
+                              </svg>
+                            }
+                            value={instanceSortKey()}
+                            options={instanceSortOptions()}
+                            onChange={(v) => setInstanceSortKey(v as InstanceSortKey)}
+                          />
+                        </div>
                         <label class="flex items-center gap-2 rounded-xl border border-slate-200 bg-white/60 px-3 py-2 text-xs text-slate-700 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-200">
                           <input
                             type="checkbox"
@@ -2874,17 +2944,14 @@ function App() {
                                     <div class="truncate font-mono text-sm font-semibold text-slate-900 dark:text-slate-100">
                                       {instanceDisplayName(i)}
                                     </div>
-                                    <div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
-                                      <span class="rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 font-mono dark:border-slate-800 dark:bg-slate-950/40">
-                                        {i.config.instance_id}
-                                      </span>
-                                      <span class="rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 font-mono dark:border-slate-800 dark:bg-slate-950/40">
-                                        {i.config.template_id}
-                                      </span>
-                                      <Badge
-                                        variant={
-                                          i.status?.state === 'PROCESS_STATE_RUNNING'
-                                            ? 'success'
+	                                    <div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+	                                      <span class="rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 font-mono dark:border-slate-800 dark:bg-slate-950/40">
+	                                        {i.config.instance_id}
+	                                      </span>
+	                                      <Badge
+	                                        variant={
+	                                          i.status?.state === 'PROCESS_STATE_RUNNING'
+	                                            ? 'success'
                                             : i.status?.state === 'PROCESS_STATE_FAILED'
                                               ? 'danger'
                                               : i.status?.state === 'PROCESS_STATE_STARTING' || i.status?.state === 'PROCESS_STATE_STOPPING'
@@ -3136,12 +3203,13 @@ function App() {
                                   </Show>
                                 </div>
 
-                                <div class="flex flex-wrap items-center gap-1.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
-                                  <IconButton
-                                    type="button"
-                                    label="Edit"
-                                    title={
-                                      isReadOnly()
+	                                <div class="flex items-center gap-2">
+	                                  <div class="flex items-center gap-1.5 max-w-0 overflow-hidden opacity-0 transition-[max-width,opacity] duration-150 invisible group-hover:visible group-hover:max-w-[480px] group-hover:opacity-100 group-focus-within:visible group-focus-within:max-w-[480px] group-focus-within:opacity-100">
+	                                  <IconButton
+	                                    type="button"
+	                                    label="Edit"
+	                                    title={
+	                                      isReadOnly()
                                         ? 'Read-only mode'
                                         : !canStartInstance(i.status)
                                           ? 'Stop the instance before editing'
@@ -3153,8 +3221,8 @@ function App() {
                                   >
                                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
                                       <path d="M13.586 3.586a2 2 0 112.828 2.828l-9.5 9.5a1 1 0 01-.39.242l-3.5 1.166a.5.5 0 01-.632-.632l1.166-3.5a1 1 0 01.242-.39l9.5-9.5z" />
-                                    </svg>
-                                  </IconButton>
+	                                    </svg>
+	                                  </IconButton>
 
                                   <IconButton
                                     type="button"
@@ -3207,13 +3275,15 @@ function App() {
                                         clip-rule="evenodd"
                                       />
                                     </svg>
-                                  </IconButton>
-                                </div>
-                              </div>
-                            </div>
-                          )}
-                                </For>
-                              </div>
+	                                  </IconButton>
+	                                  </div>
+	                                  <TemplateMark templateId={i.config.template_id} />
+	                                </div>
+	                              </div>
+	                            </div>
+	                          )}
+	                                </For>
+	                              </div>
                             </Show>
                           }
                         >
