@@ -522,9 +522,20 @@ export function FileBrowser(props: FileBrowserProps) {
                       title="Empty directory"
                       description="No files here yet."
                       actions={
-                        <Button size="xs" variant="secondary" onClick={() => fsList.refetch()}>
-                          Refresh
-                        </Button>
+                        <IconButton type="button" label="Refresh" variant="secondary" onClick={() => fsList.refetch()}>
+                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
+                            <path
+                              fill-rule="evenodd"
+                              d="M15.312 11.424a5.5 5.5 0 01-9.201 2.466.75.75 0 00-1.06 1.06 7 7 0 0011.698-3.132.75.75 0 00-1.437-.394z"
+                              clip-rule="evenodd"
+                            />
+                            <path
+                              fill-rule="evenodd"
+                              d="M4.688 8.576a5.5 5.5 0 019.201-2.466.75.75 0 001.06-1.06A7 7 0 003.25 8.182a.75.75 0 001.438.394z"
+                              clip-rule="evenodd"
+                            />
+                          </svg>
+                        </IconButton>
                       }
                     />
                   }

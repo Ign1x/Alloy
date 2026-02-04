@@ -215,6 +215,15 @@ export function LogViewer(props: LogViewerProps) {
             onInput={(e) => setQuery(e.currentTarget.value)}
             placeholder="Search"
             class="w-44"
+            leftIcon={
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
+                <path
+                  fill-rule="evenodd"
+                  d="M9 3.5a5.5 5.5 0 104.473 8.714l2.656 2.657a.75.75 0 101.061-1.06l-2.657-2.657A5.5 5.5 0 009 3.5zM5 9a4 4 0 117.999.001A4 4 0 015 9z"
+                  clip-rule="evenodd"
+                />
+              </svg>
+            }
           />
           <Show
             when={matches().length > 0}

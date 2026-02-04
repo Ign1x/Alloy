@@ -15,7 +15,7 @@ export function Input(props: InputProps) {
   const withIcons = () => Boolean(local.leftIcon || local.rightIcon)
 
   const base =
-    'w-full rounded-xl border bg-white/80 py-2 text-sm text-slate-900 shadow-sm backdrop-blur-sm transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-50 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-slate-950/60 dark:text-slate-200 dark:focus-visible:ring-offset-slate-950'
+    'relative z-0 w-full rounded-xl border bg-white/80 py-2 text-sm text-slate-900 shadow-sm backdrop-blur-sm transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-50 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-slate-950/60 dark:text-slate-200 dark:focus-visible:ring-offset-slate-950'
 
   const padding = () => {
     const left = local.leftIcon ? 'pl-9' : 'pl-3'
@@ -41,13 +41,13 @@ export function Input(props: InputProps) {
     <Show when={withIcons()} fallback={input}>
       <div class={cn('relative w-full', local.containerClass)}>
         <Show when={local.leftIcon}>
-          <div class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 dark:text-slate-400">
+          <div class="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 text-slate-500 dark:text-slate-400">
             {local.leftIcon}
           </div>
         </Show>
         {input}
         <Show when={local.rightIcon}>
-          <div class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 dark:text-slate-400">
+          <div class="absolute right-3 top-1/2 z-10 -translate-y-1/2 text-slate-500 dark:text-slate-400">
             {local.rightIcon}
           </div>
         </Show>
