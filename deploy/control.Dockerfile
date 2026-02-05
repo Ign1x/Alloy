@@ -7,7 +7,8 @@ RUN apt-get update \
   && protoc --version \
   && rm -rf /var/lib/apt/lists/*
 
-COPY . .
+COPY Cargo.toml Cargo.lock ./
+COPY crates ./crates
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry/ \
     --mount=type=cache,target=/usr/local/cargo/git/db \
