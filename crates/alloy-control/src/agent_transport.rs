@@ -225,6 +225,9 @@ impl AgentTransport {
             .map_err(|e| tonic::Status::unavailable(format!("connect failed ({endpoint}): {e}")))?;
 
         let mut grpc = tonic::client::Grpc::new(channel);
+        grpc.ready().await.map_err(|e| {
+            tonic::Status::unavailable(format!("agent is not ready ({endpoint}): {e}"))
+        })?;
         let mut request = tonic::Request::new(req);
         request.set_timeout(self.timeout);
 
