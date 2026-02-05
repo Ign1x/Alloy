@@ -45,7 +45,6 @@ export function LogViewer(props: LogViewerProps) {
   const [wrap, setWrap] = createSignal(true)
   const [fontSize, setFontSize] = createSignal(12)
   const [includeTimestamp, setIncludeTimestamp] = createSignal(false)
-  const [follow, setFollow] = createSignal(true)
   const [query, setQuery] = createSignal('')
   const [matchIdx, setMatchIdx] = createSignal(0)
   const [selectedLineIdx, setSelectedLineIdx] = createSignal<number | null>(null)
@@ -114,13 +113,13 @@ export function LogViewer(props: LogViewerProps) {
   })
 
   function isNearBottom(el: HTMLDivElement) {
-    return el.scrollHeight - (el.scrollTop + el.clientHeight) < 12
+    return el.scrollHeight - (el.scrollTop + el.clientHeight) < 48
   }
 
-  function jumpToBottom(enableFollow = true) {
+  function jumpToBottom(resumeLive = false) {
     const el = scrollEl
     if (!el) return
-    if (enableFollow) setFollow(true)
+    if (resumeLive) setLive(true)
     // For virtualized mode, scrollHeight is based on total height.
     el.scrollTop = el.scrollHeight
   }
@@ -136,7 +135,6 @@ export function LogViewer(props: LogViewerProps) {
     // Auto-follow on new lines.
     props.lines.length
     if (!live()) return
-    if (!follow()) return
     queueMicrotask(() => jumpToBottom(false))
   })
 
@@ -144,14 +142,14 @@ export function LogViewer(props: LogViewerProps) {
     if (props.error) return 'error'
     if (props.loading) return 'loading'
     if (!live()) return 'paused'
-    return follow() ? 'follow' : 'unfollow'
+    return 'live'
   })
 
   const statusDot = createMemo(() => {
     if (props.loading) return 'bg-slate-500 animate-pulse'
     if (props.error) return 'bg-rose-500'
-    if (!live()) return 'bg-slate-500'
-    return follow() ? 'bg-emerald-400' : 'bg-amber-400'
+    if (!live()) return 'bg-amber-400'
+    return 'bg-emerald-400'
   })
 
   function serializeLines(lines: LogLine[]): string {
@@ -331,25 +329,6 @@ export function LogViewer(props: LogViewerProps) {
             </svg>
           </IconButton>
 
-          <IconButton
-            type="button"
-            label={follow() ? 'Following tail' : 'Not following tail'}
-            variant="ghost"
-            onClick={() => {
-              const next = !follow()
-              setFollow(next)
-              if (next) jumpToBottom(false)
-            }}
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class={`h-4 w-4 ${follow() ? 'text-emerald-400' : ''}`}>
-              <path
-                fill-rule="evenodd"
-                d="M10 18a8 8 0 100-16 8 8 0 000 16zm.75-11a.75.75 0 00-1.5 0v3.69l-1.22-1.22a.75.75 0 10-1.06 1.06l2.5 2.5c.293.293.767.293 1.06 0l2.5-2.5a.75.75 0 10-1.06-1.06l-1.22 1.22V7z"
-                clip-rule="evenodd"
-              />
-            </svg>
-          </IconButton>
-
           <IconButton type="button" label="Clear" variant="ghost" disabled={!props.onClear} onClick={() => props.onClear?.()}>
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
               <path
@@ -419,13 +398,12 @@ export function LogViewer(props: LogViewerProps) {
             scrollEl = el
             const onScroll = () => {
               if (!live()) return
-              if (isNearBottom(el)) setFollow(true)
-              else setFollow(false)
+              // If user scrolls away from the tail while live, pause updates.
+              if (!isNearBottom(el)) setLive(false)
             }
             el.addEventListener('scroll', onScroll, { passive: true })
             queueMicrotask(() => {
               if (!live()) return
-              if (!follow()) return
               if (props.lines.length === 0) return
               jumpToBottom(false)
             })

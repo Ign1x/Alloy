@@ -147,6 +147,15 @@ type FsEntry = { name: string; is_dir: boolean; size_bytes: number; modified_uni
 
 type FileSortKey = 'name' | 'size' | 'modified'
 
+function compareName(aRaw: string, bRaw: string): number {
+  const a = aRaw.trim()
+  const b = bRaw.trim()
+  const aNum = a.length > 0 && a.charCodeAt(0) >= 48 && a.charCodeAt(0) <= 57
+  const bNum = b.length > 0 && b.charCodeAt(0) >= 48 && b.charCodeAt(0) <= 57
+  if (aNum !== bNum) return aNum ? -1 : 1
+  return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' })
+}
+
 export type FileBrowserProps = {
   enabled: boolean
   title?: string
@@ -243,7 +252,7 @@ export function FileBrowser(props: FileBrowserProps) {
       if (a.is_dir !== b.is_dir) return a.is_dir ? -1 : 1
       if (key === 'size') return mult * ((a.size_bytes ?? 0) - (b.size_bytes ?? 0))
       if (key === 'modified') return mult * ((parseUnixMs(a.modified_unix_ms) ?? 0) - (parseUnixMs(b.modified_unix_ms) ?? 0))
-      return mult * a.name.localeCompare(b.name)
+      return mult * compareName(a.name, b.name)
     })
     return list
   })

@@ -326,7 +326,7 @@ function optionsWithCurrentValue(
   const v = currentValue.trim()
   if (!v) return options
   if (options.some((o) => o.value === v)) return options
-  return [{ value: v, label: v, meta: 'custom' }, ...options]
+  return [{ value: v, label: v }, ...options]
 }
 
 type UiTab = 'instances' | 'files' | 'nodes'
@@ -366,11 +366,9 @@ function App() {
   let createInstanceNameEl: HTMLInputElement | undefined
   let createSleepSecondsEl: HTMLInputElement | undefined
   let createMcEulaEl: HTMLInputElement | undefined
-  let createMcVersionCustomEl: HTMLInputElement | undefined
   let createMcPortEl: HTMLInputElement | undefined
   let createMcMemoryCustomEl: HTMLInputElement | undefined
   let createMcFrpConfigEl: HTMLTextAreaElement | undefined
-  let createTrVersionCustomEl: HTMLInputElement | undefined
   let createTrPortEl: HTMLInputElement | undefined
   let createTrMaxPlayersEl: HTMLInputElement | undefined
   let createTrWorldNameEl: HTMLInputElement | undefined
@@ -379,11 +377,9 @@ function App() {
   let createTrFrpConfigEl: HTMLTextAreaElement | undefined
   let editDisplayNameEl: HTMLInputElement | undefined
   let editSleepSecondsEl: HTMLInputElement | undefined
-  let editMcVersionCustomEl: HTMLInputElement | undefined
   let editMcMemoryCustomEl: HTMLInputElement | undefined
   let editMcPortEl: HTMLInputElement | undefined
   let editMcFrpConfigEl: HTMLTextAreaElement | undefined
-  let editTrVersionCustomEl: HTMLInputElement | undefined
   let editTrPortEl: HTMLInputElement | undefined
   let editTrMaxPlayersEl: HTMLInputElement | undefined
   let editTrWorldNameEl: HTMLInputElement | undefined
@@ -1313,7 +1309,7 @@ function App() {
 
     const needsAdvanced =
       !createAdvanced() &&
-      (Boolean(errors.port) || Boolean(errors.world_size) || Boolean(errors.password) || Boolean(errors.version) || Boolean(errors.frp_config))
+      (Boolean(errors.port) || Boolean(errors.world_size) || Boolean(errors.password) || Boolean(errors.frp_config))
     if (needsAdvanced) setCreateAdvanced(true)
 
     const run = () => {
@@ -1327,7 +1323,6 @@ function App() {
           if (key === 'accept_eula' && focusEl(createMcEulaEl)) return
           if (key === 'port' && focusEl(createMcPortEl)) return
           if (key === 'frp_config' && focusEl(createMcFrpConfigEl)) return
-          if (key === 'version' && focusEl(createMcVersionCustomEl)) return
           if (key === 'memory_mb' && mcMemoryPreset() === 'custom' && focusEl(createMcMemoryCustomEl)) return
         }
 
@@ -1338,7 +1333,6 @@ function App() {
           if (key === 'frp_config' && focusEl(createTrFrpConfigEl)) return
           if (key === 'world_name' && focusEl(createTrWorldNameEl)) return
           if (key === 'max_players' && focusEl(createTrMaxPlayersEl)) return
-          if (key === 'version' && focusEl(createTrVersionCustomEl)) return
         }
       }
     }
@@ -1362,7 +1356,7 @@ function App() {
 
     const needsAdvanced =
       !editAdvanced() &&
-      (Boolean(errors.port) || Boolean(errors.world_size) || Boolean(errors.password) || Boolean(errors.version) || Boolean(errors.frp_config))
+      (Boolean(errors.port) || Boolean(errors.world_size) || Boolean(errors.password) || Boolean(errors.frp_config))
     if (needsAdvanced) setEditAdvanced(true)
 
     const run = () => {
@@ -1375,7 +1369,6 @@ function App() {
         if (template_id === 'minecraft:vanilla') {
           if (key === 'port' && focusEl(editMcPortEl)) return
           if (key === 'frp_config' && focusEl(editMcFrpConfigEl)) return
-          if (key === 'version' && focusEl(editMcVersionCustomEl)) return
           if (key === 'memory_mb' && editMcMemoryPreset() === 'custom' && focusEl(editMcMemoryCustomEl)) return
         }
 
@@ -1386,7 +1379,6 @@ function App() {
           if (key === 'world_size' && focusEl(editTrWorldSizeEl)) return
           if (key === 'password' && focusEl(editTrPasswordEl)) return
           if (key === 'frp_config' && focusEl(editTrFrpConfigEl)) return
-          if (key === 'version' && focusEl(editTrVersionCustomEl)) return
         }
       }
     }
@@ -2292,24 +2284,6 @@ function App() {
                                   options={optionsWithCurrentValue(mcVersionOptions(), mcVersion())}
                                   onChange={setMcVersion}
                                 />
-                                <Show when={createAdvanced()}>
-                                  <div class="space-y-2">
-                                    <Input
-                                      ref={(el) => {
-                                        createMcVersionCustomEl = el
-                                      }}
-                                      value={mcVersion()}
-                                      onInput={(e) => setMcVersion(e.currentTarget.value)}
-                                      placeholder="e.g. 1.20.4"
-                                      list="mc-version-suggest"
-                                      invalid={Boolean(createFieldErrors().version)}
-                                      spellcheck={false}
-                                    />
-                                    <datalist id="mc-version-suggest">
-                                      <For each={(mcVersionOptions() ?? []).map((o) => o.value)}>{(v) => <option value={v} />}</For>
-                                    </datalist>
-                                  </div>
-                                </Show>
                               </div>
 	                            </Field>
 
@@ -2437,24 +2411,6 @@ function App() {
                                   options={optionsWithCurrentValue(trVersionOptions(), trVersion())}
                                   onChange={setTrVersion}
                                 />
-                                <Show when={createAdvanced()}>
-                                  <div class="space-y-2">
-                                    <Input
-                                      ref={(el) => {
-                                        createTrVersionCustomEl = el
-                                      }}
-                                      value={trVersion()}
-                                      onInput={(e) => setTrVersion(e.currentTarget.value)}
-                                      placeholder="e.g. 1453"
-                                      list="tr-version-suggest"
-                                      invalid={Boolean(createFieldErrors().version)}
-                                      spellcheck={false}
-                                    />
-                                    <datalist id="tr-version-suggest">
-                                      <For each={(trVersionOptions() ?? []).map((o) => o.value)}>{(v) => <option value={v} />}</For>
-                                    </datalist>
-                                  </div>
-                                </Show>
                               </div>
 		                            </Field>
 
@@ -2647,9 +2603,7 @@ function App() {
                                 </Badge>
                               </Tooltip>
                             </Show>
-                            <div class="truncate text-[12px] font-medium text-slate-700 dark:text-slate-200" title={createPreview().template_id}>
-                              {createPreview().templateLabel}
-                            </div>
+                            <TemplateMark templateId={createPreview().template_id} class="h-8 w-8" />
                           </div>
                         </div>
                         <div class="mt-2 space-y-1.5">
@@ -2878,7 +2832,7 @@ function App() {
                       </div>
 
                       <div class="mt-3 flex flex-wrap items-center gap-2">
-                        <div class="w-full sm:w-72 lg:w-80">
+                        <div class="w-full sm:w-56 lg:w-64">
                           <Input
                             value={instanceSearchInput()}
                             onInput={(e) => setInstanceSearchInput(e.currentTarget.value)}
@@ -2918,7 +2872,7 @@ function App() {
                             }
                           />
                         </div>
-                        <div class="w-full sm:w-44">
+                        <div class="w-full sm:w-36">
                           <Dropdown
                             label=""
                             ariaLabel="Filter by status"
@@ -2942,7 +2896,7 @@ function App() {
                             onChange={(v) => setInstanceStatusFilter(v as InstanceStatusFilter)}
                           />
                         </div>
-                        <div class="w-full sm:w-60">
+                        <div class="w-full sm:w-44 lg:w-52">
                           <Dropdown
                             label=""
                             ariaLabel="Filter by template"
@@ -2962,7 +2916,7 @@ function App() {
                       </div>
 
                       <div class="mt-2 flex flex-wrap items-center gap-2">
-                        <div class="w-full sm:w-44">
+                        <div class="w-full sm:w-36">
                           <Dropdown
                             label=""
                             ariaLabel="Sort instances"
@@ -3085,9 +3039,29 @@ function App() {
                                       {instanceDisplayName(i)}
                                     </div>
 	                                    <div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
-	                                      <span class="rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 font-mono dark:border-slate-800 dark:bg-slate-950/40">
-	                                        {i.config.instance_id}
-	                                      </span>
+	                                      <button
+	                                        type="button"
+	                                        class="group inline-flex max-w-full cursor-pointer items-center gap-1 rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 font-mono text-[11px] text-slate-700 transition-colors hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/35 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-50 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-200 dark:hover:bg-slate-900 dark:focus-visible:ring-amber-400/35 dark:focus-visible:ring-offset-slate-950"
+	                                        onClick={(e) => {
+	                                          e.preventDefault()
+	                                          e.stopPropagation()
+	                                          void safeCopy(i.config.instance_id)
+	                                          pushToast('success', 'Copied ID', shortId(i.config.instance_id))
+	                                        }}
+	                                        title="Copy instance id"
+	                                      >
+	                                        <span class="truncate">{shortId(i.config.instance_id)}</span>
+	                                        <svg
+	                                          xmlns="http://www.w3.org/2000/svg"
+	                                          viewBox="0 0 20 20"
+	                                          fill="currentColor"
+	                                          class="h-3 w-3 flex-none opacity-60 group-hover:opacity-100"
+	                                          aria-hidden="true"
+	                                        >
+	                                          <path d="M5.75 2A2.75 2.75 0 003 4.75v9.5A2.75 2.75 0 005.75 17h1.5a.75.75 0 000-1.5h-1.5c-.69 0-1.25-.56-1.25-1.25v-9.5c0-.69.56-1.25 1.25-1.25h5.5c.69 0 1.25.56 1.25 1.25v1a.75.75 0 001.5 0v-1A2.75 2.75 0 0011.25 2h-5.5z" />
+	                                          <path d="M8.75 6A2.75 2.75 0 006 8.75v6.5A2.75 2.75 0 008.75 18h5.5A2.75 2.75 0 0017 15.25v-6.5A2.75 2.75 0 0014.25 6h-5.5z" />
+	                                        </svg>
+	                                      </button>
 	                                      <Badge
 	                                        variant={
 	                                          i.status?.state === 'PROCESS_STATE_RUNNING'
@@ -3105,14 +3079,9 @@ function App() {
                                       <Show when={instanceStatusKeys()[i.config.instance_id]?.updated_at_unix_ms}>
                                         {(t) => (
                                           <Badge variant="neutral" title={new Date(t()).toLocaleString()}>
-                                            updated {formatRelativeTime(t())}
+                                            {formatRelativeTime(t())}
                                           </Badge>
                                         )}
-                                      </Show>
-                                      <Show when={i.status?.pid != null}>
-                                        <span class="rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 font-mono dark:border-slate-800 dark:bg-slate-950/40">
-                                          pid {i.status?.pid}
-                                        </span>
                                       </Show>
                                       <Show when={instancePort(i)}>
                                         {(p) => {
@@ -4119,24 +4088,6 @@ function App() {
                                   options={optionsWithCurrentValue(mcVersionOptions(), editMcVersion())}
                                   onChange={setEditMcVersion}
                                 />
-                                <Show when={editAdvanced()}>
-                                  <div class="space-y-2">
-                                    <Input
-                                      ref={(el) => {
-                                        editMcVersionCustomEl = el
-                                      }}
-                                      value={editMcVersion()}
-                                      onInput={(e) => setEditMcVersion(e.currentTarget.value)}
-                                      placeholder="e.g. 1.20.4"
-                                      list="mc-version-suggest-edit"
-                                      invalid={Boolean(editFieldErrors().version)}
-                                      spellcheck={false}
-                                    />
-                                    <datalist id="mc-version-suggest-edit">
-                                      <For each={(mcVersionOptions() ?? []).map((o) => o.value)}>{(v) => <option value={v} />}</For>
-                                    </datalist>
-                                  </div>
-                                </Show>
                               </div>
 	                        </Field>
 
@@ -4268,24 +4219,6 @@ function App() {
                                 options={optionsWithCurrentValue(trVersionOptions(), editTrVersion())}
                                 onChange={setEditTrVersion}
                               />
-                              <Show when={editAdvanced()}>
-                                <div class="space-y-2">
-                                  <Input
-                                    ref={(el) => {
-                                      editTrVersionCustomEl = el
-                                    }}
-                                    value={editTrVersion()}
-                                    onInput={(e) => setEditTrVersion(e.currentTarget.value)}
-                                    placeholder="1453"
-                                    list="tr-version-suggest-edit"
-                                    invalid={Boolean(editFieldErrors().version)}
-                                    spellcheck={false}
-                                  />
-                                  <datalist id="tr-version-suggest-edit">
-                                    <For each={(trVersionOptions() ?? []).map((o) => o.value)}>{(v) => <option value={v} />}</For>
-                                  </datalist>
-                                </div>
-                              </Show>
                             </div>
 	                        </Field>
 
