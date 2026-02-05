@@ -3330,7 +3330,7 @@ function App() {
                             }
                           />
                         </div>
-                        <div class="w-full sm:w-32">
+                        <div class="w-full sm:w-36">
                           <Dropdown
                             label=""
                             ariaLabel="Filter by status"
