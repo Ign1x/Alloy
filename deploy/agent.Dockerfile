@@ -3,7 +3,7 @@ WORKDIR /app
 
 # Protobuf compiler for tonic/prost build.rs codegen.
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends protobuf-compiler \
+  && apt-get install -y --no-install-recommends protobuf-compiler curl \
   && protoc --version \
   && rm -rf /var/lib/apt/lists/*
 
@@ -15,7 +15,20 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry/ \
     set -eux; \
     cargo build --release -p alloy-agent --bin alloy-agent; \
     mkdir -p /out; \
-    cp /app/target/release/alloy-agent /out/alloy-agent
+    cp /app/target/release/alloy-agent /out/alloy-agent; \
+    FRP_VERSION=0.54.0; \
+    arch="$(dpkg --print-architecture)"; \
+    case "$arch" in \
+      amd64) frp_arch=amd64 ;; \
+      arm64) frp_arch=arm64 ;; \
+      *) echo "unsupported arch: $arch" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL -o /tmp/frp.tgz "https://github.com/fatedier/frp/releases/download/v${FRP_VERSION}/frp_${FRP_VERSION}_linux_${frp_arch}.tar.gz"; \
+    tar -C /tmp -xzf /tmp/frp.tgz; \
+    cp "/tmp/frp_${FRP_VERSION}_linux_${frp_arch}/frpc" /out/frpc; \
+    cp "/tmp/frp_${FRP_VERSION}_linux_${frp_arch}/frps" /out/frps; \
+    chmod +x /out/frpc /out/frps; \
+    rm -rf /tmp/frp*;
 
 FROM eclipse-temurin:21-jre-jammy AS java21
 
@@ -42,6 +55,8 @@ ENV PATH=/opt/java/openjdk/bin:$PATH
 #   docker run --rm --entrypoint java <image> -version
 
 COPY --from=builder /out/alloy-agent /usr/local/bin/alloy-agent
+COPY --from=builder /out/frpc /usr/local/bin/frpc
+COPY --from=builder /out/frps /usr/local/bin/frps
 
 # Persistent data root for jar cache and instance directories.
 ENV ALLOY_DATA_ROOT=/data

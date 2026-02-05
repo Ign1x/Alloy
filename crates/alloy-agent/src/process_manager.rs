@@ -572,9 +572,14 @@ struct RunInfo {
 }
 
 fn redact_params(mut params: BTreeMap<String, String>) -> BTreeMap<String, String> {
-    for k in ["password"] {
-        if params.contains_key(k) {
-            params.insert(k.to_string(), "<redacted>".to_string());
+    for (k, v) in params.iter_mut() {
+        let key = k.to_ascii_lowercase();
+        let is_secret = key.contains("password")
+            || key.contains("token")
+            || key.contains("secret")
+            || (key.contains("frp") && key.contains("config"));
+        if is_secret && !v.is_empty() {
+            *v = "<redacted>".to_string();
         }
     }
     params
@@ -611,6 +616,148 @@ fn collect_safe_env() -> BTreeMap<String, String> {
         }
     }
     out
+}
+
+fn patch_frpc_ini(raw: &str, local_port: u16) -> String {
+    let mut out = String::with_capacity(raw.len().saturating_add(32));
+    let port = local_port.to_string();
+
+    for line in raw.lines() {
+        let trimmed = line.trim_start();
+
+        // Keep comments untouched.
+        if trimmed.starts_with('#') || trimmed.starts_with(';') {
+            out.push_str(line);
+            out.push('\n');
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+        let indent_len = line.len().saturating_sub(trimmed.len());
+        let indent = &line[..indent_len];
+
+        if lower.starts_with("local_port") {
+            let rest = trimmed.get("local_port".len()..).unwrap_or("").trim_start();
+            if rest.is_empty() || rest.starts_with('=') || rest.starts_with(':') {
+                out.push_str(indent);
+                out.push_str("local_port = ");
+                out.push_str(&port);
+                out.push('\n');
+                continue;
+            }
+        }
+
+        if lower.starts_with("local_ip") {
+            let rest = trimmed.get("local_ip".len()..).unwrap_or("").trim_start();
+            if rest.is_empty() || rest.starts_with('=') || rest.starts_with(':') {
+                out.push_str(indent);
+                out.push_str("local_ip = 127.0.0.1\n");
+                continue;
+            }
+        }
+
+        out.push_str(line);
+        out.push('\n');
+    }
+
+    out
+}
+
+async fn start_frpc_sidecar(
+    sink: LogSink,
+    instance_dir: PathBuf,
+    owner_pgid: i32,
+    local_port: u16,
+    config_raw: String,
+) -> anyhow::Result<()> {
+    let cfg_dir = instance_dir.join("config");
+    let cfg_path = cfg_dir.join("frpc.ini");
+    let patched = patch_frpc_ini(&config_raw, local_port);
+
+    tokio::fs::create_dir_all(&cfg_dir)
+        .await
+        .context("create frpc config dir")?;
+
+    let tmp = cfg_path.with_extension("ini.tmp");
+    tokio::fs::write(&tmp, patched.as_bytes())
+        .await
+        .context("write frpc config tmp")?;
+    tokio::fs::rename(&tmp, &cfg_path)
+        .await
+        .context("persist frpc config")?;
+
+    let exec = std::env::var("ALLOY_FRPC_PATH").unwrap_or_else(|_| "frpc".to_string());
+
+    sink.emit(format!(
+        "[alloy-agent] starting frpc tunnel (local_port={local_port})"
+    ))
+    .await;
+
+    let mut cmd = Command::new(&exec);
+    cmd.current_dir(&instance_dir)
+        .arg("-c")
+        .arg(&cfg_path)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+
+    #[cfg(unix)]
+    {
+        unsafe {
+            cmd.pre_exec(move || {
+                set_parent_death_signal()?;
+                if libc::setpgid(0, owner_pgid) == -1 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+    }
+
+    let mut child = cmd
+        .spawn()
+        .with_context(|| format!("spawn frpc: exec={exec} (cfg {})", cfg_path.display()))?;
+
+    let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
+
+    if let Some(out) = stdout {
+        let sink = sink.clone();
+        tokio::spawn(async move {
+            let mut lines = BufReader::new(out).lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                sink.emit(format!("[frpc stdout] {line}")).await;
+            }
+        });
+    }
+    if let Some(err) = stderr {
+        let sink = sink.clone();
+        tokio::spawn(async move {
+            let mut lines = BufReader::new(err).lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                sink.emit(format!("[frpc stderr] {line}")).await;
+            }
+        });
+    }
+
+    let wait_sink = sink.clone();
+    tokio::spawn(async move {
+        let res = child.wait().await;
+        match res {
+            Ok(st) => {
+                wait_sink
+                    .emit(format!("[alloy-agent] frpc exited: {st}"))
+                    .await
+            }
+            Err(e) => {
+                wait_sink
+                    .emit(format!("[alloy-agent] frpc wait failed: {e}"))
+                    .await
+            }
+        }
+    });
+
+    Ok(())
 }
 
 #[cfg(target_os = "linux")]
@@ -977,7 +1124,7 @@ impl ProcessManager {
                     unsafe {
                         cmd.pre_exec(|| {
                             set_parent_death_signal()?;
-                            if libc::setsid() == -1 {
+                            if libc::setpgid(0, 0) == -1 {
                                 return Err(std::io::Error::last_os_error());
                             }
                             Ok(())
@@ -1063,9 +1210,17 @@ impl ProcessManager {
                 // Port probe: only mark Running once the server actually listens.
                 let probe_sink = sink.clone();
                 let port = mc.port;
+                let frp_config = params
+                    .get("frp_config")
+                    .map(|v| v.trim())
+                    .filter(|v| !v.is_empty())
+                    .map(|v| v.to_string());
+                let frp_instance_dir = dir.clone();
                 tokio::spawn({
                     let inner = inner.clone();
                     let id_str = id_str.clone();
+                    let frp_config = frp_config.clone();
+                    let frp_instance_dir = frp_instance_dir.clone();
                     async move {
                         let timeout = port_probe_timeout();
                         let ok = wait_for_local_tcp_port(port, timeout).await;
@@ -1095,6 +1250,21 @@ impl ProcessManager {
                         };
 
                         if ok {
+                            if let (Some(cfg), Some(pgid)) = (frp_config.clone(), pgid) {
+                                if let Err(e) = start_frpc_sidecar(
+                                    probe_sink.clone(),
+                                    frp_instance_dir.clone(),
+                                    pgid,
+                                    port,
+                                    cfg,
+                                )
+                                .await
+                                {
+                                    probe_sink
+                                        .emit(format!("[alloy-agent] frpc start failed: {e}"))
+                                        .await;
+                                }
+                            }
                             probe_sink
                                 .emit(format!(
                                     "[alloy-agent] minecraft port {} is accepting connections",
@@ -1118,11 +1288,25 @@ impl ProcessManager {
                     }
                 });
 
+                let process_pgid = pgid;
                 let wait_sink = sink.clone();
                 let template_id = t.template_id.clone();
                 let params_for_restart = params.clone();
                 tokio::spawn(async move {
                     let res = child.wait().await;
+                    #[cfg(unix)]
+                    if let Some(pgid) = process_pgid {
+                        unsafe {
+                            libc::kill(-pgid, libc::SIGTERM);
+                        }
+                        tokio::time::sleep(Duration::from_millis(500)).await;
+                        let alive = unsafe { libc::kill(-pgid, 0) == 0 };
+                        if alive {
+                            unsafe {
+                                libc::kill(-pgid, libc::SIGKILL);
+                            }
+                        }
+                    }
                     let runtime = tokio::time::Instant::now().duration_since(started);
 
                     let mut restart_after: Option<Duration> = None;
@@ -1429,7 +1613,7 @@ impl ProcessManager {
                     unsafe {
                         cmd.pre_exec(|| {
                             set_parent_death_signal()?;
-                            if libc::setsid() == -1 {
+                            if libc::setpgid(0, 0) == -1 {
                                 return Err(std::io::Error::last_os_error());
                             }
                             Ok(())
@@ -1521,9 +1705,17 @@ impl ProcessManager {
                 // Port probe: only mark Running once the server actually listens.
                 let probe_sink = sink.clone();
                 let port = tr.port;
+                let frp_config = params
+                    .get("frp_config")
+                    .map(|v| v.trim())
+                    .filter(|v| !v.is_empty())
+                    .map(|v| v.to_string());
+                let frp_instance_dir = dir.clone();
                 tokio::spawn({
                     let inner = inner.clone();
                     let id_str = id_str.clone();
+                    let frp_config = frp_config.clone();
+                    let frp_instance_dir = frp_instance_dir.clone();
                     async move {
                         let timeout = if creating_world {
                             Duration::from_millis(
@@ -1561,6 +1753,21 @@ impl ProcessManager {
                         };
 
                         if ok {
+                            if let (Some(cfg), Some(pgid)) = (frp_config.clone(), pgid) {
+                                if let Err(e) = start_frpc_sidecar(
+                                    probe_sink.clone(),
+                                    frp_instance_dir.clone(),
+                                    pgid,
+                                    port,
+                                    cfg,
+                                )
+                                .await
+                                {
+                                    probe_sink
+                                        .emit(format!("[alloy-agent] frpc start failed: {e}"))
+                                        .await;
+                                }
+                            }
                             probe_sink
                                 .emit(format!(
                                     "[alloy-agent] terraria port {} is accepting connections",
@@ -1584,11 +1791,25 @@ impl ProcessManager {
                     }
                 });
 
+                let process_pgid = pgid;
                 let wait_sink = sink.clone();
                 let template_id = t.template_id.clone();
                 let params_for_restart = params.clone();
                 tokio::spawn(async move {
                     let res = child.wait().await;
+                    #[cfg(unix)]
+                    if let Some(pgid) = process_pgid {
+                        unsafe {
+                            libc::kill(-pgid, libc::SIGTERM);
+                        }
+                        tokio::time::sleep(Duration::from_millis(500)).await;
+                        let alive = unsafe { libc::kill(-pgid, 0) == 0 };
+                        if alive {
+                            unsafe {
+                                libc::kill(-pgid, libc::SIGKILL);
+                            }
+                        }
+                    }
                     let runtime = tokio::time::Instant::now().duration_since(started);
 
                     let mut restart_after: Option<Duration> = None;
@@ -1763,9 +1984,9 @@ impl ProcessManager {
             {
                 unsafe {
                     cmd.pre_exec(|| {
-                        // Start a new session so we can signal the whole process tree.
+                        // Start a dedicated process group so we can signal the whole tree.
                         set_parent_death_signal()?;
-                        if libc::setsid() == -1 {
+                        if libc::setpgid(0, 0) == -1 {
                             return Err(std::io::Error::last_os_error());
                         }
                         Ok(())

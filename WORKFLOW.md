@@ -167,6 +167,29 @@ TODO:
 - [ ] Minecraft adapter (parity with legacy core features)
 - [x] Terraria adapter (prove multi-game extensibility)
 
+### Phase 5.1 - Public access (FRP)
+Definition of Done (must be true):
+- Instances can optionally expose `host:port` via FRP even when nodes have no public IP
+- UI supports pasting FRP client config and shows copyable public endpoint
+
+TODO:
+- [ ] Add FRP client sidecar (frpc) per instance (custom pasted config)
+- [ ] Optional: manage FRP servers (frps) from the panel
+
+### Phase 5.2 - Worlds / saves
+TODO:
+- [ ] World/saves import & replace (Minecraft + Terraria)
+- [ ] Backup + restore flow (download/upload or URL import)
+
+### Phase 5.3 - Minecraft modpacks
+TODO:
+- [ ] Modpack server template (upload server pack zip)
+- [ ] Modpack download + deploy from mainstream sites (start with Modrinth)
+
+### Phase 5.4 - Don't Starve Together
+TODO:
+- [ ] Add DST dedicated server template + docs (SteamCMD-based)
+
 ---
 
 ## Milestone 1 - Minecraft Vanilla (real)

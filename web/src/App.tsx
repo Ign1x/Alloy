@@ -213,6 +213,51 @@ async function safeCopy(text: string) {
   }
 }
 
+function isSecretParamKey(key: string) {
+  const k = key.toLowerCase()
+  if (k.includes('password') || k.includes('token') || k.includes('secret')) return true
+  if (k.includes('frp') && k.includes('config')) return true
+  return false
+}
+
+function parseFrpcIniEndpoint(config: string | null | undefined): string | null {
+  const raw = (config ?? '').trim()
+  if (!raw) return null
+
+  let serverAddr: string | null = null
+  let remotePort: string | null = null
+  let section: string | null = null
+
+  for (const lineRaw of raw.split('\n')) {
+    const line = lineRaw.trim()
+    if (!line || line.startsWith('#') || line.startsWith(';')) continue
+
+    const sec = /^\[(.+)\]$/.exec(line)
+    if (sec) {
+      section = sec[1].trim().toLowerCase()
+      continue
+    }
+
+    const kv = /^([A-Za-z0-9_.-]+)\s*=\s*(.+)\s*$/.exec(line)
+    if (!kv) continue
+    const key = kv[1].trim().toLowerCase()
+    let val = kv[2].trim()
+    // Strip simple inline comments.
+    val = val.replace(/\s*[#;].*$/, '').trim()
+    val = val.replace(/^"(.*)"$/, '$1').replace(/^'(.*)'$/, '$1')
+
+    if (section === 'common') {
+      if (key === 'server_addr') serverAddr = val
+      continue
+    }
+
+    if (key === 'remote_port' && remotePort == null) remotePort = val
+  }
+
+  if (!serverAddr || !remotePort) return null
+  return `${serverAddr}:${remotePort}`
+}
+
 function LabelTip(props: { label: string; content: JSX.Element }) {
   return (
     <Tooltip content={props.content}>
@@ -324,23 +369,27 @@ function App() {
   let createMcVersionCustomEl: HTMLInputElement | undefined
   let createMcPortEl: HTMLInputElement | undefined
   let createMcMemoryCustomEl: HTMLInputElement | undefined
+  let createMcFrpConfigEl: HTMLTextAreaElement | undefined
   let createTrVersionCustomEl: HTMLInputElement | undefined
   let createTrPortEl: HTMLInputElement | undefined
   let createTrMaxPlayersEl: HTMLInputElement | undefined
   let createTrWorldNameEl: HTMLInputElement | undefined
   let createTrWorldSizeEl: HTMLInputElement | undefined
   let createTrPasswordEl: HTMLInputElement | undefined
+  let createTrFrpConfigEl: HTMLTextAreaElement | undefined
   let editDisplayNameEl: HTMLInputElement | undefined
   let editSleepSecondsEl: HTMLInputElement | undefined
   let editMcVersionCustomEl: HTMLInputElement | undefined
   let editMcMemoryCustomEl: HTMLInputElement | undefined
   let editMcPortEl: HTMLInputElement | undefined
+  let editMcFrpConfigEl: HTMLTextAreaElement | undefined
   let editTrVersionCustomEl: HTMLInputElement | undefined
   let editTrPortEl: HTMLInputElement | undefined
   let editTrMaxPlayersEl: HTMLInputElement | undefined
   let editTrWorldNameEl: HTMLInputElement | undefined
   let editTrWorldSizeEl: HTMLInputElement | undefined
   let editTrPasswordEl: HTMLInputElement | undefined
+  let editTrFrpConfigEl: HTMLTextAreaElement | undefined
 
   const THEME_STORAGE_KEY = 'alloy.theme'
   type ThemePreference = 'system' | 'light' | 'dark'
@@ -867,6 +916,10 @@ function App() {
     setEditFieldErrors({})
     setEditAdvanced(false)
     setEditTrPasswordVisible(false)
+    setEditMcFrpEnabled(false)
+    setEditMcFrpConfig('')
+    setEditTrFrpEnabled(false)
+    setEditTrFrpConfig('')
   }
 
   function openEditModal(inst: { config: { instance_id: string; template_id: string; params: unknown; display_name: string | null } }) {
@@ -883,6 +936,10 @@ function App() {
     setEditFormError(null)
     setEditFieldErrors({})
     setEditAdvanced(false)
+    setEditMcFrpEnabled(false)
+    setEditMcFrpConfig('')
+    setEditTrFrpEnabled(false)
+    setEditTrFrpConfig('')
 
     setEditDisplayName(base.display_name ?? '')
 
@@ -900,6 +957,9 @@ function App() {
       setEditMcMemory(mem)
 
       setEditMcPort((params.port ?? '').trim())
+      const frp = (params.frp_config ?? '').trim()
+      setEditMcFrpEnabled(Boolean(frp))
+      setEditMcFrpConfig('')
     }
 
     if (base.template_id === 'terraria:vanilla') {
@@ -912,6 +972,9 @@ function App() {
       setEditTrWorldSize((params.world_size ?? '1').trim() || '1')
       setEditTrPassword(params.password ?? '')
       setEditTrPasswordVisible(false)
+      const frp = (params.frp_config ?? '').trim()
+      setEditTrFrpEnabled(Boolean(frp))
+      setEditTrFrpConfig('')
     }
   }
 
@@ -1010,6 +1073,8 @@ function App() {
   const [editMcMemoryPreset, setEditMcMemoryPreset] = createSignal('2048')
   const [editMcMemory, setEditMcMemory] = createSignal('2048')
   const [editMcPort, setEditMcPort] = createSignal('')
+  const [editMcFrpEnabled, setEditMcFrpEnabled] = createSignal(false)
+  const [editMcFrpConfig, setEditMcFrpConfig] = createSignal('')
 
   const [editTrVersion, setEditTrVersion] = createSignal('1453')
   const [editTrPort, setEditTrPort] = createSignal('')
@@ -1018,6 +1083,8 @@ function App() {
   const [editTrWorldSize, setEditTrWorldSize] = createSignal('1')
   const [editTrPassword, setEditTrPassword] = createSignal('')
   const [editTrPasswordVisible, setEditTrPasswordVisible] = createSignal(false)
+  const [editTrFrpEnabled, setEditTrFrpEnabled] = createSignal(false)
+  const [editTrFrpConfig, setEditTrFrpConfig] = createSignal('')
 
   const [editAdvanced, setEditAdvanced] = createSignal(false)
 
@@ -1046,6 +1113,8 @@ function App() {
       out.version = editMcEffectiveVersion().trim() || out.version || 'latest_release'
       out.memory_mb = editMcEffectiveMemory().trim() || out.memory_mb || '2048'
       out.port = editMcPort().trim() || out.port || ''
+      if (!editMcFrpEnabled()) delete out.frp_config
+      else if (editMcFrpConfig().trim()) out.frp_config = editMcFrpConfig()
     }
 
     if (base.template_id === 'terraria:vanilla') {
@@ -1058,6 +1127,8 @@ function App() {
       if (editTrPassword().trim()) out.password = editTrPassword()
       if (!editTrPassword().trim() && 'password' in base.params && base.params.password) out.password = base.params.password
       if (!editTrPassword().trim() && !('password' in base.params)) delete out.password
+      if (!editTrFrpEnabled()) delete out.frp_config
+      else if (editTrFrpConfig().trim()) out.frp_config = editTrFrpConfig()
     }
 
     return out
@@ -1080,8 +1151,8 @@ function App() {
   const editAdvancedDirty = createMemo(() => {
     const template = editTemplateId()
     const changed = editChangedKeys()
-    if (template === 'minecraft:vanilla') return changed.includes('port')
-    if (template === 'terraria:vanilla') return changed.includes('port') || changed.includes('world_size') || changed.includes('password')
+    if (template === 'minecraft:vanilla') return changed.includes('port') || changed.includes('frp_config')
+    if (template === 'terraria:vanilla') return changed.includes('port') || changed.includes('world_size') || changed.includes('password') || changed.includes('frp_config')
     return false
   })
 
@@ -1109,6 +1180,8 @@ function App() {
   const [mcMemoryPreset, setMcMemoryPreset] = createSignal('2048')
   const [mcMemory, setMcMemory] = createSignal('2048')
   const [mcPort, setMcPort] = createSignal('')
+  const [mcFrpEnabled, setMcFrpEnabled] = createSignal(false)
+  const [mcFrpConfig, setMcFrpConfig] = createSignal('')
 
   const [trVersion, setTrVersion] = createSignal('1453')
   const [trPort, setTrPort] = createSignal('')
@@ -1117,16 +1190,19 @@ function App() {
   const [trWorldSize, setTrWorldSize] = createSignal('1')
   const [trPassword, setTrPassword] = createSignal('')
   const [trPasswordVisible, setTrPasswordVisible] = createSignal(false)
+  const [trFrpEnabled, setTrFrpEnabled] = createSignal(false)
+  const [trFrpConfig, setTrFrpConfig] = createSignal('')
 
   const [createAdvanced, setCreateAdvanced] = createSignal(false)
   const createAdvancedDirty = createMemo(() => {
     const template = selectedTemplate()
-    if (template === 'minecraft:vanilla') return mcPort().trim().length > 0
+    if (template === 'minecraft:vanilla') return mcPort().trim().length > 0 || mcFrpEnabled() || mcFrpConfig().trim().length > 0
     if (template === 'terraria:vanilla') {
       if (trPort().trim()) return true
       const ws = trWorldSize().trim()
       if (ws && ws !== '1') return true
       if (trPassword().trim()) return true
+      if (trFrpEnabled() || trFrpConfig().trim()) return true
       return false
     }
     return false
@@ -1160,6 +1236,12 @@ function App() {
         value: portLabel === 'auto' ? 'TBD (auto port)' : `${connectHost()}:${portLabel}`,
       })
 
+      if (mcFrpEnabled()) {
+        const ep = parseFrpcIniEndpoint(mcFrpConfig())
+        rows.push({ label: 'FRP', value: ep ?? '(enabled)' })
+        if (!mcFrpConfig().trim()) warnings.push('Paste FRP config or disable FRP.')
+      }
+
       if (!mcEula()) warnings.push('Accept the Minecraft EULA to start.')
     }
 
@@ -1174,6 +1256,12 @@ function App() {
         label: 'Connect',
         value: portLabel === 'auto' ? 'TBD (auto port)' : `${connectHost()}:${portLabel}`,
       })
+
+      if (trFrpEnabled()) {
+        const ep = parseFrpcIniEndpoint(trFrpConfig())
+        rows.push({ label: 'FRP', value: ep ?? '(enabled)' })
+        if (!trFrpConfig().trim()) warnings.push('Paste FRP config or disable FRP.')
+      }
 
       rows.push({ label: 'Max players', value: trMaxPlayers().trim() || '8' })
       rows.push({ label: 'World name', value: trWorldName().trim() || 'world' })
@@ -1191,6 +1279,10 @@ function App() {
     setCreateFormError(null)
     setCreateFieldErrors({})
     setCreateAdvanced(false)
+    setMcFrpEnabled(false)
+    setMcFrpConfig('')
+    setTrFrpEnabled(false)
+    setTrFrpConfig('')
   })
 
   function focusEl(el: HTMLElement | undefined): boolean {
@@ -1214,13 +1306,14 @@ function App() {
       template_id === 'demo:sleep'
         ? ['seconds', 'display_name']
         : template_id === 'minecraft:vanilla'
-          ? ['accept_eula', 'version', 'memory_mb', 'port', 'display_name']
+          ? ['accept_eula', 'version', 'memory_mb', 'port', 'frp_config', 'display_name']
           : template_id === 'terraria:vanilla'
-            ? ['version', 'max_players', 'world_name', 'port', 'world_size', 'password', 'display_name']
+            ? ['version', 'max_players', 'world_name', 'port', 'world_size', 'password', 'frp_config', 'display_name']
             : ['display_name']
 
     const needsAdvanced =
-      !createAdvanced() && (Boolean(errors.port) || Boolean(errors.world_size) || Boolean(errors.password) || Boolean(errors.version))
+      !createAdvanced() &&
+      (Boolean(errors.port) || Boolean(errors.world_size) || Boolean(errors.password) || Boolean(errors.version) || Boolean(errors.frp_config))
     if (needsAdvanced) setCreateAdvanced(true)
 
     const run = () => {
@@ -1233,6 +1326,7 @@ function App() {
         if (template_id === 'minecraft:vanilla') {
           if (key === 'accept_eula' && focusEl(createMcEulaEl)) return
           if (key === 'port' && focusEl(createMcPortEl)) return
+          if (key === 'frp_config' && focusEl(createMcFrpConfigEl)) return
           if (key === 'version' && focusEl(createMcVersionCustomEl)) return
           if (key === 'memory_mb' && mcMemoryPreset() === 'custom' && focusEl(createMcMemoryCustomEl)) return
         }
@@ -1241,6 +1335,7 @@ function App() {
           if (key === 'port' && focusEl(createTrPortEl)) return
           if (key === 'world_size' && focusEl(createTrWorldSizeEl)) return
           if (key === 'password' && focusEl(createTrPasswordEl)) return
+          if (key === 'frp_config' && focusEl(createTrFrpConfigEl)) return
           if (key === 'world_name' && focusEl(createTrWorldNameEl)) return
           if (key === 'max_players' && focusEl(createTrMaxPlayersEl)) return
           if (key === 'version' && focusEl(createTrVersionCustomEl)) return
@@ -1260,13 +1355,14 @@ function App() {
       template_id === 'demo:sleep'
         ? ['display_name', 'seconds']
         : template_id === 'minecraft:vanilla'
-          ? ['display_name', 'version', 'memory_mb', 'port']
+          ? ['display_name', 'version', 'memory_mb', 'port', 'frp_config']
           : template_id === 'terraria:vanilla'
-            ? ['display_name', 'version', 'max_players', 'world_name', 'port', 'world_size', 'password']
+            ? ['display_name', 'version', 'max_players', 'world_name', 'port', 'world_size', 'password', 'frp_config']
             : ['display_name']
 
     const needsAdvanced =
-      !editAdvanced() && (Boolean(errors.port) || Boolean(errors.world_size) || Boolean(errors.password) || Boolean(errors.version))
+      !editAdvanced() &&
+      (Boolean(errors.port) || Boolean(errors.world_size) || Boolean(errors.password) || Boolean(errors.version) || Boolean(errors.frp_config))
     if (needsAdvanced) setEditAdvanced(true)
 
     const run = () => {
@@ -1278,6 +1374,7 @@ function App() {
 
         if (template_id === 'minecraft:vanilla') {
           if (key === 'port' && focusEl(editMcPortEl)) return
+          if (key === 'frp_config' && focusEl(editMcFrpConfigEl)) return
           if (key === 'version' && focusEl(editMcVersionCustomEl)) return
           if (key === 'memory_mb' && editMcMemoryPreset() === 'custom' && focusEl(editMcMemoryCustomEl)) return
         }
@@ -1288,6 +1385,7 @@ function App() {
           if (key === 'world_name' && focusEl(editTrWorldNameEl)) return
           if (key === 'world_size' && focusEl(editTrWorldSizeEl)) return
           if (key === 'password' && focusEl(editTrPasswordEl)) return
+          if (key === 'frp_config' && focusEl(editTrFrpConfigEl)) return
           if (key === 'version' && focusEl(editTrVersionCustomEl)) return
         }
       }
@@ -2250,21 +2348,53 @@ function App() {
                           </div>
 
 	                          <Show when={createAdvanced()}>
-	                            <Field
-	                              label={<LabelTip label="Port (optional)" content="Leave blank for auto-assign." />}
-	                              error={createFieldErrors().port}
-	                            >
-                              <Input
-                                ref={(el) => {
-                                  createMcPortEl = el
-                                }}
-                                type="number"
-                                value={mcPort()}
-                                onInput={(e) => setMcPort(e.currentTarget.value)}
-                                placeholder="25565"
-                                invalid={Boolean(createFieldErrors().port)}
-                              />
-                            </Field>
+	                            <div class="space-y-3">
+	                              <Field
+	                                label={<LabelTip label="Port (optional)" content="Leave blank for auto-assign." />}
+	                                error={createFieldErrors().port}
+	                              >
+                                <Input
+                                  ref={(el) => {
+                                    createMcPortEl = el
+                                  }}
+                                  type="number"
+                                  value={mcPort()}
+                                  onInput={(e) => setMcPort(e.currentTarget.value)}
+                                  placeholder="25565"
+                                  invalid={Boolean(createFieldErrors().port)}
+                                />
+                              </Field>
+
+	                              <Field
+	                                label={<LabelTip label="Public (FRP)" content="Optional. Paste an frpc config to expose this instance via FRP." />}
+	                                error={createFieldErrors().frp_config}
+	                              >
+	                                <div class="space-y-2">
+	                                  <label class="inline-flex items-center gap-2 text-[12px] text-slate-700 dark:text-slate-200">
+	                                    <input
+	                                      type="checkbox"
+	                                      class="h-4 w-4 rounded border-slate-300 bg-white text-amber-600 focus:ring-amber-400 dark:border-slate-700 dark:bg-slate-950/60 dark:text-amber-400"
+	                                      checked={mcFrpEnabled()}
+	                                      onChange={(e) => setMcFrpEnabled(e.currentTarget.checked)}
+	                                    />
+	                                    <span>Enable</span>
+	                                  </label>
+	                                  <Show when={mcFrpEnabled()}>
+	                                    <Textarea
+	                                      ref={(el) => {
+	                                        createMcFrpConfigEl = el
+	                                      }}
+	                                      value={mcFrpConfig()}
+	                                      onInput={(e) => setMcFrpConfig(e.currentTarget.value)}
+	                                      placeholder="Paste frpc config (INI)"
+	                                      spellcheck={false}
+	                                      class="font-mono text-[11px]"
+	                                      invalid={Boolean(createFieldErrors().frp_config)}
+	                                    />
+	                                  </Show>
+	                                </div>
+	                              </Field>
+	                            </div>
                           </Show>
                         </div>
                       </Show>
@@ -2459,6 +2589,36 @@ function App() {
 	                                </IconButton>
 	                              </div>
 	                            </Field>
+
+	                            <Field
+	                              label={<LabelTip label="Public (FRP)" content="Optional. Paste an frpc config to expose this instance via FRP." />}
+	                              error={createFieldErrors().frp_config}
+	                            >
+	                              <div class="space-y-2">
+	                                <label class="inline-flex items-center gap-2 text-[12px] text-slate-700 dark:text-slate-200">
+	                                  <input
+	                                    type="checkbox"
+	                                    class="h-4 w-4 rounded border-slate-300 bg-white text-amber-600 focus:ring-amber-400 dark:border-slate-700 dark:bg-slate-950/60 dark:text-amber-400"
+	                                    checked={trFrpEnabled()}
+	                                    onChange={(e) => setTrFrpEnabled(e.currentTarget.checked)}
+	                                  />
+	                                  <span>Enable</span>
+	                                </label>
+	                                <Show when={trFrpEnabled()}>
+	                                  <Textarea
+	                                    ref={(el) => {
+	                                      createTrFrpConfigEl = el
+	                                    }}
+	                                    value={trFrpConfig()}
+	                                    onInput={(e) => setTrFrpConfig(e.currentTarget.value)}
+	                                    placeholder="Paste frpc config (INI)"
+	                                    spellcheck={false}
+	                                    class="font-mono text-[11px]"
+	                                    invalid={Boolean(createFieldErrors().frp_config)}
+	                                  />
+	                                </Show>
+	                              </div>
+	                            </Field>
                           </Show>
                         </div>
                       </Show>
@@ -2542,11 +2702,13 @@ function App() {
                               params.seconds = sleepSeconds()
                             } else if (template_id === 'minecraft:vanilla') {
                               if (!mcEula()) localErrors.accept_eula = 'You must accept the EULA to start a Minecraft server.'
+                              if (mcFrpEnabled() && !mcFrpConfig().trim()) localErrors.frp_config = 'Paste frpc config.'
                               params.accept_eula = 'true'
                               const v = mcVersion().trim()
                               params.version = v || 'latest_release'
                               params.memory_mb = mcMemory() || '2048'
                               if (mcPort().trim()) params.port = mcPort().trim()
+                              if (mcFrpEnabled() && mcFrpConfig().trim()) params.frp_config = mcFrpConfig().trim()
                             } else if (template_id === 'terraria:vanilla') {
                               const v = trVersion().trim()
                               params.version = v || '1453'
@@ -2555,6 +2717,8 @@ function App() {
                               params.world_name = trWorldName().trim() || 'world'
                               params.world_size = trWorldSize().trim() || '1'
                               if (trPassword().trim()) params.password = trPassword().trim()
+                              if (trFrpEnabled() && !trFrpConfig().trim()) localErrors.frp_config = 'Paste frpc config.'
+                              if (trFrpEnabled() && trFrpConfig().trim()) params.frp_config = trFrpConfig().trim()
                             }
 
                             if (Object.keys(localErrors).length > 0) {
@@ -4009,26 +4173,61 @@ function App() {
                       </div>
 
 	                      <Show when={editAdvanced()}>
-	                        <Field
-	                          label={
-	                            <LabelTip
-	                              label="Port (0 = auto)"
-	                              content="Applied on next start. Use 0 to auto-assign a free port."
-	                            />
-	                          }
-	                          error={editFieldErrors().port}
-	                        >
-                          <Input
-                            ref={(el) => {
-                              editMcPortEl = el
-                            }}
-                            type="number"
-                            value={editMcPort()}
-                            onInput={(e) => setEditMcPort(e.currentTarget.value)}
-                            placeholder="0 for auto"
-                            invalid={Boolean(editFieldErrors().port)}
-                          />
-                        </Field>
+	                        <div class="space-y-3">
+	                          <Field
+	                            label={
+	                              <LabelTip
+	                                label="Port (0 = auto)"
+	                                content="Applied on next start. Use 0 to auto-assign a free port."
+	                              />
+	                            }
+	                            error={editFieldErrors().port}
+	                          >
+                              <Input
+                                ref={(el) => {
+                                  editMcPortEl = el
+                                }}
+                                type="number"
+                                value={editMcPort()}
+                                onInput={(e) => setEditMcPort(e.currentTarget.value)}
+                                placeholder="0 for auto"
+                                invalid={Boolean(editFieldErrors().port)}
+                              />
+                            </Field>
+
+	                          <Field
+	                            label={<LabelTip label="Public (FRP)" content="Optional. Paste an frpc config to expose this instance via FRP." />}
+	                            error={editFieldErrors().frp_config}
+	                          >
+	                            <div class="space-y-2">
+	                              <label class="inline-flex items-center gap-2 text-[12px] text-slate-700 dark:text-slate-200">
+	                                <input
+	                                  type="checkbox"
+	                                  class="h-4 w-4 rounded border-slate-300 bg-white text-amber-600 focus:ring-amber-400 dark:border-slate-700 dark:bg-slate-950/60 dark:text-amber-400"
+	                                  checked={editMcFrpEnabled()}
+	                                  onChange={(e) => {
+	                                    setEditMcFrpEnabled(e.currentTarget.checked)
+	                                    if (!e.currentTarget.checked) setEditMcFrpConfig('')
+	                                  }}
+	                                />
+	                                <span>Enable</span>
+	                              </label>
+	                              <Show when={editMcFrpEnabled()}>
+	                                <Textarea
+	                                  ref={(el) => {
+	                                    editMcFrpConfigEl = el
+	                                  }}
+	                                  value={editMcFrpConfig()}
+	                                  onInput={(e) => setEditMcFrpConfig(e.currentTarget.value)}
+	                                  placeholder="Paste frpc config to set/replace (INI)"
+	                                  spellcheck={false}
+	                                  class="font-mono text-[11px]"
+	                                  invalid={Boolean(editFieldErrors().frp_config)}
+	                                />
+	                              </Show>
+	                            </div>
+	                          </Field>
+	                        </div>
                       </Show>
                     </div>
                   </Show>
@@ -4230,6 +4429,39 @@ function App() {
 	                            </IconButton>
 	                          </div>
 	                        </Field>
+
+	                        <Field
+	                          label={<LabelTip label="Public (FRP)" content="Optional. Paste an frpc config to expose this instance via FRP." />}
+	                          error={editFieldErrors().frp_config}
+	                        >
+	                          <div class="space-y-2">
+	                            <label class="inline-flex items-center gap-2 text-[12px] text-slate-700 dark:text-slate-200">
+	                              <input
+	                                type="checkbox"
+	                                class="h-4 w-4 rounded border-slate-300 bg-white text-amber-600 focus:ring-amber-400 dark:border-slate-700 dark:bg-slate-950/60 dark:text-amber-400"
+	                                checked={editTrFrpEnabled()}
+	                                onChange={(e) => {
+	                                  setEditTrFrpEnabled(e.currentTarget.checked)
+	                                  if (!e.currentTarget.checked) setEditTrFrpConfig('')
+	                                }}
+	                              />
+	                              <span>Enable</span>
+	                            </label>
+	                            <Show when={editTrFrpEnabled()}>
+	                              <Textarea
+	                                ref={(el) => {
+	                                  editTrFrpConfigEl = el
+	                                }}
+	                                value={editTrFrpConfig()}
+	                                onInput={(e) => setEditTrFrpConfig(e.currentTarget.value)}
+	                                placeholder="Paste frpc config to set/replace (INI)"
+	                                spellcheck={false}
+	                                class="font-mono text-[11px]"
+	                                invalid={Boolean(editFieldErrors().frp_config)}
+	                              />
+	                            </Show>
+	                          </div>
+	                        </Field>
                       </Show>
                     </div>
                   </Show>
@@ -4276,6 +4508,24 @@ function App() {
 
                       setEditFormError(null)
                       setEditFieldErrors({})
+                      const localErrors: Record<string, string> = {}
+
+                      if (base.template_id === 'minecraft:vanilla') {
+                        const existing = (base.params.frp_config ?? '').trim()
+                        if (editMcFrpEnabled() && !existing && !editMcFrpConfig().trim()) localErrors.frp_config = 'Paste frpc config.'
+                      }
+
+                      if (base.template_id === 'terraria:vanilla') {
+                        const existing = (base.params.frp_config ?? '').trim()
+                        if (editTrFrpEnabled() && !existing && !editTrFrpConfig().trim()) localErrors.frp_config = 'Paste frpc config.'
+                      }
+
+                      if (Object.keys(localErrors).length > 0) {
+                        setEditFieldErrors(localErrors)
+                        queueMicrotask(() => focusFirstEditError(localErrors))
+                        return
+                      }
+
                       try {
                         await updateInstance.mutateAsync({
                           instance_id: base.instance_id,
@@ -4576,6 +4826,11 @@ function App() {
                 const p = port()
                 return p ? `${connectHost()}:${p}` : null
               }
+              const frpEndpoint = () => {
+                const raw = params()?.frp_config
+                if (typeof raw !== 'string') return null
+                return parseFrpcIniEndpoint(raw)
+              }
 
               const [revealedSecrets, setRevealedSecrets] = createSignal<Record<string, boolean>>({})
 
@@ -4594,6 +4849,13 @@ function App() {
                 pushToast('success', 'Copied', c)
               }
 
+              async function copyFrp() {
+                const c = frpEndpoint()
+                if (!c) return
+                await safeCopy(c)
+                pushToast('success', 'Copied', c)
+              }
+
               async function downloadDiagnostics() {
                 const instValue = inst()
                 try {
@@ -4602,7 +4864,7 @@ function App() {
                     params: { ...(instValue.config.params as Record<string, string>) },
                   }
                   for (const [k, v] of Object.entries(cfg.params)) {
-                    if (k.toLowerCase().includes('password') || k.toLowerCase().includes('token') || k.toLowerCase().includes('secret')) {
+                    if (isSecretParamKey(k)) {
                       if (typeof v === 'string' && v) cfg.params[k] = '<redacted>'
                     }
                   }
@@ -4636,7 +4898,7 @@ function App() {
                     params: { ...(instValue.config.params as Record<string, string>) },
                   }
                   for (const [k, v] of Object.entries(cfg.params)) {
-                    if (k.toLowerCase().includes('password') || k.toLowerCase().includes('token') || k.toLowerCase().includes('secret')) {
+                    if (isSecretParamKey(k)) {
                       if (typeof v === 'string' && v) cfg.params[k] = '<redacted>'
                     }
                   }
@@ -4678,6 +4940,28 @@ function App() {
                                 title="Copy connection info"
                               >
                                 <span class="truncate">{c()}</span>
+                                <svg
+                                  xmlns="http://www.w3.org/2000/svg"
+                                  viewBox="0 0 20 20"
+                                  fill="currentColor"
+                                  class="h-3 w-3 flex-none opacity-60 group-hover:opacity-100"
+                                  aria-hidden="true"
+                                >
+                                  <path d="M5.75 2A2.75 2.75 0 003 4.75v9.5A2.75 2.75 0 005.75 17h1.5a.75.75 0 000-1.5h-1.5c-.69 0-1.25-.56-1.25-1.25v-9.5c0-.69.56-1.25 1.25-1.25h5.5c.69 0 1.25.56 1.25 1.25v1a.75.75 0 001.5 0v-1A2.75 2.75 0 0011.25 2h-5.5z" />
+                                  <path d="M8.75 6A2.75 2.75 0 006 8.75v6.5A2.75 2.75 0 008.75 18h5.5A2.75 2.75 0 0017 15.25v-6.5A2.75 2.75 0 0014.25 6h-5.5z" />
+                                </svg>
+                              </button>
+                            )}
+                          </Show>
+                          <Show when={frpEndpoint()}>
+                            {(c) => (
+                              <button
+                                type="button"
+                                class="group inline-flex max-w-full cursor-pointer items-center gap-1 rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 font-mono text-[11px] text-slate-700 transition-colors hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/35 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-50 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-200 dark:hover:bg-slate-900 dark:focus-visible:ring-amber-400/35 dark:focus-visible:ring-offset-slate-950"
+                                onClick={() => void copyFrp()}
+                                title="Copy public endpoint (FRP)"
+                              >
+                                <span class="truncate">FRP {c()}</span>
                                 <svg
                                   xmlns="http://www.w3.org/2000/svg"
                                   viewBox="0 0 20 20"
@@ -5096,9 +5380,7 @@ function App() {
                                 <div class="min-w-0 font-mono text-[11px]">
                                   <Show
                                     when={
-                                      k.toLowerCase().includes('password') ||
-                                      k.toLowerCase().includes('token') ||
-                                      k.toLowerCase().includes('secret')
+                                      isSecretParamKey(k)
                                     }
                                     fallback={<span class="whitespace-pre-wrap break-words">{String(v ?? '')}</span>}
                                   >
@@ -5113,9 +5395,7 @@ function App() {
                                 <div class="flex items-center justify-end gap-2">
                                   <Show
                                     when={
-                                      k.toLowerCase().includes('password') ||
-                                      k.toLowerCase().includes('token') ||
-                                      k.toLowerCase().includes('secret')
+                                      isSecretParamKey(k)
                                     }
                                   >
                                     <Button
