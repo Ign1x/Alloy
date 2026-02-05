@@ -4,6 +4,7 @@ mod m0001_create_users;
 mod m0002_create_nodes;
 mod m0003_create_refresh_tokens;
 mod m0004_create_audit_events;
+mod m0005_add_node_connect_token;
 
 pub struct Migrator;
 
@@ -15,6 +16,7 @@ impl MigratorTrait for Migrator {
             Box::new(m0002_create_nodes::Migration),
             Box::new(m0003_create_refresh_tokens::Migration),
             Box::new(m0004_create_audit_events::Migration),
+            Box::new(m0005_add_node_connect_token::Migration),
         ]
     }
 }

@@ -5,13 +5,8 @@ use alloy_proto::agent_v1::{
     ListTemplatesRequest, ReadFileRequest, StartFromTemplateRequest, StartInstanceRequest,
     StopInstanceRequest, StopProcessRequest, TailFileRequest, TailLogsRequest,
     UpdateInstanceRequest, WarmTemplateCacheRequest,
-    agent_health_service_client::AgentHealthServiceClient,
-    filesystem_service_client::FilesystemServiceClient,
-    instance_service_client::InstanceServiceClient, logs_service_client::LogsServiceClient,
-    process_service_client::ProcessServiceClient,
 };
 use rspc::{Procedure, ProcedureError, ResolverError, Router};
-use tonic::Request;
 
 use specta::Type;
 use std::{
@@ -21,6 +16,58 @@ use std::{
 };
 
 use crate::audit;
+use crate::agent_transport::AgentTransport;
+
+fn random_token(n: usize) -> String {
+    use base64::Engine;
+    use rand::RngCore;
+
+    let mut buf = vec![0u8; n];
+    rand::rngs::OsRng.fill_bytes(&mut buf);
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(buf)
+}
+
+fn hash_token(raw: &str) -> String {
+    use sha2::Digest;
+    let mut hasher = sha2::Sha256::new();
+    hasher.update(raw.as_bytes());
+    hex::encode(hasher.finalize())
+}
+
+fn normalize_node_name(name: &str) -> Result<String, ()> {
+    let n = name.trim();
+    if n.is_empty() {
+        return Err(());
+    }
+    if n.len() > 64 {
+        return Err(());
+    }
+    if !n
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+    {
+        return Err(());
+    }
+    Ok(n.to_string())
+}
+
+fn api_error_with_field(
+    ctx: &Ctx,
+    code: &str,
+    message: impl Into<String>,
+    field: &str,
+    field_message: impl Into<String>,
+) -> ApiError {
+    let mut field_errors = std::collections::BTreeMap::new();
+    field_errors.insert(field.to_string(), field_message.into());
+    ApiError {
+        code: code.to_string(),
+        message: message.into(),
+        request_id: ctx.request_id.clone(),
+        field_errors,
+        hint: None,
+    }
+}
 
 #[derive(Clone, Debug, serde::Serialize, Type)]
 pub struct AuthUser {
@@ -33,6 +80,7 @@ pub struct AuthUser {
 #[derive(Clone)]
 pub struct Ctx {
     pub db: Arc<alloy_db::sea_orm::DatabaseConnection>,
+    pub agent_hub: crate::agent_tunnel::AgentHub,
     pub user: Option<AuthUser>,
     pub request_id: String,
 }
@@ -408,10 +456,22 @@ pub struct NodeDto {
     pub id: String,
     pub name: String,
     pub endpoint: String,
+    pub has_connect_token: bool,
     pub enabled: bool,
     pub last_seen_at: Option<String>,
     pub agent_version: Option<String>,
     pub last_error: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize, Type)]
+pub struct NodeCreateInput {
+    pub name: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize, Type)]
+pub struct NodeCreateOutput {
+    pub node: NodeDto,
+    pub connect_token: String,
 }
 
 #[derive(Debug, Clone, serde::Deserialize, Type)]
@@ -590,6 +650,10 @@ fn clamp_u64_to_u32(v: u64) -> u32 {
     }
 }
 
+fn agent_transport(ctx: &Ctx) -> AgentTransport {
+    AgentTransport::new(ctx.agent_hub.clone())
+}
+
 pub fn router() -> Router<Ctx> {
     // NOTE: Procedure keys are nested segments. This keeps generated `web/src/bindings.ts`
     // valid TypeScript (no unquoted keys with dots), while the runtime request path still
@@ -612,80 +676,48 @@ pub fn router() -> Router<Ctx> {
                     .map(|d| d.as_millis().to_string())
                     .unwrap_or_else(|_| "0".to_string());
 
-                let agent_endpoint = std::env::var("ALLOY_AGENT_ENDPOINT")
-                    .unwrap_or_else(|_| "http://127.0.0.1:50051".to_string());
+                let transport = agent_transport(&ctx);
+                let connected_nodes = transport.connected_nodes().await;
+                let agent_endpoint = if connected_nodes.is_empty() {
+                    std::env::var("ALLOY_AGENT_ENDPOINT")
+                        .unwrap_or_else(|_| "http://127.0.0.1:50051".to_string())
+                } else if connected_nodes.len() == 1 {
+                    format!("tunnel://{}", connected_nodes[0])
+                } else {
+                    format!("tunnel://{} nodes", connected_nodes.len())
+                };
 
-                let mut health_client = AgentHealthServiceClient::connect(agent_endpoint.clone())
-                    .await
-                    .map_err(|e| {
-                        api_error(
-                            &ctx,
-                            "agent_unreachable",
-                            format!("failed to connect agent ({agent_endpoint}): {e}"),
-                        )
-                    })?;
-
-                let mut fs_client = FilesystemServiceClient::connect(agent_endpoint.clone())
-                    .await
-                    .map_err(|e| {
-                        api_error(
-                            &ctx,
-                            "agent_unreachable",
-                            format!("failed to connect agent ({agent_endpoint}): {e}"),
-                        )
-                    })?;
-
-                let mut proc_client = ProcessServiceClient::connect(agent_endpoint.clone())
-                    .await
-                    .map_err(|e| {
-                        api_error(
-                            &ctx,
-                            "agent_unreachable",
-                            format!("failed to connect agent ({agent_endpoint}): {e}"),
-                        )
-                    })?;
-
-                let mut logs_client = LogsServiceClient::connect(agent_endpoint.clone())
-                    .await
-                    .map_err(|e| {
-                        api_error(
-                            &ctx,
-                            "agent_unreachable",
-                            format!("failed to connect agent ({agent_endpoint}): {e}"),
-                        )
-                    })?;
-
-                let health = match health_client
-                    .check(Request::new(HealthCheckRequest {}))
+                let health = match transport
+                    .call::<_, alloy_proto::agent_v1::HealthCheckResponse>(
+                        "/alloy.agent.v1.AgentHealthService/Check",
+                        HealthCheckRequest {},
+                    )
                     .await
                 {
-                    Ok(resp) => {
-                        let r = resp.into_inner();
-                        AgentHealthFullDto {
-                            endpoint: agent_endpoint.clone(),
-                            ok: true,
-                            status: Some(r.status),
-                            agent_version: Some(r.agent_version),
-                            data_root: Some(r.data_root),
-                            data_root_writable: Some(r.data_root_writable),
-                            data_root_free_bytes: Some(r.data_root_free_bytes.to_string()),
-                            ports: Some(
-                                r.ports
-                                    .into_iter()
-                                    .map(|p| PortAvailabilityDto {
-                                        port: p.port,
-                                        available: p.available,
-                                        error: if p.error.trim().is_empty() {
-                                            None
-                                        } else {
-                                            Some(p.error)
-                                        },
-                                    })
-                                    .collect(),
-                            ),
-                            error: None,
-                        }
-                    }
+                    Ok(r) => AgentHealthFullDto {
+                        endpoint: agent_endpoint.clone(),
+                        ok: true,
+                        status: Some(r.status),
+                        agent_version: Some(r.agent_version),
+                        data_root: Some(r.data_root),
+                        data_root_writable: Some(r.data_root_writable),
+                        data_root_free_bytes: Some(r.data_root_free_bytes.to_string()),
+                        ports: Some(
+                            r.ports
+                                .into_iter()
+                                .map(|p| PortAvailabilityDto {
+                                    port: p.port,
+                                    available: p.available,
+                                    error: if p.error.trim().is_empty() {
+                                        None
+                                    } else {
+                                        Some(p.error)
+                                    },
+                                })
+                                .collect(),
+                        ),
+                        error: None,
+                    },
                     Err(status) => AgentHealthFullDto {
                         endpoint: agent_endpoint.clone(),
                         ok: false,
@@ -699,25 +731,30 @@ pub fn router() -> Router<Ctx> {
                     },
                 };
 
-                let fs_caps = match fs_client
-                    .get_capabilities(Request::new(GetCapabilitiesRequest {}))
+                let fs_caps = match transport
+                    .call::<_, alloy_proto::agent_v1::GetCapabilitiesResponse>(
+                        "/alloy.agent.v1.FilesystemService/GetCapabilities",
+                        GetCapabilitiesRequest {},
+                    )
                     .await
                 {
                     Ok(resp) => FsCapabilitiesOutput {
-                        write_enabled: resp.into_inner().write_enabled,
+                        write_enabled: resp.write_enabled,
                     },
                     Err(_) => FsCapabilitiesOutput {
                         write_enabled: false,
                     },
                 };
 
-                let cache_resp = proc_client
-                    .get_cache_stats(Request::new(GetCacheStatsRequest {}))
+                let cache_resp: alloy_proto::agent_v1::GetCacheStatsResponse = transport
+                    .call(
+                        "/alloy.agent.v1.ProcessService/GetCacheStats",
+                        GetCacheStatsRequest {},
+                    )
                     .await
                     .map_err(|status| {
                         api_error_from_agent_status(&ctx, "process.get_cache_stats", status)
-                    })?
-                    .into_inner();
+                    })?;
 
                 let cache = CacheStatsOutput {
                     entries: cache_resp
@@ -734,14 +771,16 @@ pub fn router() -> Router<Ctx> {
 
                 let mut agent_log_path: Option<String> = None;
                 let mut agent_log_lines: Vec<String> = Vec::new();
-                if let Ok(resp) = fs_client
-                    .list_dir(Request::new(ListDirRequest {
-                        path: "logs".to_string(),
-                    }))
+                if let Ok(resp) = transport
+                    .call::<_, alloy_proto::agent_v1::ListDirResponse>(
+                        "/alloy.agent.v1.FilesystemService/ListDir",
+                        ListDirRequest {
+                            path: "logs".to_string(),
+                        },
+                    )
                     .await
                 {
                     let mut candidates: Vec<String> = resp
-                        .into_inner()
                         .entries
                         .into_iter()
                         .filter(|e| !e.is_dir && e.name.starts_with("agent.log"))
@@ -751,16 +790,19 @@ pub fn router() -> Router<Ctx> {
                     if let Some(name) = candidates.pop() {
                         let p = format!("logs/{name}");
                         agent_log_path = Some(p.clone());
-                        if let Ok(resp) = logs_client
-                            .tail_file(Request::new(TailFileRequest {
-                                path: p,
-                                cursor: String::new(),
-                                limit_bytes: 512 * 1024,
-                                max_lines: 800,
-                            }))
+                        if let Ok(resp) = transport
+                            .call::<_, alloy_proto::agent_v1::TailFileResponse>(
+                                "/alloy.agent.v1.LogsService/TailFile",
+                                TailFileRequest {
+                                    path: p,
+                                    cursor: String::new(),
+                                    limit_bytes: 512 * 1024,
+                                    max_lines: 800,
+                                },
+                            )
                             .await
                         {
-                            agent_log_lines = resp.into_inner().lines;
+                            agent_log_lines = resp.lines;
                         }
                     }
                 }
@@ -782,33 +824,15 @@ pub fn router() -> Router<Ctx> {
     let agent = Router::new().procedure(
         "health",
         Procedure::builder::<ApiError>().query(|ctx, _: ()| async move {
-            // Container-safe: do not hardcode localhost.
-            //
-            // Local dev default is http://127.0.0.1:50051.
-            // In this repo's docker-compose (host-networked agent), set:
-            //   ALLOY_AGENT_ENDPOINT=http://host.docker.internal:50051
-            //
-            // If you run both services on the same Docker bridge network, you can also use:
-            //   ALLOY_AGENT_ENDPOINT=http://alloy-agent:50051
-            let agent_endpoint = std::env::var("ALLOY_AGENT_ENDPOINT")
-                .unwrap_or_else(|_| "http://127.0.0.1:50051".to_string());
-
-            let mut client = AgentHealthServiceClient::connect(agent_endpoint.clone())
-                .await
-                .map_err(|e| {
-                    api_error(
-                        &ctx,
-                        "agent_unreachable",
-                        format!("failed to connect agent ({agent_endpoint}): {e}"),
-                    )
-                })?;
-
-            let resp = client
-                .check(Request::new(HealthCheckRequest {}))
+            let transport = agent_transport(&ctx);
+            let resp: alloy_proto::agent_v1::HealthCheckResponse = transport
+                .call(
+                    "/alloy.agent.v1.AgentHealthService/Check",
+                    HealthCheckRequest {},
+                )
                 .await
                 .map_err(|status| api_error_from_agent_status(&ctx, "agent.health", status))?;
 
-            let resp = resp.into_inner();
             Ok(AgentHealthResponse {
                 status: resp.status,
                 agent_version: resp.agent_version,
@@ -820,25 +844,16 @@ pub fn router() -> Router<Ctx> {
         .procedure(
             "templates",
             Procedure::builder::<ApiError>().query(|ctx, _: ()| async move {
-                let agent_endpoint = std::env::var("ALLOY_AGENT_ENDPOINT")
-                    .unwrap_or_else(|_| "http://127.0.0.1:50051".to_string());
-                let mut client = ProcessServiceClient::connect(agent_endpoint.clone())
-                    .await
-                    .map_err(|e| {
-                        api_error(
-                            &ctx,
-                            "agent_unreachable",
-                            format!("failed to connect agent ({agent_endpoint}): {e}"),
-                        )
-                    })?;
-
-                let resp = client
-                    .list_templates(Request::new(ListTemplatesRequest {}))
+                let transport = agent_transport(&ctx);
+                let resp: alloy_proto::agent_v1::ListTemplatesResponse = transport
+                    .call(
+                        "/alloy.agent.v1.ProcessService/ListTemplates",
+                        ListTemplatesRequest {},
+                    )
                     .await
                     .map_err(|status| {
                         api_error_from_agent_status(&ctx, "process.list_templates", status)
-                    })?
-                    .into_inner();
+                    })?;
 
                 Ok(resp
                     .templates
@@ -854,25 +869,16 @@ pub fn router() -> Router<Ctx> {
         .procedure(
             "list",
             Procedure::builder::<ApiError>().query(|ctx, _: ()| async move {
-                let agent_endpoint = std::env::var("ALLOY_AGENT_ENDPOINT")
-                    .unwrap_or_else(|_| "http://127.0.0.1:50051".to_string());
-                let mut client = ProcessServiceClient::connect(agent_endpoint.clone())
-                    .await
-                    .map_err(|e| {
-                        api_error(
-                            &ctx,
-                            "agent_unreachable",
-                            format!("failed to connect agent ({agent_endpoint}): {e}"),
-                        )
-                    })?;
-
-                let resp = client
-                    .list_processes(Request::new(ListProcessesRequest {}))
+                let transport = agent_transport(&ctx);
+                let resp: alloy_proto::agent_v1::ListProcessesResponse = transport
+                    .call(
+                        "/alloy.agent.v1.ProcessService/ListProcesses",
+                        ListProcessesRequest {},
+                    )
                     .await
                     .map_err(|status| {
                         api_error_from_agent_status(&ctx, "process.list_processes", status)
-                    })?
-                    .into_inner();
+                    })?;
 
                 Ok(resp
                     .processes
@@ -887,30 +893,24 @@ pub fn router() -> Router<Ctx> {
                 ensure_writable(&ctx)?;
                 enforce_rate_limit(&ctx)?;
 
-                let agent_endpoint = std::env::var("ALLOY_AGENT_ENDPOINT")
-                    .unwrap_or_else(|_| "http://127.0.0.1:50051".to_string());
-                let mut client = ProcessServiceClient::connect(agent_endpoint.clone())
-                    .await
-                    .map_err(|e| {
-                        api_error(
-                            &ctx,
-                            "agent_unreachable",
-                            format!("failed to connect agent ({agent_endpoint}): {e}"),
-                        )
-                    })?;
+                let transport = agent_transport(&ctx);
 
                 let req = StartFromTemplateRequest {
                     template_id: input.template_id,
                     params: input.params.into_iter().collect(),
                 };
 
-                let status = client
-                    .start_from_template(Request::new(req))
+                let resp: alloy_proto::agent_v1::StartFromTemplateResponse = transport
+                    .call(
+                        "/alloy.agent.v1.ProcessService/StartFromTemplate",
+                        req,
+                    )
                     .await
                     .map_err(|status| {
                         api_error_from_agent_status(&ctx, "process.start_from_template", status)
-                    })?
-                    .into_inner()
+                    })?;
+
+                let status = resp
                     .status
                     .ok_or_else(|| api_error(&ctx, "internal", "missing status"))?;
 
@@ -933,28 +933,19 @@ pub fn router() -> Router<Ctx> {
                 ensure_writable(&ctx)?;
                 enforce_rate_limit(&ctx)?;
 
-                let agent_endpoint = std::env::var("ALLOY_AGENT_ENDPOINT")
-                    .unwrap_or_else(|_| "http://127.0.0.1:50051".to_string());
-                let mut client = ProcessServiceClient::connect(agent_endpoint.clone())
-                    .await
-                    .map_err(|e| {
-                        api_error(
-                            &ctx,
-                            "agent_unreachable",
-                            format!("failed to connect agent ({agent_endpoint}): {e}"),
-                        )
-                    })?;
+                let transport = agent_transport(&ctx);
 
                 let req = StopProcessRequest {
                     process_id: input.process_id,
                     timeout_ms: input.timeout_ms.unwrap_or(30_000),
                 };
 
-                let status = client
-                    .stop(Request::new(req))
+                let resp: alloy_proto::agent_v1::StopProcessResponse = transport
+                    .call("/alloy.agent.v1.ProcessService/Stop", req)
                     .await
-                    .map_err(|status| api_error_from_agent_status(&ctx, "process.stop", status))?
-                    .into_inner()
+                    .map_err(|status| api_error_from_agent_status(&ctx, "process.stop", status))?;
+
+                let status = resp
                     .status
                     .ok_or_else(|| api_error(&ctx, "internal", "missing status"))?;
 
@@ -974,27 +965,21 @@ pub fn router() -> Router<Ctx> {
         .procedure(
             "status",
             Procedure::builder::<ApiError>().query(|ctx, input: GetStatusInput| async move {
-                let agent_endpoint = std::env::var("ALLOY_AGENT_ENDPOINT")
-                    .unwrap_or_else(|_| "http://127.0.0.1:50051".to_string());
-                let mut client = ProcessServiceClient::connect(agent_endpoint.clone())
-                    .await
-                    .map_err(|e| {
-                        api_error(
-                            &ctx,
-                            "agent_unreachable",
-                            format!("failed to connect agent ({agent_endpoint}): {e}"),
-                        )
-                    })?;
+                let transport = agent_transport(&ctx);
 
-                let status = client
-                    .get_status(Request::new(GetStatusRequest {
-                        process_id: input.process_id,
-                    }))
+                let resp: alloy_proto::agent_v1::GetStatusResponse = transport
+                    .call(
+                        "/alloy.agent.v1.ProcessService/GetStatus",
+                        GetStatusRequest {
+                            process_id: input.process_id,
+                        },
+                    )
                     .await
                     .map_err(|status| {
                         api_error_from_agent_status(&ctx, "process.get_status", status)
-                    })?
-                    .into_inner()
+                    })?;
+
+                let status = resp
                     .status
                     .ok_or_else(|| api_error(&ctx, "internal", "missing status"))?;
 
@@ -1004,29 +989,20 @@ pub fn router() -> Router<Ctx> {
         .procedure(
             "logsTail",
             Procedure::builder::<ApiError>().query(|ctx, input: TailLogsInput| async move {
-                let agent_endpoint = std::env::var("ALLOY_AGENT_ENDPOINT")
-                    .unwrap_or_else(|_| "http://127.0.0.1:50051".to_string());
-                let mut client = ProcessServiceClient::connect(agent_endpoint.clone())
-                    .await
-                    .map_err(|e| {
-                        api_error(
-                            &ctx,
-                            "agent_unreachable",
-                            format!("failed to connect agent ({agent_endpoint}): {e}"),
-                        )
-                    })?;
-
-                let resp = client
-                    .tail_logs(Request::new(TailLogsRequest {
-                        process_id: input.process_id,
-                        limit: input.limit.unwrap_or(200),
-                        cursor: input.cursor.unwrap_or_default(),
-                    }))
+                let transport = agent_transport(&ctx);
+                let resp: alloy_proto::agent_v1::TailLogsResponse = transport
+                    .call(
+                        "/alloy.agent.v1.ProcessService/TailLogs",
+                        TailLogsRequest {
+                            process_id: input.process_id,
+                            limit: input.limit.unwrap_or(200),
+                            cursor: input.cursor.unwrap_or_default(),
+                        },
+                    )
                     .await
                     .map_err(|status| {
                         api_error_from_agent_status(&ctx, "process.tail_logs", status)
-                    })?
-                    .into_inner();
+                    })?;
 
                 Ok(TailLogsOutput {
                     lines: resp.lines,
@@ -1041,28 +1017,20 @@ pub fn router() -> Router<Ctx> {
                     ensure_writable(&ctx)?;
                     enforce_rate_limit(&ctx)?;
 
-                    let agent_endpoint = std::env::var("ALLOY_AGENT_ENDPOINT")
-                        .unwrap_or_else(|_| "http://127.0.0.1:50051".to_string());
-                    let mut client = ProcessServiceClient::connect(agent_endpoint.clone())
-                        .await
-                        .map_err(|e| {
-                            api_error(
-                                &ctx,
-                                "agent_unreachable",
-                                format!("failed to connect agent ({agent_endpoint}): {e}"),
-                            )
-                        })?;
+                    let transport = agent_transport(&ctx);
 
-                    let resp = client
-                        .warm_template_cache(Request::new(WarmTemplateCacheRequest {
-                            template_id: input.template_id.clone(),
-                            params: input.params.clone().into_iter().collect(),
-                        }))
+                    let resp: alloy_proto::agent_v1::WarmTemplateCacheResponse = transport
+                        .call(
+                            "/alloy.agent.v1.ProcessService/WarmTemplateCache",
+                            WarmTemplateCacheRequest {
+                                template_id: input.template_id.clone(),
+                                params: input.params.clone().into_iter().collect(),
+                            },
+                        )
                         .await
                         .map_err(|status| {
                             api_error_from_agent_status(&ctx, "process.warm_template_cache", status)
-                        })?
-                        .into_inner();
+                        })?;
 
                     audit::record(
                         &ctx,
@@ -1082,25 +1050,16 @@ pub fn router() -> Router<Ctx> {
         .procedure(
             "cacheStats",
             Procedure::builder::<ApiError>().query(|ctx, _: ()| async move {
-                let agent_endpoint = std::env::var("ALLOY_AGENT_ENDPOINT")
-                    .unwrap_or_else(|_| "http://127.0.0.1:50051".to_string());
-                let mut client = ProcessServiceClient::connect(agent_endpoint.clone())
-                    .await
-                    .map_err(|e| {
-                        api_error(
-                            &ctx,
-                            "agent_unreachable",
-                            format!("failed to connect agent ({agent_endpoint}): {e}"),
-                        )
-                    })?;
-
-                let resp = client
-                    .get_cache_stats(Request::new(GetCacheStatsRequest {}))
+                let transport = agent_transport(&ctx);
+                let resp: alloy_proto::agent_v1::GetCacheStatsResponse = transport
+                    .call(
+                        "/alloy.agent.v1.ProcessService/GetCacheStats",
+                        GetCacheStatsRequest {},
+                    )
                     .await
                     .map_err(|status| {
                         api_error_from_agent_status(&ctx, "process.get_cache_stats", status)
-                    })?
-                    .into_inner();
+                    })?;
 
                 Ok(CacheStatsOutput {
                     entries: resp
@@ -1122,27 +1081,18 @@ pub fn router() -> Router<Ctx> {
                 ensure_writable(&ctx)?;
                 enforce_rate_limit(&ctx)?;
 
-                let agent_endpoint = std::env::var("ALLOY_AGENT_ENDPOINT")
-                    .unwrap_or_else(|_| "http://127.0.0.1:50051".to_string());
-                let mut client = ProcessServiceClient::connect(agent_endpoint.clone())
-                    .await
-                    .map_err(|e| {
-                        api_error(
-                            &ctx,
-                            "agent_unreachable",
-                            format!("failed to connect agent ({agent_endpoint}): {e}"),
-                        )
-                    })?;
-
-                let resp = client
-                    .clear_cache(Request::new(ClearCacheRequest {
-                        keys: input.keys.clone(),
-                    }))
+                let transport = agent_transport(&ctx);
+                let resp: alloy_proto::agent_v1::ClearCacheResponse = transport
+                    .call(
+                        "/alloy.agent.v1.ProcessService/ClearCache",
+                        ClearCacheRequest {
+                            keys: input.keys.clone(),
+                        },
+                    )
                     .await
                     .map_err(|status| {
                         api_error_from_agent_status(&ctx, "process.clear_cache", status)
-                    })?
-                    .into_inner();
+                    })?;
 
                 audit::record(
                     &ctx,
@@ -1173,25 +1123,16 @@ pub fn router() -> Router<Ctx> {
         .procedure(
             "capabilities",
             Procedure::builder::<ApiError>().query(|ctx, _: ()| async move {
-                let agent_endpoint = std::env::var("ALLOY_AGENT_ENDPOINT")
-                    .unwrap_or_else(|_| "http://127.0.0.1:50051".to_string());
-                let mut client = FilesystemServiceClient::connect(agent_endpoint.clone())
-                    .await
-                    .map_err(|e| {
-                        api_error(
-                            &ctx,
-                            "agent_unreachable",
-                            format!("failed to connect agent ({agent_endpoint}): {e}"),
-                        )
-                    })?;
-
-                let resp = client
-                    .get_capabilities(Request::new(GetCapabilitiesRequest {}))
+                let transport = agent_transport(&ctx);
+                let resp: alloy_proto::agent_v1::GetCapabilitiesResponse = transport
+                    .call(
+                        "/alloy.agent.v1.FilesystemService/GetCapabilities",
+                        GetCapabilitiesRequest {},
+                    )
                     .await
                     .map_err(|status| {
                         api_error_from_agent_status(&ctx, "fs.get_capabilities", status)
-                    })?
-                    .into_inner();
+                    })?;
 
                 Ok(FsCapabilitiesOutput {
                     write_enabled: resp.write_enabled,
@@ -1201,25 +1142,16 @@ pub fn router() -> Router<Ctx> {
         .procedure(
             "listDir",
             Procedure::builder::<ApiError>().query(|ctx, input: ListDirInput| async move {
-                let agent_endpoint = std::env::var("ALLOY_AGENT_ENDPOINT")
-                    .unwrap_or_else(|_| "http://127.0.0.1:50051".to_string());
-                let mut client = FilesystemServiceClient::connect(agent_endpoint.clone())
+                let transport = agent_transport(&ctx);
+                let resp: alloy_proto::agent_v1::ListDirResponse = transport
+                    .call(
+                        "/alloy.agent.v1.FilesystemService/ListDir",
+                        ListDirRequest {
+                            path: input.path.unwrap_or_default(),
+                        },
+                    )
                     .await
-                    .map_err(|e| {
-                        api_error(
-                            &ctx,
-                            "agent_unreachable",
-                            format!("failed to connect agent ({agent_endpoint}): {e}"),
-                        )
-                    })?;
-
-                let resp = client
-                    .list_dir(Request::new(ListDirRequest {
-                        path: input.path.unwrap_or_default(),
-                    }))
-                    .await
-                    .map_err(|status| api_error_from_agent_status(&ctx, "fs.list_dir", status))?
-                    .into_inner();
+                    .map_err(|status| api_error_from_agent_status(&ctx, "fs.list_dir", status))?;
 
                 Ok(ListDirOutput {
                     entries: resp
@@ -1238,27 +1170,18 @@ pub fn router() -> Router<Ctx> {
         .procedure(
             "readFile",
             Procedure::builder::<ApiError>().query(|ctx, input: ReadFileInput| async move {
-                let agent_endpoint = std::env::var("ALLOY_AGENT_ENDPOINT")
-                    .unwrap_or_else(|_| "http://127.0.0.1:50051".to_string());
-                let mut client = FilesystemServiceClient::connect(agent_endpoint.clone())
+                let transport = agent_transport(&ctx);
+                let resp: alloy_proto::agent_v1::ReadFileResponse = transport
+                    .call(
+                        "/alloy.agent.v1.FilesystemService/ReadFile",
+                        ReadFileRequest {
+                            path: input.path,
+                            offset: input.offset.unwrap_or(0) as u64,
+                            limit: input.limit.unwrap_or(0) as u64,
+                        },
+                    )
                     .await
-                    .map_err(|e| {
-                        api_error(
-                            &ctx,
-                            "agent_unreachable",
-                            format!("failed to connect agent ({agent_endpoint}): {e}"),
-                        )
-                    })?;
-
-                let resp = client
-                    .read_file(Request::new(ReadFileRequest {
-                        path: input.path,
-                        offset: input.offset.unwrap_or(0) as u64,
-                        limit: input.limit.unwrap_or(0) as u64,
-                    }))
-                    .await
-                    .map_err(|status| api_error_from_agent_status(&ctx, "fs.read_file", status))?
-                    .into_inner();
+                    .map_err(|status| api_error_from_agent_status(&ctx, "fs.read_file", status))?;
 
                 let text = String::from_utf8(resp.data)
                     .map_err(|_| api_error(&ctx, "invalid_utf8", "file is not valid utf-8"))?;
@@ -1273,28 +1196,19 @@ pub fn router() -> Router<Ctx> {
     let log = Router::new().procedure(
         "tailFile",
         Procedure::builder::<ApiError>().query(|ctx, input: TailFileInput| async move {
-            let agent_endpoint = std::env::var("ALLOY_AGENT_ENDPOINT")
-                .unwrap_or_else(|_| "http://127.0.0.1:50051".to_string());
-            let mut client = LogsServiceClient::connect(agent_endpoint.clone())
+            let transport = agent_transport(&ctx);
+            let resp: alloy_proto::agent_v1::TailFileResponse = transport
+                .call(
+                    "/alloy.agent.v1.LogsService/TailFile",
+                    TailFileRequest {
+                        path: input.path,
+                        cursor: input.cursor.unwrap_or_default(),
+                        limit_bytes: input.limit_bytes.unwrap_or(0),
+                        max_lines: input.max_lines.unwrap_or(0),
+                    },
+                )
                 .await
-                .map_err(|e| {
-                    api_error(
-                        &ctx,
-                        "agent_unreachable",
-                        format!("failed to connect agent ({agent_endpoint}): {e}"),
-                    )
-                })?;
-
-            let resp = client
-                .tail_file(Request::new(TailFileRequest {
-                    path: input.path,
-                    cursor: input.cursor.unwrap_or_default(),
-                    limit_bytes: input.limit_bytes.unwrap_or(0),
-                    max_lines: input.max_lines.unwrap_or(0),
-                }))
-                .await
-                .map_err(|status| api_error_from_agent_status(&ctx, "log.tail_file", status))?
-                .into_inner();
+                .map_err(|status| api_error_from_agent_status(&ctx, "log.tail_file", status))?;
 
             Ok(TailFileOutput {
                 lines: resp.lines,
@@ -1311,29 +1225,20 @@ pub fn router() -> Router<Ctx> {
                     ensure_writable(&ctx)?;
                     enforce_rate_limit(&ctx)?;
 
-                    let agent_endpoint = std::env::var("ALLOY_AGENT_ENDPOINT")
-                        .unwrap_or_else(|_| "http://127.0.0.1:50051".to_string());
-                    let mut client = InstanceServiceClient::connect(agent_endpoint.clone())
-                        .await
-                        .map_err(|e| {
-                            api_error(
-                                &ctx,
-                                "agent_unreachable",
-                                format!("failed to connect agent ({agent_endpoint}): {e}"),
-                            )
-                        })?;
-
-                    let resp = client
-                        .create(Request::new(CreateInstanceRequest {
-                            template_id: input.template_id,
-                            params: input.params.into_iter().collect(),
-                            display_name: input.display_name.unwrap_or_default(),
-                        }))
+                    let transport = agent_transport(&ctx);
+                    let resp: alloy_proto::agent_v1::CreateInstanceResponse = transport
+                        .call(
+                            "/alloy.agent.v1.InstanceService/Create",
+                            CreateInstanceRequest {
+                                template_id: input.template_id,
+                                params: input.params.into_iter().collect(),
+                                display_name: input.display_name.unwrap_or_default(),
+                            },
+                        )
                         .await
                         .map_err(|status| {
                             api_error_from_agent_status(&ctx, "instance.create", status)
-                        })?
-                        .into_inner();
+                        })?;
 
                     let cfg = resp
                         .config
@@ -1354,25 +1259,16 @@ pub fn router() -> Router<Ctx> {
         .procedure(
             "get",
             Procedure::builder::<ApiError>().query(|ctx, input: InstanceIdInput| async move {
-                let agent_endpoint = std::env::var("ALLOY_AGENT_ENDPOINT")
-                    .unwrap_or_else(|_| "http://127.0.0.1:50051".to_string());
-                let mut client = InstanceServiceClient::connect(agent_endpoint.clone())
+                let transport = agent_transport(&ctx);
+                let resp: alloy_proto::agent_v1::GetInstanceResponse = transport
+                    .call(
+                        "/alloy.agent.v1.InstanceService/Get",
+                        GetInstanceRequest {
+                            instance_id: input.instance_id,
+                        },
+                    )
                     .await
-                    .map_err(|e| {
-                        api_error(
-                            &ctx,
-                            "agent_unreachable",
-                            format!("failed to connect agent ({agent_endpoint}): {e}"),
-                        )
-                    })?;
-
-                let resp = client
-                    .get(Request::new(GetInstanceRequest {
-                        instance_id: input.instance_id,
-                    }))
-                    .await
-                    .map_err(|status| api_error_from_agent_status(&ctx, "instance.get", status))?
-                    .into_inner();
+                    .map_err(|status| api_error_from_agent_status(&ctx, "instance.get", status))?;
 
                 let info = resp
                     .info
@@ -1384,23 +1280,14 @@ pub fn router() -> Router<Ctx> {
         .procedure(
             "list",
             Procedure::builder::<ApiError>().query(|ctx, _: ()| async move {
-                let agent_endpoint = std::env::var("ALLOY_AGENT_ENDPOINT")
-                    .unwrap_or_else(|_| "http://127.0.0.1:50051".to_string());
-                let mut client = InstanceServiceClient::connect(agent_endpoint.clone())
+                let transport = agent_transport(&ctx);
+                let resp: alloy_proto::agent_v1::ListInstancesResponse = transport
+                    .call(
+                        "/alloy.agent.v1.InstanceService/List",
+                        ListInstancesRequest {},
+                    )
                     .await
-                    .map_err(|e| {
-                        api_error(
-                            &ctx,
-                            "agent_unreachable",
-                            format!("failed to connect agent ({agent_endpoint}): {e}"),
-                        )
-                    })?;
-
-                let resp = client
-                    .list(Request::new(ListInstancesRequest {}))
-                    .await
-                    .map_err(|status| api_error_from_agent_status(&ctx, "instance.list", status))?
-                    .into_inner();
+                    .map_err(|status| api_error_from_agent_status(&ctx, "instance.list", status))?;
 
                 let mut out = Vec::new();
                 for info in resp.instances {
@@ -1415,27 +1302,7 @@ pub fn router() -> Router<Ctx> {
                 |ctx, input: InstanceDiagnosticsInput| async move {
                     enforce_rate_limit(&ctx)?;
 
-                    let agent_endpoint = std::env::var("ALLOY_AGENT_ENDPOINT")
-                        .unwrap_or_else(|_| "http://127.0.0.1:50051".to_string());
-
-                    let mut fs_client = FilesystemServiceClient::connect(agent_endpoint.clone())
-                        .await
-                        .map_err(|e| {
-                            api_error(
-                                &ctx,
-                                "agent_unreachable",
-                                format!("failed to connect agent ({agent_endpoint}): {e}"),
-                            )
-                        })?;
-                    let mut logs_client = LogsServiceClient::connect(agent_endpoint.clone())
-                        .await
-                        .map_err(|e| {
-                            api_error(
-                                &ctx,
-                                "agent_unreachable",
-                                format!("failed to connect agent ({agent_endpoint}): {e}"),
-                            )
-                        })?;
+                    let transport = agent_transport(&ctx);
 
                     let instance_id = input.instance_id;
                     let max_lines = input.max_lines.unwrap_or(400).clamp(1, 2000);
@@ -1449,15 +1316,18 @@ pub fn router() -> Router<Ctx> {
                             .map_err(|_| api_error(&ctx, "invalid_utf8", "file is not valid utf-8"))
                     };
 
-                    let instance_json = match fs_client
-                        .read_file(Request::new(ReadFileRequest {
-                            path: format!("instances/{}/instance.json", instance_id),
-                            offset: 0,
-                            limit: 1024 * 1024,
-                        }))
+                    let instance_json = match transport
+                        .call::<_, alloy_proto::agent_v1::ReadFileResponse>(
+                            "/alloy.agent.v1.FilesystemService/ReadFile",
+                            ReadFileRequest {
+                                path: format!("instances/{}/instance.json", instance_id),
+                                offset: 0,
+                                limit: 1024 * 1024,
+                            },
+                        )
                         .await
                     {
-                        Ok(resp) => Some(to_utf8(resp.into_inner().data)?),
+                        Ok(resp) => Some(to_utf8(resp.data)?),
                         Err(status) => {
                             if status.code() == tonic::Code::NotFound {
                                 None
@@ -1485,15 +1355,18 @@ pub fn router() -> Router<Ctx> {
                         serde_json::to_string_pretty(&v).unwrap_or(raw)
                     });
 
-                    let run_json = match fs_client
-                        .read_file(Request::new(ReadFileRequest {
-                            path: format!("instances/{}/run.json", instance_id),
-                            offset: 0,
-                            limit: 1024 * 1024,
-                        }))
+                    let run_json = match transport
+                        .call::<_, alloy_proto::agent_v1::ReadFileResponse>(
+                            "/alloy.agent.v1.FilesystemService/ReadFile",
+                            ReadFileRequest {
+                                path: format!("instances/{}/run.json", instance_id),
+                                offset: 0,
+                                limit: 1024 * 1024,
+                            },
+                        )
                         .await
                     {
-                        Ok(resp) => Some(to_utf8(resp.into_inner().data)?),
+                        Ok(resp) => Some(to_utf8(resp.data)?),
                         Err(status) => {
                             if status.code() != tonic::Code::NotFound {
                                 return Err(api_error_from_agent_status(
@@ -1503,15 +1376,18 @@ pub fn router() -> Router<Ctx> {
                                 ));
                             }
 
-                            match fs_client
-                                .read_file(Request::new(ReadFileRequest {
-                                    path: format!("processes/{}/run.json", instance_id),
-                                    offset: 0,
-                                    limit: 1024 * 1024,
-                                }))
+                            match transport
+                                .call::<_, alloy_proto::agent_v1::ReadFileResponse>(
+                                    "/alloy.agent.v1.FilesystemService/ReadFile",
+                                    ReadFileRequest {
+                                        path: format!("processes/{}/run.json", instance_id),
+                                        offset: 0,
+                                        limit: 1024 * 1024,
+                                    },
+                                )
                                 .await
                             {
-                                Ok(resp) => Some(to_utf8(resp.into_inner().data)?),
+                                Ok(resp) => Some(to_utf8(resp.data)?),
                                 Err(status) => {
                                     if status.code() == tonic::Code::NotFound {
                                         None
@@ -1527,16 +1403,19 @@ pub fn router() -> Router<Ctx> {
                         }
                     };
 
-                    let console_log_lines = match logs_client
-                        .tail_file(Request::new(TailFileRequest {
-                            path: format!("instances/{}/logs/console.log", instance_id),
-                            cursor: "0".to_string(),
-                            limit_bytes,
-                            max_lines,
-                        }))
+                    let console_log_lines = match transport
+                        .call::<_, alloy_proto::agent_v1::TailFileResponse>(
+                            "/alloy.agent.v1.LogsService/TailFile",
+                            TailFileRequest {
+                                path: format!("instances/{}/logs/console.log", instance_id),
+                                cursor: "0".to_string(),
+                                limit_bytes,
+                                max_lines,
+                            },
+                        )
                         .await
                     {
-                        Ok(resp) => resp.into_inner().lines,
+                        Ok(resp) => resp.lines,
                         Err(status) => {
                             if status.code() != tonic::Code::NotFound {
                                 return Err(api_error_from_agent_status(
@@ -1546,16 +1425,22 @@ pub fn router() -> Router<Ctx> {
                                 ));
                             }
 
-                            match logs_client
-                                .tail_file(Request::new(TailFileRequest {
-                                    path: format!("processes/{}/logs/console.log", instance_id),
-                                    cursor: "0".to_string(),
-                                    limit_bytes,
-                                    max_lines,
-                                }))
+                            match transport
+                                .call::<_, alloy_proto::agent_v1::TailFileResponse>(
+                                    "/alloy.agent.v1.LogsService/TailFile",
+                                    TailFileRequest {
+                                        path: format!(
+                                            "processes/{}/logs/console.log",
+                                            instance_id
+                                        ),
+                                        cursor: "0".to_string(),
+                                        limit_bytes,
+                                        max_lines,
+                                    },
+                                )
                                 .await
                             {
-                                Ok(resp) => resp.into_inner().lines,
+                                Ok(resp) => resp.lines,
                                 Err(status) => {
                                     if status.code() == tonic::Code::NotFound {
                                         Vec::new()
@@ -1590,25 +1475,16 @@ pub fn router() -> Router<Ctx> {
                 ensure_writable(&ctx)?;
                 enforce_rate_limit(&ctx)?;
 
-                let agent_endpoint = std::env::var("ALLOY_AGENT_ENDPOINT")
-                    .unwrap_or_else(|_| "http://127.0.0.1:50051".to_string());
-                let mut client = InstanceServiceClient::connect(agent_endpoint.clone())
+                let transport = agent_transport(&ctx);
+                let resp: alloy_proto::agent_v1::StartInstanceResponse = transport
+                    .call(
+                        "/alloy.agent.v1.InstanceService/Start",
+                        StartInstanceRequest {
+                            instance_id: input.instance_id,
+                        },
+                    )
                     .await
-                    .map_err(|e| {
-                        api_error(
-                            &ctx,
-                            "agent_unreachable",
-                            format!("failed to connect agent ({agent_endpoint}): {e}"),
-                        )
-                    })?;
-
-                let resp = client
-                    .start(Request::new(StartInstanceRequest {
-                        instance_id: input.instance_id,
-                    }))
-                    .await
-                    .map_err(|status| api_error_from_agent_status(&ctx, "instance.start", status))?
-                    .into_inner();
+                    .map_err(|status| api_error_from_agent_status(&ctx, "instance.start", status))?;
 
                 let status = resp
                     .status
@@ -1632,25 +1508,18 @@ pub fn router() -> Router<Ctx> {
                     ensure_writable(&ctx)?;
                     enforce_rate_limit(&ctx)?;
 
-                    let agent_endpoint = std::env::var("ALLOY_AGENT_ENDPOINT")
-                        .unwrap_or_else(|_| "http://127.0.0.1:50051".to_string());
-                    let mut client = InstanceServiceClient::connect(agent_endpoint.clone())
-                        .await
-                        .map_err(|e| {
-                            api_error(
-                                &ctx,
-                                "agent_unreachable",
-                                format!("failed to connect agent ({agent_endpoint}): {e}"),
-                            )
-                        })?;
+                    let transport = agent_transport(&ctx);
 
                     // Best-effort: if the instance isn't running, the stop call may return NOT_FOUND.
                     // Treat that as "already stopped" and continue to start.
-                    match client
-                        .stop(Request::new(StopInstanceRequest {
-                            instance_id: input.instance_id.clone(),
-                            timeout_ms: input.timeout_ms.unwrap_or(30_000),
-                        }))
+                    match transport
+                        .call::<_, alloy_proto::agent_v1::StopInstanceResponse>(
+                            "/alloy.agent.v1.InstanceService/Stop",
+                            StopInstanceRequest {
+                                instance_id: input.instance_id.clone(),
+                                timeout_ms: input.timeout_ms.unwrap_or(30_000),
+                            },
+                        )
                         .await
                     {
                         Ok(_) => {}
@@ -1665,15 +1534,17 @@ pub fn router() -> Router<Ctx> {
                         }
                     }
 
-                    let resp = client
-                        .start(Request::new(StartInstanceRequest {
-                            instance_id: input.instance_id,
-                        }))
+                    let resp: alloy_proto::agent_v1::StartInstanceResponse = transport
+                        .call(
+                            "/alloy.agent.v1.InstanceService/Start",
+                            StartInstanceRequest {
+                                instance_id: input.instance_id,
+                            },
+                        )
                         .await
                         .map_err(|status| {
                             api_error_from_agent_status(&ctx, "instance.start", status)
-                        })?
-                        .into_inner();
+                        })?;
 
                     let status = resp
                         .status
@@ -1697,26 +1568,17 @@ pub fn router() -> Router<Ctx> {
                 ensure_writable(&ctx)?;
                 enforce_rate_limit(&ctx)?;
 
-                let agent_endpoint = std::env::var("ALLOY_AGENT_ENDPOINT")
-                    .unwrap_or_else(|_| "http://127.0.0.1:50051".to_string());
-                let mut client = InstanceServiceClient::connect(agent_endpoint.clone())
+                let transport = agent_transport(&ctx);
+                let resp: alloy_proto::agent_v1::StopInstanceResponse = transport
+                    .call(
+                        "/alloy.agent.v1.InstanceService/Stop",
+                        StopInstanceRequest {
+                            instance_id: input.instance_id,
+                            timeout_ms: input.timeout_ms.unwrap_or(30_000),
+                        },
+                    )
                     .await
-                    .map_err(|e| {
-                        api_error(
-                            &ctx,
-                            "agent_unreachable",
-                            format!("failed to connect agent ({agent_endpoint}): {e}"),
-                        )
-                    })?;
-
-                let resp = client
-                    .stop(Request::new(StopInstanceRequest {
-                        instance_id: input.instance_id,
-                        timeout_ms: input.timeout_ms.unwrap_or(30_000),
-                    }))
-                    .await
-                    .map_err(|status| api_error_from_agent_status(&ctx, "instance.stop", status))?
-                    .into_inner();
+                    .map_err(|status| api_error_from_agent_status(&ctx, "instance.stop", status))?;
 
                 let status = resp
                     .status
@@ -1740,29 +1602,20 @@ pub fn router() -> Router<Ctx> {
                     ensure_writable(&ctx)?;
                     enforce_rate_limit(&ctx)?;
 
-                    let agent_endpoint = std::env::var("ALLOY_AGENT_ENDPOINT")
-                        .unwrap_or_else(|_| "http://127.0.0.1:50051".to_string());
-                    let mut client = InstanceServiceClient::connect(agent_endpoint.clone())
-                        .await
-                        .map_err(|e| {
-                            api_error(
-                                &ctx,
-                                "agent_unreachable",
-                                format!("failed to connect agent ({agent_endpoint}): {e}"),
-                            )
-                        })?;
-
-                    let resp = client
-                        .update(Request::new(UpdateInstanceRequest {
-                            instance_id: input.instance_id.clone(),
-                            params: input.params.into_iter().collect(),
-                            display_name: input.display_name.unwrap_or_default(),
-                        }))
+                    let transport = agent_transport(&ctx);
+                    let resp: alloy_proto::agent_v1::UpdateInstanceResponse = transport
+                        .call(
+                            "/alloy.agent.v1.InstanceService/Update",
+                            UpdateInstanceRequest {
+                                instance_id: input.instance_id.clone(),
+                                params: input.params.into_iter().collect(),
+                                display_name: input.display_name.unwrap_or_default(),
+                            },
+                        )
                         .await
                         .map_err(|status| {
                             api_error_from_agent_status(&ctx, "instance.update", status)
-                        })?
-                        .into_inner();
+                        })?;
 
                     let cfg = resp
                         .config
@@ -1783,27 +1636,18 @@ pub fn router() -> Router<Ctx> {
         .procedure(
             "deletePreview",
             Procedure::builder::<ApiError>().query(|ctx, input: InstanceIdInput| async move {
-                let agent_endpoint = std::env::var("ALLOY_AGENT_ENDPOINT")
-                    .unwrap_or_else(|_| "http://127.0.0.1:50051".to_string());
-                let mut client = InstanceServiceClient::connect(agent_endpoint.clone())
-                    .await
-                    .map_err(|e| {
-                        api_error(
-                            &ctx,
-                            "agent_unreachable",
-                            format!("failed to connect agent ({agent_endpoint}): {e}"),
-                        )
-                    })?;
-
-                let resp = client
-                    .delete_preview(Request::new(DeleteInstancePreviewRequest {
-                        instance_id: input.instance_id,
-                    }))
+                let transport = agent_transport(&ctx);
+                let resp: alloy_proto::agent_v1::DeleteInstancePreviewResponse = transport
+                    .call(
+                        "/alloy.agent.v1.InstanceService/DeletePreview",
+                        DeleteInstancePreviewRequest {
+                            instance_id: input.instance_id,
+                        },
+                    )
                     .await
                     .map_err(|status| {
                         api_error_from_agent_status(&ctx, "instance.delete_preview", status)
-                    })?
-                    .into_inner();
+                    })?;
 
                 Ok(DeleteInstancePreviewOutput {
                     instance_id: resp.instance_id,
@@ -1818,26 +1662,17 @@ pub fn router() -> Router<Ctx> {
                 ensure_writable(&ctx)?;
                 enforce_rate_limit(&ctx)?;
 
-                let agent_endpoint = std::env::var("ALLOY_AGENT_ENDPOINT")
-                    .unwrap_or_else(|_| "http://127.0.0.1:50051".to_string());
-                let mut client = InstanceServiceClient::connect(agent_endpoint.clone())
-                    .await
-                    .map_err(|e| {
-                        api_error(
-                            &ctx,
-                            "agent_unreachable",
-                            format!("failed to connect agent ({agent_endpoint}): {e}"),
-                        )
-                    })?;
-
                 let instance_id = input.instance_id;
-                let resp = client
-                    .delete(Request::new(DeleteInstanceRequest {
-                        instance_id: instance_id.clone(),
-                    }))
+                let transport = agent_transport(&ctx);
+                let resp: alloy_proto::agent_v1::DeleteInstanceResponse = transport
+                    .call(
+                        "/alloy.agent.v1.InstanceService/Delete",
+                        DeleteInstanceRequest {
+                            instance_id: instance_id.clone(),
+                        },
+                    )
                     .await
-                    .map_err(|status| api_error_from_agent_status(&ctx, "instance.delete", status))?
-                    .into_inner();
+                    .map_err(|status| api_error_from_agent_status(&ctx, "instance.delete", status))?;
 
                 if resp.ok {
                     audit::record(&ctx, "instance.delete", &instance_id, None).await;
@@ -1865,12 +1700,87 @@ pub fn router() -> Router<Ctx> {
                         id: n.id.to_string(),
                         name: n.name,
                         endpoint: n.endpoint,
+                        has_connect_token: n.connect_token_hash.is_some(),
                         enabled: n.enabled,
                         last_seen_at: n.last_seen_at.map(|t| t.to_rfc3339()),
                         agent_version: n.agent_version,
                         last_error: n.last_error,
                     })
                     .collect::<Vec<_>>())
+            }),
+        )
+        .procedure(
+            "create",
+            Procedure::builder::<ApiError>().mutation(|ctx: Ctx, input: NodeCreateInput| async move {
+                use alloy_db::entities::nodes;
+                use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, Set};
+
+                ensure_writable(&ctx)?;
+                enforce_rate_limit(&ctx)?;
+
+                let user = ctx
+                    .user
+                    .clone()
+                    .ok_or_else(|| api_error(&ctx, "unauthorized", "unauthorized"))?;
+                if !user.is_admin {
+                    return Err(api_error(&ctx, "forbidden", "forbidden"));
+                }
+
+                let name = normalize_node_name(&input.name)
+                    .map_err(|_| api_error_with_field(&ctx, "invalid_param", "invalid node name", "name", "invalid name"))?;
+
+                let existing = nodes::Entity::find()
+                    .filter(nodes::Column::Name.eq(name.clone()))
+                    .one(&*ctx.db)
+                    .await
+                    .map_err(|e| api_error(&ctx, "db_error", format!("db error: {e}")))?;
+                if existing.is_some() {
+                    return Err(api_error_with_field(
+                        &ctx,
+                        "already_exists",
+                        "node already exists",
+                        "name",
+                        "name already exists",
+                    ));
+                }
+
+                let token = random_token(32);
+                let token_hash = hash_token(&token);
+                let endpoint = format!("tunnel://{name}");
+
+                let model = nodes::ActiveModel {
+                    id: Set(sea_orm::prelude::Uuid::new_v4()),
+                    name: Set(name.clone()),
+                    endpoint: Set(endpoint),
+                    connect_token_hash: Set(Some(token_hash)),
+                    enabled: Set(true),
+                    last_seen_at: Set(None),
+                    agent_version: Set(None),
+                    last_error: Set(None),
+                    created_at: Set(chrono::Utc::now().into()),
+                    updated_at: Set(chrono::Utc::now().into()),
+                };
+
+                let inserted = nodes::Entity::insert(model)
+                    .exec_with_returning(&*ctx.db)
+                    .await
+                    .map_err(|e| api_error(&ctx, "db_error", format!("db error: {e}")))?;
+
+                audit::record(&ctx, "node.create", &inserted.id.to_string(), None).await;
+
+                Ok(NodeCreateOutput {
+                    node: NodeDto {
+                        id: inserted.id.to_string(),
+                        name: inserted.name,
+                        endpoint: inserted.endpoint,
+                        has_connect_token: inserted.connect_token_hash.is_some(),
+                        enabled: inserted.enabled,
+                        last_seen_at: inserted.last_seen_at.map(|t| t.to_rfc3339()),
+                        agent_version: inserted.agent_version,
+                        last_error: inserted.last_error,
+                    },
+                    connect_token: token,
+                })
             }),
         )
         .procedure(
@@ -1919,6 +1829,7 @@ pub fn router() -> Router<Ctx> {
                         id: updated.id.to_string(),
                         name: updated.name,
                         endpoint: updated.endpoint,
+                        has_connect_token: updated.connect_token_hash.is_some(),
                         enabled: updated.enabled,
                         last_seen_at: updated.last_seen_at.map(|t| t.to_rfc3339()),
                         agent_version: updated.agent_version,

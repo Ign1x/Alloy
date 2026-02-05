@@ -1,3 +1,5 @@
+pub mod agent_transport;
+pub mod agent_tunnel;
 pub mod audit;
 pub mod auth;
 pub mod minecraft_versions;

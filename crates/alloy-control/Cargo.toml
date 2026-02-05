@@ -19,6 +19,7 @@ rand = { workspace = true }
 base64 = "0.22"
 sha2 = "0.10"
 hex = "0.4"
+prost = { workspace = true }
 rspc = { workspace = true }
 rspc-axum = { workspace = true }
 sea-orm = { workspace = true }

@@ -1,6 +1,7 @@
 use std::net::SocketAddr;
 
 use alloy_control::auth;
+use alloy_control::agent_tunnel;
 use alloy_control::node_health::NodeHealthPoller;
 use alloy_control::request_meta::RequestMeta;
 use alloy_control::rpc;
@@ -140,6 +141,7 @@ async fn init_db_and_migrate() -> anyhow::Result<AppState> {
             id: sea_orm::Set(sea_orm::prelude::Uuid::new_v4()),
             name: sea_orm::Set("default".to_string()),
             endpoint: sea_orm::Set(endpoint),
+            connect_token_hash: sea_orm::Set(None),
             enabled: sea_orm::Set(true),
             last_seen_at: sea_orm::Set(None),
             agent_version: sea_orm::Set(None),
@@ -162,6 +164,7 @@ async fn init_db_and_migrate() -> anyhow::Result<AppState> {
 
     Ok(AppState {
         db: std::sync::Arc::new(db),
+        agent_hub: agent_tunnel::AgentHub::new(),
     })
 }
 
@@ -173,7 +176,7 @@ async fn main() -> anyhow::Result<()> {
 
     let state = init_db_and_migrate().await?;
 
-    NodeHealthPoller::new(state.db.clone()).spawn();
+    NodeHealthPoller::new(state.db.clone(), state.agent_hub.clone()).spawn();
 
     let router = rpc::router();
     let (procedures, _types) = router
@@ -197,6 +200,7 @@ async fn main() -> anyhow::Result<()> {
          user: Option<axum::Extension<rpc::AuthUser>>| {
             rpc::Ctx {
                 db: state.db.clone(),
+                agent_hub: state.agent_hub.clone(),
                 user: user.map(|axum::Extension(u)| u),
                 request_id: meta.request_id,
             }
@@ -207,6 +211,7 @@ async fn main() -> anyhow::Result<()> {
     let app = Router::new()
         .route("/healthz", get(healthz))
         .route("/auth/whoami", get(auth::whoami))
+        .route("/agent/ws", get(agent_tunnel::agent_ws))
         .nest("/auth", auth_router)
         .nest("/rspc", rspc_router)
         .layer(middleware::from_fn(security::request_id))

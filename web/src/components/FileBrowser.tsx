@@ -604,16 +604,17 @@ export function FileBrowser(props: FileBrowserProps) {
         </aside>
 
         <section class="min-w-0 flex-1 overflow-auto bg-transparent p-4">
-          <Show
-            when={selectedFile()}
-            fallback={
-              <EmptyState
-                title="Select a file"
-                description="Pick a file from the left to preview its contents."
-              />
-            }
-          >
-            {(file) => (
+          <div class="mx-auto w-full max-w-[min(72rem,92%)]">
+            <Show
+              when={selectedFile()}
+              fallback={
+                <EmptyState
+                  title="Select a file"
+                  description="Pick a file from the left to preview its contents."
+                />
+              }
+            >
+              {(file) => (
               <div class="space-y-3">
                 <div class="flex flex-wrap items-start justify-between gap-3 rounded-2xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
                   <div class="min-w-0">
@@ -764,7 +765,8 @@ export function FileBrowser(props: FileBrowserProps) {
                 </Show>
               </div>
             )}
-          </Show>
+            </Show>
+          </div>
         </section>
       </div>
     </div>

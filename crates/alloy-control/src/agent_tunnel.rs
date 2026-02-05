@@ -9,8 +9,11 @@ use axum::{
     response::IntoResponse,
 };
 use futures_util::{SinkExt, StreamExt};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use tokio::sync::{Mutex, RwLock, mpsc, oneshot};
 use tracing::Instrument;
+
+use crate::state::AppState;
 
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct AgentHello {
@@ -96,6 +99,13 @@ fn configured_agent_token() -> Option<String> {
         .filter(|v| !v.is_empty())
 }
 
+fn hash_token(raw: &str) -> String {
+    use sha2::Digest;
+    let mut hasher = sha2::Sha256::new();
+    hasher.update(raw.as_bytes());
+    hex::encode(hasher.finalize())
+}
+
 fn bearer_token(headers: &HeaderMap) -> Option<String> {
     let raw = headers.get(axum::http::header::AUTHORIZATION)?.to_str().ok()?;
     let raw = raw.trim();
@@ -107,27 +117,60 @@ fn bearer_token(headers: &HeaderMap) -> Option<String> {
     Some(token.to_string())
 }
 
-fn auth_ok(headers: &HeaderMap) -> bool {
-    let Some(expected) = configured_agent_token() else {
-        return true;
+async fn authorize(
+    db: &alloy_db::sea_orm::DatabaseConnection,
+    headers: &HeaderMap,
+) -> Result<Option<String>, StatusCode> {
+    if let Some(expected) = configured_agent_token() {
+        if bearer_token(headers).is_some_and(|got| got == expected) {
+            return Ok(None);
+        }
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+
+    // If any node has a connect token configured, require tokens for agent_ws.
+    let token_required = alloy_db::entities::nodes::Entity::find()
+        .filter(alloy_db::entities::nodes::Column::ConnectTokenHash.is_not_null())
+        .one(db)
+        .await
+        .ok()
+        .flatten()
+        .is_some();
+
+    let Some(token) = bearer_token(headers) else {
+        if token_required {
+            return Err(StatusCode::UNAUTHORIZED);
+        }
+        return Ok(None);
     };
-    bearer_token(headers).is_some_and(|got| got == expected)
+
+    let token_hash = hash_token(&token);
+    let row = alloy_db::entities::nodes::Entity::find()
+        .filter(alloy_db::entities::nodes::Column::ConnectTokenHash.eq(token_hash))
+        .filter(alloy_db::entities::nodes::Column::Enabled.eq(true))
+        .one(db)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    Ok(Some(row.name))
 }
 
 pub async fn agent_ws(
-    State(hub): State<AgentHub>,
+    State(state): State<AppState>,
     ws: WebSocketUpgrade,
     headers: HeaderMap,
 ) -> impl IntoResponse {
-    if !auth_ok(&headers) {
-        return (StatusCode::UNAUTHORIZED, "unauthorized").into_response();
-    }
+    let allowed_node = match authorize(&state.db, &headers).await {
+        Ok(v) => v,
+        Err(code) => return (code, "unauthorized").into_response(),
+    };
 
-    ws.on_upgrade(|socket| handle_agent_socket(hub, socket))
+    ws.on_upgrade(move |socket| handle_agent_socket(state, socket, allowed_node))
         .into_response()
 }
 
-async fn handle_agent_socket(hub: AgentHub, socket: WebSocket) {
+async fn handle_agent_socket(state: AppState, socket: WebSocket, allowed_node: Option<String>) {
     let span = tracing::info_span!("agent_ws");
     async move {
         let (mut sender, mut receiver) = socket.split();
@@ -152,6 +195,44 @@ async fn handle_agent_socket(hub: AgentHub, socket: WebSocket) {
             return;
         }
 
+        if let Some(expected) = allowed_node.as_ref() {
+            if expected != &node {
+                let _ = sender.send(Message::Close(None)).await;
+                return;
+            }
+        }
+
+        // Ensure the node exists in the DB (supports "agent discovers panel" bootstrapping).
+        let now: chrono::DateTime<chrono::Utc> = chrono::Utc::now();
+        let existing = alloy_db::entities::nodes::Entity::find()
+            .filter(alloy_db::entities::nodes::Column::Name.eq(node.clone()))
+            .one(&*state.db)
+            .await
+            .ok()
+            .flatten();
+        if let Some(model) = existing {
+            let mut active: alloy_db::entities::nodes::ActiveModel = model.into();
+            active.agent_version = Set(Some(hello.agent_version.clone()));
+            active.last_seen_at = Set(Some(now.into()));
+            active.last_error = Set(None);
+            active.updated_at = Set(now.into());
+            let _ = active.update(&*state.db).await;
+        } else {
+            let model = alloy_db::entities::nodes::ActiveModel {
+                id: Set(sea_orm::prelude::Uuid::new_v4()),
+                name: Set(node.clone()),
+                endpoint: Set(format!("tunnel://{node}")),
+                connect_token_hash: Set(None),
+                enabled: Set(true),
+                last_seen_at: Set(Some(now.into())),
+                agent_version: Set(Some(hello.agent_version.clone())),
+                last_error: Set(None),
+                created_at: Set(now.into()),
+                updated_at: Set(now.into()),
+            };
+            let _ = alloy_db::entities::nodes::Entity::insert(model).exec(&*state.db).await;
+        }
+
         let (tx, mut rx) = mpsc::channel::<Message>(64);
         let conn = Arc::new(AgentConnection {
             node: node.clone(),
@@ -160,7 +241,7 @@ async fn handle_agent_socket(hub: AgentHub, socket: WebSocket) {
             pending: Mutex::new(HashMap::new()),
         });
 
-        hub.insert(conn.clone()).await;
+        state.agent_hub.insert(conn.clone()).await;
 
         let writer = tokio::spawn(async move {
             while let Some(msg) = rx.recv().await {
@@ -203,7 +284,7 @@ async fn handle_agent_socket(hub: AgentHub, socket: WebSocket) {
             }
         }
 
-        hub.remove(&node).await;
+        state.agent_hub.remove(&node).await;
         let _ = conn.pending.lock().await.drain();
 
         writer.abort();
@@ -211,4 +292,3 @@ async fn handle_agent_socket(hub: AgentHub, socket: WebSocket) {
     .instrument(span)
     .await
 }
-

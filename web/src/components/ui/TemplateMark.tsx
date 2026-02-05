@@ -26,7 +26,7 @@ function titleCase(s: string): string {
 
 function CubeIcon() {
   return (
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4" aria-hidden="true">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-5 w-5" aria-hidden="true">
       <path d="M10 2 3 6l7 4 7-4-7-4z" opacity="0.9" />
       <path d="M3 6v8l7 4v-8L3 6z" opacity="0.7" />
       <path d="M17 6v8l-7 4v-8l7-4z" opacity="0.5" />
@@ -36,7 +36,7 @@ function CubeIcon() {
 
 function TreeIcon() {
   return (
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4" aria-hidden="true">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-5 w-5" aria-hidden="true">
       <path d="M10 2 4.5 10H7L5 14h3v4h4v-4h3l-2-4h2.5L10 2z" />
     </svg>
   )
@@ -44,7 +44,7 @@ function TreeIcon() {
 
 function MoonIcon() {
   return (
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4" aria-hidden="true">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-5 w-5" aria-hidden="true">
       <path d="M11.25 2.5a.75.75 0 0 1 .75.75 6 6 0 0 0 6 6 .75.75 0 0 1 .53 1.28A7.5 7.5 0 1 1 10.22 1.22a.75.75 0 0 1 1.03.53Z" />
     </svg>
   )
@@ -52,7 +52,7 @@ function MoonIcon() {
 
 function GamepadIcon() {
   return (
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4" aria-hidden="true">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-5 w-5" aria-hidden="true">
       <path d="M6.5 7.5h7c1.8 0 3.25 1.46 3.25 3.25v.2c0 2.73-1.52 5.05-3.4 5.05-.96 0-1.83-.71-2.38-1.72l-.33-.62a.75.75 0 0 0-.66-.41H9.02a.75.75 0 0 0-.66.41l-.33.62c-.55 1.01-1.42 1.72-2.38 1.72-1.88 0-3.4-2.32-3.4-5.05v-.2C2.25 8.96 3.7 7.5 5.5 7.5h1Z" />
       <path d="M6.75 10.5H6v-.75a.75.75 0 0 0-1.5 0v.75h-.75a.75.75 0 0 0 0 1.5h.75v.75a.75.75 0 0 0 1.5 0V12h.75a.75.75 0 0 0 0-1.5Z" />
       <path d="M13.25 12a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5Z" />
@@ -102,10 +102,9 @@ export function TemplateMark(props: TemplateMarkProps) {
       role="img"
       aria-label={title()}
       title={title()}
-      class={cn('inline-flex h-8 w-8 flex-none items-center justify-center rounded-xl border shadow-sm dark:shadow-none', meta().class, props.class)}
+      class={cn('inline-flex h-9 w-9 flex-none items-center justify-center rounded-xl border shadow-sm dark:shadow-none', meta().class, props.class)}
     >
       {meta().icon}
     </span>
   )
 }
-

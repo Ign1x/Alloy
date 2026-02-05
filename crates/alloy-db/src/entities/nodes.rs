@@ -7,6 +7,7 @@ pub struct Model {
     pub id: Uuid,
     pub name: String,
     pub endpoint: String,
+    pub connect_token_hash: Option<String>,
     pub enabled: bool,
     pub last_seen_at: Option<DateTimeWithTimeZone>,
     pub agent_version: Option<String>,

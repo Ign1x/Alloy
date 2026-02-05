@@ -122,8 +122,8 @@ impl AgentTransport {
 
     pub async fn call<Req, Res>(&self, method: &'static str, req: Req) -> Result<Res, tonic::Status>
     where
-        Req: prost::Message,
-        Res: prost::Message + Default,
+        Req: prost::Message + 'static,
+        Res: prost::Message + Default + 'static,
     {
         match self.mode {
             TransportMode::TunnelOnly => self.call_tunnel(method, req).await,
@@ -143,8 +143,8 @@ impl AgentTransport {
         req: Req,
     ) -> Result<Res, tonic::Status>
     where
-        Req: prost::Message,
-        Res: prost::Message + Default,
+        Req: prost::Message + 'static,
+        Res: prost::Message + Default + 'static,
     {
         let Some(conn) = self.pick_tunnel_conn().await else {
             return Err(tonic::Status::unavailable(
@@ -214,8 +214,8 @@ impl AgentTransport {
         req: Req,
     ) -> Result<Res, tonic::Status>
     where
-        Req: prost::Message,
-        Res: prost::Message + Default,
+        Req: prost::Message + 'static,
+        Res: prost::Message + Default + 'static,
     {
         let endpoint = agent_endpoint();
         let channel = tonic::transport::Channel::from_shared(endpoint.clone())
@@ -237,4 +237,3 @@ impl AgentTransport {
         Ok(resp.into_inner())
     }
 }
-

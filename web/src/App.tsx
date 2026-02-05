@@ -18,6 +18,7 @@ import { Link } from './components/ui/Link'
 import { Modal } from './components/ui/Modal'
 import { Skeleton } from './components/ui/Skeleton'
 import { Tabs } from './components/ui/Tabs'
+import { Textarea } from './components/ui/Textarea'
 import { Tooltip } from './components/ui/Tooltip'
 import { FileBrowser } from './components/FileBrowser'
 import { LogViewer } from './components/LogViewer'
@@ -257,10 +258,30 @@ function connectHost() {
   }
 }
 
+function defaultControlWsUrl() {
+  try {
+    const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
+    const host = window.location.host || 'localhost'
+    return `${proto}://${host}/agent/ws`
+  } catch {
+    return 'ws://<panel-host>/agent/ws'
+  }
+}
+
 function shortId(id: string, head = 8, tail = 4): string {
   const s = id.trim()
   if (s.length <= head + tail + 1) return s
   return `${s.slice(0, head)}…${s.slice(-tail)}`
+}
+
+function optionsWithCurrentValue(
+  options: { value: string; label: string; meta?: string }[],
+  currentValue: string,
+): { value: string; label: string; meta?: string }[] {
+  const v = currentValue.trim()
+  if (!v) return options
+  if (options.some((o) => o.value === v)) return options
+  return [{ value: v, label: v, meta: 'custom' }, ...options]
 }
 
 type UiTab = 'instances' | 'files' | 'nodes'
@@ -871,10 +892,7 @@ function App() {
 
     if (base.template_id === 'minecraft:vanilla') {
       const v = (params.version ?? 'latest_release').trim() || 'latest_release'
-      const known = mcVersionOptions().some((o) => o.value === v)
       setEditMcVersion(v)
-      setEditMcVersionAdvanced(!known && v !== 'latest_release' && v !== 'latest_snapshot')
-      setEditMcVersionCustom(!known && v !== 'latest_release' && v !== 'latest_snapshot' ? v : '')
 
       const mem = (params.memory_mb ?? '2048').trim() || '2048'
       const preset = mcMemoryOptions().some((o) => o.value === mem) ? mem : 'custom'
@@ -886,10 +904,7 @@ function App() {
 
     if (base.template_id === 'terraria:vanilla') {
       const v = (params.version ?? '1453').trim() || '1453'
-      const known = ['1453', '1452', '1451', '1450', '1449', '1448', '1447', '1436', '1435', '1434', '1423'].includes(v)
       setEditTrVersion(v)
-      setEditTrVersionAdvanced(!known)
-      setEditTrVersionCustom(!known ? v : '')
 
       setEditTrPort((params.port ?? '').trim())
       setEditTrMaxPlayers((params.max_players ?? '8').trim() || '8')
@@ -992,15 +1007,11 @@ function App() {
   const [editSleepSeconds, setEditSleepSeconds] = createSignal('60')
 
   const [editMcVersion, setEditMcVersion] = createSignal('latest_release')
-  const [editMcVersionAdvanced, setEditMcVersionAdvanced] = createSignal(false)
-  const [editMcVersionCustom, setEditMcVersionCustom] = createSignal('')
   const [editMcMemoryPreset, setEditMcMemoryPreset] = createSignal('2048')
   const [editMcMemory, setEditMcMemory] = createSignal('2048')
   const [editMcPort, setEditMcPort] = createSignal('')
 
   const [editTrVersion, setEditTrVersion] = createSignal('1453')
-  const [editTrVersionAdvanced, setEditTrVersionAdvanced] = createSignal(false)
-  const [editTrVersionCustom, setEditTrVersionCustom] = createSignal('')
   const [editTrPort, setEditTrPort] = createSignal('')
   const [editTrMaxPlayers, setEditTrMaxPlayers] = createSignal('8')
   const [editTrWorldName, setEditTrWorldName] = createSignal('world')
@@ -1012,15 +1023,9 @@ function App() {
 
   const editTemplateId = createMemo(() => editBase()?.template_id ?? null)
 
-  const editMcEffectiveVersion = createMemo(() => {
-    if (!editMcVersionAdvanced()) return editMcVersion()
-    return editMcVersionCustom().trim() || editMcVersion()
-  })
+  const editMcEffectiveVersion = createMemo(() => editMcVersion())
 
-  const editTrEffectiveVersion = createMemo(() => {
-    if (!editTrVersionAdvanced()) return editTrVersion()
-    return editTrVersionCustom().trim() || editTrVersion()
-  })
+  const editTrEffectiveVersion = createMemo(() => editTrVersion())
 
   const editMcEffectiveMemory = createMemo(() => {
     if (editMcMemoryPreset() === 'custom') return editMcMemory()
@@ -1101,15 +1106,11 @@ function App() {
 
   const [mcEula, setMcEula] = createSignal(false)
   const [mcVersion, setMcVersion] = createSignal('latest_release')
-  const [mcVersionAdvanced, setMcVersionAdvanced] = createSignal(false)
-  const [mcVersionCustom, setMcVersionCustom] = createSignal('')
   const [mcMemoryPreset, setMcMemoryPreset] = createSignal('2048')
   const [mcMemory, setMcMemory] = createSignal('2048')
   const [mcPort, setMcPort] = createSignal('')
 
   const [trVersion, setTrVersion] = createSignal('1453')
-  const [trVersionAdvanced, setTrVersionAdvanced] = createSignal(false)
-  const [trVersionCustom, setTrVersionCustom] = createSignal('')
   const [trPort, setTrPort] = createSignal('')
   const [trMaxPlayers, setTrMaxPlayers] = createSignal('8')
   const [trWorldName, setTrWorldName] = createSignal('world')
@@ -1147,8 +1148,8 @@ function App() {
     }
 
     if (template_id === 'minecraft:vanilla') {
-      const v = mcVersionAdvanced() ? mcVersionCustom().trim() || mcVersion() : mcVersion()
-      rows.push({ label: 'Version', value: v || 'latest_release' })
+      const v = mcVersion().trim() || 'latest_release'
+      rows.push({ label: 'Version', value: v })
       rows.push({ label: 'Memory (MB)', value: (mcMemory().trim() || mcMemoryPreset().trim() || '2048') })
 
       const portRaw = mcPort().trim()
@@ -1163,8 +1164,8 @@ function App() {
     }
 
     if (template_id === 'terraria:vanilla') {
-      const v = trVersionAdvanced() ? trVersionCustom().trim() || trVersion() : trVersion()
-      rows.push({ label: 'Version', value: v || '1453' })
+      const v = trVersion().trim() || '1453'
+      rows.push({ label: 'Version', value: v })
 
       const portRaw = trPort().trim()
       const portLabel = !portRaw || portRaw === '0' ? 'auto' : portRaw
@@ -1219,7 +1220,7 @@ function App() {
             : ['display_name']
 
     const needsAdvanced =
-      !createAdvanced() && (Boolean(errors.port) || Boolean(errors.world_size) || Boolean(errors.password))
+      !createAdvanced() && (Boolean(errors.port) || Boolean(errors.world_size) || Boolean(errors.password) || Boolean(errors.version))
     if (needsAdvanced) setCreateAdvanced(true)
 
     const run = () => {
@@ -1232,7 +1233,7 @@ function App() {
         if (template_id === 'minecraft:vanilla') {
           if (key === 'accept_eula' && focusEl(createMcEulaEl)) return
           if (key === 'port' && focusEl(createMcPortEl)) return
-          if (key === 'version' && mcVersionAdvanced() && focusEl(createMcVersionCustomEl)) return
+          if (key === 'version' && focusEl(createMcVersionCustomEl)) return
           if (key === 'memory_mb' && mcMemoryPreset() === 'custom' && focusEl(createMcMemoryCustomEl)) return
         }
 
@@ -1242,7 +1243,7 @@ function App() {
           if (key === 'password' && focusEl(createTrPasswordEl)) return
           if (key === 'world_name' && focusEl(createTrWorldNameEl)) return
           if (key === 'max_players' && focusEl(createTrMaxPlayersEl)) return
-          if (key === 'version' && trVersionAdvanced() && focusEl(createTrVersionCustomEl)) return
+          if (key === 'version' && focusEl(createTrVersionCustomEl)) return
         }
       }
     }
@@ -1265,7 +1266,7 @@ function App() {
             : ['display_name']
 
     const needsAdvanced =
-      !editAdvanced() && (Boolean(errors.port) || Boolean(errors.world_size) || Boolean(errors.password))
+      !editAdvanced() && (Boolean(errors.port) || Boolean(errors.world_size) || Boolean(errors.password) || Boolean(errors.version))
     if (needsAdvanced) setEditAdvanced(true)
 
     const run = () => {
@@ -1277,7 +1278,7 @@ function App() {
 
         if (template_id === 'minecraft:vanilla') {
           if (key === 'port' && focusEl(editMcPortEl)) return
-          if (key === 'version' && editMcVersionAdvanced() && focusEl(editMcVersionCustomEl)) return
+          if (key === 'version' && focusEl(editMcVersionCustomEl)) return
           if (key === 'memory_mb' && editMcMemoryPreset() === 'custom' && focusEl(editMcMemoryCustomEl)) return
         }
 
@@ -1287,7 +1288,7 @@ function App() {
           if (key === 'world_name' && focusEl(editTrWorldNameEl)) return
           if (key === 'world_size' && focusEl(editTrWorldSizeEl)) return
           if (key === 'password' && focusEl(editTrPasswordEl)) return
-          if (key === 'version' && editTrVersionAdvanced() && focusEl(editTrVersionCustomEl)) return
+          if (key === 'version' && focusEl(editTrVersionCustomEl)) return
         }
       }
     }
@@ -1441,6 +1442,74 @@ function App() {
 
   const setNodeEnabled = rspc.createMutation(() => 'node.setEnabled')
   const [nodeEnabledOverride, setNodeEnabledOverride] = createSignal<Record<string, boolean>>({})
+
+  type NodeDto = {
+    id: string
+    name: string
+    endpoint: string
+    enabled: boolean
+    last_seen_at: string | null
+    agent_version: string | null
+    last_error: string | null
+    has_connect_token?: boolean
+  }
+  type NodeCreateResult = { node: NodeDto; connect_token: string }
+
+  const createNode = rspc.createMutation(() => 'node.create')
+  const [showCreateNodeModal, setShowCreateNodeModal] = createSignal(false)
+  const [createNodeName, setCreateNodeName] = createSignal('')
+  const [createNodeControlWsUrl, setCreateNodeControlWsUrl] = createSignal(defaultControlWsUrl())
+  const [createNodeFieldErrors, setCreateNodeFieldErrors] = createSignal<Record<string, string>>({})
+  const [createNodeFormError, setCreateNodeFormError] = createSignal<string | null>(null)
+  const [createNodeResult, setCreateNodeResult] = createSignal<NodeCreateResult | null>(null)
+  let createNodeNameEl: HTMLInputElement | undefined
+
+  const createNodeComposeYaml = createMemo(() => {
+    const r = createNodeResult()
+    if (!r) return ''
+    const url = createNodeControlWsUrl().trim() || defaultControlWsUrl()
+    const name = r.node.name
+    const token = r.connect_token
+
+    return [
+      'services:',
+      '  alloy-agent:',
+      '    build:',
+      '      context: .',
+      '      dockerfile: deploy/agent.Dockerfile',
+      '    network_mode: \"host\"',
+      '    restart: unless-stopped',
+      '    environment:',
+      '      - RUST_LOG=info',
+      '      - ALLOY_DATA_ROOT=/data',
+      '      - ALLOY_FS_WRITE_ENABLED=true',
+      `      - ALLOY_CONTROL_WS_URL=${url}`,
+      `      - ALLOY_NODE_NAME=${name}`,
+      `      - ALLOY_NODE_TOKEN=${token}`,
+      '    volumes:',
+      '      - alloy-agent-data:/data',
+      'volumes:',
+      '  alloy-agent-data:',
+      '',
+    ].join('\n')
+  })
+
+  function openCreateNode() {
+    setCreateNodeName('')
+    setCreateNodeControlWsUrl(defaultControlWsUrl())
+    setCreateNodeFieldErrors({})
+    setCreateNodeFormError(null)
+    setCreateNodeResult(null)
+    setShowCreateNodeModal(true)
+    requestAnimationFrame(() => createNodeNameEl?.focus())
+  }
+
+  function closeCreateNode() {
+    setShowCreateNodeModal(false)
+    setCreateNodeFieldErrors({})
+    setCreateNodeFormError(null)
+    setCreateNodeResult(null)
+  }
 
   createEffect(() => {
     if (tab() !== 'nodes') return
@@ -2118,79 +2187,32 @@ function App() {
 		                              label={<LabelTip label="Version" content="Use Latest release unless you know you need a specific version." />}
 		                              error={createFieldErrors().version}
 		                            >
-	                              <Show
-	                                when={mcVersionAdvanced()}
-	                                fallback={
-		                                  <Dropdown
-		                                    label=""
-		                                    value={mcVersion()}
-		                                    options={[
-		                                      ...mcVersionOptions(),
-		                                      { value: '__custom__', label: 'Custom…' },
-		                                    ]}
-		                                    onChange={(v) => {
-		                                      if (v === '__custom__') {
-		                                        if (!mcVersionCustom().trim()) setMcVersionCustom(mcVersion())
-	                                        setMcVersionAdvanced(true)
-	                                        requestAnimationFrame(() => createMcVersionCustomEl?.focus())
-	                                        return
-	                                      }
-	                                      setMcVersion(v)
-	                                    }}
-	                                  />
-	                                }
-	                              >
-		                                <div class="space-y-2">
-		                                  <Input
-		                                    ref={(el) => {
-		                                      createMcVersionCustomEl = el
-	                                    }}
-		                                    value={mcVersionCustom()}
-		                                    onInput={(e) => setMcVersionCustom(e.currentTarget.value)}
-		                                    onBlur={() => {
-		                                      const candidate = mcVersionCustom().trim()
-		                                      if (!candidate) {
-		                                        setMcVersionCustom('')
-		                                        setMcVersionAdvanced(false)
-		                                        return
-		                                      }
-		                                      if (mcVersionOptions().some((o) => o.value === candidate)) {
-		                                        setMcVersion(candidate)
-		                                        setMcVersionCustom('')
-		                                        setMcVersionAdvanced(false)
-		                                      }
-		                                    }}
-		                                    onKeyDown={(e) => {
-		                                      if (e.key === 'Escape') {
-		                                        e.preventDefault()
-		                                        setMcVersionCustom('')
-		                                        setMcVersionAdvanced(false)
-		                                        return
-		                                      }
-		                                      if (e.key !== 'Enter') return
-		                                      e.preventDefault()
-		                                      const candidate = mcVersionCustom().trim()
-		                                      if (!candidate) {
-		                                        setMcVersionCustom('')
-		                                        setMcVersionAdvanced(false)
-		                                        return
-		                                      }
-		                                      if (mcVersionOptions().some((o) => o.value === candidate)) {
-		                                        setMcVersion(candidate)
-		                                        setMcVersionCustom('')
-		                                        setMcVersionAdvanced(false)
-		                                      }
-		                                    }}
-		                                    placeholder="e.g. 1.20.4"
-		                                    list="mc-version-suggest"
-		                                    invalid={Boolean(createFieldErrors().version)}
-		                                    spellcheck={false}
-		                                  />
-		                                  <datalist id="mc-version-suggest">
-		                                    <For each={(mcVersionOptions() ?? []).map((o) => o.value)}>{(v) => <option value={v} />}</For>
-		                                  </datalist>
-		                                </div>
-		                              </Show>
+                              <div class="space-y-2">
+                                <Dropdown
+                                  label=""
+                                  value={mcVersion()}
+                                  options={optionsWithCurrentValue(mcVersionOptions(), mcVersion())}
+                                  onChange={setMcVersion}
+                                />
+                                <Show when={createAdvanced()}>
+                                  <div class="space-y-2">
+                                    <Input
+                                      ref={(el) => {
+                                        createMcVersionCustomEl = el
+                                      }}
+                                      value={mcVersion()}
+                                      onInput={(e) => setMcVersion(e.currentTarget.value)}
+                                      placeholder="e.g. 1.20.4"
+                                      list="mc-version-suggest"
+                                      invalid={Boolean(createFieldErrors().version)}
+                                      spellcheck={false}
+                                    />
+                                    <datalist id="mc-version-suggest">
+                                      <For each={(mcVersionOptions() ?? []).map((o) => o.value)}>{(v) => <option value={v} />}</For>
+                                    </datalist>
+                                  </div>
+                                </Show>
+                              </div>
 	                            </Field>
 
 	                            <Field
@@ -2278,76 +2300,32 @@ function App() {
 		                              }
 		                              error={createFieldErrors().version}
 		                            >
-	                              <Show
-	                                when={trVersionAdvanced()}
-	                                fallback={
-		                                  <Dropdown
-		                                    label=""
-		                                    value={trVersion()}
-		                                    options={[...trVersionOptions(), { value: '__custom__', label: 'Custom…' }]}
-		                                    onChange={(v) => {
-		                                      if (v === '__custom__') {
-		                                        if (!trVersionCustom().trim()) setTrVersionCustom(trVersion())
-	                                        setTrVersionAdvanced(true)
-	                                        requestAnimationFrame(() => createTrVersionCustomEl?.focus())
-	                                        return
-	                                      }
-	                                      setTrVersion(v)
-	                                    }}
-	                                  />
-	                                }
-	                              >
-		                                <div class="space-y-2">
-		                                  <Input
-		                                    ref={(el) => {
-		                                      createTrVersionCustomEl = el
-	                                    }}
-		                                    value={trVersionCustom()}
-		                                    onInput={(e) => setTrVersionCustom(e.currentTarget.value)}
-		                                    onBlur={() => {
-		                                      const candidate = trVersionCustom().trim()
-		                                      if (!candidate) {
-		                                        setTrVersionCustom('')
-		                                        setTrVersionAdvanced(false)
-		                                        return
-		                                      }
-		                                      if (trVersionOptions().some((o) => o.value === candidate)) {
-		                                        setTrVersion(candidate)
-		                                        setTrVersionCustom('')
-		                                        setTrVersionAdvanced(false)
-		                                      }
-		                                    }}
-		                                    onKeyDown={(e) => {
-		                                      if (e.key === 'Escape') {
-		                                        e.preventDefault()
-		                                        setTrVersionCustom('')
-		                                        setTrVersionAdvanced(false)
-		                                        return
-		                                      }
-		                                      if (e.key !== 'Enter') return
-		                                      e.preventDefault()
-		                                      const candidate = trVersionCustom().trim()
-		                                      if (!candidate) {
-		                                        setTrVersionCustom('')
-		                                        setTrVersionAdvanced(false)
-		                                        return
-		                                      }
-		                                      if (trVersionOptions().some((o) => o.value === candidate)) {
-		                                        setTrVersion(candidate)
-		                                        setTrVersionCustom('')
-		                                        setTrVersionAdvanced(false)
-		                                      }
-		                                    }}
-		                                    placeholder="e.g. 1453"
-		                                    list="tr-version-suggest"
-		                                    invalid={Boolean(createFieldErrors().version)}
-		                                    spellcheck={false}
-		                                  />
-		                                  <datalist id="tr-version-suggest">
-		                                    <For each={(trVersionOptions() ?? []).map((o) => o.value)}>{(v) => <option value={v} />}</For>
-		                                  </datalist>
-		                                </div>
-		                              </Show>
+                              <div class="space-y-2">
+                                <Dropdown
+                                  label=""
+                                  value={trVersion()}
+                                  options={optionsWithCurrentValue(trVersionOptions(), trVersion())}
+                                  onChange={setTrVersion}
+                                />
+                                <Show when={createAdvanced()}>
+                                  <div class="space-y-2">
+                                    <Input
+                                      ref={(el) => {
+                                        createTrVersionCustomEl = el
+                                      }}
+                                      value={trVersion()}
+                                      onInput={(e) => setTrVersion(e.currentTarget.value)}
+                                      placeholder="e.g. 1453"
+                                      list="tr-version-suggest"
+                                      invalid={Boolean(createFieldErrors().version)}
+                                      spellcheck={false}
+                                    />
+                                    <datalist id="tr-version-suggest">
+                                      <For each={(trVersionOptions() ?? []).map((o) => o.value)}>{(v) => <option value={v} />}</For>
+                                    </datalist>
+                                  </div>
+                                </Show>
+                              </div>
 		                            </Field>
 
 		                            <Field
@@ -2565,12 +2543,12 @@ function App() {
                             } else if (template_id === 'minecraft:vanilla') {
                               if (!mcEula()) localErrors.accept_eula = 'You must accept the EULA to start a Minecraft server.'
                               params.accept_eula = 'true'
-                              const v = mcVersionAdvanced() ? mcVersionCustom().trim() : mcVersion()
+                              const v = mcVersion().trim()
                               params.version = v || 'latest_release'
                               params.memory_mb = mcMemory() || '2048'
                               if (mcPort().trim()) params.port = mcPort().trim()
                             } else if (template_id === 'terraria:vanilla') {
-                              const v = trVersionAdvanced() ? trVersionCustom().trim() : trVersion()
+                              const v = trVersion().trim()
                               params.version = v || '1453'
                               if (trPort().trim()) params.port = trPort().trim()
                               params.max_players = trMaxPlayers().trim() || '8'
@@ -2630,11 +2608,11 @@ function App() {
                             const template_id = selectedTemplate()
                             const params: Record<string, string> = {}
                             if (template_id === 'minecraft:vanilla') {
-                              const v = mcVersionAdvanced() ? mcVersionCustom().trim() : mcVersion()
+                              const v = mcVersion().trim()
                               params.version = v || 'latest_release'
                             }
                             if (template_id === 'terraria:vanilla') {
-                              const v = trVersionAdvanced() ? trVersionCustom().trim() : trVersion()
+                              const v = trVersion().trim()
                               params.version = v || '1453'
                             }
                             try {
@@ -3202,7 +3180,7 @@ function App() {
                                 </div>
 
 	                                <div class="flex items-center gap-2">
-	                                  <div class="flex items-center gap-1.5 max-w-0 overflow-hidden opacity-0 transition-[max-width,opacity] duration-150 invisible group-hover:visible group-hover:max-w-[480px] group-hover:opacity-100 group-focus-within:visible group-focus-within:max-w-[480px] group-focus-within:opacity-100">
+	                                  <div class="flex items-center gap-1.5 max-w-0 overflow-hidden opacity-0 transition-[max-width,opacity] duration-150 invisible group-hover:visible group-hover:max-w-[480px] group-hover:opacity-100 group-hover:overflow-visible group-focus-within:visible group-focus-within:max-w-[480px] group-focus-within:opacity-100 group-focus-within:overflow-visible">
 	                                  <IconButton
 	                                    type="button"
 	                                    label="Edit"
@@ -3314,7 +3292,18 @@ function App() {
                   tabLabel="Nodes"
                   left={
                     <div class="space-y-3">
-                      <div class="flex items-center justify-end">
+                      <div class="flex items-center justify-end gap-2">
+                        <Show when={me()?.is_admin}>
+                          <IconButton type="button" label="Add node" variant="secondary" onClick={() => openCreateNode()}>
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
+                              <path
+                                fill-rule="evenodd"
+                                d="M10 3.25a.75.75 0 01.75.75v5.25H16a.75.75 0 010 1.5h-5.25V16a.75.75 0 01-1.5 0v-5.25H4a.75.75 0 010-1.5h5.25V4a.75.75 0 01.75-.75z"
+                                clip-rule="evenodd"
+                              />
+                            </svg>
+                          </IconButton>
+                        </Show>
                         <IconButton type="button" label="Refresh" variant="secondary" disabled={nodes.isPending} onClick={() => void invalidateNodes()}>
                           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
                             <path
@@ -3593,6 +3582,160 @@ function App() {
         </Modal>
 
         <Modal
+          open={showCreateNodeModal()}
+          onClose={() => closeCreateNode()}
+          title="Add node"
+          description="Creates a one-time token and a docker-compose snippet for an agent to connect back."
+          size="lg"
+          footer={
+            <Show
+              when={createNodeResult()}
+              fallback={
+                <div class="flex gap-3">
+                  <Button variant="secondary" class="flex-1" onClick={() => closeCreateNode()}>
+                    Cancel
+                  </Button>
+                  <Button
+                    variant="primary"
+                    class="flex-1"
+                    type="submit"
+                    form="alloy-create-node"
+                    loading={createNode.isPending}
+                    disabled={!createNodeName().trim()}
+                  >
+                    Create
+                  </Button>
+                </div>
+              }
+            >
+              <div class="flex gap-3">
+                <Button variant="secondary" class="flex-1" onClick={() => closeCreateNode()}>
+                  Close
+                </Button>
+              </div>
+            </Show>
+          }
+        >
+          <Show
+            when={createNodeResult()}
+            fallback={
+              <form
+                id="alloy-create-node"
+                class="grid gap-4"
+                onSubmit={async (e) => {
+                  e.preventDefault()
+                  setCreateNodeFieldErrors({})
+                  setCreateNodeFormError(null)
+                  try {
+                    const out = await createNode.mutateAsync({ name: createNodeName().trim() })
+                    setCreateNodeResult(out as any)
+                    pushToast('success', 'Node created', (out as any).node?.name ?? '')
+                    await invalidateNodes()
+                    if ((out as any).node?.id) setSelectedNodeId((out as any).node.id)
+                  } catch (err) {
+                    if (isAlloyApiError(err)) {
+                      setCreateNodeFieldErrors(err.data.field_errors ?? {})
+                      setCreateNodeFormError(err.data.message)
+                      return
+                    }
+                    setCreateNodeFormError(err instanceof Error ? err.message : 'create failed')
+                  }
+                }}
+              >
+                <Field label="Name" required error={createNodeFieldErrors().name}>
+                  <Input
+                    ref={(el) => {
+                      createNodeNameEl = el
+                    }}
+                    value={createNodeName()}
+                    onInput={(e) => setCreateNodeName(e.currentTarget.value)}
+                    placeholder="e.g. node-1"
+                    spellcheck={false}
+                    invalid={Boolean(createNodeFieldErrors().name)}
+                  />
+                </Field>
+
+                <Field label={<LabelTip label="Control WS URL" content="The agent connects to this websocket endpoint (usually your panel URL)." />}>
+                  <Input
+                    value={createNodeControlWsUrl()}
+                    onInput={(e) => setCreateNodeControlWsUrl(e.currentTarget.value)}
+                    placeholder={defaultControlWsUrl()}
+                    spellcheck={false}
+                  />
+                </Field>
+
+                <Show when={createNodeFormError()}>
+                  {(msg) => (
+                    <div class="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-[12px] text-rose-800 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-200">
+                      {msg()}
+                    </div>
+                  )}
+                </Show>
+              </form>
+            }
+          >
+            {(r) => (
+              <div class="space-y-4">
+                <div class="rounded-2xl border border-slate-200 bg-white/60 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
+                  <div class="flex items-center justify-between gap-3">
+                    <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Token</div>
+                    <IconButton
+                      type="button"
+                      label="Copy token"
+                      variant="secondary"
+                      onClick={() => {
+                        void safeCopy(r().connect_token)
+                        pushToast('success', 'Copied', 'Token copied.')
+                      }}
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
+                        <path d="M5.75 2A2.75 2.75 0 003 4.75v9.5A2.75 2.75 0 005.75 17h1.5a.75.75 0 000-1.5h-1.5c-.69 0-1.25-.56-1.25-1.25v-9.5c0-.69.56-1.25 1.25-1.25h5.5c.69 0 1.25.56 1.25 1.25v1a.75.75 0 001.5 0v-1A2.75 2.75 0 0011.25 2h-5.5z" />
+                        <path d="M8.75 6A2.75 2.75 0 006 8.75v6.5A2.75 2.75 0 008.75 18h5.5A2.75 2.75 0 0017 15.25v-6.5A2.75 2.75 0 0014.25 6h-5.5z" />
+                      </svg>
+                    </IconButton>
+                  </div>
+                  <Input value={r().connect_token} readOnly class="mt-2 font-mono text-[11px]" />
+                  <div class="mt-2 text-[11px] text-slate-500 dark:text-slate-400">Save it now — it’s only shown once.</div>
+                </div>
+
+                <div class="rounded-2xl border border-slate-200 bg-white/60 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
+                  <div class="flex items-center justify-between gap-3">
+                    <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">docker-compose.yml</div>
+                    <IconButton
+                      type="button"
+                      label="Copy compose"
+                      variant="secondary"
+                      onClick={() => {
+                        void safeCopy(createNodeComposeYaml())
+                        pushToast('success', 'Copied', 'Compose copied.')
+                      }}
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
+                        <path d="M5.75 2A2.75 2.75 0 003 4.75v9.5A2.75 2.75 0 005.75 17h1.5a.75.75 0 000-1.5h-1.5c-.69 0-1.25-.56-1.25-1.25v-9.5c0-.69.56-1.25 1.25-1.25h5.5c.69 0 1.25.56 1.25 1.25v1a.75.75 0 001.5 0v-1A2.75 2.75 0 0011.25 2h-5.5z" />
+                        <path d="M8.75 6A2.75 2.75 0 006 8.75v6.5A2.75 2.75 0 008.75 18h5.5A2.75 2.75 0 0017 15.25v-6.5A2.75 2.75 0 0014.25 6h-5.5z" />
+                      </svg>
+                    </IconButton>
+                  </div>
+
+                  <div class="mt-3">
+                    <Field label={<LabelTip label="Control WS URL" content="If your agent can’t reach the panel, update this URL and copy again." />}>
+                      <Input
+                        value={createNodeControlWsUrl()}
+                        onInput={(e) => setCreateNodeControlWsUrl(e.currentTarget.value)}
+                        placeholder={defaultControlWsUrl()}
+                        spellcheck={false}
+                      />
+                    </Field>
+                  </div>
+
+                  <Textarea value={createNodeComposeYaml()} readOnly class="mt-3 font-mono text-[11px]" />
+                </div>
+              </div>
+            )}
+          </Show>
+        </Modal>
+
+        <Modal
           open={confirmDeleteInstanceId() != null}
           onClose={() => setConfirmDeleteInstanceId(null)}
           title="Delete instance"
@@ -3805,76 +3948,32 @@ function App() {
 		                          }
 		                          error={editFieldErrors().version}
 		                        >
-		                          <Show
-		                            when={editMcVersionAdvanced()}
-		                            fallback={
-		                              <Dropdown
-		                                label=""
-		                                value={editMcVersion()}
-		                                options={[...mcVersionOptions(), { value: '__custom__', label: 'Custom…' }]}
-		                                onChange={(v) => {
-		                                  if (v === '__custom__') {
-		                                    if (!editMcVersionCustom().trim()) setEditMcVersionCustom(editMcVersion())
-		                                    setEditMcVersionAdvanced(true)
-	                                    requestAnimationFrame(() => editMcVersionCustomEl?.focus())
-	                                    return
-	                                  }
-	                                  setEditMcVersion(v)
-	                                }}
-	                              />
-	                            }
-	                          >
-		                            <div class="space-y-2">
-		                              <Input
-		                                ref={(el) => {
-		                                  editMcVersionCustomEl = el
-		                                }}
-		                                value={editMcVersionCustom()}
-		                                onInput={(e) => setEditMcVersionCustom(e.currentTarget.value)}
-		                                onBlur={() => {
-		                                  const candidate = editMcVersionCustom().trim()
-		                                  if (!candidate) {
-		                                    setEditMcVersionCustom('')
-		                                    setEditMcVersionAdvanced(false)
-		                                    return
-		                                  }
-		                                  if (mcVersionOptions().some((o) => o.value === candidate)) {
-		                                    setEditMcVersion(candidate)
-		                                    setEditMcVersionCustom('')
-		                                    setEditMcVersionAdvanced(false)
-		                                  }
-		                                }}
-		                                onKeyDown={(e) => {
-		                                  if (e.key === 'Escape') {
-		                                    e.preventDefault()
-		                                    setEditMcVersionCustom('')
-		                                    setEditMcVersionAdvanced(false)
-		                                    return
-		                                  }
-		                                  if (e.key !== 'Enter') return
-		                                  e.preventDefault()
-		                                  const candidate = editMcVersionCustom().trim()
-		                                  if (!candidate) {
-		                                    setEditMcVersionCustom('')
-		                                    setEditMcVersionAdvanced(false)
-		                                    return
-		                                  }
-		                                  if (mcVersionOptions().some((o) => o.value === candidate)) {
-		                                    setEditMcVersion(candidate)
-		                                    setEditMcVersionCustom('')
-		                                    setEditMcVersionAdvanced(false)
-		                                  }
-		                                }}
-		                                placeholder="e.g. 1.20.4"
-		                                list="mc-version-suggest-edit"
-		                                invalid={Boolean(editFieldErrors().version)}
-		                                spellcheck={false}
-		                              />
-		                              <datalist id="mc-version-suggest-edit">
-		                                <For each={(mcVersionOptions() ?? []).map((o) => o.value)}>{(v) => <option value={v} />}</For>
-		                              </datalist>
-		                            </div>
-		                          </Show>
+                              <div class="space-y-2">
+                                <Dropdown
+                                  label=""
+                                  value={editMcVersion()}
+                                  options={optionsWithCurrentValue(mcVersionOptions(), editMcVersion())}
+                                  onChange={setEditMcVersion}
+                                />
+                                <Show when={editAdvanced()}>
+                                  <div class="space-y-2">
+                                    <Input
+                                      ref={(el) => {
+                                        editMcVersionCustomEl = el
+                                      }}
+                                      value={editMcVersion()}
+                                      onInput={(e) => setEditMcVersion(e.currentTarget.value)}
+                                      placeholder="e.g. 1.20.4"
+                                      list="mc-version-suggest-edit"
+                                      invalid={Boolean(editFieldErrors().version)}
+                                      spellcheck={false}
+                                    />
+                                    <datalist id="mc-version-suggest-edit">
+                                      <For each={(mcVersionOptions() ?? []).map((o) => o.value)}>{(v) => <option value={v} />}</For>
+                                    </datalist>
+                                  </div>
+                                </Show>
+                              </div>
 	                        </Field>
 
 	                        <Field
@@ -3963,76 +4062,32 @@ function App() {
 		                          }
 		                          error={editFieldErrors().version}
 		                        >
-	                          <Show
-	                            when={editTrVersionAdvanced()}
-	                            fallback={
-		                              <Dropdown
-		                                label=""
-		                                value={editTrVersion()}
-		                                options={[...trVersionOptions(), { value: '__custom__', label: 'Custom…' }]}
-		                                onChange={(v) => {
-		                                  if (v === '__custom__') {
-		                                    if (!editTrVersionCustom().trim()) setEditTrVersionCustom(editTrVersion())
-	                                    setEditTrVersionAdvanced(true)
-	                                    requestAnimationFrame(() => editTrVersionCustomEl?.focus())
-	                                    return
-	                                  }
-	                                  setEditTrVersion(v)
-	                                }}
-	                              />
-	                            }
-	                          >
-		                            <div class="space-y-2">
-		                              <Input
-		                                ref={(el) => {
-		                                  editTrVersionCustomEl = el
-		                                }}
-		                                value={editTrVersionCustom()}
-		                                onInput={(e) => setEditTrVersionCustom(e.currentTarget.value)}
-		                                onBlur={() => {
-		                                  const candidate = editTrVersionCustom().trim()
-		                                  if (!candidate) {
-		                                    setEditTrVersionCustom('')
-		                                    setEditTrVersionAdvanced(false)
-		                                    return
-		                                  }
-		                                  if (trVersionOptions().some((o) => o.value === candidate)) {
-		                                    setEditTrVersion(candidate)
-		                                    setEditTrVersionCustom('')
-		                                    setEditTrVersionAdvanced(false)
-		                                  }
-		                                }}
-		                                onKeyDown={(e) => {
-		                                  if (e.key === 'Escape') {
-		                                    e.preventDefault()
-		                                    setEditTrVersionCustom('')
-		                                    setEditTrVersionAdvanced(false)
-		                                    return
-		                                  }
-		                                  if (e.key !== 'Enter') return
-		                                  e.preventDefault()
-		                                  const candidate = editTrVersionCustom().trim()
-		                                  if (!candidate) {
-		                                    setEditTrVersionCustom('')
-		                                    setEditTrVersionAdvanced(false)
-		                                    return
-		                                  }
-		                                  if (trVersionOptions().some((o) => o.value === candidate)) {
-		                                    setEditTrVersion(candidate)
-		                                    setEditTrVersionCustom('')
-		                                    setEditTrVersionAdvanced(false)
-		                                  }
-		                                }}
-		                                placeholder="1453"
-		                                list="tr-version-suggest-edit"
-		                                invalid={Boolean(editFieldErrors().version)}
-		                                spellcheck={false}
-		                              />
-		                              <datalist id="tr-version-suggest-edit">
-		                                <For each={(trVersionOptions() ?? []).map((o) => o.value)}>{(v) => <option value={v} />}</For>
-		                              </datalist>
-		                            </div>
-		                          </Show>
+                            <div class="space-y-2">
+                              <Dropdown
+                                label=""
+                                value={editTrVersion()}
+                                options={optionsWithCurrentValue(trVersionOptions(), editTrVersion())}
+                                onChange={setEditTrVersion}
+                              />
+                              <Show when={editAdvanced()}>
+                                <div class="space-y-2">
+                                  <Input
+                                    ref={(el) => {
+                                      editTrVersionCustomEl = el
+                                    }}
+                                    value={editTrVersion()}
+                                    onInput={(e) => setEditTrVersion(e.currentTarget.value)}
+                                    placeholder="1453"
+                                    list="tr-version-suggest-edit"
+                                    invalid={Boolean(editFieldErrors().version)}
+                                    spellcheck={false}
+                                  />
+                                  <datalist id="tr-version-suggest-edit">
+                                    <For each={(trVersionOptions() ?? []).map((o) => o.value)}>{(v) => <option value={v} />}</For>
+                                  </datalist>
+                                </div>
+                              </Show>
+                            </div>
 	                        </Field>
 
 	                        <Field
