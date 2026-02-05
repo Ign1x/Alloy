@@ -1,7 +1,11 @@
 # Deployment (Docker)
 
 This directory contains the Dockerized deployment for the current vertical slice
-(web -> rspc -> alloy-control -> gRPC -> alloy-agent).
+(web -> rspc -> alloy-control -> alloy-agent).
+
+Alloy supports two agent transport modes:
+- **Direct gRPC**: control dials `ALLOY_AGENT_ENDPOINT` (works when the agent is reachable inbound).
+- **Reverse tunnel (recommended)**: agent dials back to control over WebSocket (`ALLOY_CONTROL_WS_URL`), so it works behind NAT / without a public IP.
 
 ## Services
 - `alloy-agent` (gRPC): container port `50051`
@@ -142,7 +146,16 @@ curl -fsS -X POST -H 'content-type: application/json' \
 
 ## Configuration
 
-`alloy-control` uses `ALLOY_AGENT_ENDPOINT` to find the agent gRPC endpoint.
+`alloy-control` uses `ALLOY_AGENT_ENDPOINT` for **direct gRPC** and `ALLOY_AGENT_TRANSPORT` to pick the transport:
+
+- `ALLOY_AGENT_TRANSPORT=auto` (default): use reverse tunnel if connected, otherwise use direct gRPC.
+- `ALLOY_AGENT_TRANSPORT=tunnel`: only use reverse tunnel.
+- `ALLOY_AGENT_TRANSPORT=direct`: only use direct gRPC.
 
 - Local dev default: `http://127.0.0.1:50051`
 - docker-compose (host-networked agent): `http://host.docker.internal:50051` (via `extra_hosts: host-gateway`)
+
+To enable **reverse tunnel** (agent -> control), set on `alloy-agent`:
+- `ALLOY_CONTROL_WS_URL=http://<control-host>:8080/agent/ws`
+- `ALLOY_NODE_NAME=<node-name>` (optional; defaults to `$ALLOY_NODE_NAME` or `$HOSTNAME`)
+- `ALLOY_NODE_TOKEN=<token>` (optional; required if the node is created via the Nodes UI)

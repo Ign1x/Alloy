@@ -127,17 +127,20 @@ async fn cleanup_orphan_processes() {
 #[cfg(not(target_os = "linux"))]
 async fn cleanup_orphan_processes() {}
 
+mod control_tunnel;
+mod dst;
+mod dst_download;
 mod error_payload;
-mod health_service;
 mod filesystem_service;
+mod health_service;
 mod instance_service;
 mod logs_service;
 mod minecraft;
 mod minecraft_download;
+mod minecraft_modrinth;
 mod port_alloc;
 mod process_manager;
 mod process_service;
-mod control_tunnel;
 mod templates;
 mod terraria;
 mod terraria_download;

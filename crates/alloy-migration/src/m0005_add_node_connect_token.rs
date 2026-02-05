@@ -54,4 +54,3 @@ enum Nodes {
     Table,
     ConnectTokenHash,
 }
-

@@ -107,7 +107,10 @@ fn hash_token(raw: &str) -> String {
 }
 
 fn bearer_token(headers: &HeaderMap) -> Option<String> {
-    let raw = headers.get(axum::http::header::AUTHORIZATION)?.to_str().ok()?;
+    let raw = headers
+        .get(axum::http::header::AUTHORIZATION)?
+        .to_str()
+        .ok()?;
     let raw = raw.trim();
     let rest = raw.strip_prefix("Bearer ")?;
     let token = rest.trim();
@@ -117,31 +120,29 @@ fn bearer_token(headers: &HeaderMap) -> Option<String> {
     Some(token.to_string())
 }
 
+#[derive(Debug, Clone)]
+enum WsAuth {
+    /// Authorized by a global shared token (ALLOY_AGENT_CONNECT_TOKEN).
+    AnyToken,
+    /// Authorized by a per-node token; node name must match hello.node.
+    NodeToken { node: String },
+    /// No token provided; only nodes without a connect token may connect.
+    NoToken,
+}
+
 async fn authorize(
     db: &alloy_db::sea_orm::DatabaseConnection,
     headers: &HeaderMap,
-) -> Result<Option<String>, StatusCode> {
+) -> Result<WsAuth, StatusCode> {
     if let Some(expected) = configured_agent_token() {
         if bearer_token(headers).is_some_and(|got| got == expected) {
-            return Ok(None);
+            return Ok(WsAuth::AnyToken);
         }
         return Err(StatusCode::UNAUTHORIZED);
     }
 
-    // If any node has a connect token configured, require tokens for agent_ws.
-    let token_required = alloy_db::entities::nodes::Entity::find()
-        .filter(alloy_db::entities::nodes::Column::ConnectTokenHash.is_not_null())
-        .one(db)
-        .await
-        .ok()
-        .flatten()
-        .is_some();
-
     let Some(token) = bearer_token(headers) else {
-        if token_required {
-            return Err(StatusCode::UNAUTHORIZED);
-        }
-        return Ok(None);
+        return Ok(WsAuth::NoToken);
     };
 
     let token_hash = hash_token(&token);
@@ -153,7 +154,7 @@ async fn authorize(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
-    Ok(Some(row.name))
+    Ok(WsAuth::NodeToken { node: row.name })
 }
 
 pub async fn agent_ws(
@@ -161,28 +162,36 @@ pub async fn agent_ws(
     ws: WebSocketUpgrade,
     headers: HeaderMap,
 ) -> impl IntoResponse {
-    let allowed_node = match authorize(&state.db, &headers).await {
+    let auth = match authorize(&state.db, &headers).await {
         Ok(v) => v,
         Err(code) => return (code, "unauthorized").into_response(),
     };
 
-    ws.on_upgrade(move |socket| handle_agent_socket(state, socket, allowed_node))
+    ws.on_upgrade(move |socket| handle_agent_socket(state, socket, auth))
         .into_response()
 }
 
-async fn handle_agent_socket(state: AppState, socket: WebSocket, allowed_node: Option<String>) {
+async fn handle_agent_socket(state: AppState, socket: WebSocket, auth: WsAuth) {
     let span = tracing::info_span!("agent_ws");
     async move {
         let (mut sender, mut receiver) = socket.split();
 
         let hello = match receiver.next().await {
-            Some(Ok(Message::Text(text))) => match serde_json::from_str::<AgentToControlFrame>(&text) {
-                Ok(AgentToControlFrame::Hello { node, agent_version }) => AgentHello { node, agent_version },
-                _ => {
-                    let _ = sender.send(Message::Close(None)).await;
-                    return;
+            Some(Ok(Message::Text(text))) => {
+                match serde_json::from_str::<AgentToControlFrame>(&text) {
+                    Ok(AgentToControlFrame::Hello {
+                        node,
+                        agent_version,
+                    }) => AgentHello {
+                        node,
+                        agent_version,
+                    },
+                    _ => {
+                        let _ = sender.send(Message::Close(None)).await;
+                        return;
+                    }
                 }
-            },
+            }
             Some(Ok(_)) | Some(Err(_)) | None => {
                 let _ = sender.send(Message::Close(None)).await;
                 return;
@@ -195,10 +204,34 @@ async fn handle_agent_socket(state: AppState, socket: WebSocket, allowed_node: O
             return;
         }
 
-        if let Some(expected) = allowed_node.as_ref() {
-            if expected != &node {
-                let _ = sender.send(Message::Close(None)).await;
-                return;
+        match &auth {
+            WsAuth::AnyToken => {}
+            WsAuth::NodeToken { node: expected } => {
+                if expected != &node {
+                    let _ = sender.send(Message::Close(None)).await;
+                    return;
+                }
+            }
+            WsAuth::NoToken => {
+                // No token provided: only allow nodes that do NOT have a connect token configured.
+                // This prevents accidentally leaving token-protected nodes open.
+                let existing = alloy_db::entities::nodes::Entity::find()
+                    .filter(alloy_db::entities::nodes::Column::Name.eq(node.clone()))
+                    .one(&*state.db)
+                    .await
+                    .ok()
+                    .flatten();
+
+                if let Some(row) = existing {
+                    if !row.enabled {
+                        let _ = sender.send(Message::Close(None)).await;
+                        return;
+                    }
+                    if row.connect_token_hash.is_some() {
+                        let _ = sender.send(Message::Close(None)).await;
+                        return;
+                    }
+                }
             }
         }
 
@@ -230,7 +263,9 @@ async fn handle_agent_socket(state: AppState, socket: WebSocket, allowed_node: O
                 created_at: Set(now.into()),
                 updated_at: Set(now.into()),
             };
-            let _ = alloy_db::entities::nodes::Entity::insert(model).exec(&*state.db).await;
+            let _ = alloy_db::entities::nodes::Entity::insert(model)
+                .exec(&*state.db)
+                .await;
         }
 
         let (tx, mut rx) = mpsc::channel::<Message>(64);

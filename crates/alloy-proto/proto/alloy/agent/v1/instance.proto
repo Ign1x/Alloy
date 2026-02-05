@@ -15,6 +15,11 @@ service InstanceService {
   rpc Start(StartInstanceRequest) returns (StartInstanceResponse);
   rpc Stop(StopInstanceRequest) returns (StopInstanceResponse);
   rpc Update(UpdateInstanceRequest) returns (UpdateInstanceResponse);
+  // Import/replace an instance save (world) from a URL.
+  //
+  // This is intentionally agent-side to avoid control-plane file uploads and to
+  // keep large downloads/extracts close to the data root.
+  rpc ImportSaveFromUrl(ImportSaveFromUrlRequest) returns (ImportSaveFromUrlResponse);
   rpc DeletePreview(DeleteInstancePreviewRequest) returns (DeleteInstancePreviewResponse);
   rpc Delete(DeleteInstanceRequest) returns (DeleteInstanceResponse);
 }
@@ -99,4 +104,20 @@ message UpdateInstanceRequest {
 
 message UpdateInstanceResponse {
   InstanceConfig config = 1;
+}
+
+message ImportSaveFromUrlRequest {
+  string instance_id = 1;
+  // http(s) URL to a .zip (recommended) or a direct save file (e.g. .wld).
+  string url = 2;
+}
+
+message ImportSaveFromUrlResponse {
+  bool ok = 1;
+  // Human-friendly summary for UI.
+  string message = 2;
+  // Path under the agent data root where the save was installed.
+  string installed_path = 3;
+  // Path under the agent data root where the previous save was backed up (if any).
+  string backup_path = 4;
 }

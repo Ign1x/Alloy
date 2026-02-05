@@ -9,15 +9,13 @@ use tracing::{Instrument, info_span};
 use alloy_proto::agent_v1::{
     ClearCacheRequest, CreateInstanceRequest, DeleteInstancePreviewRequest, DeleteInstanceRequest,
     GetCacheStatsRequest, GetCapabilitiesRequest, GetInstanceRequest, GetStatusRequest,
-    HealthCheckRequest, ListDirRequest, ListInstancesRequest, ListProcessesRequest,
-    ListTemplatesRequest, MkdirRequest, ReadFileRequest, RenameRequest, StartFromTemplateRequest,
-    StartInstanceRequest, StopInstanceRequest, StopProcessRequest, TailFileRequest, TailLogsRequest,
-    UpdateInstanceRequest, WarmTemplateCacheRequest, WriteFileRequest,
-    agent_health_service_server::AgentHealthService,
-    filesystem_service_server::FilesystemService,
-    instance_service_server::InstanceService,
-    logs_service_server::LogsService,
-    process_service_server::ProcessService,
+    HealthCheckRequest, ImportSaveFromUrlRequest, ListDirRequest, ListInstancesRequest,
+    ListProcessesRequest, ListTemplatesRequest, MkdirRequest, ReadFileRequest, RenameRequest,
+    StartFromTemplateRequest, StartInstanceRequest, StopInstanceRequest, StopProcessRequest,
+    TailFileRequest, TailLogsRequest, UpdateInstanceRequest, WarmTemplateCacheRequest,
+    WriteFileRequest, agent_health_service_server::AgentHealthService,
+    filesystem_service_server::FilesystemService, instance_service_server::InstanceService,
+    logs_service_server::LogsService, process_service_server::ProcessService,
 };
 use tonic::{Request, Status};
 
@@ -85,7 +83,11 @@ impl AgentRpc {
 
             "/alloy.agent.v1.FilesystemService/GetCapabilities" => {
                 let req: GetCapabilitiesRequest = self.decode_req(payload)?;
-                let resp = self.fs.get_capabilities(Request::new(req)).await?.into_inner();
+                let resp = self
+                    .fs
+                    .get_capabilities(Request::new(req))
+                    .await?
+                    .into_inner();
                 Ok(resp.encode_to_vec())
             }
             "/alloy.agent.v1.FilesystemService/ListDir" => {
@@ -127,7 +129,11 @@ impl AgentRpc {
 
             "/alloy.agent.v1.ProcessService/ListTemplates" => {
                 let req: ListTemplatesRequest = self.decode_req(payload)?;
-                let resp = self.process.list_templates(Request::new(req)).await?.into_inner();
+                let resp = self
+                    .process
+                    .list_templates(Request::new(req))
+                    .await?
+                    .into_inner();
                 Ok(resp.encode_to_vec())
             }
             "/alloy.agent.v1.ProcessService/StartFromTemplate" => {
@@ -159,7 +165,11 @@ impl AgentRpc {
             }
             "/alloy.agent.v1.ProcessService/ClearCache" => {
                 let req: ClearCacheRequest = self.decode_req(payload)?;
-                let resp = self.process.clear_cache(Request::new(req)).await?.into_inner();
+                let resp = self
+                    .process
+                    .clear_cache(Request::new(req))
+                    .await?
+                    .into_inner();
                 Ok(resp.encode_to_vec())
             }
             "/alloy.agent.v1.ProcessService/Stop" => {
@@ -178,12 +188,20 @@ impl AgentRpc {
             }
             "/alloy.agent.v1.ProcessService/GetStatus" => {
                 let req: GetStatusRequest = self.decode_req(payload)?;
-                let resp = self.process.get_status(Request::new(req)).await?.into_inner();
+                let resp = self
+                    .process
+                    .get_status(Request::new(req))
+                    .await?
+                    .into_inner();
                 Ok(resp.encode_to_vec())
             }
             "/alloy.agent.v1.ProcessService/TailLogs" => {
                 let req: TailLogsRequest = self.decode_req(payload)?;
-                let resp = self.process.tail_logs(Request::new(req)).await?.into_inner();
+                let resp = self
+                    .process
+                    .tail_logs(Request::new(req))
+                    .await?
+                    .into_inner();
                 Ok(resp.encode_to_vec())
             }
 
@@ -215,6 +233,15 @@ impl AgentRpc {
             "/alloy.agent.v1.InstanceService/Update" => {
                 let req: UpdateInstanceRequest = self.decode_req(payload)?;
                 let resp = self.instance.update(Request::new(req)).await?.into_inner();
+                Ok(resp.encode_to_vec())
+            }
+            "/alloy.agent.v1.InstanceService/ImportSaveFromUrl" => {
+                let req: ImportSaveFromUrlRequest = self.decode_req(payload)?;
+                let resp = self
+                    .instance
+                    .import_save_from_url(Request::new(req))
+                    .await?
+                    .into_inner();
                 Ok(resp.encode_to_vec())
             }
             "/alloy.agent.v1.InstanceService/DeletePreview" => {
@@ -275,7 +302,10 @@ fn node_token() -> Option<String> {
 }
 
 pub fn spawn(manager: ProcessManager) {
-    let Some(url) = std::env::var("ALLOY_CONTROL_WS_URL").ok().and_then(|v| parse_ws_url(&v)) else {
+    let Some(url) = std::env::var("ALLOY_CONTROL_WS_URL")
+        .ok()
+        .and_then(|v| parse_ws_url(&v))
+    else {
         return;
     };
 
@@ -307,7 +337,12 @@ pub fn spawn(manager: ProcessManager) {
     });
 }
 
-async fn run_once(url: &str, node: &str, token: Option<&str>, rpc: &AgentRpc) -> anyhow::Result<()> {
+async fn run_once(
+    url: &str,
+    node: &str,
+    token: Option<&str>,
+    rpc: &AgentRpc,
+) -> anyhow::Result<()> {
     let mut req = url.into_client_request()?;
     if let Some(tok) = token {
         let value = format!("Bearer {tok}");
@@ -330,9 +365,14 @@ async fn run_once(url: &str, node: &str, token: Option<&str>, rpc: &AgentRpc) ->
         let msg = msg?;
         match msg {
             WsMessage::Text(text) => {
-                let frame = serde_json::from_str::<ControlToAgentFrame>(&text).unwrap_or(ControlToAgentFrame::Unknown);
+                let frame = serde_json::from_str::<ControlToAgentFrame>(&text)
+                    .unwrap_or(ControlToAgentFrame::Unknown);
                 match frame {
-                    ControlToAgentFrame::Req { id, method, payload_b64 } => {
+                    ControlToAgentFrame::Req {
+                        id,
+                        method,
+                        payload_b64,
+                    } => {
                         let payload = match b64.decode(payload_b64.as_bytes()) {
                             Ok(v) => v,
                             Err(_) => {
@@ -340,10 +380,13 @@ async fn run_once(url: &str, node: &str, token: Option<&str>, rpc: &AgentRpc) ->
                                     id,
                                     ok: false,
                                     payload_b64: None,
-                                    status_code: Some(Status::invalid_argument("invalid base64").code() as i32),
+                                    status_code: Some(
+                                        Status::invalid_argument("invalid base64").code() as i32,
+                                    ),
                                     status_message: Some("invalid base64 payload".to_string()),
                                 };
-                                sink.send(WsMessage::Text(serde_json::to_string(&resp)?.into())).await?;
+                                sink.send(WsMessage::Text(serde_json::to_string(&resp)?.into()))
+                                    .await?;
                                 continue;
                             }
                         };
@@ -364,7 +407,8 @@ async fn run_once(url: &str, node: &str, token: Option<&str>, rpc: &AgentRpc) ->
                                 status_message: Some(status.message().to_string()),
                             },
                         };
-                        sink.send(WsMessage::Text(serde_json::to_string(&out)?.into())).await?;
+                        sink.send(WsMessage::Text(serde_json::to_string(&out)?.into()))
+                            .await?;
                     }
                     ControlToAgentFrame::Unknown => {}
                 }

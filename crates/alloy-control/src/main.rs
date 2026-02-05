@@ -1,7 +1,7 @@
 use std::net::SocketAddr;
 
-use alloy_control::auth;
 use alloy_control::agent_tunnel;
+use alloy_control::auth;
 use alloy_control::node_health::NodeHealthPoller;
 use alloy_control::request_meta::RequestMeta;
 use alloy_control::rpc;
@@ -49,69 +49,50 @@ async fn healthz(State(_state): State<AppState>) -> Json<HealthzResponse> {
     let agent_endpoint = std::env::var("ALLOY_AGENT_ENDPOINT")
         .unwrap_or_else(|_| "http://127.0.0.1:50051".to_string());
 
-    let agent =
-        match alloy_proto::agent_v1::agent_health_service_client::AgentHealthServiceClient::connect(
-            agent_endpoint.clone(),
+    let transport = alloy_control::agent_transport::AgentTransport::new(_state.agent_hub.clone());
+    let agent = match transport
+        .call::<_, alloy_proto::agent_v1::HealthCheckResponse>(
+            "/alloy.agent.v1.AgentHealthService/Check",
+            alloy_proto::agent_v1::HealthCheckRequest {},
         )
         .await
-        {
-            Ok(mut client) => match client
-                .check(tonic::Request::new(
-                    alloy_proto::agent_v1::HealthCheckRequest {},
-                ))
-                .await
-            {
-                Ok(resp) => {
-                    let resp = resp.into_inner();
-                    HealthzAgent {
-                        endpoint: agent_endpoint,
-                        ok: true,
-                        status: Some(resp.status),
-                        agent_version: Some(resp.agent_version),
-                        data_root: Some(resp.data_root),
-                        data_root_writable: Some(resp.data_root_writable),
-                        data_root_free_bytes: Some(resp.data_root_free_bytes),
-                        ports: Some(
-                            resp.ports
-                                .into_iter()
-                                .map(|p| HealthzPort {
-                                    port: p.port,
-                                    available: p.available,
-                                    error: if p.error.is_empty() {
-                                        None
-                                    } else {
-                                        Some(p.error)
-                                    },
-                                })
-                                .collect(),
-                        ),
-                        error: None,
-                    }
-                }
-                Err(e) => HealthzAgent {
-                    endpoint: agent_endpoint,
-                    ok: false,
-                    status: None,
-                    agent_version: None,
-                    data_root: None,
-                    data_root_writable: None,
-                    data_root_free_bytes: None,
-                    ports: None,
-                    error: Some(format!("health check failed: {e}")),
-                },
-            },
-            Err(e) => HealthzAgent {
-                endpoint: agent_endpoint,
-                ok: false,
-                status: None,
-                agent_version: None,
-                data_root: None,
-                data_root_writable: None,
-                data_root_free_bytes: None,
-                ports: None,
-                error: Some(format!("connect failed: {e}")),
-            },
-        };
+    {
+        Ok(resp) => HealthzAgent {
+            endpoint: agent_endpoint,
+            ok: true,
+            status: Some(resp.status),
+            agent_version: Some(resp.agent_version),
+            data_root: Some(resp.data_root),
+            data_root_writable: Some(resp.data_root_writable),
+            data_root_free_bytes: Some(resp.data_root_free_bytes),
+            ports: Some(
+                resp.ports
+                    .into_iter()
+                    .map(|p| HealthzPort {
+                        port: p.port,
+                        available: p.available,
+                        error: if p.error.is_empty() {
+                            None
+                        } else {
+                            Some(p.error)
+                        },
+                    })
+                    .collect(),
+            ),
+            error: None,
+        },
+        Err(e) => HealthzAgent {
+            endpoint: agent_endpoint,
+            ok: false,
+            status: None,
+            agent_version: None,
+            data_root: None,
+            data_root_writable: None,
+            data_root_free_bytes: None,
+            ports: None,
+            error: Some(e.to_string()),
+        },
+    };
 
     Json(HealthzResponse {
         status: "ok",

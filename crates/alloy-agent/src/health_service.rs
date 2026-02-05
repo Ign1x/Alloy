@@ -108,4 +108,3 @@ impl AgentHealthService for HealthApi {
 pub fn server() -> AgentHealthServiceServer<HealthApi> {
     AgentHealthServiceServer::new(HealthApi)
 }
-

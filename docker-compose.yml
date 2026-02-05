@@ -26,6 +26,10 @@ services:
       # Enable filesystem write operations (mkdir/write/rename/remove) via the agent FS service.
       # Without this, the UI can only browse/read files.
       - ALLOY_FS_WRITE_ENABLED=true
+      # Reverse-connect back to the control plane over WebSocket.
+      # This avoids fragile host-network -> container networking (and enables NAT'd nodes).
+      - ALLOY_CONTROL_WS_URL=http://127.0.0.1:8080/agent/ws
+      - ALLOY_NODE_NAME=default
     volumes:
       - alloy-agent-data:/data
     restart: unless-stopped

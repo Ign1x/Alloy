@@ -1,4 +1,7 @@
-use std::{io::ErrorKind, net::TcpListener};
+use std::{
+    io::ErrorKind,
+    net::{TcpListener, UdpSocket},
+};
 
 use anyhow::Context;
 
@@ -22,5 +25,26 @@ pub fn allocate_tcp_port(preferred: u16) -> anyhow::Result<u16> {
     // Ask OS for an ephemeral port.
     let listener = TcpListener::bind(("0.0.0.0", 0))?;
     let port = listener.local_addr()?.port();
+    Ok(port)
+}
+
+pub fn allocate_udp_port(preferred: u16) -> anyhow::Result<u16> {
+    if preferred != 0 {
+        match UdpSocket::bind(("0.0.0.0", preferred)) {
+            Ok(s) => {
+                s.set_nonblocking(true).ok();
+            }
+            Err(e) if e.kind() == ErrorKind::AddrInUse => {
+                anyhow::bail!("port already in use: {preferred}");
+            }
+            Err(e) => {
+                return Err(e).context(format!("bind port {preferred}"));
+            }
+        }
+        return Ok(preferred);
+    }
+
+    let sock = UdpSocket::bind(("0.0.0.0", 0))?;
+    let port = sock.local_addr()?.port();
     Ok(port)
 }

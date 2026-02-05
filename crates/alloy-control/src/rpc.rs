@@ -15,8 +15,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::audit;
 use crate::agent_transport::AgentTransport;
+use crate::audit;
 
 fn random_token(n: usize) -> String {
     use base64::Engine;
@@ -536,6 +536,20 @@ pub struct UpdateInstanceInput {
     pub display_name: Option<String>,
 }
 
+#[derive(Debug, Clone, serde::Deserialize, Type)]
+pub struct ImportSaveFromUrlInput {
+    pub instance_id: String,
+    pub url: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize, Type)]
+pub struct ImportSaveFromUrlOutput {
+    pub ok: bool,
+    pub message: String,
+    pub installed_path: String,
+    pub backup_path: String,
+}
+
 #[derive(Debug, Clone, serde::Serialize, Type)]
 pub struct DeleteInstanceOutput {
     pub ok: bool,
@@ -901,10 +915,7 @@ pub fn router() -> Router<Ctx> {
                 };
 
                 let resp: alloy_proto::agent_v1::StartFromTemplateResponse = transport
-                    .call(
-                        "/alloy.agent.v1.ProcessService/StartFromTemplate",
-                        req,
-                    )
+                    .call("/alloy.agent.v1.ProcessService/StartFromTemplate", req)
                     .await
                     .map_err(|status| {
                         api_error_from_agent_status(&ctx, "process.start_from_template", status)
@@ -1429,10 +1440,7 @@ pub fn router() -> Router<Ctx> {
                                 .call::<_, alloy_proto::agent_v1::TailFileResponse>(
                                     "/alloy.agent.v1.LogsService/TailFile",
                                     TailFileRequest {
-                                        path: format!(
-                                            "processes/{}/logs/console.log",
-                                            instance_id
-                                        ),
+                                        path: format!("processes/{}/logs/console.log", instance_id),
                                         cursor: "0".to_string(),
                                         limit_bytes,
                                         max_lines,
@@ -1484,7 +1492,9 @@ pub fn router() -> Router<Ctx> {
                         },
                     )
                     .await
-                    .map_err(|status| api_error_from_agent_status(&ctx, "instance.start", status))?;
+                    .map_err(|status| {
+                        api_error_from_agent_status(&ctx, "instance.start", status)
+                    })?;
 
                 let status = resp
                     .status
@@ -1634,6 +1644,46 @@ pub fn router() -> Router<Ctx> {
             ),
         )
         .procedure(
+            "importSaveFromUrl",
+            Procedure::builder::<ApiError>().mutation(
+                |ctx, input: ImportSaveFromUrlInput| async move {
+                    ensure_writable(&ctx)?;
+                    enforce_rate_limit(&ctx)?;
+
+                    let transport = agent_transport(&ctx);
+                    let resp: alloy_proto::agent_v1::ImportSaveFromUrlResponse = transport
+                        .call(
+                            "/alloy.agent.v1.InstanceService/ImportSaveFromUrl",
+                            alloy_proto::agent_v1::ImportSaveFromUrlRequest {
+                                instance_id: input.instance_id.clone(),
+                                url: input.url,
+                            },
+                        )
+                        .await
+                        .map_err(|status| {
+                            api_error_from_agent_status(&ctx, "instance.import_save", status)
+                        })?;
+
+                    if resp.ok {
+                        audit::record(
+                            &ctx,
+                            "instance.import_save",
+                            &input.instance_id,
+                            Some(serde_json::json!({ "installed_path": resp.installed_path })),
+                        )
+                        .await;
+                    }
+
+                    Ok(ImportSaveFromUrlOutput {
+                        ok: resp.ok,
+                        message: resp.message,
+                        installed_path: resp.installed_path,
+                        backup_path: resp.backup_path,
+                    })
+                },
+            ),
+        )
+        .procedure(
             "deletePreview",
             Procedure::builder::<ApiError>().query(|ctx, input: InstanceIdInput| async move {
                 let transport = agent_transport(&ctx);
@@ -1672,7 +1722,9 @@ pub fn router() -> Router<Ctx> {
                         },
                     )
                     .await
-                    .map_err(|status| api_error_from_agent_status(&ctx, "instance.delete", status))?;
+                    .map_err(|status| {
+                        api_error_from_agent_status(&ctx, "instance.delete", status)
+                    })?;
 
                 if resp.ok {
                     audit::record(&ctx, "instance.delete", &instance_id, None).await;
@@ -1711,77 +1763,86 @@ pub fn router() -> Router<Ctx> {
         )
         .procedure(
             "create",
-            Procedure::builder::<ApiError>().mutation(|ctx: Ctx, input: NodeCreateInput| async move {
-                use alloy_db::entities::nodes;
-                use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, Set};
+            Procedure::builder::<ApiError>().mutation(
+                |ctx: Ctx, input: NodeCreateInput| async move {
+                    use alloy_db::entities::nodes;
+                    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, Set};
 
-                ensure_writable(&ctx)?;
-                enforce_rate_limit(&ctx)?;
+                    ensure_writable(&ctx)?;
+                    enforce_rate_limit(&ctx)?;
 
-                let user = ctx
-                    .user
-                    .clone()
-                    .ok_or_else(|| api_error(&ctx, "unauthorized", "unauthorized"))?;
-                if !user.is_admin {
-                    return Err(api_error(&ctx, "forbidden", "forbidden"));
-                }
+                    let user = ctx
+                        .user
+                        .clone()
+                        .ok_or_else(|| api_error(&ctx, "unauthorized", "unauthorized"))?;
+                    if !user.is_admin {
+                        return Err(api_error(&ctx, "forbidden", "forbidden"));
+                    }
 
-                let name = normalize_node_name(&input.name)
-                    .map_err(|_| api_error_with_field(&ctx, "invalid_param", "invalid node name", "name", "invalid name"))?;
+                    let name = normalize_node_name(&input.name).map_err(|_| {
+                        api_error_with_field(
+                            &ctx,
+                            "invalid_param",
+                            "invalid node name",
+                            "name",
+                            "invalid name",
+                        )
+                    })?;
 
-                let existing = nodes::Entity::find()
-                    .filter(nodes::Column::Name.eq(name.clone()))
-                    .one(&*ctx.db)
-                    .await
-                    .map_err(|e| api_error(&ctx, "db_error", format!("db error: {e}")))?;
-                if existing.is_some() {
-                    return Err(api_error_with_field(
-                        &ctx,
-                        "already_exists",
-                        "node already exists",
-                        "name",
-                        "name already exists",
-                    ));
-                }
+                    let existing = nodes::Entity::find()
+                        .filter(nodes::Column::Name.eq(name.clone()))
+                        .one(&*ctx.db)
+                        .await
+                        .map_err(|e| api_error(&ctx, "db_error", format!("db error: {e}")))?;
+                    if existing.is_some() {
+                        return Err(api_error_with_field(
+                            &ctx,
+                            "already_exists",
+                            "node already exists",
+                            "name",
+                            "name already exists",
+                        ));
+                    }
 
-                let token = random_token(32);
-                let token_hash = hash_token(&token);
-                let endpoint = format!("tunnel://{name}");
+                    let token = random_token(32);
+                    let token_hash = hash_token(&token);
+                    let endpoint = format!("tunnel://{name}");
 
-                let model = nodes::ActiveModel {
-                    id: Set(sea_orm::prelude::Uuid::new_v4()),
-                    name: Set(name.clone()),
-                    endpoint: Set(endpoint),
-                    connect_token_hash: Set(Some(token_hash)),
-                    enabled: Set(true),
-                    last_seen_at: Set(None),
-                    agent_version: Set(None),
-                    last_error: Set(None),
-                    created_at: Set(chrono::Utc::now().into()),
-                    updated_at: Set(chrono::Utc::now().into()),
-                };
+                    let model = nodes::ActiveModel {
+                        id: Set(sea_orm::prelude::Uuid::new_v4()),
+                        name: Set(name.clone()),
+                        endpoint: Set(endpoint),
+                        connect_token_hash: Set(Some(token_hash)),
+                        enabled: Set(true),
+                        last_seen_at: Set(None),
+                        agent_version: Set(None),
+                        last_error: Set(None),
+                        created_at: Set(chrono::Utc::now().into()),
+                        updated_at: Set(chrono::Utc::now().into()),
+                    };
 
-                let inserted = nodes::Entity::insert(model)
-                    .exec_with_returning(&*ctx.db)
-                    .await
-                    .map_err(|e| api_error(&ctx, "db_error", format!("db error: {e}")))?;
+                    let inserted = nodes::Entity::insert(model)
+                        .exec_with_returning(&*ctx.db)
+                        .await
+                        .map_err(|e| api_error(&ctx, "db_error", format!("db error: {e}")))?;
 
-                audit::record(&ctx, "node.create", &inserted.id.to_string(), None).await;
+                    audit::record(&ctx, "node.create", &inserted.id.to_string(), None).await;
 
-                Ok(NodeCreateOutput {
-                    node: NodeDto {
-                        id: inserted.id.to_string(),
-                        name: inserted.name,
-                        endpoint: inserted.endpoint,
-                        has_connect_token: inserted.connect_token_hash.is_some(),
-                        enabled: inserted.enabled,
-                        last_seen_at: inserted.last_seen_at.map(|t| t.to_rfc3339()),
-                        agent_version: inserted.agent_version,
-                        last_error: inserted.last_error,
-                    },
-                    connect_token: token,
-                })
-            }),
+                    Ok(NodeCreateOutput {
+                        node: NodeDto {
+                            id: inserted.id.to_string(),
+                            name: inserted.name,
+                            endpoint: inserted.endpoint,
+                            has_connect_token: inserted.connect_token_hash.is_some(),
+                            enabled: inserted.enabled,
+                            last_seen_at: inserted.last_seen_at.map(|t| t.to_rfc3339()),
+                            agent_version: inserted.agent_version,
+                            last_error: inserted.last_error,
+                        },
+                        connect_token: token,
+                    })
+                },
+            ),
         )
         .procedure(
             "setEnabled",

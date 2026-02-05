@@ -192,7 +192,8 @@ impl AgentTransport {
             let code = code_from_i32(resp.status_code.unwrap_or(2));
             return Err(tonic::Status::new(
                 code,
-                resp.status_message.unwrap_or_else(|| "agent error".to_string()),
+                resp.status_message
+                    .unwrap_or_else(|| "agent error".to_string()),
             ));
         }
 
@@ -233,10 +234,7 @@ impl AgentTransport {
 
         let path = tonic::codegen::http::uri::PathAndQuery::from_static(method);
         let codec = tonic::codec::ProstCodec::default();
-        let resp = grpc
-            .unary(request, path, codec)
-            .await
-            .map_err(|s| s)?;
+        let resp = grpc.unary(request, path, codec).await.map_err(|s| s)?;
         Ok(resp.into_inner())
     }
 }

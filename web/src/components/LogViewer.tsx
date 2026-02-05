@@ -35,11 +35,13 @@ export type LogViewerProps = {
   live?: boolean
   onLiveChange?: (live: boolean) => void
   storageKey?: string
+  minimal?: boolean
   class?: string
 }
 
 export function LogViewer(props: LogViewerProps) {
   const storageKey = () => props.storageKey ?? 'alloy.logviewer'
+  const minimal = () => Boolean(props.minimal)
 
   const [internalLive, setInternalLive] = createSignal(true)
   const [wrap, setWrap] = createSignal(true)
@@ -51,6 +53,7 @@ export function LogViewer(props: LogViewerProps) {
   const [copyLastN, setCopyLastN] = createSignal('200')
 
   let scrollEl: HTMLDivElement | undefined
+  let ignoreScrollOnce = false
 
   const live = () => (props.live === undefined ? internalLive() : props.live)
   const setLive = (value: boolean) => (props.onLiveChange ? props.onLiveChange(value) : setInternalLive(value))
@@ -121,7 +124,12 @@ export function LogViewer(props: LogViewerProps) {
     if (!el) return
     if (resumeLive) setLive(true)
     // For virtualized mode, scrollHeight is based on total height.
-    el.scrollTop = el.scrollHeight
+    const doScroll = () => {
+      ignoreScrollOnce = true
+      el.scrollTop = el.scrollHeight
+    }
+    doScroll()
+    requestAnimationFrame(doScroll)
   }
 
   function scrollToLine(idx: number) {
@@ -135,7 +143,7 @@ export function LogViewer(props: LogViewerProps) {
     // Auto-follow on new lines.
     props.lines.length
     if (!live()) return
-    queueMicrotask(() => jumpToBottom(false))
+    requestAnimationFrame(() => jumpToBottom(false))
   })
 
   const statusLabel = createMemo(() => {
@@ -212,7 +220,7 @@ export function LogViewer(props: LogViewerProps) {
             value={query()}
             onInput={(e) => setQuery(e.currentTarget.value)}
             placeholder="Search"
-            class="w-44"
+            class={minimal() ? 'w-40' : 'w-44'}
             leftIcon={
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
                 <path
@@ -250,50 +258,52 @@ export function LogViewer(props: LogViewerProps) {
             </svg>
           </IconButton>
 
-          <IconButton
-            type="button"
-            label={wrap() ? 'Wrap: on' : 'Wrap: off'}
-            variant="ghost"
-            onClick={() => setWrap((v) => !v)}
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class={`h-4 w-4 ${wrap() ? 'text-amber-500' : ''}`}>
-              <path
-                fill-rule="evenodd"
-                d="M2 5.75A.75.75 0 012.75 5h10a3.25 3.25 0 110 6.5H7.56l1.22 1.22a.75.75 0 11-1.06 1.06l-2.5-2.5a.75.75 0 010-1.06l2.5-2.5a.75.75 0 011.06 1.06L7.56 10h5.19a1.75 1.75 0 100-3.5h-10A.75.75 0 012 5.75z"
-                clip-rule="evenodd"
-              />
-            </svg>
-          </IconButton>
-
-          <div class="flex items-center gap-1">
+          <Show when={!minimal()}>
             <IconButton
               type="button"
-              label="Decrease font size"
+              label={wrap() ? 'Wrap: on' : 'Wrap: off'}
               variant="ghost"
-              disabled={fontSize() <= 10}
-              onClick={() => setFontSize((v) => clampNumber(v - 1, 10, 18))}
+              onClick={() => setWrap((v) => !v)}
             >
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-                <path d="M5 10a.75.75 0 01.75-.75h8.5a.75.75 0 010 1.5h-8.5A.75.75 0 015 10z" />
-              </svg>
-            </IconButton>
-            <span class="w-8 text-center text-[11px] text-slate-500 dark:text-slate-400">{fontSize()}px</span>
-            <IconButton
-              type="button"
-              label="Increase font size"
-              variant="ghost"
-              disabled={fontSize() >= 18}
-              onClick={() => setFontSize((v) => clampNumber(v + 1, 10, 18))}
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class={`h-4 w-4 ${wrap() ? 'text-amber-500' : ''}`}>
                 <path
                   fill-rule="evenodd"
-                  d="M10 4.25a.75.75 0 01.75.75v4.25H15a.75.75 0 010 1.5h-4.25V15a.75.75 0 01-1.5 0v-4.25H5a.75.75 0 010-1.5h4.25V5a.75.75 0 01.75-.75z"
+                  d="M2 5.75A.75.75 0 012.75 5h10a3.25 3.25 0 110 6.5H7.56l1.22 1.22a.75.75 0 11-1.06 1.06l-2.5-2.5a.75.75 0 010-1.06l2.5-2.5a.75.75 0 011.06 1.06L7.56 10h5.19a1.75 1.75 0 100-3.5h-10A.75.75 0 012 5.75z"
                   clip-rule="evenodd"
                 />
               </svg>
             </IconButton>
-          </div>
+
+            <div class="flex items-center gap-1">
+              <IconButton
+                type="button"
+                label="Decrease font size"
+                variant="ghost"
+                disabled={fontSize() <= 10}
+                onClick={() => setFontSize((v) => clampNumber(v - 1, 10, 18))}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
+                  <path d="M5 10a.75.75 0 01.75-.75h8.5a.75.75 0 010 1.5h-8.5A.75.75 0 015 10z" />
+                </svg>
+              </IconButton>
+              <span class="w-8 text-center text-[11px] text-slate-500 dark:text-slate-400">{fontSize()}px</span>
+              <IconButton
+                type="button"
+                label="Increase font size"
+                variant="ghost"
+                disabled={fontSize() >= 18}
+                onClick={() => setFontSize((v) => clampNumber(v + 1, 10, 18))}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
+                  <path
+                    fill-rule="evenodd"
+                    d="M10 4.25a.75.75 0 01.75.75v4.25H15a.75.75 0 010 1.5h-4.25V15a.75.75 0 01-1.5 0v-4.25H5a.75.75 0 010-1.5h4.25V5a.75.75 0 01.75-.75z"
+                    clip-rule="evenodd"
+                  />
+                </svg>
+              </IconButton>
+            </div>
+          </Show>
 
           <IconButton
             type="button"
@@ -329,6 +339,15 @@ export function LogViewer(props: LogViewerProps) {
             </svg>
           </IconButton>
 
+          <Show when={minimal()}>
+            <IconButton type="button" label="Copy tail" variant="ghost" onClick={() => copyLast()}>
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
+                <path d="M5.75 2A2.75 2.75 0 003 4.75v9.5A2.75 2.75 0 005.75 17h1.5a.75.75 0 000-1.5h-1.5c-.69 0-1.25-.56-1.25-1.25v-9.5c0-.69.56-1.25 1.25-1.25h5.5c.69 0 1.25.56 1.25 1.25v1a.75.75 0 001.5 0v-1A2.75 2.75 0 0011.25 2h-5.5z" />
+                <path d="M8.75 6A2.75 2.75 0 006 8.75v6.5A2.75 2.75 0 008.75 18h5.5A2.75 2.75 0 0017 15.25v-6.5A2.75 2.75 0 0014.25 6h-5.5z" />
+              </svg>
+            </IconButton>
+          </Show>
+
           <IconButton type="button" label="Clear" variant="ghost" disabled={!props.onClear} onClick={() => props.onClear?.()}>
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
               <path
@@ -341,49 +360,51 @@ export function LogViewer(props: LogViewerProps) {
         </div>
       </div>
 
-      <div class="mt-3 flex flex-wrap items-center justify-between gap-2">
-        <div class="flex items-center gap-2">
-          <label class="flex items-center gap-2 text-[12px] text-slate-600 dark:text-slate-300" title="Include timestamp when copying">
-            <input
-              type="checkbox"
-              class="h-4 w-4 rounded border-slate-300 text-amber-600 focus-visible:ring-2 focus-visible:ring-amber-500/35 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-50 dark:border-slate-700 dark:bg-slate-950/60 dark:text-amber-400 dark:focus-visible:ring-offset-slate-950"
-              checked={includeTimestamp()}
-              onChange={(e) => setIncludeTimestamp(e.currentTarget.checked)}
-            />
-            Timestamps
-          </label>
-        </div>
-        <div class="flex flex-wrap items-center gap-2">
-          <IconButton type="button" label="Copy selected line" variant="secondary" disabled={selectedLineIdx() == null} onClick={() => copySelected()}>
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-              <path d="M5.75 2A2.75 2.75 0 003 4.75v9.5A2.75 2.75 0 005.75 17h1.5a.75.75 0 000-1.5h-1.5c-.69 0-1.25-.56-1.25-1.25v-9.5c0-.69.56-1.25 1.25-1.25h5.5c.69 0 1.25.56 1.25 1.25v1a.75.75 0 001.5 0v-1A2.75 2.75 0 0011.25 2h-5.5z" />
-              <path d="M8.75 6A2.75 2.75 0 006 8.75v6.5A2.75 2.75 0 008.75 18h5.5A2.75 2.75 0 0017 15.25v-6.5A2.75 2.75 0 0014.25 6h-5.5z" />
-            </svg>
-          </IconButton>
+      <Show when={!minimal()}>
+        <div class="mt-3 flex flex-wrap items-center justify-between gap-2">
           <div class="flex items-center gap-2">
-            <Input value={copyLastN()} onInput={(e) => setCopyLastN(e.currentTarget.value)} class="w-20" />
-            <IconButton type="button" label="Copy last N lines" variant="secondary" onClick={() => copyLast()}>
+            <label class="flex items-center gap-2 text-[12px] text-slate-600 dark:text-slate-300" title="Include timestamp when copying">
+              <input
+                type="checkbox"
+                class="h-4 w-4 rounded border-slate-300 text-amber-600 focus-visible:ring-2 focus-visible:ring-amber-500/35 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-50 dark:border-slate-700 dark:bg-slate-950/60 dark:text-amber-400 dark:focus-visible:ring-offset-slate-950"
+                checked={includeTimestamp()}
+                onChange={(e) => setIncludeTimestamp(e.currentTarget.checked)}
+              />
+              Timestamps
+            </label>
+          </div>
+          <div class="flex flex-wrap items-center gap-2">
+            <IconButton type="button" label="Copy selected line" variant="secondary" disabled={selectedLineIdx() == null} onClick={() => copySelected()}>
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
+                <path d="M5.75 2A2.75 2.75 0 003 4.75v9.5A2.75 2.75 0 005.75 17h1.5a.75.75 0 000-1.5h-1.5c-.69 0-1.25-.56-1.25-1.25v-9.5c0-.69.56-1.25 1.25-1.25h5.5c.69 0 1.25.56 1.25 1.25v1a.75.75 0 001.5 0v-1A2.75 2.75 0 0011.25 2h-5.5z" />
+                <path d="M8.75 6A2.75 2.75 0 006 8.75v6.5A2.75 2.75 0 008.75 18h5.5A2.75 2.75 0 0017 15.25v-6.5A2.75 2.75 0 0014.25 6h-5.5z" />
+              </svg>
+            </IconButton>
+            <div class="flex items-center gap-2">
+              <Input value={copyLastN()} onInput={(e) => setCopyLastN(e.currentTarget.value)} class="w-20" />
+              <IconButton type="button" label="Copy last N lines" variant="secondary" onClick={() => copyLast()}>
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
+                  <path
+                    fill-rule="evenodd"
+                    d="M10 3a7 7 0 100 14 7 7 0 000-14zM8.75 7.5a.75.75 0 011.5 0v2.19l1.47.98a.75.75 0 11-.84 1.25l-1.8-1.2a.75.75 0 01-.33-.62V7.5z"
+                    clip-rule="evenodd"
+                  />
+                </svg>
+              </IconButton>
+            </div>
+            <IconButton type="button" label="Copy all lines" variant="secondary" onClick={() => copyAll()}>
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
                 <path
                   fill-rule="evenodd"
-                  d="M10 3a7 7 0 100 14 7 7 0 000-14zM8.75 7.5a.75.75 0 011.5 0v2.19l1.47.98a.75.75 0 11-.84 1.25l-1.8-1.2a.75.75 0 01-.33-.62V7.5z"
+                  d="M3 4.75A2.75 2.75 0 015.75 2h5.5A2.75 2.75 0 0114 4.75v10.5A2.75 2.75 0 0111.25 18h-5.5A2.75 2.75 0 013 15.25V4.75zm5.5 1a.75.75 0 000 1.5h3a.75.75 0 000-1.5h-3zM7.75 9a.75.75 0 000 1.5h3.5a.75.75 0 000-1.5h-3.5zM7.75 12.25a.75.75 0 000 1.5h3.5a.75.75 0 000-1.5h-3.5z"
                   clip-rule="evenodd"
                 />
+                <path d="M15.5 6.5a.75.75 0 01.75.75v8A3.25 3.25 0 0113 18.5h-.25a.75.75 0 010-1.5H13a1.75 1.75 0 001.75-1.75v-8a.75.75 0 01.75-.75z" />
               </svg>
             </IconButton>
           </div>
-          <IconButton type="button" label="Copy all lines" variant="secondary" onClick={() => copyAll()}>
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-              <path
-                fill-rule="evenodd"
-                d="M3 4.75A2.75 2.75 0 015.75 2h5.5A2.75 2.75 0 0114 4.75v10.5A2.75 2.75 0 0111.25 18h-5.5A2.75 2.75 0 013 15.25V4.75zm5.5 1a.75.75 0 000 1.5h3a.75.75 0 000-1.5h-3zM7.75 9a.75.75 0 000 1.5h3.5a.75.75 0 000-1.5h-3.5zM7.75 12.25a.75.75 0 000 1.5h3.5a.75.75 0 000-1.5h-3.5z"
-                clip-rule="evenodd"
-              />
-              <path d="M15.5 6.5a.75.75 0 01.75.75v8A3.25 3.25 0 0113 18.5h-.25a.75.75 0 010-1.5H13a1.75 1.75 0 001.75-1.75v-8a.75.75 0 01.75-.75z" />
-            </svg>
-          </IconButton>
         </div>
-      </div>
+      </Show>
 
       <div class="mt-3">
         <VirtualLines
@@ -397,12 +418,16 @@ export function LogViewer(props: LogViewerProps) {
           onScrollEl={(el) => {
             scrollEl = el
             const onScroll = () => {
+              if (ignoreScrollOnce) {
+                ignoreScrollOnce = false
+                return
+              }
               if (!live()) return
               // If user scrolls away from the tail while live, pause updates.
               if (!isNearBottom(el)) setLive(false)
             }
             el.addEventListener('scroll', onScroll, { passive: true })
-            queueMicrotask(() => {
+            requestAnimationFrame(() => {
               if (!live()) return
               if (props.lines.length === 0) return
               jumpToBottom(false)

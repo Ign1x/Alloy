@@ -181,6 +181,51 @@ pub fn list_templates() -> Vec<ProcessTemplate> {
             graceful_stdin: Some("stop\n".to_string()),
         },
         ProcessTemplate {
+            template_id: "minecraft:modrinth".to_string(),
+            display_name: "Minecraft: Modrinth Pack".to_string(),
+            command: "java".to_string(),
+            args: vec![],
+            params: vec![
+                param_bool(
+                    "accept_eula",
+                    "Accept EULA",
+                    true,
+                    false,
+                    "Required to start Minecraft server. You must agree to Mojang's EULA.",
+                ),
+                param_string(
+                    "mrpack",
+                    "Modpack (mrpack)",
+                    true,
+                    "",
+                    Vec::new(),
+                    "https://modrinth.com/modpack/.../version/...",
+                    "Paste a Modrinth version URL or a direct .mrpack download URL.",
+                ),
+                param_int(
+                    "memory_mb",
+                    "Memory (MiB)",
+                    false,
+                    "2048",
+                    512,
+                    65536,
+                    "2048",
+                    "Max heap size passed to Java (Xmx).",
+                ),
+                param_int(
+                    "port",
+                    "Port",
+                    false,
+                    "0",
+                    1024,
+                    65535,
+                    "25565 (leave blank for auto)",
+                    "TCP port to bind. Use 0 or leave blank to auto-assign a free port.",
+                ),
+            ],
+            graceful_stdin: Some("stop\n".to_string()),
+        },
+        ProcessTemplate {
             template_id: "terraria:vanilla".to_string(),
             display_name: "Terraria: Vanilla".to_string(),
             // Placeholder; spawn spec is prepared by the terraria module.
@@ -248,6 +293,78 @@ pub fn list_templates() -> Vec<ProcessTemplate> {
             ],
             graceful_stdin: Some("exit\n".to_string()),
         },
+        ProcessTemplate {
+            template_id: "dst:vanilla".to_string(),
+            display_name: "Don't Starve Together".to_string(),
+            command: "./dontstarve_dedicated_server_nullrenderer".to_string(),
+            args: vec![],
+            params: vec![
+                param_secret(
+                    "cluster_token",
+                    "Cluster token",
+                    true,
+                    "",
+                    "Required. Get it from Klei and paste it here (cluster_token.txt).",
+                ),
+                param_string(
+                    "cluster_name",
+                    "Cluster name",
+                    false,
+                    "Alloy DST server",
+                    Vec::new(),
+                    "Alloy DST server",
+                    "Shown in the server list.",
+                ),
+                param_int(
+                    "max_players",
+                    "Max players",
+                    false,
+                    "6",
+                    1,
+                    64,
+                    "6",
+                    "Maximum number of players.",
+                ),
+                param_secret(
+                    "password",
+                    "Password",
+                    false,
+                    "",
+                    "Optional cluster password for joining players.",
+                ),
+                param_int(
+                    "port",
+                    "Server port (UDP)",
+                    false,
+                    "10999",
+                    0,
+                    65535,
+                    "10999 (0 = auto)",
+                    "UDP port used by clients to connect. Use 0 to auto-assign.",
+                ),
+                param_int(
+                    "master_port",
+                    "Master port (UDP)",
+                    false,
+                    "27016",
+                    0,
+                    65535,
+                    "27016 (0 = auto)",
+                    "Steam master server port. Use 0 to auto-assign.",
+                ),
+                param_int(
+                    "auth_port",
+                    "Auth port (UDP)",
+                    false,
+                    "8766",
+                    0,
+                    65535,
+                    "8766 (0 = auto)",
+                    "Steam authentication port. Use 0 to auto-assign.",
+                ),
+            ],
+            graceful_stdin: None,
+        },
     ]
 }
 
@@ -303,8 +420,16 @@ pub fn apply_params(
         let _ = crate::minecraft::validate_vanilla_params(params)?;
     }
 
+    if t.template_id == "minecraft:modrinth" {
+        let _ = crate::minecraft_modrinth::validate_params(params)?;
+    }
+
     if t.template_id == "terraria:vanilla" {
         let _ = crate::terraria::validate_vanilla_params(params)?;
+    }
+
+    if t.template_id == "dst:vanilla" {
+        let _ = crate::dst::validate_vanilla_params(params)?;
     }
 
     Ok(t)

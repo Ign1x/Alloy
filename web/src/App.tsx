@@ -104,6 +104,7 @@ function formatRelativeTime(unixMs: number | null | undefined): string {
 
 function startProgressSteps(templateId: string): string[] {
   if (templateId === 'minecraft:vanilla') return ['Resolve', 'Download', 'Spawn', 'Wait']
+  if (templateId === 'minecraft:modrinth') return ['Resolve', 'Download', 'Install', 'Spawn', 'Wait']
   if (templateId === 'terraria:vanilla') return ['Resolve', 'Download', 'Extract', 'Spawn', 'Wait']
   return ['Spawn', 'Wait']
 }
@@ -117,6 +118,7 @@ function startProgressIndex(templateId: string, message: string): number {
 
   if (m.includes('resolve')) return clamp(find('resolve'))
   if (m.includes('download')) return clamp(find('download'))
+  if (m.includes('install')) return clamp(find('install'))
   if (m.includes('extract')) return clamp(find('extract'))
   if (m.includes('spawn')) return clamp(find('spawn'))
   if (m.includes('wait')) return clamp(find('wait'))
@@ -366,8 +368,9 @@ function App() {
   let createInstanceNameEl: HTMLInputElement | undefined
   let createSleepSecondsEl: HTMLInputElement | undefined
   let createMcEulaEl: HTMLInputElement | undefined
+  let createMcMrpackEl: HTMLInputElement | undefined
   let createMcPortEl: HTMLInputElement | undefined
-  let createMcMemoryCustomEl: HTMLInputElement | undefined
+  let createMcMemoryEl: HTMLInputElement | undefined
   let createMcFrpConfigEl: HTMLTextAreaElement | undefined
   let createTrPortEl: HTMLInputElement | undefined
   let createTrMaxPlayersEl: HTMLInputElement | undefined
@@ -375,9 +378,16 @@ function App() {
   let createTrWorldSizeEl: HTMLInputElement | undefined
   let createTrPasswordEl: HTMLInputElement | undefined
   let createTrFrpConfigEl: HTMLTextAreaElement | undefined
+  let createDstClusterTokenEl: HTMLInputElement | undefined
+  let createDstClusterNameEl: HTMLInputElement | undefined
+  let createDstMaxPlayersEl: HTMLInputElement | undefined
+  let createDstPasswordEl: HTMLInputElement | undefined
+  let createDstPortEl: HTMLInputElement | undefined
+  let createDstMasterPortEl: HTMLInputElement | undefined
+  let createDstAuthPortEl: HTMLInputElement | undefined
   let editDisplayNameEl: HTMLInputElement | undefined
   let editSleepSecondsEl: HTMLInputElement | undefined
-  let editMcMemoryCustomEl: HTMLInputElement | undefined
+  let editMcMemoryEl: HTMLInputElement | undefined
   let editMcPortEl: HTMLInputElement | undefined
   let editMcFrpConfigEl: HTMLTextAreaElement | undefined
   let editTrPortEl: HTMLInputElement | undefined
@@ -948,8 +958,6 @@ function App() {
       setEditMcVersion(v)
 
       const mem = (params.memory_mb ?? '2048').trim() || '2048'
-      const preset = mcMemoryOptions().some((o) => o.value === mem) ? mem : 'custom'
-      setEditMcMemoryPreset(preset)
       setEditMcMemory(mem)
 
       setEditMcPort((params.port ?? '').trim())
@@ -976,6 +984,7 @@ function App() {
 
   const createInstance = rspc.createMutation(() => 'instance.create')
   const updateInstance = rspc.createMutation(() => 'instance.update')
+  const importSaveFromUrl = rspc.createMutation(() => 'instance.importSaveFromUrl')
   const startInstance = rspc.createMutation(() => 'instance.start')
   const restartInstance = rspc.createMutation(() => 'instance.restart')
   const stopInstance = rspc.createMutation(() => 'instance.stop')
@@ -1066,7 +1075,6 @@ function App() {
   const [editSleepSeconds, setEditSleepSeconds] = createSignal('60')
 
   const [editMcVersion, setEditMcVersion] = createSignal('latest_release')
-  const [editMcMemoryPreset, setEditMcMemoryPreset] = createSignal('2048')
   const [editMcMemory, setEditMcMemory] = createSignal('2048')
   const [editMcPort, setEditMcPort] = createSignal('')
   const [editMcFrpEnabled, setEditMcFrpEnabled] = createSignal(false)
@@ -1090,11 +1098,6 @@ function App() {
 
   const editTrEffectiveVersion = createMemo(() => editTrVersion())
 
-  const editMcEffectiveMemory = createMemo(() => {
-    if (editMcMemoryPreset() === 'custom') return editMcMemory()
-    return editMcMemoryPreset()
-  })
-
   const editOutgoingParams = createMemo(() => {
     const base = editBase()
     if (!base) return null
@@ -1107,7 +1110,7 @@ function App() {
     if (base.template_id === 'minecraft:vanilla') {
       out.accept_eula = 'true'
       out.version = editMcEffectiveVersion().trim() || out.version || 'latest_release'
-      out.memory_mb = editMcEffectiveMemory().trim() || out.memory_mb || '2048'
+      out.memory_mb = editMcMemory().trim() || out.memory_mb || '2048'
       out.port = editMcPort().trim() || out.port || ''
       if (!editMcFrpEnabled()) delete out.frp_config
       else if (editMcFrpConfig().trim()) out.frp_config = editMcFrpConfig()
@@ -1173,7 +1176,7 @@ function App() {
 
   const [mcEula, setMcEula] = createSignal(false)
   const [mcVersion, setMcVersion] = createSignal('latest_release')
-  const [mcMemoryPreset, setMcMemoryPreset] = createSignal('2048')
+  const [mcMrpack, setMcMrpack] = createSignal('')
   const [mcMemory, setMcMemory] = createSignal('2048')
   const [mcPort, setMcPort] = createSignal('')
   const [mcFrpEnabled, setMcFrpEnabled] = createSignal(false)
@@ -1189,16 +1192,37 @@ function App() {
   const [trFrpEnabled, setTrFrpEnabled] = createSignal(false)
   const [trFrpConfig, setTrFrpConfig] = createSignal('')
 
+  const [dstClusterToken, setDstClusterToken] = createSignal('')
+  const [dstClusterTokenVisible, setDstClusterTokenVisible] = createSignal(false)
+  const [dstClusterName, setDstClusterName] = createSignal('Alloy DST server')
+  const [dstMaxPlayers, setDstMaxPlayers] = createSignal('6')
+  const [dstPassword, setDstPassword] = createSignal('')
+  const [dstPasswordVisible, setDstPasswordVisible] = createSignal(false)
+  const [dstPort, setDstPort] = createSignal('0')
+  const [dstMasterPort, setDstMasterPort] = createSignal('0')
+  const [dstAuthPort, setDstAuthPort] = createSignal('0')
+
   const [createAdvanced, setCreateAdvanced] = createSignal(false)
   const createAdvancedDirty = createMemo(() => {
     const template = selectedTemplate()
-    if (template === 'minecraft:vanilla') return mcPort().trim().length > 0 || mcFrpEnabled() || mcFrpConfig().trim().length > 0
+    if (template === 'minecraft:vanilla' || template === 'minecraft:modrinth') {
+      return mcPort().trim().length > 0 || mcFrpEnabled() || mcFrpConfig().trim().length > 0
+    }
     if (template === 'terraria:vanilla') {
       if (trPort().trim()) return true
       const ws = trWorldSize().trim()
       if (ws && ws !== '1') return true
       if (trPassword().trim()) return true
       if (trFrpEnabled() || trFrpConfig().trim()) return true
+      return false
+    }
+    if (template === 'dst:vanilla') {
+      const p = dstPort().trim()
+      const mp = dstMasterPort().trim()
+      const ap = dstAuthPort().trim()
+      if (p && p !== '0') return true
+      if (mp && mp !== '0') return true
+      if (ap && ap !== '0') return true
       return false
     }
     return false
@@ -1222,7 +1246,7 @@ function App() {
     if (template_id === 'minecraft:vanilla') {
       const v = mcVersion().trim() || 'latest_release'
       rows.push({ label: 'Version', value: v })
-      rows.push({ label: 'Memory (MB)', value: (mcMemory().trim() || mcMemoryPreset().trim() || '2048') })
+      rows.push({ label: 'Memory (MB)', value: mcMemory().trim() || '2048' })
 
       const portRaw = mcPort().trim()
       const portLabel = !portRaw || portRaw === '0' ? 'auto' : portRaw
@@ -1239,6 +1263,56 @@ function App() {
       }
 
       if (!mcEula()) warnings.push('Accept the Minecraft EULA to start.')
+    }
+
+    if (template_id === 'minecraft:modrinth') {
+      const src = mcMrpack().trim()
+      rows.push({ label: 'Modpack', value: src || '(not set)' })
+      rows.push({ label: 'Memory (MB)', value: mcMemory().trim() || '2048' })
+
+      const portRaw = mcPort().trim()
+      const portLabel = !portRaw || portRaw === '0' ? 'auto' : portRaw
+      rows.push({ label: 'Port', value: portLabel })
+      rows.push({
+        label: 'Connect',
+        value: portLabel === 'auto' ? 'TBD (auto port)' : `${connectHost()}:${portLabel}`,
+      })
+
+      if (mcFrpEnabled()) {
+        const ep = parseFrpcIniEndpoint(mcFrpConfig())
+        rows.push({ label: 'FRP', value: ep ?? '(enabled)' })
+        if (!mcFrpConfig().trim()) warnings.push('Paste FRP config or disable FRP.')
+      }
+
+      if (!mcEula()) warnings.push('Accept the Minecraft EULA to start.')
+      if (!src) warnings.push('Paste a Modrinth version link or a direct .mrpack URL.')
+    }
+
+    if (template_id === 'dst:vanilla') {
+      rows.push({ label: 'Cluster token', value: dstClusterToken().trim() ? '(set)' : '(not set)', isSecret: true })
+      rows.push({ label: 'Cluster name', value: dstClusterName().trim() || 'Alloy DST server' })
+      rows.push({ label: 'Max players', value: dstMaxPlayers().trim() || '6' })
+      rows.push({ label: 'Password', value: dstPassword().trim() ? '(set)' : '(none)', isSecret: true })
+
+      const portRaw = dstPort().trim()
+      const portLabel = !portRaw || portRaw === '0' ? 'auto' : portRaw
+      rows.push({ label: 'UDP port', value: portLabel })
+      rows.push({
+        label: 'Connect',
+        value: portLabel === 'auto' ? 'TBD (auto port)' : `${connectHost()}:${portLabel}`,
+      })
+
+      if (createAdvanced() || createAdvancedDirty()) {
+        const masterRaw = dstMasterPort().trim()
+        const masterLabel = !masterRaw || masterRaw === '0' ? 'auto' : masterRaw
+        rows.push({ label: 'Master port', value: masterLabel })
+
+        const authRaw = dstAuthPort().trim()
+        const authLabel = !authRaw || authRaw === '0' ? 'auto' : authRaw
+        rows.push({ label: 'Auth port', value: authLabel })
+      }
+
+      if (!dstClusterToken().trim()) warnings.push('Paste your Klei cluster token to start.')
     }
 
     if (template_id === 'terraria:vanilla') {
@@ -1279,6 +1353,8 @@ function App() {
     setMcFrpConfig('')
     setTrFrpEnabled(false)
     setTrFrpConfig('')
+    setDstClusterTokenVisible(false)
+    setDstPasswordVisible(false)
   })
 
   function focusEl(el: HTMLElement | undefined): boolean {
@@ -1303,13 +1379,22 @@ function App() {
         ? ['seconds', 'display_name']
         : template_id === 'minecraft:vanilla'
           ? ['accept_eula', 'version', 'memory_mb', 'port', 'frp_config', 'display_name']
+          : template_id === 'minecraft:modrinth'
+            ? ['accept_eula', 'mrpack', 'memory_mb', 'port', 'frp_config', 'display_name']
+          : template_id === 'dst:vanilla'
+            ? ['cluster_token', 'cluster_name', 'max_players', 'password', 'port', 'master_port', 'auth_port', 'display_name']
           : template_id === 'terraria:vanilla'
             ? ['version', 'max_players', 'world_name', 'port', 'world_size', 'password', 'frp_config', 'display_name']
             : ['display_name']
 
     const needsAdvanced =
       !createAdvanced() &&
-      (Boolean(errors.port) || Boolean(errors.world_size) || Boolean(errors.password) || Boolean(errors.frp_config))
+      (Boolean(errors.port) ||
+        Boolean(errors.master_port) ||
+        Boolean(errors.auth_port) ||
+        Boolean(errors.world_size) ||
+        Boolean(errors.password) ||
+        Boolean(errors.frp_config))
     if (needsAdvanced) setCreateAdvanced(true)
 
     const run = () => {
@@ -1319,11 +1404,12 @@ function App() {
         if (key === 'display_name' && focusEl(createInstanceNameEl)) return
         if (key === 'seconds' && focusEl(createSleepSecondsEl)) return
 
-        if (template_id === 'minecraft:vanilla') {
+        if (template_id === 'minecraft:vanilla' || template_id === 'minecraft:modrinth') {
           if (key === 'accept_eula' && focusEl(createMcEulaEl)) return
+          if (key === 'mrpack' && focusEl(createMcMrpackEl)) return
           if (key === 'port' && focusEl(createMcPortEl)) return
           if (key === 'frp_config' && focusEl(createMcFrpConfigEl)) return
-          if (key === 'memory_mb' && mcMemoryPreset() === 'custom' && focusEl(createMcMemoryCustomEl)) return
+          if (key === 'memory_mb' && focusEl(createMcMemoryEl)) return
         }
 
         if (template_id === 'terraria:vanilla') {
@@ -1333,6 +1419,16 @@ function App() {
           if (key === 'frp_config' && focusEl(createTrFrpConfigEl)) return
           if (key === 'world_name' && focusEl(createTrWorldNameEl)) return
           if (key === 'max_players' && focusEl(createTrMaxPlayersEl)) return
+        }
+
+        if (template_id === 'dst:vanilla') {
+          if (key === 'cluster_token' && focusEl(createDstClusterTokenEl)) return
+          if (key === 'cluster_name' && focusEl(createDstClusterNameEl)) return
+          if (key === 'max_players' && focusEl(createDstMaxPlayersEl)) return
+          if (key === 'password' && focusEl(createDstPasswordEl)) return
+          if (key === 'port' && focusEl(createDstPortEl)) return
+          if (key === 'master_port' && focusEl(createDstMasterPortEl)) return
+          if (key === 'auth_port' && focusEl(createDstAuthPortEl)) return
         }
       }
     }
@@ -1369,7 +1465,7 @@ function App() {
         if (template_id === 'minecraft:vanilla') {
           if (key === 'port' && focusEl(editMcPortEl)) return
           if (key === 'frp_config' && focusEl(editMcFrpConfigEl)) return
-          if (key === 'memory_mb' && editMcMemoryPreset() === 'custom' && focusEl(editMcMemoryCustomEl)) return
+          if (key === 'memory_mb' && focusEl(editMcMemoryEl)) return
         }
 
         if (template_id === 'terraria:vanilla') {
@@ -1428,14 +1524,6 @@ function App() {
     return out
   })
 
-  const mcMemoryOptions = createMemo(() => [
-    { value: '16384', label: '16 GB', meta: 'high' },
-    { value: '8192', label: '8 GB' },
-    { value: '4096', label: '4 GB' },
-    { value: '2048', label: '2 GB', meta: 'default' },
-    { value: 'custom', label: 'Custom...' },
-  ])
-
   const [tab, setTab] = createSignal<UiTab>('instances')
 
   // Nodes state/queries will be moved into NodesPage next.
@@ -1465,8 +1553,10 @@ function App() {
   type InstanceDetailTab = 'overview' | 'logs' | 'files' | 'config'
   const [instanceDetailTab, setInstanceDetailTab] = createSignal<InstanceDetailTab>('logs')
 
+  const [importSaveUrl, setImportSaveUrl] = createSignal('')
+
   type TailLine = { text: string; received_at_unix_ms: number }
-  const MAX_PROCESS_LOG_LINES = 600
+  const MAX_PROCESS_LOG_LINES = 400
   const [processLogCursor, setProcessLogCursor] = createSignal<string | null>(null)
   const [processLogLive, setProcessLogLive] = createSignal(true)
   const [processLogLines, setProcessLogLines] = createSignal<TailLine[]>([])
@@ -1477,6 +1567,7 @@ function App() {
     setProcessLogCursor(null)
     setProcessLogLines([])
     setProcessLogLive(true)
+    setImportSaveUrl('')
   })
 
   const processLogsTail = rspc.createQuery(
@@ -2174,7 +2265,7 @@ function App() {
               <div class="flex min-h-0 flex-1">
               <Show when={tab() === 'instances'}>
                 <InstancesPage
-                  tabLabel={tab()}
+                  tabLabel="Instances"
                   left={
                     <div class="space-y-3">
 	                      <Field
@@ -2296,28 +2387,16 @@ function App() {
 	                              }
 	                              error={createFieldErrors().memory_mb}
 	                            >
-                              <div class="space-y-2">
-                                <Dropdown
-                                  label=""
-                                  value={mcMemoryPreset()}
-                                  options={mcMemoryOptions()}
-                                  onChange={(v) => {
-                                    setMcMemoryPreset(v)
-                                    if (v !== 'custom') setMcMemory(v)
-                                  }}
-                                />
-                                <Show when={mcMemoryPreset() === 'custom'}>
-                                  <Input
-                                    ref={(el) => {
-                                      createMcMemoryCustomEl = el
-                                    }}
-                                    type="number"
-                                    value={mcMemory()}
-                                    onInput={(e) => setMcMemory(e.currentTarget.value)}
-                                    invalid={Boolean(createFieldErrors().memory_mb)}
-                                  />
-                                </Show>
-                              </div>
+                              <Input
+                                ref={(el) => {
+                                  createMcMemoryEl = el
+                                }}
+                                type="number"
+                                value={mcMemory()}
+                                onInput={(e) => setMcMemory(e.currentTarget.value)}
+                                placeholder="2048"
+                                invalid={Boolean(createFieldErrors().memory_mb)}
+                              />
                             </Field>
                           </div>
 
@@ -2369,6 +2448,380 @@ function App() {
 	                                </div>
 	                              </Field>
 	                            </div>
+                          </Show>
+                        </div>
+                      </Show>
+
+                      <Show when={selectedTemplate() === 'minecraft:modrinth'}>
+                        <div class="space-y-3 border-t border-slate-200 pt-3 dark:border-slate-800">
+                          <div class="flex items-center justify-between gap-3">
+                            <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                              Minecraft modpack
+                            </div>
+                            <Button
+                              size="xs"
+                              variant={createAdvanced() ? 'secondary' : 'ghost'}
+                              onClick={() => setCreateAdvanced((v) => !v)}
+                              title="Show or hide advanced fields"
+                            >
+                              <span class="inline-flex items-center gap-2">
+                                {createAdvanced() ? 'Hide advanced' : 'Advanced'}
+                                <Show when={!createAdvanced() && createAdvancedDirty()}>
+                                  <span class="h-1.5 w-1.5 rounded-full bg-amber-500" aria-hidden="true" />
+                                </Show>
+                              </span>
+                            </Button>
+                          </div>
+
+                          <div class="rounded-2xl border border-slate-200 bg-white/70 p-3 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
+                            <label for="mc-eula" class="flex items-start gap-3 text-sm text-slate-800 dark:text-slate-300">
+                              <input
+                                ref={(el) => {
+                                  createMcEulaEl = el
+                                }}
+                                id="mc-eula"
+                                type="checkbox"
+                                checked={mcEula()}
+                                onChange={(e) => setMcEula(e.currentTarget.checked)}
+                                class="mt-1 h-4 w-4 rounded border-slate-300 bg-white text-amber-600 focus:ring-amber-400 dark:border-slate-700 dark:bg-slate-950/60 dark:text-amber-400"
+                              />
+                              <span class="leading-snug">
+                                I accept the Minecraft EULA
+                                <a
+                                  class="ml-2 text-amber-700 underline decoration-dotted underline-offset-4 hover:text-amber-800 dark:text-amber-300 dark:hover:text-amber-200"
+                                  href="https://aka.ms/MinecraftEULA"
+                                  target="_blank"
+                                  rel="noreferrer"
+                                >
+                                  (read)
+                                </a>
+                              </span>
+                            </label>
+                            <Show when={createFieldErrors().accept_eula}>
+                              {(msg) => <div class="mt-2 text-[12px] text-rose-700 dark:text-rose-300">{msg()}</div>}
+                            </Show>
+                          </div>
+
+                          <Field
+                            label={
+                              <LabelTip
+                                label="Modpack (mrpack)"
+                                content="Paste a Modrinth version link (recommended) or a direct .mrpack URL."
+                              />
+                            }
+                            required
+                            error={createFieldErrors().mrpack}
+                          >
+                            <Input
+                              ref={(el) => {
+                                createMcMrpackEl = el
+                              }}
+                              value={mcMrpack()}
+                              onInput={(e) => setMcMrpack(e.currentTarget.value)}
+                              placeholder="https://modrinth.com/modpack/.../version/..."
+                              spellcheck={false}
+                              invalid={Boolean(createFieldErrors().mrpack)}
+                            />
+                          </Field>
+
+                          <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                            <Field
+                              label={<LabelTip label="Memory (MiB)" content="Max heap size passed to Java (Xmx)." />}
+                              error={createFieldErrors().memory_mb}
+                            >
+                              <Input
+                                ref={(el) => {
+                                  createMcMemoryEl = el
+                                }}
+                                type="number"
+                                value={mcMemory()}
+                                onInput={(e) => setMcMemory(e.currentTarget.value)}
+                                placeholder="2048"
+                                invalid={Boolean(createFieldErrors().memory_mb)}
+                              />
+                            </Field>
+                          </div>
+
+                          <Show when={createAdvanced()}>
+                            <div class="space-y-3">
+                              <Field
+                                label={<LabelTip label="Port (optional)" content="Leave blank for auto-assign." />}
+                                error={createFieldErrors().port}
+                              >
+                                <Input
+                                  ref={(el) => {
+                                    createMcPortEl = el
+                                  }}
+                                  type="number"
+                                  value={mcPort()}
+                                  onInput={(e) => setMcPort(e.currentTarget.value)}
+                                  placeholder="25565"
+                                  invalid={Boolean(createFieldErrors().port)}
+                                />
+                              </Field>
+
+                              <Field
+                                label={<LabelTip label="Public (FRP)" content="Optional. Paste an frpc config to expose this instance via FRP." />}
+                                error={createFieldErrors().frp_config}
+                              >
+                                <div class="space-y-2">
+                                  <label class="inline-flex items-center gap-2 text-[12px] text-slate-700 dark:text-slate-200">
+                                    <input
+                                      type="checkbox"
+                                      class="h-4 w-4 rounded border-slate-300 bg-white text-amber-600 focus:ring-amber-400 dark:border-slate-700 dark:bg-slate-950/60 dark:text-amber-400"
+                                      checked={mcFrpEnabled()}
+                                      onChange={(e) => setMcFrpEnabled(e.currentTarget.checked)}
+                                    />
+                                    <span>Enable</span>
+                                  </label>
+                                  <Show when={mcFrpEnabled()}>
+                                    <Textarea
+                                      ref={(el) => {
+                                        createMcFrpConfigEl = el
+                                      }}
+                                      value={mcFrpConfig()}
+                                      onInput={(e) => setMcFrpConfig(e.currentTarget.value)}
+                                      placeholder="Paste frpc config (INI)"
+                                      spellcheck={false}
+                                      class="font-mono text-[11px]"
+                                      invalid={Boolean(createFieldErrors().frp_config)}
+                                    />
+                                  </Show>
+                                </div>
+                              </Field>
+                            </div>
+                          </Show>
+                        </div>
+                      </Show>
+
+                      <Show when={selectedTemplate() === 'dst:vanilla'}>
+                        <div class="space-y-3 border-t border-slate-200 pt-3 dark:border-slate-800">
+                          <div class="flex items-center justify-between gap-3">
+                            <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                              Don't Starve Together
+                            </div>
+                            <Button
+                              size="xs"
+                              variant={createAdvanced() ? 'secondary' : 'ghost'}
+                              onClick={() => setCreateAdvanced((v) => !v)}
+                              title="Show or hide advanced fields"
+                            >
+                              <span class="inline-flex items-center gap-2">
+                                {createAdvanced() ? 'Hide advanced' : 'Advanced'}
+                                <Show when={!createAdvanced() && createAdvancedDirty()}>
+                                  <span class="h-1.5 w-1.5 rounded-full bg-amber-500" aria-hidden="true" />
+                                </Show>
+                              </span>
+                            </Button>
+                          </div>
+
+                          <Field
+                            label={
+                              <LabelTip
+                                label="Cluster token"
+                                content="Required. Paste your cluster_token.txt contents from Klei."
+                              />
+                            }
+                            required
+                            error={createFieldErrors().cluster_token}
+                          >
+                            <div class="flex flex-wrap items-center gap-2">
+                              <Input
+                                ref={(el) => {
+                                  createDstClusterTokenEl = el
+                                }}
+                                type={dstClusterTokenVisible() ? 'text' : 'password'}
+                                value={dstClusterToken()}
+                                onInput={(e) => setDstClusterToken(e.currentTarget.value)}
+                                placeholder="Paste token…"
+                                spellcheck={false}
+                                invalid={Boolean(createFieldErrors().cluster_token)}
+                                class="min-w-[220px] flex-1 font-mono text-[11px]"
+                              />
+                              <IconButton
+                                type="button"
+                                size="sm"
+                                variant="secondary"
+                                label={dstClusterTokenVisible() ? 'Hide token' : 'Show token'}
+                                onClick={() => setDstClusterTokenVisible((v) => !v)}
+                              >
+                                <Show
+                                  when={dstClusterTokenVisible()}
+                                  fallback={
+                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
+                                      <path d="M10 12.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5z" />
+                                      <path
+                                        fill-rule="evenodd"
+                                        d="M.664 10.59a1.651 1.651 0 010-1.186A10.004 10.004 0 0110 3c4.257 0 7.893 2.66 9.336 6.41.147.382.147.804 0 1.186A10.004 10.004 0 0110 17c-4.257 0-7.893-2.66-9.336-6.41zM14 10a4 4 0 11-8 0 4 4 0 018 0z"
+                                        clip-rule="evenodd"
+                                      />
+                                    </svg>
+                                  }
+                                >
+                                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
+                                    <path d="M13.359 11.238l1.36 1.36a4 4 0 01-5.317-5.317l1.36 1.36a2.5 2.5 0 002.597 2.597z" />
+                                    <path
+                                      fill-rule="evenodd"
+                                      d="M2 4.25a.75.75 0 011.28-.53l14.5 14.5a.75.75 0 11-1.06 1.06l-2.294-2.294A9.961 9.961 0 0110 17c-4.257 0-7.893-2.66-9.336-6.41a1.651 1.651 0 010-1.186 10.03 10.03 0 012.924-4.167L2.22 3.78A.75.75 0 012 4.25zm6.12 6.12a2.5 2.5 0 003.51 3.51l-3.51-3.51z"
+                                      clip-rule="evenodd"
+                                    />
+                                    <path d="M12.454 8.214L9.31 5.07A4 4 0 0114.93 10.69l-2.476-2.476z" />
+                                    <path d="M15.765 12.585l1.507 1.507a10.03 10.03 0 002.064-3.502 1.651 1.651 0 000-1.186A10.004 10.004 0 0010 3a9.961 9.961 0 00-3.426.608l1.65 1.65A8.473 8.473 0 0110 4.5c3.49 0 6.574 2.138 7.773 5.5a8.5 8.5 0 01-2.008 2.585z" />
+                                  </svg>
+                                </Show>
+                              </IconButton>
+                              <IconButton
+                                type="button"
+                                size="sm"
+                                variant="secondary"
+                                label="Copy token"
+                                disabled={!dstClusterToken().trim()}
+                                onClick={() => void safeCopy(dstClusterToken().trim())}
+                              >
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
+                                  <path d="M5.75 2A2.75 2.75 0 003 4.75v9.5A2.75 2.75 0 005.75 17h1.5a.75.75 0 000-1.5h-1.5c-.69 0-1.25-.56-1.25-1.25v-9.5c0-.69.56-1.25 1.25-1.25h5.5c.69 0 1.25.56 1.25 1.25v1a.75.75 0 001.5 0v-1A2.75 2.75 0 0011.25 2h-5.5z" />
+                                  <path d="M8.75 6A2.75 2.75 0 006 8.75v6.5A2.75 2.75 0 008.75 18h5.5A2.75 2.75 0 0017 15.25v-6.5A2.75 2.75 0 0014.25 6h-5.5z" />
+                                </svg>
+                              </IconButton>
+                            </div>
+                          </Field>
+
+                          <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                            <Field label="Cluster name" error={createFieldErrors().cluster_name}>
+                              <Input
+                                ref={(el) => {
+                                  createDstClusterNameEl = el
+                                }}
+                                value={dstClusterName()}
+                                onInput={(e) => setDstClusterName(e.currentTarget.value)}
+                                placeholder="Alloy DST server"
+                                spellcheck={false}
+                                invalid={Boolean(createFieldErrors().cluster_name)}
+                              />
+                            </Field>
+
+                            <Field label={<LabelTip label="Max players" content="Maximum concurrent players allowed to join." />} error={createFieldErrors().max_players}>
+                              <Input
+                                ref={(el) => {
+                                  createDstMaxPlayersEl = el
+                                }}
+                                type="number"
+                                value={dstMaxPlayers()}
+                                onInput={(e) => setDstMaxPlayers(e.currentTarget.value)}
+                                placeholder="6"
+                                invalid={Boolean(createFieldErrors().max_players)}
+                              />
+                            </Field>
+                          </div>
+
+                          <Field label={<LabelTip label="Password (optional)" content="Optional cluster password for joining players." />} error={createFieldErrors().password}>
+                            <div class="flex flex-wrap items-center gap-2">
+                              <Input
+                                ref={(el) => {
+                                  createDstPasswordEl = el
+                                }}
+                                type={dstPasswordVisible() ? 'text' : 'password'}
+                                value={dstPassword()}
+                                onInput={(e) => setDstPassword(e.currentTarget.value)}
+                                placeholder="(none)"
+                                invalid={Boolean(createFieldErrors().password)}
+                                class="min-w-[220px] flex-1"
+                              />
+                              <IconButton
+                                type="button"
+                                size="sm"
+                                variant="secondary"
+                                label={dstPasswordVisible() ? 'Hide password' : 'Show password'}
+                                onClick={() => setDstPasswordVisible((v) => !v)}
+                              >
+                                <Show
+                                  when={dstPasswordVisible()}
+                                  fallback={
+                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
+                                      <path d="M10 12.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5z" />
+                                      <path
+                                        fill-rule="evenodd"
+                                        d="M.664 10.59a1.651 1.651 0 010-1.186A10.004 10.004 0 0110 3c4.257 0 7.893 2.66 9.336 6.41.147.382.147.804 0 1.186A10.004 10.004 0 0110 17c-4.257 0-7.893-2.66-9.336-6.41zM14 10a4 4 0 11-8 0 4 4 0 018 0z"
+                                        clip-rule="evenodd"
+                                      />
+                                    </svg>
+                                  }
+                                >
+                                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
+                                    <path d="M13.359 11.238l1.36 1.36a4 4 0 01-5.317-5.317l1.36 1.36a2.5 2.5 0 002.597 2.597z" />
+                                    <path
+                                      fill-rule="evenodd"
+                                      d="M2 4.25a.75.75 0 011.28-.53l14.5 14.5a.75.75 0 11-1.06 1.06l-2.294-2.294A9.961 9.961 0 0110 17c-4.257 0-7.893-2.66-9.336-6.41a1.651 1.651 0 010-1.186 10.03 10.03 0 012.924-4.167L2.22 3.78A.75.75 0 012 4.25zm6.12 6.12a2.5 2.5 0 003.51 3.51l-3.51-3.51z"
+                                      clip-rule="evenodd"
+                                    />
+                                    <path d="M12.454 8.214L9.31 5.07A4 4 0 0114.93 10.69l-2.476-2.476z" />
+                                    <path d="M15.765 12.585l1.507 1.507a10.03 10.03 0 002.064-3.502 1.651 1.651 0 000-1.186A10.004 10.004 0 0010 3a9.961 9.961 0 00-3.426.608l1.65 1.65A8.473 8.473 0 0110 4.5c3.49 0 6.574 2.138 7.773 5.5a8.5 8.5 0 01-2.008 2.585z" />
+                                  </svg>
+                                </Show>
+                              </IconButton>
+                              <IconButton
+                                type="button"
+                                size="sm"
+                                variant="secondary"
+                                label="Copy password"
+                                disabled={!dstPassword().trim()}
+                                onClick={() => void safeCopy(dstPassword().trim())}
+                              >
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
+                                  <path d="M5.75 2A2.75 2.75 0 003 4.75v9.5A2.75 2.75 0 005.75 17h1.5a.75.75 0 000-1.5h-1.5c-.69 0-1.25-.56-1.25-1.25v-9.5c0-.69.56-1.25 1.25-1.25h5.5c.69 0 1.25.56 1.25 1.25v1a.75.75 0 001.5 0v-1A2.75 2.75 0 0011.25 2h-5.5z" />
+                                  <path d="M8.75 6A2.75 2.75 0 006 8.75v6.5A2.75 2.75 0 008.75 18h5.5A2.75 2.75 0 0017 15.25v-6.5A2.75 2.75 0 0014.25 6h-5.5z" />
+                                </svg>
+                              </IconButton>
+                            </div>
+                          </Field>
+
+                          <Show when={createAdvanced()}>
+                            <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                              <Field label={<LabelTip label="Port (UDP)" content="Client connection port. Use 0 to auto-assign." />} error={createFieldErrors().port}>
+                                <Input
+                                  ref={(el) => {
+                                    createDstPortEl = el
+                                  }}
+                                  type="number"
+                                  value={dstPort()}
+                                  onInput={(e) => setDstPort(e.currentTarget.value)}
+                                  placeholder="0"
+                                  invalid={Boolean(createFieldErrors().port)}
+                                />
+                              </Field>
+
+                              <Field
+                                label={<LabelTip label="Master (UDP)" content="Steam master server port. Use 0 to auto-assign." />}
+                                error={createFieldErrors().master_port}
+                              >
+                                <Input
+                                  ref={(el) => {
+                                    createDstMasterPortEl = el
+                                  }}
+                                  type="number"
+                                  value={dstMasterPort()}
+                                  onInput={(e) => setDstMasterPort(e.currentTarget.value)}
+                                  placeholder="0"
+                                  invalid={Boolean(createFieldErrors().master_port)}
+                                />
+                              </Field>
+
+                              <Field
+                                label={<LabelTip label="Auth (UDP)" content="Steam authentication port. Use 0 to auto-assign." />}
+                                error={createFieldErrors().auth_port}
+                              >
+                                <Input
+                                  ref={(el) => {
+                                    createDstAuthPortEl = el
+                                  }}
+                                  type="number"
+                                  value={dstAuthPort()}
+                                  onInput={(e) => setDstAuthPort(e.currentTarget.value)}
+                                  placeholder="0"
+                                  invalid={Boolean(createFieldErrors().auth_port)}
+                                />
+                              </Field>
+                            </div>
                           </Show>
                         </div>
                       </Show>
@@ -2663,6 +3116,15 @@ function App() {
                               params.memory_mb = mcMemory() || '2048'
                               if (mcPort().trim()) params.port = mcPort().trim()
                               if (mcFrpEnabled() && mcFrpConfig().trim()) params.frp_config = mcFrpConfig().trim()
+                            } else if (template_id === 'minecraft:modrinth') {
+                              if (!mcEula()) localErrors.accept_eula = 'You must accept the EULA to start a Minecraft server.'
+                              if (!mcMrpack().trim()) localErrors.mrpack = 'Paste a Modrinth version link or a direct .mrpack URL.'
+                              if (mcFrpEnabled() && !mcFrpConfig().trim()) localErrors.frp_config = 'Paste frpc config.'
+                              params.accept_eula = 'true'
+                              params.mrpack = mcMrpack().trim()
+                              params.memory_mb = mcMemory() || '2048'
+                              if (mcPort().trim()) params.port = mcPort().trim()
+                              if (mcFrpEnabled() && mcFrpConfig().trim()) params.frp_config = mcFrpConfig().trim()
                             } else if (template_id === 'terraria:vanilla') {
                               const v = trVersion().trim()
                               params.version = v || '1453'
@@ -2673,6 +3135,18 @@ function App() {
                               if (trPassword().trim()) params.password = trPassword().trim()
                               if (trFrpEnabled() && !trFrpConfig().trim()) localErrors.frp_config = 'Paste frpc config.'
                               if (trFrpEnabled() && trFrpConfig().trim()) params.frp_config = trFrpConfig().trim()
+                            } else if (template_id === 'dst:vanilla') {
+                              if (!dstClusterToken().trim()) localErrors.cluster_token = 'Paste your Klei cluster token.'
+                              params.cluster_token = dstClusterToken().trim()
+                              params.cluster_name = dstClusterName().trim() || 'Alloy DST server'
+                              params.max_players = dstMaxPlayers().trim() || '6'
+                              if (dstPassword().trim()) params.password = dstPassword().trim()
+                              const p = dstPort().trim()
+                              const mp = dstMasterPort().trim()
+                              const ap = dstAuthPort().trim()
+                              if (p) params.port = p
+                              if (mp) params.master_port = mp
+                              if (ap) params.auth_port = ap
                             }
 
                             if (Object.keys(localErrors).length > 0) {
@@ -2787,22 +3261,6 @@ function App() {
                           </div>
                         </div>
                         <div class="flex flex-wrap items-center gap-2">
-                          <IconButton
-                            type="button"
-                            label="Refresh"
-                            title="Refresh instances"
-                            variant="secondary"
-                            disabled={instances.isPending}
-                            onClick={() => void invalidateInstances()}
-                          >
-                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-                              <path
-                                fill-rule="evenodd"
-                                d="M15.312 11.424a5.5 5.5 0 01-9.201 2.466.75.75 0 011.06-1.06 4 4 0 006.764-2.289H13a.75.75 0 010-1.5h2.75a.75.75 0 01.75.75V12.5a.75.75 0 01-1.5 0v-1.076zM4.688 8.576a5.5 5.5 0 019.201-2.466.75.75 0 11-1.06 1.06A4 4 0 006.065 9.46H7a.75.75 0 010 1.5H4.25a.75.75 0 01-.75-.75V7.5a.75.75 0 011.5 0v1.076z"
-                                clip-rule="evenodd"
-                              />
-                            </svg>
-                          </IconButton>
 	                            <Button
 	                              size="xs"
 	                              variant="primary"
@@ -2832,7 +3290,7 @@ function App() {
                       </div>
 
                       <div class="mt-3 flex flex-wrap items-center gap-2">
-                        <div class="w-full sm:w-56 lg:w-64">
+                        <div class="w-full sm:w-44 lg:w-52">
                           <Input
                             value={instanceSearchInput()}
                             onInput={(e) => setInstanceSearchInput(e.currentTarget.value)}
@@ -2872,7 +3330,7 @@ function App() {
                             }
                           />
                         </div>
-                        <div class="w-full sm:w-36">
+                        <div class="w-full sm:w-32">
                           <Dropdown
                             label=""
                             ariaLabel="Filter by status"
@@ -2896,7 +3354,7 @@ function App() {
                             onChange={(v) => setInstanceStatusFilter(v as InstanceStatusFilter)}
                           />
                         </div>
-                        <div class="w-full sm:w-44 lg:w-52">
+                        <div class="w-full sm:w-36 lg:w-44">
                           <Dropdown
                             label=""
                             ariaLabel="Filter by template"
@@ -2916,7 +3374,7 @@ function App() {
                       </div>
 
                       <div class="mt-2 flex flex-wrap items-center gap-2">
-                        <div class="w-full sm:w-36">
+                        <div class="w-full sm:w-32">
                           <Dropdown
                             label=""
                             ariaLabel="Sort instances"
@@ -3041,7 +3499,7 @@ function App() {
 	                                    <div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
 	                                      <button
 	                                        type="button"
-	                                        class="group inline-flex max-w-full cursor-pointer items-center gap-1 rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 font-mono text-[11px] text-slate-700 transition-colors hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/35 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-50 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-200 dark:hover:bg-slate-900 dark:focus-visible:ring-amber-400/35 dark:focus-visible:ring-offset-slate-950"
+	                                        class="group inline-flex max-w-full cursor-pointer items-center gap-1 rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 font-mono text-[11px] text-slate-700 transition-all duration-150 hover:bg-white active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/35 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-50 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-200 dark:hover:bg-slate-900 dark:focus-visible:ring-amber-400/35 dark:focus-visible:ring-offset-slate-950"
 	                                        onClick={(e) => {
 	                                          e.preventDefault()
 	                                          e.stopPropagation()
@@ -3087,20 +3545,12 @@ function App() {
                                         {(p) => {
 	                                          const addr = `${connectHost()}:${p()}`
 	                                          return (
-	                                            <span
-	                                              class="group inline-flex max-w-full cursor-pointer items-center gap-1 rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 font-mono text-slate-700 transition-colors hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/35 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-50 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-200 dark:hover:bg-slate-900 dark:focus-visible:ring-amber-400/35 dark:focus-visible:ring-offset-slate-950"
+	                                            <button
+	                                              type="button"
+	                                              class="group inline-flex max-w-full cursor-pointer items-center gap-1 rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 font-mono text-slate-700 transition-all duration-150 hover:bg-white active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/35 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-50 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-200 dark:hover:bg-slate-900 dark:focus-visible:ring-amber-400/35 dark:focus-visible:ring-offset-slate-950"
 	                                              title="Click to copy connection address"
-	                                              role="button"
-	                                              tabIndex={0}
 	                                              onClick={(e) => {
 	                                                e.preventDefault()
-                                                e.stopPropagation()
-                                                void safeCopy(addr)
-                                                pushToast('success', 'Copied address', addr)
-                                              }}
-                                              onKeyDown={(e) => {
-                                                if (e.key !== 'Enter' && e.key !== ' ') return
-                                                e.preventDefault()
                                                 e.stopPropagation()
                                                 void safeCopy(addr)
                                                 pushToast('success', 'Copied address', addr)
@@ -3117,8 +3567,8 @@ function App() {
                                                 <path d="M5.75 2A2.75 2.75 0 003 4.75v9.5A2.75 2.75 0 005.75 17h1.5a.75.75 0 000-1.5h-1.5c-.69 0-1.25-.56-1.25-1.25v-9.5c0-.69.56-1.25 1.25-1.25h5.5c.69 0 1.25.56 1.25 1.25v1a.75.75 0 001.5 0v-1A2.75 2.75 0 0011.25 2h-5.5z" />
                                                 <path d="M8.75 6A2.75 2.75 0 006 8.75v6.5A2.75 2.75 0 008.75 18h5.5A2.75 2.75 0 0017 15.25v-6.5A2.75 2.75 0 0014.25 6h-5.5z" />
                                               </svg>
-                                            </span>
-                                          )
+                                            </button>
+	                                          )
                                         }}
                                       </Show>
                                     </div>
@@ -3437,20 +3887,6 @@ function App() {
                             </svg>
                           </IconButton>
                         </Show>
-                        <IconButton type="button" label="Refresh" variant="secondary" disabled={nodes.isPending} onClick={() => void invalidateNodes()}>
-                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-                            <path
-                              fill-rule="evenodd"
-                              d="M15.312 11.424a5.5 5.5 0 01-9.201 2.466.75.75 0 00-1.06 1.06 7 7 0 0011.698-3.132.75.75 0 00-1.437-.394z"
-                              clip-rule="evenodd"
-                            />
-                            <path
-                              fill-rule="evenodd"
-                              d="M4.688 8.576a5.5 5.5 0 019.201-2.466.75.75 0 001.06-1.06A7 7 0 003.25 8.182a.75.75 0 001.438.394z"
-                              clip-rule="evenodd"
-                            />
-                          </svg>
-                        </IconButton>
                       </div>
                       <div class="flex flex-wrap items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400">
                         <span>Updated {formatRelativeTime(nodesLastUpdatedAtUnixMs())}</span>
@@ -3520,27 +3956,6 @@ function App() {
                     <>
                       <div class="flex flex-wrap items-center justify-between gap-2">
                         <div class="text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">Details</div>
-                        <IconButton
-                          type="button"
-                          label="Refresh"
-                          title="Refresh nodes"
-                          variant="secondary"
-                          disabled={nodes.isPending}
-                          onClick={() => void invalidateNodes()}
-                        >
-                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-                            <path
-                              fill-rule="evenodd"
-                              d="M15.312 11.424a5.5 5.5 0 01-9.201 2.466.75.75 0 00-1.06 1.06 7 7 0 0011.698-3.132.75.75 0 00-1.437-.394z"
-                              clip-rule="evenodd"
-                            />
-                            <path
-                              fill-rule="evenodd"
-                              d="M4.688 8.576a5.5 5.5 0 019.201-2.466.75.75 0 001.06-1.06A7 7 0 003.25 8.182a.75.75 0 001.438.394z"
-                              clip-rule="evenodd"
-                            />
-                          </svg>
-                        </IconButton>
                       </div>
 
                       <div class="mt-3 rounded-xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
@@ -4100,26 +4515,16 @@ function App() {
 	                          }
 	                          error={editFieldErrors().memory_mb}
 	                        >
-                          <div class="space-y-2">
-                            <Dropdown
-                              label=""
-                              value={editMcMemoryPreset()}
-                              options={mcMemoryOptions()}
-                              onChange={(v) => setEditMcMemoryPreset(v)}
-                            />
-                            <Show when={editMcMemoryPreset() === 'custom'}>
-                              <Input
-                                ref={(el) => {
-                                  editMcMemoryCustomEl = el
-                                }}
-                                type="number"
-                                value={editMcMemory()}
-                                onInput={(e) => setEditMcMemory(e.currentTarget.value)}
-                                placeholder="2048"
-                                invalid={Boolean(editFieldErrors().memory_mb)}
-                              />
-                            </Show>
-                          </div>
+                          <Input
+                            ref={(el) => {
+                              editMcMemoryEl = el
+                            }}
+                            type="number"
+                            value={editMcMemory()}
+                            onInput={(e) => setEditMcMemory(e.currentTarget.value)}
+                            placeholder="2048"
+                            invalid={Boolean(editFieldErrors().memory_mb)}
+                          />
                         </Field>
                       </div>
 
@@ -4868,7 +5273,7 @@ function App() {
                             {(c) => (
                               <button
                                 type="button"
-                                class="group inline-flex max-w-full cursor-pointer items-center gap-1 rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 font-mono text-[11px] text-slate-700 transition-colors hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/35 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-50 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-200 dark:hover:bg-slate-900 dark:focus-visible:ring-amber-400/35 dark:focus-visible:ring-offset-slate-950"
+                                class="group inline-flex max-w-full cursor-pointer items-center gap-1 rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 font-mono text-[11px] text-slate-700 transition-all duration-150 hover:bg-white active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/35 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-50 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-200 dark:hover:bg-slate-900 dark:focus-visible:ring-amber-400/35 dark:focus-visible:ring-offset-slate-950"
                                 onClick={() => void copyConnect()}
                                 title="Copy connection info"
                               >
@@ -4890,7 +5295,7 @@ function App() {
                             {(c) => (
                               <button
                                 type="button"
-                                class="group inline-flex max-w-full cursor-pointer items-center gap-1 rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 font-mono text-[11px] text-slate-700 transition-colors hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/35 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-50 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-200 dark:hover:bg-slate-900 dark:focus-visible:ring-amber-400/35 dark:focus-visible:ring-offset-slate-950"
+                                class="group inline-flex max-w-full cursor-pointer items-center gap-1 rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 font-mono text-[11px] text-slate-700 transition-all duration-150 hover:bg-white active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/35 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-50 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-200 dark:hover:bg-slate-900 dark:focus-visible:ring-amber-400/35 dark:focus-visible:ring-offset-slate-950"
                                 onClick={() => void copyFrp()}
                                 title="Copy public endpoint (FRP)"
                               >
@@ -4913,40 +5318,6 @@ function App() {
                         <Show when={status()?.state === 'PROCESS_STATE_STARTING' ? status()?.message?.trim() : null}>
                           {(msg) => <StartProgress templateId={inst().config.template_id} message={msg()} />}
                         </Show>
-
-	                        <div class="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400">
-	                          <button
-	                            type="button"
-	                            class="group inline-flex cursor-pointer items-center gap-1 rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 font-mono text-slate-700 hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/35 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-50 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-200 dark:hover:bg-slate-900 dark:focus-visible:ring-amber-400/35 dark:focus-visible:ring-offset-slate-950"
-	                            onClick={() => {
-	                              void safeCopy(id())
-	                              pushToast('success', 'Copied ID', shortId(id()))
-	                            }}
-	                            title="Copy instance id"
-	                          >
-	                            <span class="truncate">{shortId(id())}</span>
-	                            <svg
-	                              xmlns="http://www.w3.org/2000/svg"
-	                              viewBox="0 0 20 20"
-	                              fill="currentColor"
-	                              class="h-3 w-3 flex-none opacity-60 group-hover:opacity-100"
-	                              aria-hidden="true"
-	                            >
-	                              <path d="M5.75 2A2.75 2.75 0 003 4.75v9.5A2.75 2.75 0 005.75 17h1.5a.75.75 0 000-1.5h-1.5c-.69 0-1.25-.56-1.25-1.25v-9.5c0-.69.56-1.25 1.25-1.25h5.5c.69 0 1.25.56 1.25 1.25v1a.75.75 0 001.5 0v-1A2.75 2.75 0 0011.25 2h-5.5z" />
-	                              <path d="M8.75 6A2.75 2.75 0 006 8.75v6.5A2.75 2.75 0 008.75 18h5.5A2.75 2.75 0 0017 15.25v-6.5A2.75 2.75 0 0014.25 6h-5.5z" />
-	                            </svg>
-	                          </button>
-	                          <Show when={instanceStatusKeys()[id()]?.updated_at_unix_ms}>
-	                            {(t) => (
-                              <span
-	                                class="rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 font-mono dark:border-slate-800 dark:bg-slate-950/40"
-	                                title={new Date(t()).toLocaleString()}
-	                              >
-	                                {formatRelativeTime(t())}
-	                              </span>
-	                            )}
-	                          </Show>
-	                        </div>
                       </div>
 
                       <div class="flex flex-wrap items-center justify-end gap-2">
@@ -5170,91 +5541,168 @@ function App() {
                   </div>
 
                   <Show when={instanceDetailTab() === 'overview'}>
-                    <div class="grid gap-4 lg:grid-cols-2">
-                      <div class="rounded-2xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
-                        <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Status</div>
-                        <div class="mt-3 space-y-2 text-[12px] text-slate-600 dark:text-slate-300">
-                          <div class="flex items-center justify-between gap-3">
-                            <div class="text-slate-500 dark:text-slate-400">State</div>
-                            <div class="font-mono text-[11px]">{status()?.state ?? 'PROCESS_STATE_EXITED'}</div>
-                          </div>
-                          <Show when={status()?.pid != null}>
+                    <div class="space-y-4">
+                      <div class="grid gap-4 lg:grid-cols-2">
+                        <div class="rounded-2xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
+                          <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Status</div>
+                          <div class="mt-3 space-y-2 text-[12px] text-slate-600 dark:text-slate-300">
                             <div class="flex items-center justify-between gap-3">
-                              <div class="text-slate-500 dark:text-slate-400">PID</div>
-                              <div class="font-mono text-[11px]">{status()?.pid}</div>
+                              <div class="text-slate-500 dark:text-slate-400">State</div>
+                              <div class="font-mono text-[11px]">{status()?.state ?? 'PROCESS_STATE_EXITED'}</div>
                             </div>
-                          </Show>
-                          <Show when={status()?.exit_code != null}>
-                            <div class="flex items-center justify-between gap-3">
-                              <div class="text-slate-500 dark:text-slate-400">Exit</div>
-                              <div class="font-mono text-[11px]">{status()?.exit_code}</div>
-                            </div>
-                          </Show>
-                        </div>
-
-                        <Show when={status()?.message != null}>
-                          <div class="mt-3 rounded-xl border border-slate-200 bg-white/60 p-3 text-[12px] text-slate-700 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-200">
-                            <div class="font-semibold">Message</div>
-                            <div class="mt-1 font-mono text-[11px] whitespace-pre-wrap">{selectedInstanceMessage() ?? ''}</div>
-                            <Show when={statusMessageParts(status()).hint}>
-                              {(hint) => (
-                                <div class="mt-2 text-[11px] text-slate-500 dark:text-slate-400">{hint()}</div>
-                              )}
+                            <Show when={status()?.pid != null}>
+                              <div class="flex items-center justify-between gap-3">
+                                <div class="text-slate-500 dark:text-slate-400">PID</div>
+                                <div class="font-mono text-[11px]">{status()?.pid}</div>
+                              </div>
+                            </Show>
+                            <Show when={status()?.exit_code != null}>
+                              <div class="flex items-center justify-between gap-3">
+                                <div class="text-slate-500 dark:text-slate-400">Exit</div>
+                                <div class="font-mono text-[11px]">{status()?.exit_code}</div>
+                              </div>
                             </Show>
                           </div>
-                        </Show>
-                      </div>
 
-                      <div class="rounded-2xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
-                        <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Resources</div>
-                        <Show
-                          when={status()?.resources}
-                          fallback={<div class="mt-3 text-[12px] text-slate-500">(no resource data)</div>}
-                        >
-                          {(r) => (
-                            <div class="mt-3 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
-                              <span class="rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 font-mono dark:border-slate-800 dark:bg-slate-950/40">
-                                cpu {formatCpuPercent(r().cpu_percent_x100)}
-                              </span>
-                              <span class="rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 font-mono dark:border-slate-800 dark:bg-slate-950/40">
-                                rss {formatBytes(parseU64(r().rss_bytes))}
-                              </span>
-                              <span class="rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 font-mono dark:border-slate-800 dark:bg-slate-950/40">
-                                io {formatBytes(parseU64(r().read_bytes))}↓ {formatBytes(parseU64(r().write_bytes))}↑
-                              </span>
+                          <Show when={status()?.message != null}>
+                            <div class="mt-3 rounded-xl border border-slate-200 bg-white/60 p-3 text-[12px] text-slate-700 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-200">
+                              <div class="font-semibold">Message</div>
+                              <div class="mt-1 font-mono text-[11px] whitespace-pre-wrap">{selectedInstanceMessage() ?? ''}</div>
+                              <Show when={statusMessageParts(status()).hint}>
+                                {(hint) => (
+                                  <div class="mt-2 text-[11px] text-slate-500 dark:text-slate-400">{hint()}</div>
+                                )}
+                              </Show>
                             </div>
-                          )}
-                        </Show>
+                          </Show>
+                        </div>
 
-                        <div class="mt-4 flex flex-wrap items-center gap-2">
-                          <Button
-                            size="xs"
-                            variant="secondary"
-                            onClick={() => {
-                              setInstanceDetailTab('logs')
-                            }}
+                        <div class="rounded-2xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
+                          <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Resources</div>
+                          <Show
+                            when={status()?.resources}
+                            fallback={<div class="mt-3 text-[12px] text-slate-500">(no resource data)</div>}
                           >
-                            View logs
-                          </Button>
-                          <Button
-                            size="xs"
-                            variant="secondary"
-                            onClick={() => {
-                              setInstanceDetailTab('files')
-                            }}
-                          >
-                            Browse files
-                          </Button>
-                          <Button
-                            size="xs"
-                            variant="secondary"
-                            onClick={() => openInFiles(`instances/${id()}`)}
-                            title="Open in the global Files tab"
-                          >
-                            Open in Files tab
-                          </Button>
+                            {(r) => (
+                              <div class="mt-3 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+                                <span class="rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 font-mono dark:border-slate-800 dark:bg-slate-950/40">
+                                  cpu {formatCpuPercent(r().cpu_percent_x100)}
+                                </span>
+                                <span class="rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 font-mono dark:border-slate-800 dark:bg-slate-950/40">
+                                  rss {formatBytes(parseU64(r().rss_bytes))}
+                                </span>
+                                <span class="rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 font-mono dark:border-slate-800 dark:bg-slate-950/40">
+                                  io {formatBytes(parseU64(r().read_bytes))}↓ {formatBytes(parseU64(r().write_bytes))}↑
+                                </span>
+                              </div>
+                            )}
+                          </Show>
+
+                          <div class="mt-4 flex flex-wrap items-center gap-2">
+                            <Button
+                              size="xs"
+                              variant="secondary"
+                              onClick={() => {
+                                setInstanceDetailTab('logs')
+                              }}
+                            >
+                              View logs
+                            </Button>
+                            <Button
+                              size="xs"
+                              variant="secondary"
+                              onClick={() => {
+                                setInstanceDetailTab('files')
+                              }}
+                            >
+                              Browse files
+                            </Button>
+                            <Button
+                              size="xs"
+                              variant="secondary"
+                              onClick={() => openInFiles(`instances/${id()}`)}
+                              title="Open in the global Files tab"
+                            >
+                              Open in Files tab
+                            </Button>
+                          </div>
                         </div>
                       </div>
+
+                      <Show
+                        when={
+                          inst().config.template_id === 'minecraft:vanilla' ||
+                          inst().config.template_id === 'minecraft:modrinth' ||
+                          inst().config.template_id === 'terraria:vanilla'
+                        }
+                      >
+                        <div class="rounded-2xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
+                          <div class="flex items-center justify-between gap-3">
+                            <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Save</div>
+                            <Show
+                              when={canStartInstance(status())}
+                              fallback={<Badge variant="warning">Stop to import</Badge>}
+                            >
+                              <Badge variant="neutral">Import from URL</Badge>
+                            </Show>
+                          </div>
+
+                          <div class="mt-2 text-[12px] text-slate-600 dark:text-slate-300">
+                            <Show
+                              when={inst().config.template_id === 'terraria:vanilla'}
+                              fallback={<span>Paste a world .zip URL (must contain a single Minecraft world).</span>}
+                            >
+                              <span>Paste a .zip (recommended) or direct .wld URL.</span>
+                            </Show>
+                          </div>
+
+                          <div class="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
+                            <Input
+                              value={importSaveUrl()}
+                              onInput={(e) => setImportSaveUrl(e.currentTarget.value)}
+                              placeholder="https://..."
+                              spellcheck={false}
+                              class="flex-1"
+                              leftIcon={
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
+                                  <path
+                                    fill-rule="evenodd"
+                                    d="M12.5 2.75a.75.75 0 01.75.75v2h1a3.25 3.25 0 013.25 3.25v5a3.25 3.25 0 01-3.25 3.25h-5A3.25 3.25 0 017 13.75v-1a.75.75 0 011.5 0v1c0 .966.784 1.75 1.75 1.75h5A1.75 1.75 0 0017 13.75v-5A1.75 1.75 0 0015.25 7h-1v2a.75.75 0 11-1.5 0V3.5a.75.75 0 01.75-.75z"
+                                    clip-rule="evenodd"
+                                  />
+                                  <path
+                                    fill-rule="evenodd"
+                                    d="M3.25 5.5A2.75 2.75 0 016 2.75h4A2.75 2.75 0 0112.75 5.5v8.5A2.75 2.75 0 0110 16.75H6A2.75 2.75 0 013.25 14V5.5zM6 4.25c-.69 0-1.25.56-1.25 1.25V14c0 .69.56 1.25 1.25 1.25h4c.69 0 1.25-.56 1.25-1.25V5.5c0-.69-.56-1.25-1.25-1.25H6z"
+                                    clip-rule="evenodd"
+                                  />
+                                </svg>
+                              }
+                            />
+                            <Button
+                              variant="secondary"
+                              disabled={isReadOnly() || !canStartInstance(status()) || importSaveFromUrl.isPending || !importSaveUrl().trim()}
+                              loading={importSaveFromUrl.isPending}
+                              onClick={async () => {
+                                const url = importSaveUrl().trim()
+                                if (!url) return
+                                try {
+                                  const out = await importSaveFromUrl.mutateAsync({ instance_id: id(), url })
+                                  pushToast('success', 'Imported', out.message || out.installed_path)
+                                  setImportSaveUrl('')
+                                } catch (e) {
+                                  toastError('Import failed', e)
+                                }
+                              }}
+                            >
+                              Import
+                            </Button>
+                          </div>
+
+                          <div class="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
+                            The instance must be stopped. Old save is backed up automatically.
+                          </div>
+                        </div>
+                      </Show>
                     </div>
                   </Show>
 
@@ -5267,6 +5715,7 @@ function App() {
                       lines={processLogLines()}
                       loading={processLogsTail.isPending}
                       error={processLogsTail.isError ? processLogsTail.error : undefined}
+                      minimal={true}
                       live={processLogLive()}
                       onLiveChange={setProcessLogLive}
                       onClear={() => setProcessLogLines([])}
