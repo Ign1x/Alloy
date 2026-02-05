@@ -805,7 +805,7 @@ function App() {
     const list = (instances.data ?? []) as InstanceListItem[]
     const set = new Set<string>()
     for (const i of list) set.add(i.config.template_id)
-    const opts = [{ value: 'all', label: 'All templates' }]
+    const opts = [{ value: 'all', label: 'All' }]
     for (const id of Array.from(set).sort()) opts.push({ value: id, label: id })
     return opts
   })
@@ -818,7 +818,7 @@ function App() {
   ])
 
   const instanceStatusFilterOptions = createMemo(() => [
-    { value: 'all', label: 'All statuses' },
+    { value: 'all', label: 'All' },
     { value: 'running', label: 'Running' },
     { value: 'starting', label: 'Starting' },
     { value: 'stopping', label: 'Stopping' },
@@ -3302,7 +3302,7 @@ function App() {
                       </div>
 
                       <div class="mt-3 flex flex-wrap items-center gap-2">
-                        <div class="w-full sm:w-44 lg:w-52">
+                        <div class="w-full sm:w-40 lg:w-44">
                           <Input
                             value={instanceSearchInput()}
                             onInput={(e) => setInstanceSearchInput(e.currentTarget.value)}
@@ -3366,7 +3366,7 @@ function App() {
                             onChange={(v) => setInstanceStatusFilter(v as InstanceStatusFilter)}
                           />
                         </div>
-                        <div class="w-full sm:w-36 lg:w-44">
+                        <div class="w-full sm:w-36 lg:w-40">
                           <Dropdown
                             label=""
                             ariaLabel="Filter by template"
@@ -3416,7 +3416,7 @@ function App() {
                         </label>
                       </div>
 
-                      <Show when={instances.isError && (instances.error as unknown)}>
+                      <Show when={instances.isError && instances.data == null && (instances.error as unknown)}>
                         <ErrorState
                           class="mt-4"
                           title="Failed to load instances"
@@ -3425,7 +3425,21 @@ function App() {
                         />
                       </Show>
 
-                      <Show when={!instances.isError}>
+                      <Show when={instances.isError && instances.data != null}>
+                        <Banner
+                          class="mt-4"
+                          variant="warning"
+                          title="Refresh failed"
+                          message="Showing last known instance list."
+                          actions={
+                            <Button size="xs" variant="secondary" onClick={() => void invalidateInstances()}>
+                              Retry
+                            </Button>
+                          }
+                        />
+                      </Show>
+
+                      <Show when={!instances.isError || instances.data != null}>
                         <Show
                           when={instances.isPending}
                           fallback={
@@ -5269,14 +5283,11 @@ function App() {
               return (
                 <div class="space-y-4">
                   <div
-                    class={`-mx-5 -mt-4 border-b border-slate-200 bg-white/80 px-5 py-3 backdrop-blur dark:border-slate-800 dark:bg-slate-950/80 ${
-                      instanceDetailTab() === 'logs' ? '' : 'sticky top-0 z-10'
-                    }`}
+                    class="-mx-5 -mt-4 border-b border-slate-200 bg-white/60 px-5 py-3 dark:border-slate-800 dark:bg-slate-950/50"
                   >
-                    <div class="flex flex-wrap items-start justify-between gap-3">
+                    <div class="flex flex-wrap items-center justify-between gap-3">
                       <div class="min-w-0">
 	                        <div class="mt-1 flex flex-wrap items-center gap-2">
-	                          <div class="truncate font-display text-base font-semibold text-slate-900 dark:text-slate-100">{uiName()}</div>
 	                          <Badge variant={statusVariant()} title={status()?.state ?? 'PROCESS_STATE_EXITED'}>
 	                            {instanceStateLabel(status())}
 	                          </Badge>
@@ -5540,15 +5551,6 @@ function App() {
                         ]}
                         onChange={setInstanceDetailTab}
                       />
-
-                      <Show when={instanceDetailTab() === 'logs'}>
-                        <div class="flex items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400">
-                          <span
-                            class={`h-1.5 w-1.5 rounded-full ${statusDotClass({ loading: processLogsTail.isPending, error: processLogsTail.isError })}`}
-                          />
-                          <span>{processLogLive() ? 'live' : 'paused'}</span>
-                        </div>
-                      </Show>
                     </div>
                   </div>
 
@@ -5609,35 +5611,6 @@ function App() {
                               </div>
                             )}
                           </Show>
-
-                          <div class="mt-4 flex flex-wrap items-center gap-2">
-                            <Button
-                              size="xs"
-                              variant="secondary"
-                              onClick={() => {
-                                setInstanceDetailTab('logs')
-                              }}
-                            >
-                              View logs
-                            </Button>
-                            <Button
-                              size="xs"
-                              variant="secondary"
-                              onClick={() => {
-                                setInstanceDetailTab('files')
-                              }}
-                            >
-                              Browse files
-                            </Button>
-                            <Button
-                              size="xs"
-                              variant="secondary"
-                              onClick={() => openInFiles(`instances/${id()}`)}
-                              title="Open in the global Files tab"
-                            >
-                              Open in Files tab
-                            </Button>
-                          </div>
                         </div>
                       </div>
 
@@ -5645,7 +5618,8 @@ function App() {
                         when={
                           inst().config.template_id === 'minecraft:vanilla' ||
                           inst().config.template_id === 'minecraft:modrinth' ||
-                          inst().config.template_id === 'terraria:vanilla'
+                          inst().config.template_id === 'terraria:vanilla' ||
+                          inst().config.template_id === 'dst:vanilla'
                         }
                       >
                         <div class="rounded-2xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
@@ -5662,7 +5636,14 @@ function App() {
                           <div class="mt-2 text-[12px] text-slate-600 dark:text-slate-300">
                             <Show
                               when={inst().config.template_id === 'terraria:vanilla'}
-                              fallback={<span>Paste a world .zip URL (must contain a single Minecraft world).</span>}
+                              fallback={
+                                <Show
+                                  when={inst().config.template_id === 'dst:vanilla'}
+                                  fallback={<span>Paste a world .zip URL (must contain a single Minecraft world).</span>}
+                                >
+                                  <span>Paste a .zip URL containing a single DST cluster (Cluster_1/).</span>
+                                </Show>
+                              }
                             >
                               <span>Paste a .zip (recommended) or direct .wld URL.</span>
                             </Show>

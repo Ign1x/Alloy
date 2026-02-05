@@ -53,16 +53,26 @@ FROM eclipse-temurin:21-jre-jammy AS java21
 FROM debian:bookworm-slim AS runtime
 WORKDIR /app
 
-RUN apt-get update \
-  && apt-get install -y --no-install-recommends \
-    ca-certificates \
-    libcurl4 \
-    libgcc-s1 \
-    libicu72 \
-    libssl3 \
-    libstdc++6 \
-    zlib1g \
-  && rm -rf /var/lib/apt/lists/*
+RUN set -eux; \
+    arch="$(dpkg --print-architecture)"; \
+    apt-get update; \
+    pkgs="ca-certificates libcurl4 libgcc-s1 libicu72 libssl3 libstdc++6 zlib1g tar"; \
+    # SteamCMD (used by DST) ships 32-bit binaries and only works on amd64.
+    if [ "$arch" = "amd64" ]; then \
+      # SteamCMD commonly needs: 32-bit glibc loader + libstdc++ + zlib + tinfo/ncurses.
+      pkgs="$pkgs libc6-i386 lib32gcc-s1 lib32stdc++6 lib32z1 lib32tinfo6"; \
+    fi; \
+    apt-get install -y --no-install-recommends $pkgs; \
+    rm -rf /var/lib/apt/lists/*; \
+    if [ "$arch" = "amd64" ]; then \
+      # Some minimal images may not ship the expected i386 dynamic loader path.
+      # Ensure /lib/ld-linux.so.2 exists so SteamCMD's 32-bit ELF can exec.
+      if [ ! -e /lib/ld-linux.so.2 ]; then \
+        if [ -e /lib32/ld-linux.so.2 ]; then ln -s /lib32/ld-linux.so.2 /lib/ld-linux.so.2; fi; \
+        if [ -e /lib/i386-linux-gnu/ld-linux.so.2 ]; then ln -s /lib/i386-linux-gnu/ld-linux.so.2 /lib/ld-linux.so.2; fi; \
+      fi; \
+      test -e /lib/ld-linux.so.2; \
+    fi
 
 # Ship Java 21 without relying on Debian packages (bookworm doesn't include 21).
 COPY --from=java21 /opt/java/openjdk /opt/java/openjdk

@@ -2001,7 +2001,10 @@ impl ProcessManager {
                         "download_failed",
                         format!("failed to install dst server: {e}"),
                         None,
-                        Some("Ensure steamcmd dependencies are installed in the agent image, then try again.".to_string()),
+                        Some(
+                            "SteamCMD requires 32-bit runtime support on amd64 (libc6-i386, lib32gcc-s1, lib32stdc++6, lib32z1, lib32tinfo6). Rebuild the agent image and retry."
+                                .to_string(),
+                        ),
                     )
                 })?;
 

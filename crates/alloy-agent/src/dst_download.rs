@@ -135,6 +135,12 @@ async fn ensure_steamcmd() -> anyhow::Result<PathBuf> {
 }
 
 pub async fn ensure_dst_server() -> anyhow::Result<InstalledDstServer> {
+    // SteamCMD + DST dedicated server is only available as x86 Linux binaries.
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        anyhow::bail!("dst:vanilla is currently supported on amd64 nodes only");
+    }
+
     let install_dir = cache_dir().join("latest");
     let bin64 = install_dir
         .join("bin64")

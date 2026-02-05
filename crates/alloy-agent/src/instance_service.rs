@@ -395,6 +395,53 @@ fn find_minecraft_world_root(extracted_root: &Path) -> anyhow::Result<PathBuf> {
     Ok(hits.remove(0))
 }
 
+fn find_dst_cluster_root(extracted_root: &Path) -> anyhow::Result<PathBuf> {
+    fn walk(cur: &Path, hits: &mut Vec<PathBuf>) {
+        let rd = match std::fs::read_dir(cur) {
+            Ok(v) => v,
+            Err(_) => return,
+        };
+        for e in rd.flatten() {
+            let path = e.path();
+            let meta = match std::fs::symlink_metadata(&path) {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+            if meta.file_type().is_symlink() {
+                continue;
+            }
+            if meta.is_dir() {
+                walk(&path, hits);
+                continue;
+            }
+            if meta.is_file()
+                && path
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .is_some_and(|n| n.eq_ignore_ascii_case("cluster.ini"))
+                && let Some(parent) = path.parent()
+            {
+                // Keep only plausible cluster roots.
+                if parent.join("Master").join("server.ini").is_file() {
+                    hits.push(parent.to_path_buf());
+                }
+            }
+        }
+    }
+
+    let mut hits = Vec::<PathBuf>::new();
+    walk(extracted_root, &mut hits);
+    hits.sort();
+    hits.dedup();
+    if hits.is_empty() {
+        anyhow::bail!("could not find Cluster_1/cluster.ini in archive");
+    }
+    if hits.len() > 1 {
+        anyhow::bail!("multiple DST clusters found in archive; provide a single Cluster_1");
+    }
+    Ok(hits.remove(0))
+}
+
 #[derive(Debug, Clone)]
 pub struct InstanceApi {
     manager: ProcessManager,
@@ -733,6 +780,47 @@ impl InstanceService for InstanceApi {
                         .map_err(|e| Status::internal(format!("failed to install world: {e}")))?;
 
                     return Ok(("terraria world imported".to_string(), target, backup));
+                }
+
+                if template_id == "dst:vanilla" {
+                    let is_zip = is_zip_hint
+                        || download_path2
+                            .to_string_lossy()
+                            .to_ascii_lowercase()
+                            .ends_with(".zip");
+                    if !is_zip {
+                        return Err(Status::invalid_argument("dst save import expects a .zip cluster (Cluster_1/)"));
+                    }
+
+                    let extracted_root = imports_dir2.join(format!("extracted-{nonce}"));
+                    extract_zip_safely(&download_path2, &extracted_root).map_err(|e| {
+                        Status::invalid_argument(format!("failed to extract zip: {e}"))
+                    })?;
+
+                    let cluster_root = find_dst_cluster_root(&extracted_root).map_err(|e| {
+                        Status::invalid_argument(format!("invalid dst save: {e}"))
+                    })?;
+
+                    let dst_root = instance_dir2.join("klei").join("DoNotStarveTogether");
+                    std::fs::create_dir_all(&dst_root).map_err(|e| {
+                        Status::internal(format!("failed to create dst root: {e}"))
+                    })?;
+
+                    let target = dst_root.join("Cluster_1");
+                    let mut backup: Option<PathBuf> = None;
+                    if target.exists() {
+                        let backup_path = dst_root.join(format!("Cluster_1_backup_{nonce}"));
+                        std::fs::rename(&target, &backup_path).map_err(|e| {
+                            Status::internal(format!("failed to backup existing cluster: {e}"))
+                        })?;
+                        backup = Some(backup_path);
+                    }
+
+                    std::fs::rename(&cluster_root, &target)
+                        .map_err(|e| Status::internal(format!("failed to install cluster: {e}")))?;
+                    let _ = std::fs::remove_dir_all(&extracted_root);
+
+                    return Ok(("dst cluster imported".to_string(), target, backup));
                 }
 
                 Err(Status::unimplemented(
