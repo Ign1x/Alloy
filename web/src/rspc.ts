@@ -63,7 +63,10 @@ class AlloyFetchTransport {
     this.fetch = fetch || globalThis.fetch.bind(globalThis)
   }
 
-  private normalizeRspcError(data: unknown, meta: { key: string; operation: OperationType; httpStatus: number }): AlloyApiError {
+  private normalizeRspcError(
+    data: unknown,
+    meta: { key: string; operation: OperationType; httpStatus: number; requestId: string },
+  ): AlloyApiError {
     if (isPlainObject(data)) {
       const code =
         typeof data.code === 'string'
@@ -81,12 +84,13 @@ class AlloyFetchTransport {
             ? data.error
             : toErrorString(data)
 
-      const request_id =
+      const request_id_raw =
         typeof data.request_id === 'string'
           ? data.request_id
           : typeof data.requestId === 'string'
             ? data.requestId
             : ''
+      const request_id = request_id_raw || meta.requestId
 
       const field_errors = parseFieldErrors((data as any).field_errors ?? (data as any).fieldErrors)
       const hint = typeof data.hint === 'string' ? data.hint : null
@@ -95,13 +99,22 @@ class AlloyFetchTransport {
     }
 
     if (typeof data === 'string' && data.trim()) {
-      return new AlloyApiError({ code: 'rspc_error', message: data, request_id: '', hint: null })
+      const raw = data.trim()
+      if (raw.startsWith('Resolver(') || raw.includes('ResolverError')) {
+        return new AlloyApiError({
+          code: 'internal',
+          message: 'Backend resolver error. Please retry.',
+          request_id: meta.requestId,
+          hint: raw,
+        })
+      }
+      return new AlloyApiError({ code: 'rspc_error', message: raw, request_id: meta.requestId, hint: null })
     }
 
     return new AlloyApiError({
       code: 'rspc_error',
       message: `RSPC error (${meta.operation} ${meta.key}, HTTP ${meta.httpStatus})`,
-      request_id: '',
+      request_id: meta.requestId,
       hint: null,
     })
   }
@@ -134,6 +147,7 @@ class AlloyFetchTransport {
       body,
       headers,
     })
+    const requestId = (resp.headers.get('x-request-id') || '').trim()
 
     const respBody = (await (async () => {
       try {
@@ -149,21 +163,21 @@ class AlloyFetchTransport {
         const msg = text.trim()
           ? `HTTP ${resp.status} ${resp.statusText}: ${text.slice(0, 240)}`
           : `HTTP ${resp.status} ${resp.statusText}: non-JSON response`
-        throw new AlloyApiError({ code: 'http_error', message: msg, request_id: '', hint: null })
+        throw new AlloyApiError({ code: 'http_error', message: msg, request_id: requestId, hint: null })
       }
     })()) as unknown
     if (!isPlainObject(respBody) || !isPlainObject(respBody.result)) {
       throw new AlloyApiError({
         code: 'invalid_rspc_response',
         message: `Invalid RSPC response (HTTP ${resp.status} ${resp.statusText})`,
-        request_id: '',
+        request_id: requestId,
         hint: null,
       })
     }
 
     const { type, data } = respBody.result as { type?: unknown; data?: unknown }
     if (type === 'error') {
-      throw this.normalizeRspcError(data, { key, operation, httpStatus: resp.status })
+      throw this.normalizeRspcError(data, { key, operation, httpStatus: resp.status, requestId })
     }
 
     return data

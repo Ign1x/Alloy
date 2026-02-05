@@ -638,7 +638,13 @@ function App() {
   const [instancesPollErrorStreak, setInstancesPollErrorStreak] = createSignal(0)
   const instances = rspc.createQuery(
     () => ['instance.list', null],
-    () => ({ enabled: isAuthed(), refetchInterval: instancesPollMs(), refetchOnWindowFocus: false }),
+    () => ({
+      enabled: isAuthed(),
+      refetchInterval: instancesPollMs(),
+      refetchOnWindowFocus: false,
+      retry: 3,
+      retryDelay: (attempt) => Math.min(400 * Math.pow(2, attempt), 4000),
+    }),
   )
 
   const [instancesLastUpdatedAtUnixMs, setInstancesLastUpdatedAtUnixMs] = createSignal<number | null>(null)
@@ -737,6 +743,12 @@ function App() {
     let base = anyStartingOrStopping ? 800 : anyRunning ? 2000 : 5000
     if (count >= 20) base = Math.min(base * 2, 15_000)
     if (count >= 60) base = Math.min(base * 2, 30_000)
+
+    // On first load, transient backend/agent startup can fail once; retry quickly so users
+    // don't need to click "Retry" after refresh.
+    if (instances.isError && instances.data == null) {
+      base = 800
+    }
 
     const nextStreak = instances.isError ? Math.min(instancesPollErrorStreak() + 1, 6) : 0
     setInstancesPollErrorStreak(nextStreak)
