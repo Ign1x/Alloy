@@ -10,3 +10,6 @@ dist/
 ## OS / tooling
 .DS_Store
 .sisyphus/
+
+## Local planning docs
+goals/
