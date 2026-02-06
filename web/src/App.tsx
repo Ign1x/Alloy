@@ -1,5 +1,5 @@
 import { isAlloyApiError, onAuthEvent, queryClient, rspc } from './rspc'
-import { createEffect, createMemo, createSignal, For, Show, type JSX } from 'solid-js'
+import { createEffect, createMemo, createSignal, For, Show, onCleanup, type JSX } from 'solid-js'
 import { Portal } from 'solid-js/web'
 import type { ProcessStatusDto } from './bindings'
 import { ensureCsrfCookie, login, logout, whoami } from './auth'
@@ -24,6 +24,7 @@ import { FileBrowser } from './components/FileBrowser'
 import { LogViewer } from './components/LogViewer'
 import InstancesPage from './pages/InstancesPage'
 import NodesPage from './pages/NodesPage'
+import { ArrowUpDown, Moon, Monitor, Search, Sun } from 'lucide-solid'
 
 function statusDotClass(state: { loading: boolean; error: boolean }) {
   if (state.loading) return 'bg-slate-600 animate-pulse'
@@ -31,7 +32,70 @@ function statusDotClass(state: { loading: boolean; error: boolean }) {
   return 'bg-emerald-400'
 }
 
+type InstanceCardBackdrop = {
+  src: string
+  position: string
+}
+
+function templateKind(templateId: string): string {
+  const i = templateId.indexOf(':')
+  return i >= 0 ? templateId.slice(0, i) : templateId
+}
+
+function instanceCardBackdrop(templateId: string): InstanceCardBackdrop | null {
+  const kind = templateKind(templateId)
+  if (kind === 'minecraft') return { src: '/game-backdrops/minecraft-bg.jpg', position: '66% 52%' }
+  if (kind === 'dst') return { src: '/game-backdrops/dst-bg.jpg', position: '82% 56%' }
+  if (kind === 'terraria') return { src: '/game-backdrops/terraria-bg.jpg', position: '80% 58%' }
+  if (kind === 'dsp') return { src: '/game-backdrops/dsp-bg.jpg', position: '78% 54%' }
+  return null
+}
+
+function VisibilityToggle(props: {
+  visible: boolean
+  labelWhenHidden: string
+  labelWhenVisible: string
+  onToggle: () => void
+}) {
+  const label = () => (props.visible ? props.labelWhenVisible : props.labelWhenHidden)
+  return (
+    <button
+      type="button"
+      class="inline-flex h-6 w-6 items-center justify-center rounded-md text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/35 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-200 dark:focus-visible:ring-amber-400/35"
+      aria-label={label()}
+      title={label()}
+      onClick={props.onToggle}
+    >
+      <Show
+        when={props.visible}
+        fallback={
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4" aria-hidden="true">
+            <path d="M10 12.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5z" />
+            <path
+              fill-rule="evenodd"
+              d="M.664 10.59a1.651 1.651 0 010-1.186A10.004 10.004 0 0110 3c4.257 0 7.893 2.66 9.336 6.41.147.382.147.804 0 1.186A10.004 10.004 0 0110 17c-4.257 0-7.893-2.66-9.336-6.41zM14 10a4 4 0 11-8 0 4 4 0 018 0z"
+              clip-rule="evenodd"
+            />
+          </svg>
+        }
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4" aria-hidden="true">
+          <path d="M13.359 11.238l1.36 1.36a4 4 0 01-5.317-5.317l1.36 1.36a2.5 2.5 0 002.597 2.597z" />
+          <path
+            fill-rule="evenodd"
+            d="M2 4.25a.75.75 0 011.28-.53l14.5 14.5a.75.75 0 11-1.06 1.06l-2.294-2.294A9.961 9.961 0 0110 17c-4.257 0-7.893-2.66-9.336-6.41a1.651 1.651 0 010-1.186 10.03 10.03 0 012.924-4.167L2.22 3.78A.75.75 0 012 4.25zm6.12 6.12a2.5 2.5 0 003.51 3.51l-3.51-3.51z"
+            clip-rule="evenodd"
+          />
+          <path d="M12.454 8.214L9.31 5.07A4 4 0 0114.93 10.69l-2.476-2.476z" />
+          <path d="M15.765 12.585l1.507 1.507a10.03 10.03 0 002.064-3.502 1.651 1.651 0 000-1.186A10.004 10.004 0 0010 3a9.961 9.961 0 00-3.426.608l1.65 1.65A8.473 8.473 0 0110 4.5c3.49 0 6.574 2.138 7.773 5.5a8.5 8.5 0 01-2.008 2.585z" />
+        </svg>
+      </Show>
+    </button>
+  )
+}
+
 const AGENT_ERROR_PREFIX = 'ALLOY_ERROR_JSON:'
+const DSP_DEFAULT_SOURCE_ROOT = '/data/uploads/dsp/server'
 type AgentErrorPayload = {
   code: string
   message: string
@@ -108,6 +172,7 @@ function startProgressSteps(templateId: string): string[] {
   if (templateId === 'minecraft:import') return ['Import', 'Extract', 'Spawn', 'Wait']
   if (templateId === 'minecraft:curseforge') return ['Resolve', 'Download', 'Extract', 'Spawn', 'Wait']
   if (templateId === 'terraria:vanilla') return ['Resolve', 'Download', 'Extract', 'Spawn', 'Wait']
+  if (templateId === 'dsp:nebula') return ['Resolve', 'Spawn', 'Wait']
   return ['Spawn', 'Wait']
 }
 
@@ -131,6 +196,48 @@ function startProgressIndex(templateId: string, message: string): number {
 function StartProgress(props: { templateId: string; message: string }) {
   const steps = () => startProgressSteps(props.templateId)
   const active = () => startProgressIndex(props.templateId, props.message)
+  return (
+    <div class="mt-2 rounded-xl border border-slate-200 bg-white/60 px-3 py-2 text-[11px] text-slate-600 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-300">
+      <div class="flex flex-wrap items-center gap-2">
+        <For each={steps()}>
+          {(s, idx) => {
+            const i = idx()
+            const state = () => (i < active() ? 'done' : i === active() ? 'active' : 'todo')
+            const dot = () =>
+              state() === 'done'
+                ? 'bg-emerald-400'
+                : state() === 'active'
+                  ? 'bg-amber-400 animate-pulse'
+                  : 'bg-slate-400'
+            const text = () =>
+              state() === 'active' ? 'text-slate-900 dark:text-slate-100' : 'text-slate-600 dark:text-slate-300'
+
+            return (
+              <div class="flex items-center gap-2">
+                <span class={`h-1.5 w-1.5 rounded-full ${dot()}`} aria-hidden="true" />
+                <span class={text()}>{s}</span>
+                <Show when={i < steps().length - 1}>
+                  <span class="text-slate-300 dark:text-slate-700" aria-hidden="true">
+                    ›
+                  </span>
+                </Show>
+              </div>
+            )
+          }}
+        </For>
+
+        <span class="ml-auto truncate font-mono text-[11px] text-slate-500 dark:text-slate-400" title={props.message}>
+          {props.message}
+        </span>
+      </div>
+    </div>
+  )
+}
+
+function DownloadProgress(props: { templateId: string; message: string }) {
+  const steps = () => downloadProgressSteps(props.templateId)
+  const active = () => downloadProgressIndex(props.templateId, props.message)
+
   return (
     <div class="mt-2 rounded-xl border border-slate-200 bg-white/60 px-3 py-2 text-[11px] text-slate-600 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-300">
       <div class="flex flex-wrap items-center gap-2">
@@ -226,42 +333,80 @@ function isSecretParamKey(key: string) {
   return false
 }
 
-function parseFrpcIniEndpoint(config: string | null | undefined): string | null {
+type FrpConfigFormat = 'ini' | 'json' | 'toml' | 'yaml' | 'unknown'
+
+function detectFrpConfigFormat(config: string | null | undefined): FrpConfigFormat {
+  const raw = (config ?? '').trim()
+  if (!raw) return 'unknown'
+
+  try {
+    const v = JSON.parse(raw) as unknown
+    if (v && typeof v === 'object') return 'json'
+  } catch {
+    // ignore
+  }
+
+  if (/^\s*common\s*:/m.test(raw) || /^\s*proxies\s*:/m.test(raw)) return 'yaml'
+  if (/^\s*\[\[\s*proxies\s*\]\]/m.test(raw)) return 'toml'
+  if (/^\s*\[\s*common\s*\]/m.test(raw)) return 'ini'
+  if (/^\s*\[\s*[A-Za-z0-9_.-]+\s*\]\s*$/m.test(raw)) return 'toml'
+
+  return 'unknown'
+}
+
+function parseFrpEndpoint(config: string | null | undefined): string | null {
   const raw = (config ?? '').trim()
   if (!raw) return null
 
-  let serverAddr: string | null = null
-  let remotePort: string | null = null
-  let section: string | null = null
-
-  for (const lineRaw of raw.split('\n')) {
-    const line = lineRaw.trim()
-    if (!line || line.startsWith('#') || line.startsWith(';')) continue
-
-    const sec = /^\[(.+)\]$/.exec(line)
-    if (sec) {
-      section = sec[1].trim().toLowerCase()
-      continue
+  try {
+    const v = JSON.parse(raw) as unknown as {
+      common?: { server_addr?: unknown; server_port?: unknown }
     }
-
-    const kv = /^([A-Za-z0-9_.-]+)\s*=\s*(.+)\s*$/.exec(line)
-    if (!kv) continue
-    const key = kv[1].trim().toLowerCase()
-    let val = kv[2].trim()
-    // Strip simple inline comments.
-    val = val.replace(/\s*[#;].*$/, '').trim()
-    val = val.replace(/^"(.*)"$/, '$1').replace(/^'(.*)'$/, '$1')
-
-    if (section === 'common') {
-      if (key === 'server_addr') serverAddr = val
-      continue
-    }
-
-    if (key === 'remote_port' && remotePort == null) remotePort = val
+    const addr = typeof v?.common?.server_addr === 'string' ? v.common.server_addr.trim() : ''
+    const portRaw = v?.common?.server_port
+    const port = typeof portRaw === 'number' || typeof portRaw === 'string' ? String(portRaw).trim() : ''
+    if (addr && port) return `${addr}:${port}`
+  } catch {
+    // ignore
   }
 
-  if (!serverAddr || !remotePort) return null
-  return `${serverAddr}:${remotePort}`
+  if (/^\s*common\s*:/m.test(raw)) {
+    const addr = /^\s*server_addr\s*:\s*(.+)$/m.exec(raw)?.[1]?.trim() ?? ''
+    const port = /^\s*server_port\s*:\s*(.+)$/m.exec(raw)?.[1]?.trim() ?? ''
+    if (addr && port) return `${addr}:${port}`
+  }
+
+  if (/^\s*\[\s*common\s*\]/m.test(raw)) {
+    let serverAddr: string | null = null
+    let serverPort: string | null = null
+    let section: string | null = null
+
+    for (const lineRaw of raw.split('\n')) {
+      const line = lineRaw.trim()
+      if (!line || line.startsWith('#') || line.startsWith(';')) continue
+
+      const sec = /^\[(.+)\]$/.exec(line)
+      if (sec) {
+        section = sec[1].trim().toLowerCase()
+        continue
+      }
+
+      const kv = /^([A-Za-z0-9_.-]+)\s*=\s*(.+)\s*$/.exec(line)
+      if (!kv) continue
+      const key = kv[1].trim().toLowerCase()
+      let val = kv[2].trim()
+      val = val.replace(/\s*[#;].*$/, '').trim()
+      val = val.replace(/^"(.*)"$/, '$1').replace(/^'(.*)'$/, '$1')
+
+      if (section !== 'common') continue
+      if (key === 'server_addr') serverAddr = val
+      if (key === 'server_port') serverPort = val
+    }
+
+    if (serverAddr && serverPort) return `${serverAddr}:${serverPort}`
+  }
+
+  return null
 }
 
 function LabelTip(props: { label: string; content: JSX.Element }) {
@@ -335,10 +480,159 @@ function optionsWithCurrentValue(
   return [{ value: v, label: v }, ...options]
 }
 
-type UiTab = 'instances' | 'files' | 'nodes' | 'frp' | 'settings'
+type UiTab = 'instances' | 'downloads' | 'files' | 'nodes' | 'frp' | 'settings'
 
 type MinecraftCreateMode = 'vanilla' | 'modrinth' | 'import' | 'curseforge'
 type FrpConfigMode = 'paste' | 'node'
+type DownloadTarget = 'minecraft_vanilla' | 'terraria_vanilla' | 'dsp_nebula'
+type DownloadCenterView = 'library' | 'queue' | 'installed' | 'updates'
+type DownloadJobState = 'queued' | 'running' | 'paused' | 'success' | 'error' | 'canceled'
+type DownloadJob = {
+  id: string
+  target: DownloadTarget
+  templateId: string
+  version: string
+  params: Record<string, string>
+  state: DownloadJobState
+  message: string
+  requestId?: string
+  startedAtUnixMs: number
+  updatedAtUnixMs: number
+}
+
+function downloadTargetLabel(target: DownloadTarget): string {
+  if (target === 'minecraft_vanilla') return 'Minecraft (Vanilla)'
+  if (target === 'terraria_vanilla') return 'Terraria (Vanilla)'
+  return 'DSP (Nebula)'
+}
+
+function downloadProgressSteps(templateId: string): string[] {
+  if (templateId === 'minecraft:vanilla') return ['Resolve', 'Download', 'Verify', 'Ready']
+  if (templateId === 'terraria:vanilla') return ['Resolve', 'Download', 'Extract', 'Ready']
+  if (templateId === 'dsp:nebula') return ['Login', 'Download', 'Install', 'Ready']
+  return ['Queue', 'Run', 'Ready']
+}
+
+function downloadProgressIndex(templateId: string, message: string): number {
+  const m = message.toLowerCase()
+  const steps = downloadProgressSteps(templateId)
+
+  const find = (label: string) => steps.findIndex((s) => s.toLowerCase() === label)
+  const clamp = (idx: number) => Math.max(0, Math.min(steps.length - 1, idx))
+
+  if (m.includes('resolve')) return clamp(find('resolve'))
+  if (m.includes('login')) return clamp(find('login'))
+  if (m.includes('download')) return clamp(find('download'))
+  if (m.includes('extract')) return clamp(find('extract'))
+  if (m.includes('install')) return clamp(find('install'))
+  if (m.includes('verify')) return clamp(find('verify'))
+  if (m.includes('ready') || m.includes('warmed') || m.includes('completed')) return clamp(find('ready'))
+  return 0
+}
+
+function downloadEstimatedMessage(templateId: string, elapsedMs: number): string {
+  if (templateId === 'minecraft:vanilla') {
+    if (elapsedMs < 2_000) return 'resolving minecraft version metadata…'
+    if (elapsedMs < 15_000) return 'downloading minecraft server files…'
+    return 'verifying cache and preparing ready state…'
+  }
+  if (templateId === 'terraria:vanilla') {
+    if (elapsedMs < 2_000) return 'resolving terraria release metadata…'
+    if (elapsedMs < 15_000) return 'downloading terraria server package…'
+    return 'extracting and verifying terraria server files…'
+  }
+  if (templateId === 'dsp:nebula') {
+    if (elapsedMs < 3_000) return 'logging in via steamcmd…'
+    if (elapsedMs < 30_000) return 'downloading dsp server files via steamcmd…'
+    return 'installing and validating dsp runtime files…'
+  }
+  return 'preparing files…'
+}
+
+function downloadJobProgressMessage(job: DownloadJob, nowUnixMs: number): string {
+  if (job.state !== 'running') return job.message
+  const elapsed = Math.max(0, nowUnixMs - job.startedAtUnixMs)
+  return downloadEstimatedMessage(job.templateId, elapsed)
+}
+
+function downloadJobStatusVariant(state: DownloadJobState): 'warning' | 'neutral' | 'success' | 'danger' {
+  if (state === 'running') return 'warning'
+  if (state === 'queued' || state === 'paused') return 'neutral'
+  if (state === 'success') return 'success'
+  return 'danger'
+}
+
+function downloadJobStatusLabel(state: DownloadJobState): string {
+  if (state === 'running') return 'Running'
+  if (state === 'queued') return 'Queued'
+  if (state === 'paused') return 'Paused'
+  if (state === 'success') return 'Success'
+  if (state === 'canceled') return 'Canceled'
+  return 'Failed'
+}
+
+function formatDateTime(unixMs: number | null | undefined): string {
+  if (!unixMs || !Number.isFinite(unixMs) || unixMs <= 0) return '—'
+  try {
+    return new Date(unixMs).toLocaleString()
+  } catch {
+    return '—'
+  }
+}
+
+const DOWNLOAD_VIEW_STORAGE_KEY = 'alloy.download.view.v1'
+
+function parseUnixMs(value: unknown): number {
+  const raw = typeof value === 'string' ? value : typeof value === 'number' ? String(value) : '0'
+  const n = Number.parseInt(raw, 10)
+  return Number.isFinite(n) ? n : 0
+}
+
+function mapDownloadJobFromServer(raw: unknown): DownloadJob | null {
+  if (!raw || typeof raw !== 'object') return null
+  const row = raw as Record<string, unknown>
+
+  const id = typeof row.id === 'string' ? row.id : ''
+  const targetRaw = row.target
+  const templateId = typeof row.template_id === 'string' ? row.template_id : ''
+  const version = typeof row.version === 'string' ? row.version : ''
+  const stateRaw = row.state
+  const message = typeof row.message === 'string' ? row.message : ''
+  if (!id || !templateId) return null
+  if (targetRaw !== 'minecraft_vanilla' && targetRaw !== 'terraria_vanilla' && targetRaw !== 'dsp_nebula') return null
+  if (
+    stateRaw !== 'queued' &&
+    stateRaw !== 'running' &&
+    stateRaw !== 'paused' &&
+    stateRaw !== 'success' &&
+    stateRaw !== 'error' &&
+    stateRaw !== 'canceled'
+  ) {
+    return null
+  }
+  const target: DownloadTarget = targetRaw
+  const state: DownloadJobState = stateRaw
+
+  const paramsRaw = typeof row.params === 'object' && row.params ? (row.params as Record<string, unknown>) : {}
+  const params: Record<string, string> = {}
+  for (const [k, v] of Object.entries(paramsRaw)) {
+    if (!k || v == null) continue
+    params[k] = String(v)
+  }
+
+  return {
+    id,
+    target,
+    templateId,
+    version,
+    params,
+    state,
+    message,
+    requestId: typeof row.request_id === 'string' ? row.request_id : undefined,
+    startedAtUnixMs: parseUnixMs(row.started_at_unix_ms) || parseUnixMs(row.created_at_unix_ms),
+    updatedAtUnixMs: parseUnixMs(row.updated_at_unix_ms),
+  }
+}
 
 const CREATE_TEMPLATE_MINECRAFT = '__minecraft__'
 
@@ -378,6 +672,7 @@ function App() {
   const [loginUser, setLoginUser] = createSignal('admin')
   const [loginPass, setLoginPass] = createSignal('admin')
   const [showLoginModal, setShowLoginModal] = createSignal(false)
+  const [showDspInitModal, setShowDspInitModal] = createSignal(false)
   const [confirmDeleteInstanceId, setConfirmDeleteInstanceId] = createSignal<string | null>(null)
   const [confirmDeleteText, setConfirmDeleteText] = createSignal('')
   const [editingInstanceId, setEditingInstanceId] = createSignal<string | null>(null)
@@ -412,6 +707,15 @@ function App() {
   let createDstPortEl: HTMLInputElement | undefined
   let createDstMasterPortEl: HTMLInputElement | undefined
   let createDstAuthPortEl: HTMLInputElement | undefined
+  let createDspStartupModeEl: HTMLDivElement | undefined
+  let createDspSaveNameEl: HTMLInputElement | undefined
+  let createDspPortEl: HTMLInputElement | undefined
+  let createDspServerPasswordEl: HTMLInputElement | undefined
+  let createDspRemoteAccessPasswordEl: HTMLInputElement | undefined
+  let createDspUpsEl: HTMLInputElement | undefined
+  let createDspWineBinEl: HTMLInputElement | undefined
+  let dspSteamGuardCodeEl: HTMLInputElement | undefined
+  let settingsSteamcmdMaFileInputEl: HTMLInputElement | undefined
   let editDisplayNameEl: HTMLInputElement | undefined
   let editSleepSecondsEl: HTMLInputElement | undefined
   let editMcMemoryEl: HTMLInputElement | undefined
@@ -530,12 +834,34 @@ function App() {
     }, 6500)
   }
 
+  function friendlyErrorMessage(err: unknown): string {
+    const raw = err instanceof Error ? err.message : 'unknown error'
+    const lower = raw.toLowerCase()
+    if (lower.includes('504 gateway time-out') || lower.includes('504 gateway timeout')) {
+      return 'Gateway timed out, but backend may still be downloading. Open Downloads, warm files first, then retry.'
+    }
+    return raw
+  }
+
   function toastError(title: string, err: unknown) {
     if (isAlloyApiError(err)) {
       pushToast('error', title, err.data.message, err.data.request_id)
       return
     }
-    pushToast('error', title, err instanceof Error ? err.message : 'unknown error')
+    pushToast('error', title, friendlyErrorMessage(err))
+  }
+
+  function dspSourceInitRequired(
+    message: string | null | undefined,
+    fieldErrors: Record<string, string> | null | undefined,
+  ): boolean {
+    if (fieldErrors?.server_root) return true
+    const m = (message ?? '').toLowerCase()
+    return m.includes('dsp source files are not initialized') || m.includes('not initialized')
+  }
+
+  function dspSteamcmdSettingsRequiredMessage() {
+    return 'SteamCMD credentials are not configured. Open Settings → SteamCMD credentials, Login successfully, then retry.'
   }
 
   async function refreshSession() {
@@ -740,7 +1066,7 @@ function App() {
   const [instanceStatusFilter, setInstanceStatusFilter] = createSignal<InstanceStatusFilter>('all')
   const [instanceTemplateFilter, setInstanceTemplateFilter] = createSignal<string>('all')
   const [instanceSortKey, setInstanceSortKey] = createSignal<InstanceSortKey>('updated')
-  const [instanceCompact, setInstanceCompact] = createSignal(false)
+  const instanceCompact = () => true
   const [pinnedInstanceIds, setPinnedInstanceIds] = createSignal<Record<string, boolean>>({})
 
   createEffect(() => {
@@ -771,7 +1097,6 @@ function App() {
       if (parsed?.sort_key === 'name' || parsed?.sort_key === 'updated' || parsed?.sort_key === 'status' || parsed?.sort_key === 'port') {
         setInstanceSortKey(parsed.sort_key)
       }
-      if (typeof parsed?.compact === 'boolean') setInstanceCompact(parsed.compact)
       if (parsed?.pinned && typeof parsed.pinned === 'object') {
         const next: Record<string, boolean> = {}
         for (const [k, v] of Object.entries(parsed.pinned as Record<string, unknown>)) {
@@ -793,7 +1118,6 @@ function App() {
           status: instanceStatusFilter(),
           template: instanceTemplateFilter(),
           sort_key: instanceSortKey(),
-          compact: instanceCompact(),
           pinned: pinnedInstanceIds(),
         }),
       )
@@ -1103,6 +1427,9 @@ function App() {
     () => ['settings.status', null],
     () => ({ enabled: isAuthed(), refetchOnWindowFocus: false }),
   )
+  const hasSavedSteamcmdCreds = createMemo(
+    () => Boolean(settingsStatus.data?.steamcmd_username_set && settingsStatus.data?.steamcmd_password_set),
+  )
 
   const updateCheck = rspc.createQuery(
     () => ['update.check', null],
@@ -1110,9 +1437,18 @@ function App() {
   )
   const triggerUpdate = rspc.createMutation(() => 'update.trigger')
 
+  const mcVersions = rspc.createQuery(
+    () => ['minecraft.versions', null],
+    () => ({ enabled: isAuthed(), refetchOnWindowFocus: false }),
+  )
+
   const frpNodes = rspc.createQuery(
     () => ['frp.list', null],
-    () => ({ enabled: isAuthed(), refetchOnWindowFocus: false }),
+    () => ({
+      enabled: isAuthed(),
+      refetchOnWindowFocus: false,
+      refetchInterval: isAuthed() && tab() === 'frp' ? 5000 : false,
+    }),
   )
   const frpCreateNode = rspc.createMutation(() => 'frp.create')
   const frpUpdateNode = rspc.createMutation(() => 'frp.update')
@@ -1131,8 +1467,10 @@ function App() {
       meta: list.length > 0 ? undefined : "Open FRP tab to add one.",
     })
     for (const n of list) {
-      const endpoint = parseFrpcIniEndpoint(n.config)
-      out.push({ value: n.id, label: n.name, meta: endpoint ?? 'invalid config' })
+      const endpoint =
+        n.server_addr && n.server_port ? `${n.server_addr}:${n.server_port}` : parseFrpEndpoint(n.config)
+      const latency = n.latency_ms != null ? `${n.latency_ms}ms` : 'offline'
+      out.push({ value: n.id, label: n.name, meta: endpoint ? `${endpoint} · ${latency}` : latency })
     }
     return out
   })
@@ -1142,8 +1480,19 @@ function App() {
     if (!id) return null
     const list = (frpNodes.data ?? []) as unknown as FrpNodeDto[]
     const n = list.find((x) => x.id === id) ?? null
-    const cfg = (n?.config ?? '').trim()
-    return cfg ? cfg : null
+    if (!n) return null
+
+    const cfg = (n.config ?? '').trim()
+    if (cfg) return cfg
+
+    if (!n.server_addr || !n.server_port) return null
+    const lines = ['[common]', `server_addr = ${n.server_addr}`, `server_port = ${n.server_port}`]
+    const token = (n.token ?? '').trim()
+    const allocPorts = (n.allocatable_ports ?? '').trim()
+    if (token) lines.push(`token = ${token}`)
+    if (allocPorts) lines.push(`# alloy_alloc_ports = ${allocPorts}`)
+    lines.push('', '[alloy]', 'type = tcp', 'local_ip = 127.0.0.1', 'local_port = 0', 'remote_port = 0')
+    return lines.join('\n')
   }
 
   const instanceDeletePreview = rspc.createQuery(
@@ -1161,14 +1510,36 @@ function App() {
 
   const warmCache = rspc.createMutation(() => 'process.warmCache')
   const clearCache = rspc.createMutation(() => 'process.clearCache')
+  const downloadQueue = rspc.createQuery(
+    () => ['process.downloadQueue', null],
+    () => ({
+      enabled: isAuthed(),
+      refetchOnWindowFocus: false,
+      refetchInterval: isAuthed() && tab() === 'downloads' ? 1500 : false,
+    }),
+  )
+  const downloadQueueEnqueue = rspc.createMutation(() => 'process.downloadQueueEnqueue')
+  const downloadQueueSetPaused = rspc.createMutation(() => 'process.downloadQueueSetPaused')
+  const downloadQueueMove = rspc.createMutation(() => 'process.downloadQueueMove')
+  const downloadQueuePauseJob = rspc.createMutation(() => 'process.downloadQueuePauseJob')
+  const downloadQueueResumeJob = rspc.createMutation(() => 'process.downloadQueueResumeJob')
+  const downloadQueueCancelJob = rspc.createMutation(() => 'process.downloadQueueCancelJob')
+  const downloadQueueRetryJob = rspc.createMutation(() => 'process.downloadQueueRetryJob')
+  const downloadQueueClearHistory = rspc.createMutation(() => 'process.downloadQueueClearHistory')
 
   const setDstDefaultKleiKey = rspc.createMutation(() => 'settings.setDstDefaultKleiKey')
   const setCurseforgeApiKey = rspc.createMutation(() => 'settings.setCurseforgeApiKey')
+  const setSteamcmdCredentials = rspc.createMutation(() => 'settings.setSteamcmdCredentials')
 
   const [settingsDstKey, setSettingsDstKey] = createSignal('')
   const [settingsDstKeyVisible, setSettingsDstKeyVisible] = createSignal(false)
   const [settingsCurseforgeKey, setSettingsCurseforgeKey] = createSignal('')
   const [settingsCurseforgeKeyVisible, setSettingsCurseforgeKeyVisible] = createSignal(false)
+  const [settingsSteamcmdUsername, setSettingsSteamcmdUsername] = createSignal('')
+  const [settingsSteamcmdPassword, setSettingsSteamcmdPassword] = createSignal('')
+  const [settingsSteamcmdPasswordVisible, setSettingsSteamcmdPasswordVisible] = createSignal(false)
+  const [settingsSteamcmdGuardCode, setSettingsSteamcmdGuardCode] = createSignal('')
+  const [settingsSteamcmdMaFile, setSettingsSteamcmdMaFile] = createSignal('')
 
   type InstanceOp = 'starting' | 'stopping' | 'restarting' | 'deleting' | 'updating'
   const [instanceOpById, setInstanceOpById] = createSignal<Record<string, InstanceOp | undefined>>({})
@@ -1213,6 +1584,13 @@ function App() {
   const [sleepSeconds, setSleepSeconds] = createSignal<string>('60')
   const [createFormError, setCreateFormError] = createSignal<{ message: string; requestId?: string } | null>(null)
   const [createFieldErrors, setCreateFieldErrors] = createSignal<Record<string, string>>({})
+  const [warmFormError, setWarmFormError] = createSignal<{ message: string; requestId?: string } | null>(null)
+  const [warmFieldErrors, setWarmFieldErrors] = createSignal<Record<string, string>>({})
+  const [pendingCreateAfterDspInit, setPendingCreateAfterDspInit] = createSignal<{
+    template_id: string
+    params: Record<string, string>
+    display_name: string | null
+  } | null>(null)
   const [editFormError, setEditFormError] = createSignal<{ message: string; requestId?: string } | null>(null)
   const [editFieldErrors, setEditFieldErrors] = createSignal<Record<string, string>>({})
   const [editBase, setEditBase] = createSignal<{
@@ -1352,6 +1730,82 @@ function App() {
   const [mcFrpNodeId, setMcFrpNodeId] = createSignal('')
 
   const [trVersion, setTrVersion] = createSignal('1453')
+  const [downloadMcVersion, setDownloadMcVersion] = createSignal('latest_release')
+  const [downloadTrVersion, setDownloadTrVersion] = createSignal('1453')
+  const [downloadDspGuardCode, setDownloadDspGuardCode] = createSignal('')
+  const [downloadCenterView, setDownloadCenterView] = createSignal<DownloadCenterView>((() => {
+    try {
+      const v = localStorage.getItem(DOWNLOAD_VIEW_STORAGE_KEY)
+      if (v === 'library' || v === 'queue' || v === 'installed' || v === 'updates') return v
+    } catch {
+      // ignore
+    }
+    return 'queue'
+  })())
+  const [downloadEnqueueTarget, setDownloadEnqueueTarget] = createSignal<DownloadTarget | null>(null)
+  const [downloadNowUnixMs, setDownloadNowUnixMs] = createSignal(Date.now())
+
+  createEffect(() => {
+    try {
+      localStorage.setItem(DOWNLOAD_VIEW_STORAGE_KEY, downloadCenterView())
+    } catch {
+      // ignore
+    }
+  })
+
+  const downloadJobs = createMemo<DownloadJob[]>(() => {
+    const rows = (downloadQueue.data?.jobs ?? []) as unknown[]
+    const out: DownloadJob[] = []
+    for (const row of rows) {
+      const mapped = mapDownloadJobFromServer(row)
+      if (mapped) out.push(mapped)
+    }
+    return out
+  })
+  const downloadQueuePaused = createMemo(() => Boolean(downloadQueue.data?.queue_paused))
+
+  const downloadStatus = createMemo(() => {
+    const out = new Map<DownloadTarget, { ok: boolean; message: string; requestId?: string; atUnixMs: number }>()
+    for (const job of downloadJobs()) {
+      if (job.state !== 'success' && job.state !== 'error' && job.state !== 'canceled') continue
+      if (out.has(job.target)) continue
+      out.set(job.target, {
+        ok: job.state === 'success',
+        message: job.message,
+        requestId: job.requestId,
+        atUnixMs: job.updatedAtUnixMs,
+      })
+    }
+    return out
+  })
+
+  const [selectedDownloadJobId, setSelectedDownloadJobId] = createSignal<string | null>(null)
+  const selectedDownloadJob = createMemo(() => {
+    const id = selectedDownloadJobId()
+    if (!id) return null
+    return downloadJobs().find((job) => job.id === id) ?? null
+  })
+
+  const latestDownloadFailureByTarget = createMemo(() => {
+    const out = new Map<DownloadTarget, DownloadJob>()
+    for (const job of downloadJobs()) {
+      if (job.state !== 'error') continue
+      const prev = out.get(job.target)
+      if (!prev || job.updatedAtUnixMs > prev.updatedAtUnixMs) {
+        out.set(job.target, job)
+      }
+    }
+    return out
+  })
+
+  createEffect(() => {
+    const selectedId = selectedDownloadJobId()
+    if (!selectedId) return
+    if (!downloadJobs().some((job) => job.id === selectedId)) {
+      setSelectedDownloadJobId(null)
+    }
+  })
+
   const [trPort, setTrPort] = createSignal('')
   const [trMaxPlayers, setTrMaxPlayers] = createSignal('8')
   const [trWorldName, setTrWorldName] = createSignal('world')
@@ -1363,6 +1817,21 @@ function App() {
   const [trFrpMode, setTrFrpMode] = createSignal<FrpConfigMode>('paste')
   const [trFrpNodeId, setTrFrpNodeId] = createSignal('')
 
+  const mcEffectiveFrpConfig = createMemo(() =>
+    !mcFrpEnabled()
+      ? ''
+      : mcFrpMode() === 'node'
+        ? frpNodeConfigById(mcFrpNodeId()) ?? ''
+        : mcFrpConfig().trim(),
+  )
+  const trEffectiveFrpConfig = createMemo(() =>
+    !trFrpEnabled()
+      ? ''
+      : trFrpMode() === 'node'
+        ? frpNodeConfigById(trFrpNodeId()) ?? ''
+        : trFrpConfig().trim(),
+  )
+
   const [dstClusterToken, setDstClusterToken] = createSignal('')
   const [dstClusterTokenVisible, setDstClusterTokenVisible] = createSignal(false)
   const [dstClusterName, setDstClusterName] = createSignal('Alloy DST server')
@@ -1372,6 +1841,19 @@ function App() {
   const [dstPort, setDstPort] = createSignal('0')
   const [dstMasterPort, setDstMasterPort] = createSignal('0')
   const [dstAuthPort, setDstAuthPort] = createSignal('0')
+
+  const [dspPort, setDspPort] = createSignal('')
+  const [dspStartupMode, setDspStartupMode] = createSignal('auto')
+  const [dspSaveName, setDspSaveName] = createSignal('')
+  const [dspServerPassword, setDspServerPassword] = createSignal('')
+  const [dspServerPasswordVisible, setDspServerPasswordVisible] = createSignal(false)
+  const [dspRemoteAccessPassword, setDspRemoteAccessPassword] = createSignal('')
+  const [dspRemoteAccessPasswordVisible, setDspRemoteAccessPasswordVisible] = createSignal(false)
+  const [dspAutoPauseEnabled, setDspAutoPauseEnabled] = createSignal(false)
+  const [dspUps, setDspUps] = createSignal('60')
+  const [dspWineBin, setDspWineBin] = createSignal('wine64')
+  const [dspWarmNeedsInit, setDspWarmNeedsInit] = createSignal(false)
+  const [dspSteamGuardCode, setDspSteamGuardCode] = createSignal('')
 
   const createTemplateId = createMemo(() => {
     const raw = selectedTemplate()
@@ -1403,14 +1885,14 @@ function App() {
   const createAdvancedDirty = createMemo(() => {
     const template = createTemplateId()
     if (template.startsWith('minecraft:')) {
-      return mcPort().trim().length > 0 || mcFrpEnabled() || mcFrpConfig().trim().length > 0
+      return mcPort().trim().length > 0 || mcFrpEnabled() || mcEffectiveFrpConfig().trim().length > 0
     }
     if (template === 'terraria:vanilla') {
       if (trPort().trim()) return true
       const ws = trWorldSize().trim()
       if (ws && ws !== '1') return true
       if (trPassword().trim()) return true
-      if (trFrpEnabled() || trFrpConfig().trim()) return true
+      if (trFrpEnabled() || trEffectiveFrpConfig().trim()) return true
       return false
     }
     if (template === 'dst:vanilla') {
@@ -1420,6 +1902,18 @@ function App() {
       if (p && p !== '0') return true
       if (mp && mp !== '0') return true
       if (ap && ap !== '0') return true
+      return false
+    }
+    if (template === 'dsp:nebula') {
+      const p = dspPort().trim()
+      if (p && p !== '0') return true
+      if (dspServerPassword().trim()) return true
+      if (dspRemoteAccessPassword().trim()) return true
+      if (dspAutoPauseEnabled()) return true
+      const ups = dspUps().trim()
+      if (ups && ups !== '60') return true
+      const wine = dspWineBin().trim()
+      if (wine && wine !== 'wine64') return true
       return false
     }
     return false
@@ -1454,9 +1948,9 @@ function App() {
       })
 
       if (mcFrpEnabled()) {
-        const ep = parseFrpcIniEndpoint(mcFrpConfig())
+        const ep = parseFrpEndpoint(mcEffectiveFrpConfig())
         rows.push({ label: 'FRP', value: ep ?? '(enabled)' })
-        if (!mcFrpConfig().trim()) warnings.push('Paste FRP config or disable FRP.')
+        if (!mcEffectiveFrpConfig().trim()) warnings.push('Paste FRP config or disable FRP.')
       }
 
       if (!mcEula()) warnings.push('Accept the Minecraft EULA to start.')
@@ -1476,9 +1970,9 @@ function App() {
       })
 
       if (mcFrpEnabled()) {
-        const ep = parseFrpcIniEndpoint(mcFrpConfig())
+        const ep = parseFrpEndpoint(mcEffectiveFrpConfig())
         rows.push({ label: 'FRP', value: ep ?? '(enabled)' })
-        if (!mcFrpConfig().trim()) warnings.push('Paste FRP config or disable FRP.')
+        if (!mcEffectiveFrpConfig().trim()) warnings.push('Paste FRP config or disable FRP.')
       }
 
       if (!mcEula()) warnings.push('Accept the Minecraft EULA to start.')
@@ -1499,9 +1993,9 @@ function App() {
       })
 
       if (mcFrpEnabled()) {
-        const ep = parseFrpcIniEndpoint(mcFrpConfig())
+        const ep = parseFrpEndpoint(mcEffectiveFrpConfig())
         rows.push({ label: 'FRP', value: ep ?? '(enabled)' })
-        if (!mcFrpConfig().trim()) warnings.push('Paste FRP config or disable FRP.')
+        if (!mcEffectiveFrpConfig().trim()) warnings.push('Paste FRP config or disable FRP.')
       }
 
       if (!mcEula()) warnings.push('Accept the Minecraft EULA to start.')
@@ -1522,9 +2016,9 @@ function App() {
       })
 
       if (mcFrpEnabled()) {
-        const ep = parseFrpcIniEndpoint(mcFrpConfig())
+        const ep = parseFrpEndpoint(mcEffectiveFrpConfig())
         rows.push({ label: 'FRP', value: ep ?? '(enabled)' })
-        if (!mcFrpConfig().trim()) warnings.push('Paste FRP config or disable FRP.')
+        if (!mcEffectiveFrpConfig().trim()) warnings.push('Paste FRP config or disable FRP.')
       }
 
       if (!mcEula()) warnings.push('Accept the Minecraft EULA to start.')
@@ -1580,9 +2074,9 @@ function App() {
       })
 
       if (trFrpEnabled()) {
-        const ep = parseFrpcIniEndpoint(trFrpConfig())
+        const ep = parseFrpEndpoint(trEffectiveFrpConfig())
         rows.push({ label: 'FRP', value: ep ?? '(enabled)' })
-        if (!trFrpConfig().trim()) warnings.push('Paste FRP config or disable FRP.')
+        if (!trEffectiveFrpConfig().trim()) warnings.push('Paste FRP config or disable FRP.')
       }
 
       rows.push({ label: 'Max players', value: trMaxPlayers().trim() || '8' })
@@ -1590,6 +2084,34 @@ function App() {
       rows.push({ label: 'World size', value: trWorldSize().trim() || '1' })
       rows.push({ label: 'Password', value: trPassword().trim() ? '(set)' : '(none)', isSecret: true })
 
+    }
+
+    if (template_id === 'dsp:nebula') {
+      const mode = dspStartupMode().trim() || 'auto'
+      const save = dspSaveName().trim()
+
+      rows.push({ label: 'Server source', value: DSP_DEFAULT_SOURCE_ROOT })
+      rows.push({ label: 'Startup mode', value: mode })
+      if (mode === 'load') rows.push({ label: 'Save name', value: save || '(not set)' })
+      else if (save) rows.push({ label: 'Save name', value: save })
+
+      const portRaw = dspPort().trim()
+      const portLabel = !portRaw || portRaw === '0' ? 'auto' : portRaw
+      rows.push({ label: 'Port', value: portLabel })
+      rows.push({
+        label: 'Connect',
+        value: portLabel === 'auto' ? 'TBD (auto port)' : `${connectHost()}:${portLabel}`,
+      })
+
+      if (createAdvanced() || createAdvancedDirty()) {
+        rows.push({ label: 'Server password', value: dspServerPassword().trim() ? '(set)' : '(none)', isSecret: true })
+        rows.push({ label: 'Remote password', value: dspRemoteAccessPassword().trim() ? '(set)' : '(none)', isSecret: true })
+        rows.push({ label: 'Auto pause', value: dspAutoPauseEnabled() ? 'enabled' : 'disabled' })
+        rows.push({ label: 'UPS', value: dspUps().trim() || '60' })
+        rows.push({ label: 'Wine', value: dspWineBin().trim() || 'wine64' })
+      }
+
+      if (mode === 'load' && !save) warnings.push('Provide Save name when startup mode is load.')
     }
 
     return { template_id, templateLabel, rows, warnings }
@@ -1600,13 +2122,25 @@ function App() {
     selectedTemplate()
     setCreateFormError(null)
     setCreateFieldErrors({})
+    setWarmFormError(null)
+    setWarmFieldErrors({})
+    setPendingCreateAfterDspInit(null)
+    setShowDspInitModal(false)
+    setDspWarmNeedsInit(false)
+    setDspSteamGuardCode('')
     setCreateAdvanced(false)
     setMcFrpEnabled(false)
     setMcFrpConfig('')
+    setMcFrpMode('paste')
+    setMcFrpNodeId('')
     setTrFrpEnabled(false)
     setTrFrpConfig('')
+    setTrFrpMode('paste')
+    setTrFrpNodeId('')
     setDstClusterTokenVisible(false)
     setDstPasswordVisible(false)
+    setDspServerPasswordVisible(false)
+    setDspRemoteAccessPasswordVisible(false)
   })
 
   function focusEl(el: HTMLElement | undefined): boolean {
@@ -1647,6 +2181,8 @@ function App() {
                 ? ['cluster_token', 'cluster_name', 'max_players', 'password', 'port', 'master_port', 'auth_port', 'display_name']
               : template_id === 'terraria:vanilla'
                 ? ['version', 'max_players', 'world_name', 'port', 'world_size', 'password', 'frp_config', 'display_name']
+              : template_id === 'dsp:nebula'
+                ? ['startup_mode', 'save_name', 'port', 'server_password', 'remote_access_password', 'ups', 'wine_bin', 'display_name']
                 : ['display_name']
 
     const needsAdvanced =
@@ -1656,7 +2192,12 @@ function App() {
         Boolean(errors.auth_port) ||
         Boolean(errors.world_size) ||
         Boolean(errors.password) ||
-        Boolean(errors.frp_config))
+        Boolean(errors.frp_config) ||
+        Boolean(errors.server_password) ||
+        Boolean(errors.remote_access_password) ||
+        Boolean(errors.auto_pause_enabled) ||
+        Boolean(errors.ups) ||
+        Boolean(errors.wine_bin))
     if (needsAdvanced) setCreateAdvanced(true)
 
     const run = () => {
@@ -1705,12 +2246,350 @@ function App() {
           if (key === 'master_port' && focusEl(createDstMasterPortEl)) return
           if (key === 'auth_port' && focusEl(createDstAuthPortEl)) return
         }
+
+        if (template_id === 'dsp:nebula') {
+          if (key === 'startup_mode' && focusDropdown(createDspStartupModeEl)) return
+          if (key === 'save_name' && focusEl(createDspSaveNameEl)) return
+          if (key === 'port' && focusEl(createDspPortEl)) return
+          if (key === 'server_password' && focusEl(createDspServerPasswordEl)) return
+          if (key === 'remote_access_password' && focusEl(createDspRemoteAccessPasswordEl)) return
+          if (key === 'ups' && focusEl(createDspUpsEl)) return
+          if (key === 'wine_bin' && focusEl(createDspWineBinEl)) return
+        }
       }
     }
 
     if (needsAdvanced) requestAnimationFrame(run)
     else queueMicrotask(run)
   }
+
+  function closeDspInitModal() {
+    setShowDspInitModal(false)
+    setPendingCreateAfterDspInit(null)
+    setWarmFormError(null)
+    setWarmFieldErrors({})
+  }
+
+  async function runDspInitAndMaybeCreate() {
+    const template_id = createTemplateId()
+    if (template_id !== 'dsp:nebula') return
+
+    if (!hasSavedSteamcmdCreds()) {
+      setPendingCreateAfterDspInit(null)
+      setShowDspInitModal(false)
+      setWarmFieldErrors({})
+      setWarmFormError(null)
+      setCreateFieldErrors({})
+      setCreateFormError({ message: dspSteamcmdSettingsRequiredMessage() })
+      pushToast('error', 'SteamCMD not configured', dspSteamcmdSettingsRequiredMessage())
+      return
+    }
+
+    const guardCode = dspSteamGuardCode().trim()
+
+    setWarmFormError(null)
+    setWarmFieldErrors({})
+
+    try {
+      const warmParams: Record<string, string> = {}
+      if (guardCode) warmParams.steam_guard_code = guardCode
+
+      const warmOut = await warmCache.mutateAsync({ template_id: 'dsp:nebula', params: warmParams })
+      setDspWarmNeedsInit(false)
+      setDspSteamGuardCode('')
+      pushToast('success', 'DSP source initialized', warmOut.message)
+
+      const pending = pendingCreateAfterDspInit()
+      if (!pending) {
+        setShowDspInitModal(false)
+        return
+      }
+
+      const out = await createInstance.mutateAsync(pending)
+      setPendingCreateAfterDspInit(null)
+      setShowDspInitModal(false)
+      setCreateFormError(null)
+      setCreateFieldErrors({})
+      pushToast('success', 'Instance created', pending.display_name ?? undefined)
+      await invalidateInstances()
+      revealInstance(out.instance_id)
+      setSelectedInstanceId(out.instance_id)
+    } catch (e) {
+      if (isAlloyApiError(e)) {
+        const fieldErrors = e.data.field_errors ?? {}
+        if (fieldErrors.steam_guard_code) {
+          setWarmFieldErrors({ steam_guard_code: fieldErrors.steam_guard_code })
+          setWarmFormError({ message: e.data.message, requestId: e.data.request_id })
+          setShowDspInitModal(true)
+        } else if (fieldErrors.steam_username || fieldErrors.steam_password) {
+          setWarmFieldErrors({})
+          setWarmFormError(null)
+          setShowDspInitModal(false)
+          setCreateFieldErrors({})
+          setCreateFormError({ message: dspSteamcmdSettingsRequiredMessage(), requestId: e.data.request_id })
+        } else {
+          setCreateFieldErrors(fieldErrors)
+          setCreateFormError({ message: e.data.message, requestId: e.data.request_id })
+        }
+
+        if (dspSourceInitRequired(e.data.message, fieldErrors)) {
+          setDspWarmNeedsInit(true)
+        }
+        if (e.data.hint) pushToast('info', 'Hint', e.data.hint, e.data.request_id)
+        return
+      }
+
+      setWarmFormError({ message: friendlyErrorMessage(e) })
+    }
+  }
+
+  const hasRunningDownloadJobs = createMemo(() => downloadJobs().some((j) => j.state === 'running'))
+
+  createEffect(() => {
+    if (!hasRunningDownloadJobs()) return
+    setDownloadNowUnixMs(Date.now())
+    const timer = window.setInterval(() => setDownloadNowUnixMs(Date.now()), 1000)
+    onCleanup(() => window.clearInterval(timer))
+  })
+
+  async function invalidateDownloadQueue() {
+    await queryClient.invalidateQueries({ queryKey: ['process.downloadQueue', null] })
+  }
+
+  async function toggleDownloadQueuePaused() {
+    try {
+      await downloadQueueSetPaused.mutateAsync({ paused: !downloadQueuePaused() })
+      await invalidateDownloadQueue()
+    } catch (e) {
+      toastError('Queue update failed', e)
+    }
+  }
+
+  async function clearDownloadHistory() {
+    try {
+      await downloadQueueClearHistory.mutateAsync(null)
+      await invalidateDownloadQueue()
+    } catch (e) {
+      toastError('Clear history failed', e)
+    }
+  }
+
+  async function moveDownloadJob(jobId: string, direction: -1 | 1) {
+    try {
+      await downloadQueueMove.mutateAsync({ job_id: jobId, direction })
+      await invalidateDownloadQueue()
+    } catch (e) {
+      toastError('Reorder failed', e)
+    }
+  }
+
+  async function pauseDownloadJob(jobId: string) {
+    try {
+      await downloadQueuePauseJob.mutateAsync({ job_id: jobId })
+      await invalidateDownloadQueue()
+    } catch (e) {
+      toastError('Pause failed', e)
+    }
+  }
+
+  async function resumeDownloadJob(jobId: string) {
+    try {
+      await downloadQueueResumeJob.mutateAsync({ job_id: jobId })
+      await invalidateDownloadQueue()
+    } catch (e) {
+      toastError('Resume failed', e)
+    }
+  }
+
+  async function cancelDownloadJob(jobId: string) {
+    try {
+      await downloadQueueCancelJob.mutateAsync({ job_id: jobId })
+      await invalidateDownloadQueue()
+    } catch (e) {
+      toastError('Cancel failed', e)
+    }
+  }
+
+  async function retryDownloadJob(jobId: string) {
+    try {
+      await downloadQueueRetryJob.mutateAsync({ job_id: jobId })
+      await invalidateDownloadQueue()
+    } catch (e) {
+      toastError('Retry failed', e)
+    }
+  }
+
+  async function copyDownloadFailureReason(job: DownloadJob) {
+    const latestFailure = latestDownloadFailureByTarget().get(job.target)
+    const message = (latestFailure?.message ?? '').trim() || (job.message ?? '').trim()
+    if (!message) {
+      pushToast('info', 'Nothing to copy', 'No failure reason found for this task yet.')
+      return
+    }
+    await safeCopy(message)
+    pushToast('success', 'Copied', 'Failure reason copied.')
+  }
+
+  async function copyDownloadJobDetails(job: DownloadJob) {
+    await safeCopy(
+      JSON.stringify(
+        {
+          id: job.id,
+          target: job.target,
+          template_id: job.templateId,
+          version: job.version,
+          state: job.state,
+          message: job.message,
+          request_id: job.requestId ?? null,
+          started_at_unix_ms: job.startedAtUnixMs,
+          updated_at_unix_ms: job.updatedAtUnixMs,
+          params: job.params,
+        },
+        null,
+        2,
+      ),
+    )
+    pushToast('success', 'Copied', 'Task details copied as JSON.')
+  }
+
+  function buildDownloadRequest(
+    target: DownloadTarget,
+  ): { templateId: string; version: string; params: Record<string, string> } | null {
+    let templateId = 'minecraft:vanilla'
+    let version = 'latest'
+    const params: Record<string, string> = {}
+
+    if (target === 'minecraft_vanilla') {
+      const v = downloadMcVersion().trim()
+      params.version = v || 'latest_release'
+      version = params.version
+      templateId = 'minecraft:vanilla'
+    }
+
+    if (target === 'terraria_vanilla') {
+      const v = downloadTrVersion().trim()
+      params.version = v || '1453'
+      version = params.version
+      templateId = 'terraria:vanilla'
+    }
+
+    if (target === 'dsp_nebula') {
+      version = 'steamcmd'
+      templateId = 'dsp:nebula'
+      if (!hasSavedSteamcmdCreds()) {
+        const msg = dspSteamcmdSettingsRequiredMessage()
+        pushToast('error', 'SteamCMD not configured', msg)
+        setTab('settings')
+        return null
+      }
+      const guard = downloadDspGuardCode().trim()
+      if (guard) params.steam_guard_code = guard
+    }
+
+    return { templateId, version, params }
+  }
+
+  async function enqueueDownloadWarm(target: DownloadTarget) {
+    if (isReadOnly()) {
+      pushToast('error', 'Read-only mode', 'Enable write mode before downloading server files.')
+      return
+    }
+
+    const req = buildDownloadRequest(target)
+    if (!req) return
+
+    try {
+      setDownloadEnqueueTarget(target)
+      await downloadQueueEnqueue.mutateAsync({
+        target,
+        template_id: req.templateId,
+        version: req.version,
+        params: req.params,
+      })
+      if (target === 'dsp_nebula') {
+        setDownloadDspGuardCode('')
+      }
+      setDownloadCenterView('queue')
+      pushToast('info', 'Added to queue', `${downloadTargetLabel(target)} · ${req.version}`)
+      await invalidateDownloadQueue()
+    } catch (e) {
+      if (isAlloyApiError(e)) {
+        const fieldErrors = e.data.field_errors ?? {}
+        if (target === 'dsp_nebula' && (fieldErrors.steam_username || fieldErrors.steam_password)) {
+          pushToast('error', 'SteamCMD not configured', dspSteamcmdSettingsRequiredMessage(), e.data.request_id)
+          setTab('settings')
+        } else {
+          pushToast('error', 'Add to queue failed', e.data.message, e.data.request_id)
+        }
+        if (fieldErrors.steam_guard_code) {
+          pushToast('info', 'Steam Guard required', 'Enter latest Steam Guard code or enable Auto 2FA.', e.data.request_id)
+        }
+        if (e.data.hint) pushToast('info', 'Hint', e.data.hint, e.data.request_id)
+        return
+      }
+      pushToast('error', 'Add to queue failed', friendlyErrorMessage(e))
+    } finally {
+      setDownloadEnqueueTarget(null)
+    }
+  }
+
+  const downloadLastSuccessVersionByTarget = createMemo(() => {
+    const out = new Map<DownloadTarget, string>()
+    for (const job of downloadJobs()) {
+      if (job.state !== 'success') continue
+      if (!out.has(job.target)) out.set(job.target, job.version)
+    }
+    return out
+  })
+
+  const downloadCacheByKey = createMemo(() => {
+    const map = new Map<string, { key: string; path: string; size_bytes: string; last_used_unix_ms: string }>()
+    for (const entry of controlDiagnostics.data?.cache?.entries ?? []) {
+      map.set(entry.key, entry as { key: string; path: string; size_bytes: string; last_used_unix_ms: string })
+    }
+    return map
+  })
+
+  const downloadInstalledRows = createMemo(() => {
+    const targets: DownloadTarget[] = ['minecraft_vanilla', 'terraria_vanilla', 'dsp_nebula']
+    return targets.map((target) => {
+      const templateId =
+        target === 'minecraft_vanilla'
+          ? 'minecraft:vanilla'
+          : target === 'terraria_vanilla'
+            ? 'terraria:vanilla'
+            : 'dsp:nebula'
+      const cache = downloadCacheByKey().get(templateId)
+      const installed = Number(cache?.size_bytes ?? '0') > 0
+      const installedVersion = downloadLastSuccessVersionByTarget().get(target) ?? (installed ? 'cached' : 'not installed')
+      return {
+        target,
+        templateId,
+        installed,
+        installedVersion,
+        sizeBytes: Number(cache?.size_bytes ?? '0'),
+        lastUsedUnixMs: Number(cache?.last_used_unix_ms ?? '0'),
+      }
+    })
+  })
+
+  const downloadUpdateRows = createMemo(() => {
+    const mcLatest = mcVersions.data?.latest_release ?? 'latest_release'
+    const trLatest = '1453'
+    const dspLatest = 'steamcmd-source'
+
+    return downloadInstalledRows().map((row) => {
+      const latestVersion =
+        row.target === 'minecraft_vanilla' ? mcLatest : row.target === 'terraria_vanilla' ? trLatest : dspLatest
+      const installedVersion = row.installedVersion
+      const updateAvailable = row.installed && installedVersion !== 'cached' && installedVersion !== latestVersion
+      return {
+        ...row,
+        latestVersion,
+        updateAvailable,
+      }
+    })
+  })
 
   function focusFirstEditError(errors: Record<string, string>) {
     const template_id = editTemplateId()
@@ -1777,11 +2656,6 @@ function App() {
     { value: '1434', label: '1.4.3.4 (1434)' },
     { value: '1423', label: '1.4.2.3 (1423)' },
   ])
-
-  const mcVersions = rspc.createQuery(
-    () => ['minecraft.versions', null],
-    () => ({ enabled: isAuthed(), refetchOnWindowFocus: false }),
-  )
 
   const mcVersionOptions = createMemo(() => {
     const data = mcVersions.data
@@ -1920,7 +2794,12 @@ function App() {
   type FrpNodeDto = {
     id: string
     name: string
+    server_addr: string | null
+    server_port: number | null
+    allocatable_ports: string | null
+    token: string | null
     config: string
+    latency_ms: number | null
     created_at: string
     updated_at: string
   }
@@ -1928,16 +2807,28 @@ function App() {
   const [showFrpNodeModal, setShowFrpNodeModal] = createSignal(false)
   const [editingFrpNodeId, setEditingFrpNodeId] = createSignal<string | null>(null)
   const [frpNodeName, setFrpNodeName] = createSignal('')
+  const [frpNodeServerAddr, setFrpNodeServerAddr] = createSignal('')
+  const [frpNodeServerPort, setFrpNodeServerPort] = createSignal('')
+  const [frpNodeAllocatablePorts, setFrpNodeAllocatablePorts] = createSignal('')
+  const [frpNodeToken, setFrpNodeToken] = createSignal('')
+  const [frpNodeTokenVisible, setFrpNodeTokenVisible] = createSignal(false)
   const [frpNodeConfig, setFrpNodeConfig] = createSignal('')
   const [frpNodeFieldErrors, setFrpNodeFieldErrors] = createSignal<Record<string, string>>({})
   const [frpNodeFormError, setFrpNodeFormError] = createSignal<string | null>(null)
   let frpNodeNameEl: HTMLInputElement | undefined
+  let frpNodeServerAddrEl: HTMLInputElement | undefined
+  let frpNodeServerPortEl: HTMLInputElement | undefined
   let frpNodeConfigEl: HTMLTextAreaElement | undefined
 
   function closeFrpNodeModal() {
     setShowFrpNodeModal(false)
     setEditingFrpNodeId(null)
     setFrpNodeName('')
+    setFrpNodeServerAddr('')
+    setFrpNodeServerPort('')
+    setFrpNodeAllocatablePorts('')
+    setFrpNodeToken('')
+    setFrpNodeTokenVisible(false)
     setFrpNodeConfig('')
     setFrpNodeFieldErrors({})
     setFrpNodeFormError(null)
@@ -1946,6 +2837,11 @@ function App() {
   function openCreateFrpNodeModal() {
     setEditingFrpNodeId(null)
     setFrpNodeName('')
+    setFrpNodeServerAddr('')
+    setFrpNodeServerPort('7000')
+    setFrpNodeAllocatablePorts('')
+    setFrpNodeToken('')
+    setFrpNodeTokenVisible(false)
     setFrpNodeConfig('')
     setFrpNodeFieldErrors({})
     setFrpNodeFormError(null)
@@ -1955,11 +2851,26 @@ function App() {
   function openEditFrpNodeModal(node: FrpNodeDto) {
     setEditingFrpNodeId(node.id)
     setFrpNodeName(node.name)
+    setFrpNodeServerAddr(node.server_addr ?? '')
+    setFrpNodeServerPort(node.server_port != null ? String(node.server_port) : '')
+    setFrpNodeAllocatablePorts(node.allocatable_ports ?? '')
+    setFrpNodeToken(node.token ?? '')
+    setFrpNodeTokenVisible(false)
     setFrpNodeConfig(node.config)
     setFrpNodeFieldErrors({})
     setFrpNodeFormError(null)
     setShowFrpNodeModal(true)
   }
+
+  const frpNodeDetectedFormat = createMemo(() => detectFrpConfigFormat(frpNodeConfig()))
+  const frpNodeCanSave = createMemo(() => {
+    if (!frpNodeName().trim()) return false
+    if (frpNodeConfig().trim()) return true
+
+    const addr = frpNodeServerAddr().trim()
+    const port = Number.parseInt(frpNodeServerPort().trim(), 10)
+    return Boolean(addr) && Number.isFinite(port) && port > 0 && port <= 65535
+  })
 
   const createNode = rspc.createMutation(() => 'node.create')
   const [showCreateNodeModal, setShowCreateNodeModal] = createSignal(false)
@@ -2121,11 +3032,33 @@ function App() {
               title="Instances"
             >
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-5 w-5">
-                <path d="M10.75 2.5a.75.75 0 00-1.5 0V3.2a6.8 6.8 0 00-2.98 1.235l-.5-.5a.75.75 0 10-1.06 1.06l.5.5A6.8 6.8 0 003.2 9.25H2.5a.75.75 0 000 1.5h.7a6.8 6.8 0 001.235 2.98l-.5.5a.75.75 0 101.06 1.06l.5-.5A6.8 6.8 0 009.25 16.8v.7a.75.75 0 001.5 0v-.7a6.8 6.8 0 002.98-1.235l.5.5a.75.75 0 101.06-1.06l-.5-.5a6.8 6.8 0 001.235-2.98h.7a.75.75 0 000-1.5h-.7a6.8 6.8 0 00-1.235-2.98l.5-.5a.75.75 0 10-1.06-1.06l-.5.5A6.8 6.8 0 0010.75 3.2V2.5z" />
-                <path d="M10 6.5a3.5 3.5 0 100 7 3.5 3.5 0 000-7z" />
+                <path d="M3 4.75A1.75 1.75 0 014.75 3h2.5A1.75 1.75 0 019 4.75v2.5A1.75 1.75 0 017.25 9h-2.5A1.75 1.75 0 013 7.25v-2.5zM11 4.75A1.75 1.75 0 0112.75 3h2.5A1.75 1.75 0 0117 4.75v2.5A1.75 1.75 0 0115.25 9h-2.5A1.75 1.75 0 0111 7.25v-2.5zM3 12.75A1.75 1.75 0 014.75 11h2.5A1.75 1.75 0 019 12.75v2.5A1.75 1.75 0 017.25 17h-2.5A1.75 1.75 0 013 15.25v-2.5zM11 12.75A1.75 1.75 0 0112.75 11h2.5A1.75 1.75 0 0117 12.75v2.5A1.75 1.75 0 0115.25 17h-2.5A1.75 1.75 0 0111 15.25v-2.5z" />
               </svg>
               <Show when={sidebarExpanded()}>
                 <span class="text-sm font-medium">Instances</span>
+              </Show>
+            </button>
+
+            <button
+              type="button"
+              class={`group flex items-center gap-3 rounded-xl px-3 py-2 transition-colors ${
+                tab() === 'downloads'
+                  ? 'bg-amber-500/10 text-amber-800 ring-1 ring-inset ring-amber-500/20 dark:text-amber-200'
+                  : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-900/60 dark:hover:text-slate-100'
+              } ${sidebarExpanded() ? '' : 'justify-center'}`}
+              onClick={() => setTab('downloads')}
+              aria-label="Downloads"
+              title="Downloads"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-5 w-5">
+                <path
+                  fill-rule="evenodd"
+                  d="M10 2.75a.75.75 0 01.75.75v8.19l2.22-2.22a.75.75 0 111.06 1.06l-3.5 3.5a.75.75 0 01-1.06 0l-3.5-3.5a.75.75 0 111.06-1.06l2.22 2.22V3.5a.75.75 0 01.75-.75zM3.5 14.25a.75.75 0 01.75.75v.75c0 .69.56 1.25 1.25 1.25h9c.69 0 1.25-.56 1.25-1.25V15a.75.75 0 011.5 0v.75A2.75 2.75 0 0114.5 18h-9a2.75 2.75 0 01-2.75-2.75V15a.75.75 0 01.75-.75z"
+                  clip-rule="evenodd"
+                />
+              </svg>
+              <Show when={sidebarExpanded()}>
+                <span class="text-sm font-medium">Downloads</span>
               </Show>
             </button>
 
@@ -2180,16 +3113,7 @@ function App() {
               title="FRP"
             >
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-5 w-5">
-                <path
-                  fill-rule="evenodd"
-                  d="M2 10a.75.75 0 01.75-.75h8.69L9.22 7.03a.75.75 0 111.06-1.06l3.5 3.5a.75.75 0 010 1.06l-3.5 3.5a.75.75 0 11-1.06-1.06l2.22-2.22H2.75A.75.75 0 012 10z"
-                  clip-rule="evenodd"
-                />
-                <path
-                  fill-rule="evenodd"
-                  d="M18 10a.75.75 0 01-.75.75H8.56l2.22 2.22a.75.75 0 11-1.06 1.06l-3.5-3.5a.75.75 0 010-1.06l3.5-3.5a.75.75 0 111.06 1.06L8.56 9.25h8.69A.75.75 0 0118 10z"
-                  clip-rule="evenodd"
-                />
+                <path d="M4.75 4A1.75 1.75 0 003 5.75v8.5C3 15.216 3.784 16 4.75 16h1.5C7.216 16 8 15.216 8 14.25V11h4v3.25c0 .966.784 1.75 1.75 1.75h1.5c.966 0 1.75-.784 1.75-1.75v-8.5A1.75 1.75 0 0015.25 4h-1.5A1.75 1.75 0 0012 5.75V9H8V5.75A1.75 1.75 0 006.25 4h-1.5z" />
               </svg>
               <Show when={sidebarExpanded()}>
                 <span class="text-sm font-medium">FRP</span>
@@ -2208,11 +3132,11 @@ function App() {
                 aria-label="Settings"
                 title="Settings"
               >
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-5 w-5">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-5 w-5" aria-hidden="true">
                   <path
                     fill-rule="evenodd"
-                    d="M7.84 1.804A1 1 0 018.82 1h2.36a1 1 0 01.98.804l.238 1.19a7.97 7.97 0 011.794.74l1.09-.56a1 1 0 011.24.29l1.667 1.667a1 1 0 01.29 1.24l-.56 1.09c.309.56.56 1.16.74 1.794l1.19.238a1 1 0 01.804.98v2.36a1 1 0 01-.804.98l-1.19.238a7.97 7.97 0 01-.74 1.794l.56 1.09a1 1 0 01-.29 1.24l-1.667 1.667a1 1 0 01-1.24.29l-1.09-.56a7.97 7.97 0 01-1.794.74l-.238 1.19a1 1 0 01-.98.804H8.82a1 1 0 01-.98-.804l-.238-1.19a7.97 7.97 0 01-1.794-.74l-1.09.56a1 1 0 01-1.24-.29L1.81 15.62a1 1 0 01-.29-1.24l.56-1.09a7.97 7.97 0 01-.74-1.794l-1.19-.238A1 1 0 010 10.48V8.12a1 1 0 01.804-.98l1.19-.238c.18-.634.431-1.234.74-1.794l-.56-1.09a1 1 0 01.29-1.24L4.13 1.11a1 1 0 011.24-.29l1.09.56c.56-.309 1.16-.56 1.794-.74l.238-1.19zM10 7a3 3 0 100 6 3 3 0 000-6z"
                     clip-rule="evenodd"
+                    d="M7.83922 1.80388C7.93271 1.33646 8.34312 1 8.81981 1H11.1802C11.6569 1 12.0673 1.33646 12.1608 1.80388L12.4913 3.45629C13.1956 3.72458 13.8454 4.10332 14.4196 4.57133L16.0179 4.03065C16.4694 3.8779 16.966 4.06509 17.2043 4.47791L18.3845 6.52207C18.6229 6.93489 18.5367 7.45855 18.1786 7.77322L16.9119 8.88645C16.9699 9.24909 17 9.62103 17 10C17 10.379 16.9699 10.7509 16.9119 11.1135L18.1786 12.2268C18.5367 12.5414 18.6229 13.0651 18.3845 13.4779L17.2043 15.5221C16.966 15.9349 16.4694 16.1221 16.0179 15.9693L14.4196 15.4287C13.8454 15.8967 13.1956 16.2754 12.4913 16.5437L12.1608 18.1961C12.0673 18.6635 11.6569 19 11.1802 19H8.81981C8.34312 19 7.93271 18.6635 7.83922 18.1961L7.50874 16.5437C6.80443 16.2754 6.1546 15.8967 5.58043 15.4287L3.98214 15.9694C3.5306 16.1221 3.03401 15.9349 2.79567 15.5221L1.61547 13.4779C1.37713 13.0651 1.4633 12.5415 1.82136 12.2268L3.08808 11.1135C3.03012 10.7509 3 10.379 3 10C3 9.62103 3.03012 9.2491 3.08808 8.88647L1.82136 7.77324C1.46331 7.45857 1.37713 6.93491 1.61547 6.52209L2.79567 4.47793C3.03401 4.06511 3.5306 3.87791 3.98214 4.03066L5.58042 4.57134C6.15459 4.10332 6.80442 3.72459 7.50874 3.45629L7.83922 1.80388ZM10 13C11.6569 13 13 11.6569 13 10C13 8.34315 11.6569 7 10 7C8.34315 7 7 8.34315 7 10C7 11.6569 8.34315 13 10 13Z"
                   />
                 </svg>
                 <Show when={sidebarExpanded()}>
@@ -2255,35 +3179,12 @@ function App() {
               <Show
                 when={themePref() === 'dark'}
                 fallback={
-                  <Show
-                    when={themePref() === 'light'}
-                    fallback={
-                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-                        <path
-                          fill-rule="evenodd"
-                          d="M4.75 3A2.75 2.75 0 002 5.75v6.5A2.75 2.75 0 004.75 15H9v1.25H7.75a.75.75 0 000 1.5h4.5a.75.75 0 000-1.5H11V15h4.25A2.75 2.75 0 0018 12.25v-6.5A2.75 2.75 0 0015.25 3H4.75zm-.25 2.75c0-.69.56-1.25 1.25-1.25h8.5c.69 0 1.25.56 1.25 1.25v6.5c0 .69-.56 1.25-1.25 1.25h-8.5c-.69 0-1.25-.56-1.25-1.25v-6.5z"
-                          clip-rule="evenodd"
-                        />
-                      </svg>
-                    }
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-                      <path
-                        fill-rule="evenodd"
-                        d="M10 2a.75.75 0 01.75.75V4a.75.75 0 01-1.5 0V2.75A.75.75 0 0110 2zm0 12a4 4 0 100-8 4 4 0 000 8zm0 3a.75.75 0 01.75.75V18a.75.75 0 01-1.5 0v-1.25A.75.75 0 0110 17zm8-7a.75.75 0 01-.75.75H16a.75.75 0 010-1.5h1.25A.75.75 0 0118 10zm-14.5 0a.75.75 0 01-.75.75H2.75a.75.75 0 010-1.5H3.5A.75.75 0 014.25 10zm10.657-5.657a.75.75 0 010 1.06l-.884.884a.75.75 0 11-1.06-1.06l.884-.884a.75.75 0 011.06 0zM6.287 14.713a.75.75 0 010 1.06l-.884.884a.75.75 0 11-1.06-1.06l.884-.884a.75.75 0 011.06 0zm9.37 0a.75.75 0 01-1.06 0l-.884-.884a.75.75 0 111.06-1.06l.884.884a.75.75 0 010 1.06zm-9.37-9.37a.75.75 0 01-1.06 0l-.884-.884a.75.75 0 011.06-1.06l.884.884a.75.75 0 010 1.06z"
-                        clip-rule="evenodd"
-                      />
-                    </svg>
+                  <Show when={themePref() === 'light'} fallback={<Monitor class="h-4 w-4" strokeWidth={1.9} />}>
+                    <Sun class="h-4 w-4" strokeWidth={1.9} />
                   </Show>
                 }
               >
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-                  <path
-                    fill-rule="evenodd"
-                    d="M17.293 13.293A8 8 0 016.707 2.707a8 8 0 1010.586 10.586z"
-                    clip-rule="evenodd"
-                  />
-                </svg>
+                <Moon class="h-4 w-4" strokeWidth={1.9} />
               </Show>
             </IconButton>
           </div>
@@ -2334,29 +3235,11 @@ function App() {
                 }
               >
                 {themePref() === 'dark' ? (
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-                    <path
-                      fill-rule="evenodd"
-                      d="M17.293 13.293A8 8 0 016.707 2.707a8 8 0 1010.586 10.586z"
-                      clip-rule="evenodd"
-                    />
-                  </svg>
+                  <Moon class="h-4 w-4" strokeWidth={1.9} />
                 ) : themePref() === 'light' ? (
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-                    <path
-                      fill-rule="evenodd"
-                      d="M10 2a.75.75 0 01.75.75V4a.75.75 0 01-1.5 0V2.75A.75.75 0 0110 2zm0 12a4 4 0 100-8 4 4 0 000 8zm0 3a.75.75 0 01.75.75V18a.75.75 0 01-1.5 0v-1.25A.75.75 0 0110 17zm8-7a.75.75 0 01-.75.75H16a.75.75 0 010-1.5h1.25A.75.75 0 0118 10zm-14.5 0a.75.75 0 01-.75.75H2.75a.75.75 0 010-1.5H3.5A.75.75 0 014.25 10zm10.657-5.657a.75.75 0 010 1.06l-.884.884a.75.75 0 11-1.06-1.06l.884-.884a.75.75 0 011.06 0zM6.287 14.713a.75.75 0 010 1.06l-.884.884a.75.75 0 11-1.06-1.06l.884-.884a.75.75 0 011.06 0zm9.37 0a.75.75 0 01-1.06 0l-.884-.884a.75.75 0 111.06-1.06l.884.884a.75.75 0 010 1.06zm-9.37-9.37a.75.75 0 01-1.06 0l-.884-.884a.75.75 0 011.06-1.06l.884.884a.75.75 0 010 1.06z"
-                      clip-rule="evenodd"
-                    />
-                  </svg>
+                  <Sun class="h-4 w-4" strokeWidth={1.9} />
                 ) : (
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-                    <path
-                      fill-rule="evenodd"
-                      d="M4.75 3A2.75 2.75 0 002 5.75v6.5A2.75 2.75 0 004.75 15H9v1.25H7.75a.75.75 0 000 1.5h4.5a.75.75 0 000-1.5H11V15h4.25A2.75 2.75 0 0018 12.25v-6.5A2.75 2.75 0 0015.25 3H4.75zm-.25 2.75c0-.69.56-1.25 1.25-1.25h8.5c.69 0 1.25.56 1.25 1.25v6.5c0 .69-.56 1.25-1.25 1.25h-8.5c-.69 0-1.25-.56-1.25-1.25v-6.5z"
-                      clip-rule="evenodd"
-                    />
-                  </svg>
+                  <Monitor class="h-4 w-4" strokeWidth={1.9} />
                 )}
               </button>
 
@@ -2472,6 +3355,20 @@ function App() {
                 }}
               >
                 Instances
+              </button>
+              <button
+                type="button"
+                class={`w-full rounded-xl border px-3 py-2 text-left text-sm font-medium transition-colors ${
+                  tab() === 'downloads'
+                    ? 'border-amber-500/20 bg-amber-500/10 text-amber-900 dark:border-amber-500/25 dark:bg-amber-500/15 dark:text-amber-100'
+                    : 'border-slate-200 bg-white/70 text-slate-800 hover:bg-white dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:hover:bg-slate-900'
+                }`}
+                onClick={() => {
+                  setTab('downloads')
+                  setMobileNavOpen(false)
+                }}
+              >
+                Downloads
               </button>
               <button
                 type="button"
@@ -2949,7 +3846,7 @@ function App() {
                               </Field>
 
                               <Field
-                                label={<LabelTip label="Public (FRP)" content="Optional. Paste an frpc config to expose this instance via FRP." />}
+                                label={<LabelTip label="Public (FRP)" content="Optional. Paste an FRP config to expose this instance (auto-detects INI/TOML/YAML/JSON)." />}
                                 error={createFieldErrors().frp_config}
                               >
                                 <div class="space-y-2">
@@ -2997,7 +3894,7 @@ function App() {
                                           />
                                         </div>
                                         <div class="text-[11px] text-slate-500 dark:text-slate-400">
-                                          Uses the saved frpc.ini and patches <span class="font-mono">local_port</span> automatically.
+                                          Uses the saved node config and patches <span class="font-mono">local_port</span> (and auto remote port if needed).
                                         </div>
                                       </Show>
 
@@ -3008,7 +3905,7 @@ function App() {
                                           }}
                                           value={mcFrpConfig()}
                                           onInput={(e) => setMcFrpConfig(e.currentTarget.value)}
-                                          placeholder="Paste frpc config (INI)"
+                                          placeholder="Paste FRP config (auto: INI/TOML/YAML/JSON)"
                                           spellcheck={false}
                                           class="font-mono text-[11px]"
                                           invalid={Boolean(createFieldErrors().frp_config)}
@@ -3071,40 +3968,16 @@ function App() {
                                 placeholder="Paste token…"
                                 spellcheck={false}
                                 invalid={Boolean(createFieldErrors().cluster_token)}
-                                class="min-w-[220px] flex-1 font-mono text-[11px]"
+                                class="w-full flex-1 font-mono text-[11px]"
+                                rightIcon={
+                                  <VisibilityToggle
+                                    visible={dstClusterTokenVisible()}
+                                    labelWhenHidden="Show token"
+                                    labelWhenVisible="Hide token"
+                                    onToggle={() => setDstClusterTokenVisible((v) => !v)}
+                                  />
+                                }
                               />
-                              <IconButton
-                                type="button"
-                                size="sm"
-                                variant="secondary"
-                                label={dstClusterTokenVisible() ? 'Hide token' : 'Show token'}
-                                onClick={() => setDstClusterTokenVisible((v) => !v)}
-                              >
-                                <Show
-                                  when={dstClusterTokenVisible()}
-                                  fallback={
-                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-                                      <path d="M10 12.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5z" />
-                                      <path
-                                        fill-rule="evenodd"
-                                        d="M.664 10.59a1.651 1.651 0 010-1.186A10.004 10.004 0 0110 3c4.257 0 7.893 2.66 9.336 6.41.147.382.147.804 0 1.186A10.004 10.004 0 0110 17c-4.257 0-7.893-2.66-9.336-6.41zM14 10a4 4 0 11-8 0 4 4 0 018 0z"
-                                        clip-rule="evenodd"
-                                      />
-                                    </svg>
-                                  }
-                                >
-                                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-                                    <path d="M13.359 11.238l1.36 1.36a4 4 0 01-5.317-5.317l1.36 1.36a2.5 2.5 0 002.597 2.597z" />
-                                    <path
-                                      fill-rule="evenodd"
-                                      d="M2 4.25a.75.75 0 011.28-.53l14.5 14.5a.75.75 0 11-1.06 1.06l-2.294-2.294A9.961 9.961 0 0110 17c-4.257 0-7.893-2.66-9.336-6.41a1.651 1.651 0 010-1.186 10.03 10.03 0 012.924-4.167L2.22 3.78A.75.75 0 012 4.25zm6.12 6.12a2.5 2.5 0 003.51 3.51l-3.51-3.51z"
-                                      clip-rule="evenodd"
-                                    />
-                                    <path d="M12.454 8.214L9.31 5.07A4 4 0 0114.93 10.69l-2.476-2.476z" />
-                                    <path d="M15.765 12.585l1.507 1.507a10.03 10.03 0 002.064-3.502 1.651 1.651 0 000-1.186A10.004 10.004 0 0010 3a9.961 9.961 0 00-3.426.608l1.65 1.65A8.473 8.473 0 0110 4.5c3.49 0 6.574 2.138 7.773 5.5a8.5 8.5 0 01-2.008 2.585z" />
-                                  </svg>
-                                </Show>
-                              </IconButton>
                               <IconButton
                                 type="button"
                                 size="sm"
@@ -3160,40 +4033,16 @@ function App() {
                                 onInput={(e) => setDstPassword(e.currentTarget.value)}
                                 placeholder="(none)"
                                 invalid={Boolean(createFieldErrors().password)}
-                                class="min-w-[220px] flex-1"
+                                class="w-full flex-1"
+                                rightIcon={
+                                  <VisibilityToggle
+                                    visible={dstPasswordVisible()}
+                                    labelWhenHidden="Show password"
+                                    labelWhenVisible="Hide password"
+                                    onToggle={() => setDstPasswordVisible((v) => !v)}
+                                  />
+                                }
                               />
-                              <IconButton
-                                type="button"
-                                size="sm"
-                                variant="secondary"
-                                label={dstPasswordVisible() ? 'Hide password' : 'Show password'}
-                                onClick={() => setDstPasswordVisible((v) => !v)}
-                              >
-                                <Show
-                                  when={dstPasswordVisible()}
-                                  fallback={
-                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-                                      <path d="M10 12.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5z" />
-                                      <path
-                                        fill-rule="evenodd"
-                                        d="M.664 10.59a1.651 1.651 0 010-1.186A10.004 10.004 0 0110 3c4.257 0 7.893 2.66 9.336 6.41.147.382.147.804 0 1.186A10.004 10.004 0 0110 17c-4.257 0-7.893-2.66-9.336-6.41zM14 10a4 4 0 11-8 0 4 4 0 018 0z"
-                                        clip-rule="evenodd"
-                                      />
-                                    </svg>
-                                  }
-                                >
-                                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-                                    <path d="M13.359 11.238l1.36 1.36a4 4 0 01-5.317-5.317l1.36 1.36a2.5 2.5 0 002.597 2.597z" />
-                                    <path
-                                      fill-rule="evenodd"
-                                      d="M2 4.25a.75.75 0 011.28-.53l14.5 14.5a.75.75 0 11-1.06 1.06l-2.294-2.294A9.961 9.961 0 0110 17c-4.257 0-7.893-2.66-9.336-6.41a1.651 1.651 0 010-1.186 10.03 10.03 0 012.924-4.167L2.22 3.78A.75.75 0 012 4.25zm6.12 6.12a2.5 2.5 0 003.51 3.51l-3.51-3.51z"
-                                      clip-rule="evenodd"
-                                    />
-                                    <path d="M12.454 8.214L9.31 5.07A4 4 0 0114.93 10.69l-2.476-2.476z" />
-                                    <path d="M15.765 12.585l1.507 1.507a10.03 10.03 0 002.064-3.502 1.651 1.651 0 000-1.186A10.004 10.004 0 0010 3a9.961 9.961 0 00-3.426.608l1.65 1.65A8.473 8.473 0 0110 4.5c3.49 0 6.574 2.138 7.773 5.5a8.5 8.5 0 01-2.008 2.585z" />
-                                  </svg>
-                                </Show>
-                              </IconButton>
                               <IconButton
                                 type="button"
                                 size="sm"
@@ -3376,49 +4225,25 @@ function App() {
 		                              error={createFieldErrors().password}
 		                            >
 	                              <div class="flex flex-wrap items-center gap-2">
-	                                <Input
-	                                  ref={(el) => {
-	                                    createTrPasswordEl = el
-	                                  }}
-	                                  type={trPasswordVisible() ? 'text' : 'password'}
-	                                  value={trPassword()}
-	                                  onInput={(e) => setTrPassword(e.currentTarget.value)}
-	                                  invalid={Boolean(createFieldErrors().password)}
-	                                  class="min-w-[220px] flex-1"
+	                              <Input
+	                              ref={(el) => {
+	                              createTrPasswordEl = el
+	                              }}
+	                              type={trPasswordVisible() ? 'text' : 'password'}
+	                              value={trPassword()}
+	                              onInput={(e) => setTrPassword(e.currentTarget.value)}
+	                              invalid={Boolean(createFieldErrors().password)}
+	                              class="w-full flex-1"
+	                                rightIcon={
+	                                  <VisibilityToggle
+	                                  visible={trPasswordVisible()}
+	                                  labelWhenHidden="Show password"
+	                                  labelWhenVisible="Hide password"
+	                                  onToggle={() => setTrPasswordVisible((v) => !v)}
 	                                />
-	                                <IconButton
-	                                  type="button"
-	                                  size="sm"
-	                                  variant="secondary"
-	                                  label={trPasswordVisible() ? 'Hide password' : 'Show password'}
-	                                  onClick={() => setTrPasswordVisible((v) => !v)}
-	                                >
-	                                  <Show
-	                                    when={trPasswordVisible()}
-	                                    fallback={
-	                                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-	                                        <path d="M10 12.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5z" />
-	                                        <path
-	                                          fill-rule="evenodd"
-	                                          d="M.664 10.59a1.651 1.651 0 010-1.186A10.004 10.004 0 0110 3c4.257 0 7.893 2.66 9.336 6.41.147.382.147.804 0 1.186A10.004 10.004 0 0110 17c-4.257 0-7.893-2.66-9.336-6.41zM14 10a4 4 0 11-8 0 4 4 0 018 0z"
-	                                          clip-rule="evenodd"
-	                                        />
-	                                      </svg>
-	                                    }
-	                                  >
-	                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-	                                      <path d="M13.359 11.238l1.36 1.36a4 4 0 01-5.317-5.317l1.36 1.36a2.5 2.5 0 002.597 2.597z" />
-	                                      <path
-	                                        fill-rule="evenodd"
-	                                        d="M2 4.25a.75.75 0 011.28-.53l14.5 14.5a.75.75 0 11-1.06 1.06l-2.294-2.294A9.961 9.961 0 0110 17c-4.257 0-7.893-2.66-9.336-6.41a1.651 1.651 0 010-1.186 10.03 10.03 0 012.924-4.167L2.22 3.78A.75.75 0 012 4.25zm6.12 6.12a2.5 2.5 0 003.51 3.51l-3.51-3.51z"
-	                                        clip-rule="evenodd"
-	                                      />
-	                                      <path d="M12.454 8.214L9.31 5.07A4 4 0 0114.93 10.69l-2.476-2.476z" />
-	                                      <path d="M15.765 12.585l1.507 1.507a10.03 10.03 0 002.064-3.502 1.651 1.651 0 000-1.186A10.004 10.004 0 0010 3a9.961 9.961 0 00-3.426.608l1.65 1.65A8.473 8.473 0 0110 4.5c3.49 0 6.574 2.138 7.773 5.5a8.5 8.5 0 01-2.008 2.585z" />
-	                                    </svg>
-	                                  </Show>
-	                                </IconButton>
-	                                <IconButton
+	                                }
+	                              />
+	                              <IconButton
 	                                  type="button"
 	                                  size="sm"
 	                                  variant="secondary"
@@ -3435,7 +4260,7 @@ function App() {
 	                            </Field>
 
 	                            <Field
-	                              label={<LabelTip label="Public (FRP)" content="Optional. Paste an frpc config to expose this instance via FRP." />}
+	                              label={<LabelTip label="Public (FRP)" content="Optional. Paste an FRP config to expose this instance (auto-detects INI/TOML/YAML/JSON)." />}
 	                              error={createFieldErrors().frp_config}
 	                            >
 	                              <div class="space-y-2">
@@ -3483,7 +4308,7 @@ function App() {
 	                                        />
 	                                      </div>
 	                                      <div class="text-[11px] text-slate-500 dark:text-slate-400">
-	                                        Uses the saved frpc.ini and patches <span class="font-mono">local_port</span> automatically.
+	                                        Uses the saved node config and patches <span class="font-mono">local_port</span> (and auto remote port if needed).
 	                                      </div>
 	                                    </Show>
 
@@ -3494,7 +4319,7 @@ function App() {
 	                                        }}
 	                                        value={trFrpConfig()}
 	                                        onInput={(e) => setTrFrpConfig(e.currentTarget.value)}
-	                                        placeholder="Paste frpc config (INI)"
+	                                        placeholder="Paste FRP config (auto: INI/TOML/YAML/JSON)"
 	                                        spellcheck={false}
 	                                        class="font-mono text-[11px]"
 	                                        invalid={Boolean(createFieldErrors().frp_config)}
@@ -3504,6 +4329,193 @@ function App() {
 	                                </Show>
 	                              </div>
 	                            </Field>
+                          </Show>
+                        </div>
+                      </Show>
+
+                      <Show when={selectedTemplate() === 'dsp:nebula'}>
+                        <div class="space-y-3 border-t border-slate-200 pt-3 dark:border-slate-800">
+                          <div class="flex items-center justify-between gap-3">
+                            <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                              Dyson Sphere Program (Nebula)
+                            </div>
+                            <Button
+                              size="xs"
+                              variant={createAdvanced() ? 'secondary' : 'ghost'}
+                              onClick={() => setCreateAdvanced((v) => !v)}
+                              title="Show or hide advanced fields"
+                            >
+                              <span class="inline-flex items-center gap-2">
+                                {createAdvanced() ? 'Hide advanced' : 'Advanced'}
+                                <Show when={!createAdvanced() && createAdvancedDirty()}>
+                                  <span class="h-1.5 w-1.5 rounded-full bg-amber-500" aria-hidden="true" />
+                                </Show>
+                              </span>
+                            </Button>
+                          </div>
+
+                          <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                            <Field
+                              label={
+                                <LabelTip
+                                  label="Startup mode"
+                                  content="auto/load_latest/load/newgame_default/newgame_cfg. load requires Save name."
+                                />
+                              }
+                              error={createFieldErrors().startup_mode}
+                            >
+                              <div
+                                ref={(el) => {
+                                  createDspStartupModeEl = el
+                                }}
+                              >
+                                <Dropdown
+                                  label=""
+                                  value={dspStartupMode()}
+                                  options={[
+                                    { value: 'auto', label: 'Auto' },
+                                    { value: 'load_latest', label: 'Load latest' },
+                                    { value: 'load', label: 'Load specific save' },
+                                    { value: 'newgame_default', label: 'New game (default cfg)' },
+                                    { value: 'newgame_cfg', label: 'New game (Nebula cfg)' },
+                                  ]}
+                                  onChange={setDspStartupMode}
+                                />
+                              </div>
+                            </Field>
+
+                            <Field
+                              label={<LabelTip label="Save name (optional)" content="Required only when Startup mode = load. No .dsv suffix." />}
+                              required={dspStartupMode() === 'load'}
+                              error={createFieldErrors().save_name}
+                            >
+                              <Input
+                                ref={(el) => {
+                                  createDspSaveNameEl = el
+                                }}
+                                value={dspSaveName()}
+                                onInput={(e) => setDspSaveName(e.currentTarget.value)}
+                                placeholder="MyFactory"
+                                spellcheck={false}
+                                invalid={Boolean(createFieldErrors().save_name)}
+                              />
+                            </Field>
+                          </div>
+
+                          <Show when={createAdvanced()}>
+                            <div class="space-y-3">
+                              <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                                <Field
+                                  label={<LabelTip label="Port (optional)" content="TCP bind port. 0 or blank means auto-assign." />}
+                                  error={createFieldErrors().port}
+                                >
+                                  <Input
+                                    ref={(el) => {
+                                      createDspPortEl = el
+                                    }}
+                                    type="number"
+                                    value={dspPort()}
+                                    onInput={(e) => setDspPort(e.currentTarget.value)}
+                                    placeholder="8469"
+                                    invalid={Boolean(createFieldErrors().port)}
+                                  />
+                                </Field>
+
+                                <Field label={<LabelTip label="UPS" content="Simulation UPS. Range 1..240." />} error={createFieldErrors().ups}>
+                                  <Input
+                                    ref={(el) => {
+                                      createDspUpsEl = el
+                                    }}
+                                    type="number"
+                                    value={dspUps()}
+                                    onInput={(e) => setDspUps(e.currentTarget.value)}
+                                    placeholder="60"
+                                    invalid={Boolean(createFieldErrors().ups)}
+                                  />
+                                </Field>
+
+                                <Field label={<LabelTip label="Wine binary" content="Wine executable used to run DSPGAME.exe." />} error={createFieldErrors().wine_bin}>
+                                  <Input
+                                    ref={(el) => {
+                                      createDspWineBinEl = el
+                                    }}
+                                    value={dspWineBin()}
+                                    onInput={(e) => setDspWineBin(e.currentTarget.value)}
+                                    placeholder="wine64"
+                                    spellcheck={false}
+                                    invalid={Boolean(createFieldErrors().wine_bin)}
+                                    class="font-mono text-[11px]"
+                                  />
+                                </Field>
+                              </div>
+
+                              <Field
+                                label={<LabelTip label="Server password (optional)" content="Optional player join password." />}
+                                error={createFieldErrors().server_password}
+                              >
+                                <div class="flex flex-wrap items-center gap-2">
+                                  <Input
+                                    ref={(el) => {
+                                      createDspServerPasswordEl = el
+                                    }}
+                                    type={dspServerPasswordVisible() ? 'text' : 'password'}
+                                    value={dspServerPassword()}
+                                    onInput={(e) => setDspServerPassword(e.currentTarget.value)}
+                                    invalid={Boolean(createFieldErrors().server_password)}
+                                    class="w-full flex-1"
+                                    rightIcon={
+                                      <VisibilityToggle
+                                        visible={dspServerPasswordVisible()}
+                                        labelWhenHidden="Show password"
+                                        labelWhenVisible="Hide password"
+                                        onToggle={() => setDspServerPasswordVisible((v) => !v)}
+                                      />
+                                    }
+                                  />
+                                </div>
+                              </Field>
+
+                              <Field
+                                label={<LabelTip label="Remote password (optional)" content="Optional Nebula remote access password." />}
+                                error={createFieldErrors().remote_access_password}
+                              >
+                                <div class="flex flex-wrap items-center gap-2">
+                                  <Input
+                                    ref={(el) => {
+                                      createDspRemoteAccessPasswordEl = el
+                                    }}
+                                    type={dspRemoteAccessPasswordVisible() ? 'text' : 'password'}
+                                    value={dspRemoteAccessPassword()}
+                                    onInput={(e) => setDspRemoteAccessPassword(e.currentTarget.value)}
+                                    invalid={Boolean(createFieldErrors().remote_access_password)}
+                                    class="w-full flex-1"
+                                    rightIcon={
+                                      <VisibilityToggle
+                                        visible={dspRemoteAccessPasswordVisible()}
+                                        labelWhenHidden="Show password"
+                                        labelWhenVisible="Hide password"
+                                        onToggle={() => setDspRemoteAccessPasswordVisible((v) => !v)}
+                                      />
+                                    }
+                                  />
+                                </div>
+                              </Field>
+
+                              <Field
+                                label={<LabelTip label="Auto pause when empty" content="Pause simulation automatically when no players are connected." />}
+                                error={createFieldErrors().auto_pause_enabled}
+                              >
+                                <label class="inline-flex items-center gap-2 text-[12px] text-slate-700 dark:text-slate-200">
+                                  <input
+                                    type="checkbox"
+                                    class="h-4 w-4 rounded border-slate-300 bg-white text-amber-600 focus:ring-amber-400 dark:border-slate-700 dark:bg-slate-950/60 dark:text-amber-400"
+                                    checked={dspAutoPauseEnabled()}
+                                    onChange={(e) => setDspAutoPauseEnabled(e.currentTarget.checked)}
+                                  />
+                                  <span>Enable</span>
+                                </label>
+                              </Field>
+                            </div>
                           </Show>
                         </div>
                       </Show>
@@ -3580,23 +4592,15 @@ function App() {
                             setCreateFieldErrors({})
 
                             const localErrors: Record<string, string> = {}
-                            const mcFrpCfg = mcFrpEnabled()
-                              ? mcFrpMode() === 'node'
-                                ? frpNodeConfigById(mcFrpNodeId()) ?? ''
-                                : mcFrpConfig().trim()
-                              : ''
-                            const trFrpCfg = trFrpEnabled()
-                              ? trFrpMode() === 'node'
-                                ? frpNodeConfigById(trFrpNodeId()) ?? ''
-                                : trFrpConfig().trim()
-                              : ''
+                            const mcFrpCfg = mcEffectiveFrpConfig().trim()
+                            const trFrpCfg = trEffectiveFrpConfig().trim()
 
                             if (template_id === 'demo:sleep') {
                               params.seconds = sleepSeconds()
                             } else if (template_id === 'minecraft:vanilla') {
                               if (!mcEula()) localErrors.accept_eula = 'You must accept the EULA to start a Minecraft server.'
                               if (mcFrpEnabled() && !mcFrpCfg)
-                                localErrors.frp_config = mcFrpMode() === 'node' ? 'Select an FRP node.' : 'Paste frpc config.'
+                                localErrors.frp_config = mcFrpMode() === 'node' ? 'Select an FRP node.' : 'Paste FRP config.'
                               params.accept_eula = 'true'
                               const v = mcVersion().trim()
                               params.version = v || 'latest_release'
@@ -3607,7 +4611,7 @@ function App() {
                               if (!mcEula()) localErrors.accept_eula = 'You must accept the EULA to start a Minecraft server.'
                               if (!mcMrpack().trim()) localErrors.mrpack = 'Paste a Modrinth version link or a direct .mrpack URL.'
                               if (mcFrpEnabled() && !mcFrpCfg)
-                                localErrors.frp_config = mcFrpMode() === 'node' ? 'Select an FRP node.' : 'Paste frpc config.'
+                                localErrors.frp_config = mcFrpMode() === 'node' ? 'Select an FRP node.' : 'Paste FRP config.'
                               params.accept_eula = 'true'
                               params.mrpack = mcMrpack().trim()
                               params.memory_mb = mcMemory() || '2048'
@@ -3617,7 +4621,7 @@ function App() {
                               if (!mcEula()) localErrors.accept_eula = 'You must accept the EULA to start a Minecraft server.'
                               if (!mcImportPack().trim()) localErrors.pack = 'Provide a server pack zip URL, or a path under /data.'
                               if (mcFrpEnabled() && !mcFrpCfg)
-                                localErrors.frp_config = mcFrpMode() === 'node' ? 'Select an FRP node.' : 'Paste frpc config.'
+                                localErrors.frp_config = mcFrpMode() === 'node' ? 'Select an FRP node.' : 'Paste FRP config.'
                               params.accept_eula = 'true'
                               params.pack = mcImportPack().trim()
                               params.memory_mb = mcMemory() || '2048'
@@ -3627,7 +4631,7 @@ function App() {
                               if (!mcEula()) localErrors.accept_eula = 'You must accept the EULA to start a Minecraft server.'
                               if (!mcCurseforge().trim()) localErrors.curseforge = 'Paste a CurseForge file URL, or modId:fileId.'
                               if (mcFrpEnabled() && !mcFrpCfg)
-                                localErrors.frp_config = mcFrpMode() === 'node' ? 'Select an FRP node.' : 'Paste frpc config.'
+                                localErrors.frp_config = mcFrpMode() === 'node' ? 'Select an FRP node.' : 'Paste FRP config.'
                               params.accept_eula = 'true'
                               params.curseforge = mcCurseforge().trim()
                               params.memory_mb = mcMemory() || '2048'
@@ -3642,7 +4646,7 @@ function App() {
                               params.world_size = trWorldSize().trim() || '1'
                               if (trPassword().trim()) params.password = trPassword().trim()
                               if (trFrpEnabled() && !trFrpCfg)
-                                localErrors.frp_config = trFrpMode() === 'node' ? 'Select an FRP node.' : 'Paste frpc config.'
+                                localErrors.frp_config = trFrpMode() === 'node' ? 'Select an FRP node.' : 'Paste FRP config.'
                               if (trFrpEnabled() && trFrpCfg) params.frp_config = trFrpCfg
                             } else if (template_id === 'dst:vanilla') {
                               params.cluster_token = dstClusterToken().trim()
@@ -3655,11 +4659,36 @@ function App() {
                               if (p) params.port = p
                               if (mp) params.master_port = mp
                               if (ap) params.auth_port = ap
+                            } else if (template_id === 'dsp:nebula') {
+                              const mode = dspStartupMode().trim() || 'auto'
+                              const save = dspSaveName().trim()
+                              if (mode === 'load' && !save) localErrors.save_name = 'Required when startup_mode=load.'
+                              params.startup_mode = mode
+                              if (save) params.save_name = save
+                              if (dspPort().trim()) params.port = dspPort().trim()
+                              if (dspServerPassword().trim()) params.server_password = dspServerPassword().trim()
+                              if (dspRemoteAccessPassword().trim()) params.remote_access_password = dspRemoteAccessPassword().trim()
+                              params.auto_pause_enabled = dspAutoPauseEnabled() ? 'true' : 'false'
+                              params.ups = dspUps().trim() || '60'
+                              params.wine_bin = dspWineBin().trim() || 'wine64'
                             }
 
                             if (Object.keys(localErrors).length > 0) {
                               setCreateFieldErrors(localErrors)
                               queueMicrotask(() => focusFirstCreateError(localErrors))
+                              return
+                            }
+
+                            if (template_id === 'dsp:nebula' && dspWarmNeedsInit()) {
+                              if (!hasSavedSteamcmdCreds()) {
+                                setPendingCreateAfterDspInit(null)
+                                setCreateFieldErrors({})
+                                setCreateFormError({ message: dspSteamcmdSettingsRequiredMessage() })
+                                pushToast('error', 'SteamCMD not configured', dspSteamcmdSettingsRequiredMessage())
+                                return
+                              }
+                              setPendingCreateAfterDspInit({ template_id, params: { ...params }, display_name })
+                              await runDspInitAndMaybeCreate()
                               return
                             }
 
@@ -3671,12 +4700,34 @@ function App() {
                               setSelectedInstanceId(out.instance_id)
                             } catch (e) {
                               if (isAlloyApiError(e)) {
-                                setCreateFieldErrors(e.data.field_errors ?? {})
+                                const fieldErrors = e.data.field_errors ?? {}
+                                if (template_id === 'dsp:nebula' && dspSourceInitRequired(e.data.message, fieldErrors)) {
+                                  setDspWarmNeedsInit(true)
+                                  setCreateFieldErrors({})
+                                  setCreateFormError(null)
+                                  setWarmFieldErrors(fieldErrors)
+                                  setWarmFormError({ message: e.data.message, requestId: e.data.request_id })
+
+                                  if (!hasSavedSteamcmdCreds()) {
+                                    setPendingCreateAfterDspInit(null)
+                                    setWarmFieldErrors({})
+                                    setWarmFormError(null)
+                                    setCreateFormError({ message: dspSteamcmdSettingsRequiredMessage(), requestId: e.data.request_id })
+                                    pushToast('error', 'SteamCMD not configured', dspSteamcmdSettingsRequiredMessage(), e.data.request_id)
+                                  } else {
+                                    setPendingCreateAfterDspInit({ template_id, params: { ...params }, display_name })
+                                    await runDspInitAndMaybeCreate()
+                                  }
+                                  if (e.data.hint) pushToast('info', 'Hint', e.data.hint, e.data.request_id)
+                                  return
+                                }
+
+                                setCreateFieldErrors(fieldErrors)
                                 setCreateFormError({ message: e.data.message, requestId: e.data.request_id })
                                 if (e.data.hint) pushToast('info', 'Hint', e.data.hint, e.data.request_id)
-                                queueMicrotask(() => focusFirstCreateError(e.data.field_errors ?? {}))
+                                queueMicrotask(() => focusFirstCreateError(fieldErrors))
                               } else {
-                                setCreateFormError({ message: e instanceof Error ? e.message : 'unknown error' })
+                                setCreateFormError({ message: friendlyErrorMessage(e) })
                               }
                             }
                           }}
@@ -3698,15 +4749,17 @@ function App() {
 	                            </svg>
 	                          }
 	                          loading={warmCache.isPending}
-	                          disabled={
-	                            isReadOnly() ||
-	                            createInstance.isPending ||
-	                            !['minecraft:vanilla', 'terraria:vanilla'].includes(createTemplateId())
-	                          }
+                          disabled={
+                            isReadOnly() ||
+                            createInstance.isPending ||
+                            !['minecraft:vanilla', 'terraria:vanilla', 'dsp:nebula'].includes(createTemplateId())
+                          }
                           title={isReadOnly() ? 'Read-only mode' : 'Only download required files (no start)'}
 	                          onClick={async () => {
 	                            const template_id = createTemplateId()
 	                            const params: Record<string, string> = {}
+                            setWarmFormError(null)
+                            setWarmFieldErrors({})
 	                            if (template_id === 'minecraft:vanilla') {
 	                              const v = mcVersion().trim()
 	                              params.version = v || 'latest_release'
@@ -3715,10 +4768,47 @@ function App() {
                               const v = trVersion().trim()
                               params.version = v || '1453'
                             }
+                            if (template_id === 'dsp:nebula') {
+                              const guardCode = dspSteamGuardCode().trim()
+
+                              if (dspWarmNeedsInit() && !hasSavedSteamcmdCreds()) {
+                                setWarmFieldErrors({})
+                                setWarmFormError(null)
+                                pushToast('error', 'SteamCMD not configured', dspSteamcmdSettingsRequiredMessage())
+                                return
+                              }
+
+                              if (guardCode) params.steam_guard_code = guardCode
+                            }
                             try {
                               const out = await warmCache.mutateAsync({ template_id, params })
+                              if (template_id === 'dsp:nebula') {
+                                setDspWarmNeedsInit(false)
+                                setWarmFieldErrors({})
+                                setDspSteamGuardCode('')
+                              }
                               pushToast('success', 'Cache warmed', out.message)
                             } catch (e) {
+                              if (template_id === 'dsp:nebula' && isAlloyApiError(e)) {
+                                const fieldErrors = e.data.field_errors ?? {}
+                                const needsGuard = Boolean(fieldErrors.steam_guard_code)
+
+                                if (needsGuard) {
+                                  setWarmFieldErrors({ steam_guard_code: fieldErrors.steam_guard_code })
+                                  setWarmFormError({ message: e.data.message, requestId: e.data.request_id })
+                                  setShowDspInitModal(true)
+                                } else {
+                                  setWarmFieldErrors({})
+                                  setWarmFormError(null)
+                                  setShowDspInitModal(false)
+                                  if (dspSourceInitRequired(e.data.message, fieldErrors) || fieldErrors.steam_username || fieldErrors.steam_password) {
+                                    setDspWarmNeedsInit(true)
+                                    pushToast('error', 'SteamCMD not configured', dspSteamcmdSettingsRequiredMessage(), e.data.request_id)
+                                  }
+                                }
+                                if (e.data.hint) pushToast('info', 'Hint', e.data.hint, e.data.request_id)
+                                return
+                              }
                               toastError('Warm cache failed', e)
                             }
                           }}
@@ -3734,7 +4824,7 @@ function App() {
                       <Show when={createFormError()}>
                         <div class="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-900 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-200">
                           <div class="font-semibold">Create failed</div>
-                          <div class="mt-1 text-xs text-rose-800/90 dark:text-rose-200/90">{createFormError()!.message}</div>
+                          <div class="mt-1 whitespace-pre-wrap break-words text-xs text-rose-800/90 dark:text-rose-200/90">{createFormError()!.message}</div>
 		                          <Show when={createFormError()!.requestId}>
 		                            <div class="mt-2 flex items-center justify-between gap-2">
 		                              <div class="text-[11px] text-rose-700/80 dark:text-rose-200/70 font-mono">req {createFormError()!.requestId}</div>
@@ -3805,15 +4895,7 @@ function App() {
                             placeholder="Search…"
                             aria-label="Search instances"
                             spellcheck={false}
-                            leftIcon={
-                              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-                                <path
-                                  fill-rule="evenodd"
-                                  d="M9 3.5a5.5 5.5 0 104.473 8.714l2.656 2.657a.75.75 0 101.061-1.06l-2.657-2.657A5.5 5.5 0 009 3.5zM5 9a4 4 0 117.999.001A4 4 0 015 9z"
-                                  clip-rule="evenodd"
-                                />
-                              </svg>
-                            }
+                            leftIcon={<Search class="h-4 w-4" strokeWidth={1.9} />}
                             rightIcon={
                               instanceSearchInput().length > 0 ? (
                                 <button
@@ -3887,29 +4969,12 @@ function App() {
                             label=""
                             ariaLabel="Sort instances"
                             title="Sort"
-                            leftIcon={
-                              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-                                <path
-                                  fill-rule="evenodd"
-                                  d="M6 4.25a.75.75 0 01.75.75v9.69l1.72-1.72a.75.75 0 111.06 1.06l-3 3a.75.75 0 01-1.06 0l-3-3a.75.75 0 111.06-1.06l1.72 1.72V5A.75.75 0 016 4.25zm8 0a.75.75 0 01.75.75v9.69l1.72-1.72a.75.75 0 111.06 1.06l-3 3a.75.75 0 01-1.06 0l-3-3a.75.75 0 111.06-1.06l1.72 1.72V5a.75.75 0 01.75-.75z"
-                                  clip-rule="evenodd"
-                                />
-                              </svg>
-                            }
+                            leftIcon={<ArrowUpDown class="h-4 w-4" strokeWidth={1.9} />}
                             value={instanceSortKey()}
                             options={instanceSortOptions()}
                             onChange={(v) => setInstanceSortKey(v as InstanceSortKey)}
                           />
                         </div>
-                        <label class="flex items-center gap-2 rounded-xl border border-slate-200 bg-white/60 px-3 py-2 text-xs text-slate-700 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-200">
-                          <input
-                            type="checkbox"
-                            class="h-4 w-4 rounded border-slate-300 bg-white text-amber-600 focus:ring-amber-400 dark:border-slate-700 dark:bg-slate-950/60 dark:text-amber-400"
-                            checked={instanceCompact()}
-                            onChange={(e) => setInstanceCompact(e.currentTarget.checked)}
-                          />
-                          Compact
-                        </label>
                       </div>
 
                       <Show when={instances.isError && instances.data == null && (instances.error as unknown)}>
@@ -3987,7 +5052,7 @@ function App() {
                           {(i) => (
                               <div
                                 ref={(el) => instanceCardEls.set(i.config.instance_id, el)}
-                                class={`group rounded-2xl border border-slate-200 bg-white/70 p-4 shadow-sm transition-all duration-150 hover:-translate-y-0.5 hover:bg-white hover:shadow-md active:scale-[0.99] dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none dark:hover:bg-slate-950/60 ${
+                                class={`group relative overflow-hidden rounded-2xl border border-slate-200 bg-white/62 p-4 shadow-sm transition-all duration-150 hover:-translate-y-0.5 hover:bg-white/72 hover:shadow-md active:scale-[0.99] dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none dark:hover:bg-slate-950/60 ${
                                   selectedInstanceId() === i.config.instance_id
                                     ? 'ring-1 ring-amber-500/25'
                                     : highlightInstanceId() === i.config.instance_id
@@ -3995,8 +5060,27 @@ function App() {
                                       : 'ring-0 ring-transparent'
                                 }`}
                               >
+                                <Show when={instanceCardBackdrop(i.config.template_id)}>
+                                  {(bg) => (
+                                    <>
+                                      <img
+                                        src={bg().src}
+                                        alt=""
+                                        aria-hidden="true"
+                                        class="pointer-events-none absolute inset-0 h-full w-full select-none object-cover opacity-[0.4] saturate-110 contrast-115 blur-[1.4px] transition-transform duration-300 group-hover:scale-[1.06] dark:opacity-[0.38]"
+                                        style={{ 'object-position': bg().position }}
+                                        loading="lazy"
+                                        decoding="async"
+                                      />
+                                      <div class="pointer-events-none absolute inset-0 rounded-2xl bg-gradient-to-r from-white/84 via-white/60 to-white/22 dark:from-slate-950/90 dark:via-slate-950/74 dark:to-slate-950/50" />
+                                      <div class="pointer-events-none absolute inset-0 rounded-2xl bg-gradient-to-b from-transparent to-white/10 dark:to-slate-950/18" />
+                                      <div class="pointer-events-none absolute inset-0 rounded-2xl bg-[radial-gradient(130%_92%_at_86%_56%,rgba(15,23,42,0)_32%,rgba(15,23,42,0.28)_100%)] dark:bg-[radial-gradient(130%_92%_at_86%_56%,rgba(2,6,23,0)_26%,rgba(2,6,23,0.55)_100%)]" />
+                                      <div class="pointer-events-none absolute inset-x-0 bottom-0 h-24 rounded-b-2xl bg-gradient-to-t from-white/72 via-white/56 to-transparent dark:from-slate-950/78 dark:via-slate-950/64 dark:to-transparent" />
+                                    </>
+                                  )}
+                                </Show>
                               <div
-                                class="w-full cursor-pointer text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/35 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-50 dark:focus-visible:ring-amber-400/35 dark:focus-visible:ring-offset-slate-950"
+                                class="relative z-10 w-full cursor-pointer text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/35 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-50 dark:focus-visible:ring-amber-400/35 dark:focus-visible:ring-offset-slate-950"
                                 data-instance-card-focus="true"
                                 role="button"
                                 tabIndex={0}
@@ -4148,7 +5232,7 @@ function App() {
                                   (i.status?.message != null || i.status?.exit_code != null)
                                 }
                               >
-                                <div class="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] text-rose-800 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-200">
+                                <div class="relative z-10 mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] text-rose-800 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-200">
                                   <span class="font-semibold">Failed:</span>
                                   <span class="ml-1">
                                     <Show when={i.status?.exit_code != null}>
@@ -4170,7 +5254,7 @@ function App() {
 
                               <Show when={i.status?.resources}>
                                 {(r) => (
-                                  <div class="mt-3 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+                                  <div class="relative z-10 mt-3 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
                                     <span class="rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 font-mono dark:border-slate-800 dark:bg-slate-950/40">
                                       cpu {formatCpuPercent(r().cpu_percent_x100)}
                                     </span>
@@ -4184,7 +5268,7 @@ function App() {
                                 )}
                               </Show>
 
-                              <div class="mt-3 flex flex-wrap items-center justify-between gap-2">
+                              <div class="relative z-10 mt-3 flex flex-wrap items-center justify-between gap-2">
                                 <div class="flex flex-wrap items-center gap-2">
                                   <Show
                                     when={canStartInstance(i.status)}
@@ -4358,7 +5442,6 @@ function App() {
                                     </svg>
 	                                  </IconButton>
 	                                  </div>
-	                                  <TemplateMark templateId={i.config.template_id} />
 	                                </div>
 	                              </div>
 	                            </div>
@@ -4382,6 +5465,375 @@ function App() {
                 />
               </Show>
 
+              <Show when={tab() === 'downloads'}>
+                <div class="min-h-0 flex-1 overflow-auto p-4">
+                  <div class="mx-auto w-full max-w-3xl space-y-4">
+                    <div class="flex items-start justify-between gap-3">
+                      <div>
+                        <div class="text-sm font-semibold text-slate-900 dark:text-slate-100">Downloads</div>
+                        <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                          Steam-style download center: queue, library, installed state, and updates.
+                        </div>
+                      </div>
+                      <div class="flex items-center gap-2">
+                        <Badge variant={hasRunningDownloadJobs() ? 'warning' : 'neutral'}>
+                          {hasRunningDownloadJobs() ? 'Running' : 'Idle'}
+                        </Badge>
+                        <Show when={downloadQueuePaused()}>
+                          <Badge variant="warning">Queue paused</Badge>
+                        </Show>
+                      </div>
+                    </div>
+
+                    <div class="flex flex-wrap items-center gap-2">
+                      <Tabs
+                        value={downloadCenterView()}
+                        options={[
+                          { value: 'library', label: 'Library' },
+                          { value: 'queue', label: 'Downloads' },
+                          { value: 'installed', label: 'Installed' },
+                          { value: 'updates', label: 'Updates' },
+                        ]}
+                        onChange={setDownloadCenterView}
+                      />
+                    </div>
+
+                    <div class="rounded-2xl border border-amber-200 bg-amber-50/70 px-4 py-3 text-xs text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-200">
+                      If Create returns <span class="font-mono">HTTP 504</span>, it usually means the reverse proxy timed out while backend download is still running.
+                      Use this page to warm files first, then Create will be fast.
+                    </div>
+
+                    <Show when={downloadCenterView() === 'queue'}>
+                      <div class="rounded-2xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
+                      <div class="flex items-center justify-between gap-3">
+                        <div class="text-sm font-medium text-slate-900 dark:text-slate-100">Download Queue</div>
+                        <div class="flex items-center gap-2">
+                          <Badge variant={hasRunningDownloadJobs() ? 'warning' : 'neutral'}>
+                            {hasRunningDownloadJobs() ? 'Running' : 'Idle'}
+                          </Badge>
+                          <Button
+                            size="xs"
+                            variant="secondary"
+                            onClick={() => void toggleDownloadQueuePaused()}
+                          >
+                            {downloadQueuePaused() ? 'Resume queue' : 'Pause queue'}
+                          </Button>
+                          <Button
+                            size="xs"
+                            variant="secondary"
+                            disabled={hasRunningDownloadJobs() || downloadJobs().length === 0}
+                            onClick={() => void clearDownloadHistory()}
+                          >
+                            Clear history
+                          </Button>
+                        </div>
+                      </div>
+
+                      <Show
+                        when={downloadJobs().length > 0}
+                        fallback={<div class="mt-3 text-xs text-slate-500 dark:text-slate-400">No download jobs yet.</div>}
+                      >
+                        <div class="mt-3 space-y-3">
+                          <For each={downloadJobs()}>
+                            {(job) => {
+                              const progressMessage = () => downloadJobProgressMessage(job, downloadNowUnixMs())
+
+                              return (
+                                <div class="rounded-xl border border-slate-200 bg-white/60 px-3 py-3 dark:border-slate-800 dark:bg-slate-950/40">
+                                  <div class="flex flex-wrap items-center gap-2">
+                                    <div class="text-xs font-semibold text-slate-800 dark:text-slate-100">{downloadTargetLabel(job.target)}</div>
+                                    <Badge variant={downloadJobStatusVariant(job.state)}>{downloadJobStatusLabel(job.state)}</Badge>
+                                    <span class="rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 font-mono text-[11px] text-slate-600 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-300">
+                                      {job.version}
+                                    </span>
+                                    <span class="ml-auto font-mono text-[11px] text-slate-500">{formatRelativeTime(job.updatedAtUnixMs)}</span>
+                                  </div>
+
+                                  <Show
+                                    when={job.state === 'running'}
+                                    fallback={<div class="mt-2 text-xs text-slate-600 dark:text-slate-300">{job.message}</div>}
+                                  >
+                                    <DownloadProgress templateId={job.templateId} message={progressMessage()} />
+                                  </Show>
+
+                                  <div class="mt-2 flex flex-wrap items-center gap-2">
+                                    <Button size="xs" variant="secondary" onClick={() => setSelectedDownloadJobId(job.id)}>
+                                      Details
+                                    </Button>
+                                    <Button
+                                      size="xs"
+                                      variant="secondary"
+                                      disabled={job.state === 'running'}
+                                      onClick={() => void moveDownloadJob(job.id, -1)}
+                                    >
+                                      ↑
+                                    </Button>
+                                    <Button
+                                      size="xs"
+                                      variant="secondary"
+                                      disabled={job.state === 'running'}
+                                      onClick={() => void moveDownloadJob(job.id, 1)}
+                                    >
+                                      ↓
+                                    </Button>
+                                    <Show when={job.state === 'queued'}>
+                                      <Button size="xs" variant="secondary" onClick={() => void pauseDownloadJob(job.id)}>
+                                        Pause
+                                      </Button>
+                                    </Show>
+                                    <Show when={job.state === 'paused'}>
+                                      <Button size="xs" variant="secondary" onClick={() => void resumeDownloadJob(job.id)}>
+                                        Resume
+                                      </Button>
+                                    </Show>
+                                    <Show when={job.state === 'queued' || job.state === 'paused'}>
+                                      <Button size="xs" variant="danger" onClick={() => void cancelDownloadJob(job.id)}>
+                                        Cancel
+                                      </Button>
+                                    </Show>
+                                    <Show when={job.state === 'error' || job.state === 'success' || job.state === 'canceled'}>
+                                      <Button size="xs" variant="secondary" onClick={() => void retryDownloadJob(job.id)}>
+                                        Retry
+                                      </Button>
+                                    </Show>
+                                  </div>
+
+                                  <Show when={job.requestId}>
+                                    <div class="mt-2 font-mono text-[11px] text-slate-500 dark:text-slate-400">req {job.requestId}</div>
+                                  </Show>
+                                </div>
+                              )
+                            }}
+                          </For>
+                        </div>
+                      </Show>
+                      </div>
+                    </Show>
+
+                    <Show when={downloadCenterView() === 'queue' || downloadCenterView() === 'library'}>
+                    <div class="rounded-2xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
+                      <div class="flex items-center justify-between gap-3">
+                        <div class="text-sm font-medium text-slate-900 dark:text-slate-100">Minecraft (Vanilla)</div>
+                        <Badge variant="neutral">Template minecraft:vanilla</Badge>
+                      </div>
+                      <div class="mt-3 grid gap-2 sm:grid-cols-[1fr_auto] sm:items-end">
+                        <Field label="Version">
+                          <Dropdown
+                            label=""
+                            value={downloadMcVersion()}
+                            options={mcVersionOptions()}
+                            onChange={setDownloadMcVersion}
+                          />
+                        </Field>
+                        <Button
+                          size="sm"
+                          variant="primary"
+                          loading={downloadQueueEnqueue.isPending && downloadEnqueueTarget() === 'minecraft_vanilla'}
+                          disabled={isReadOnly()}
+                          onClick={() => void enqueueDownloadWarm('minecraft_vanilla')}
+                        >
+                          Download / Update
+                        </Button>
+                      </div>
+                      <Show when={downloadStatus().get('minecraft_vanilla')}>
+                        {(s) => (
+                          <div
+                            class={`mt-3 rounded-xl border px-3 py-2 text-xs ${
+                              s().ok
+                                ? 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/20 dark:text-emerald-200'
+                                : 'border-rose-200 bg-rose-50 text-rose-800 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-200'
+                            }`}
+                          >
+                            {s().message}
+                            <div class="mt-1 font-mono text-[11px] opacity-80">{formatRelativeTime(s().atUnixMs)}</div>
+                          </div>
+                        )}
+                      </Show>
+                    </div>
+                    </Show>
+
+                    <Show when={downloadCenterView() === 'installed'}>
+                      <div class="rounded-2xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
+                        <div class="text-sm font-medium text-slate-900 dark:text-slate-100">Installed</div>
+                        <div class="mt-3 space-y-2">
+                          <For each={downloadInstalledRows()}>
+                            {(row) => (
+                              <div class="rounded-xl border border-slate-200 bg-white/60 px-3 py-2 text-xs dark:border-slate-800 dark:bg-slate-950/40">
+                                <div class="flex flex-wrap items-center gap-2">
+                                  <div class="font-semibold text-slate-800 dark:text-slate-100">{downloadTargetLabel(row.target)}</div>
+                                  <Badge variant={row.installed ? 'success' : 'neutral'}>{row.installed ? 'Installed' : 'Missing'}</Badge>
+                                  <span class="rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 font-mono text-[11px] text-slate-600 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-300">
+                                    {row.installedVersion}
+                                  </span>
+                                </div>
+                                <div class="mt-1 text-slate-600 dark:text-slate-300">
+                                  size {formatBytes(row.sizeBytes)} · last used {formatRelativeTime(row.lastUsedUnixMs)}
+                                </div>
+                              </div>
+                            )}
+                          </For>
+                        </div>
+                      </div>
+                    </Show>
+
+                    <Show when={downloadCenterView() === 'updates'}>
+                      <div class="rounded-2xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
+                        <div class="text-sm font-medium text-slate-900 dark:text-slate-100">Available Updates</div>
+                        <div class="mt-3 space-y-2">
+                          <For each={downloadUpdateRows()}>
+                            {(row) => (
+                              <div class="rounded-xl border border-slate-200 bg-white/60 px-3 py-2 text-xs dark:border-slate-800 dark:bg-slate-950/40">
+                                <div class="flex flex-wrap items-center gap-2">
+                                  <div class="font-semibold text-slate-800 dark:text-slate-100">{downloadTargetLabel(row.target)}</div>
+                                  <Badge variant={row.updateAvailable ? 'warning' : 'success'}>
+                                    {row.updateAvailable ? 'Update available' : 'Up to date'}
+                                  </Badge>
+                                  <span class="rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 font-mono text-[11px] text-slate-600 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-300">
+                                    {row.installedVersion} → {row.latestVersion}
+                                  </span>
+                                  <Button
+                                    size="xs"
+                                    variant="secondary"
+                                    class="ml-auto"
+                                    disabled={isReadOnly() || !row.updateAvailable}
+                                    onClick={() => void enqueueDownloadWarm(row.target)}
+                                  >
+                                    {row.updateAvailable ? 'Queue update' : 'Up to date'}
+                                  </Button>
+                                </div>
+                              </div>
+                            )}
+                          </For>
+                        </div>
+                      </div>
+                    </Show>
+
+                    <Show when={downloadCenterView() === 'queue' || downloadCenterView() === 'library'}>
+                    <div class="rounded-2xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
+                      <div class="flex items-center justify-between gap-3">
+                        <div class="text-sm font-medium text-slate-900 dark:text-slate-100">Terraria (Vanilla)</div>
+                        <Badge variant="neutral">Template terraria:vanilla</Badge>
+                      </div>
+                      <div class="mt-3 grid gap-2 sm:grid-cols-[1fr_auto] sm:items-end">
+                        <Field label="Version">
+                          <Dropdown
+                            label=""
+                            value={downloadTrVersion()}
+                            options={trVersionOptions()}
+                            onChange={setDownloadTrVersion}
+                          />
+                        </Field>
+                        <Button
+                          size="sm"
+                          variant="primary"
+                          loading={downloadQueueEnqueue.isPending && downloadEnqueueTarget() === 'terraria_vanilla'}
+                          disabled={isReadOnly()}
+                          onClick={() => void enqueueDownloadWarm('terraria_vanilla')}
+                        >
+                          Download / Update
+                        </Button>
+                      </div>
+                      <Show when={downloadStatus().get('terraria_vanilla')}>
+                        {(s) => (
+                          <div
+                            class={`mt-3 rounded-xl border px-3 py-2 text-xs ${
+                              s().ok
+                                ? 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/20 dark:text-emerald-200'
+                                : 'border-rose-200 bg-rose-50 text-rose-800 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-200'
+                            }`}
+                          >
+                            {s().message}
+                            <div class="mt-1 font-mono text-[11px] opacity-80">{formatRelativeTime(s().atUnixMs)}</div>
+                          </div>
+                        )}
+                      </Show>
+                    </div>
+                    </Show>
+
+                    <Show when={downloadCenterView() === 'queue' || downloadCenterView() === 'library'}>
+                    <div class="rounded-2xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
+                      <div class="flex items-center justify-between gap-3">
+                        <div class="text-sm font-medium text-slate-900 dark:text-slate-100">DSP (Nebula)</div>
+                        <Badge variant={hasSavedSteamcmdCreds() ? 'success' : 'warning'}>
+                          {hasSavedSteamcmdCreds() ? 'SteamCMD ready' : 'SteamCMD required'}
+                        </Badge>
+                      </div>
+                      <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                        Uses SteamCMD credentials in Settings. Auto 2FA is supported when maFile/shared_secret is imported.
+                      </div>
+
+                      <Show when={!hasSavedSteamcmdCreds()}>
+                        <div class="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-200">
+                          SteamCMD credentials are missing.
+                          <Button size="xs" variant="secondary" class="ml-2" onClick={() => setTab('settings')}>
+                            Open Settings
+                          </Button>
+                        </div>
+                      </Show>
+
+                      <div class="mt-3 grid gap-2 sm:grid-cols-[1fr_auto] sm:items-end">
+                        <Field label="Steam Guard code (optional)">
+                          <Input
+                            value={downloadDspGuardCode()}
+                            onInput={(e) => setDownloadDspGuardCode(e.currentTarget.value)}
+                            placeholder="Only needed when Auto 2FA is unavailable"
+                            autocomplete="one-time-code"
+                            class="font-mono text-[11px]"
+                          />
+                        </Field>
+                        <Button
+                          size="sm"
+                          variant="primary"
+                          loading={downloadQueueEnqueue.isPending && downloadEnqueueTarget() === 'dsp_nebula'}
+                          disabled={isReadOnly()}
+                          onClick={() => void enqueueDownloadWarm('dsp_nebula')}
+                        >
+                          Download / Update
+                        </Button>
+                      </div>
+
+                      <Show when={downloadStatus().get('dsp_nebula')}>
+                        {(s) => (
+                          <div
+                            class={`mt-3 rounded-xl border px-3 py-2 text-xs ${
+                              s().ok
+                                ? 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/20 dark:text-emerald-200'
+                                : 'border-rose-200 bg-rose-50 text-rose-800 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-200'
+                            }`}
+                          >
+                            {s().message}
+                            <Show when={s().requestId}>
+                              <div class="mt-1 font-mono text-[11px] opacity-80">req {s().requestId}</div>
+                            </Show>
+                            <div class="mt-1 font-mono text-[11px] opacity-80">{formatRelativeTime(s().atUnixMs)}</div>
+                          </div>
+                        )}
+                      </Show>
+                    </div>
+                    </Show>
+
+                    <div class="rounded-2xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
+                      <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Cache entries</div>
+                      <Show
+                        when={(controlDiagnostics.data?.cache?.entries ?? []).length > 0}
+                        fallback={<div class="mt-2 text-xs text-slate-500 dark:text-slate-400">No cache entries yet.</div>}
+                      >
+                        <div class="mt-3 grid gap-2">
+                          <For each={(controlDiagnostics.data?.cache?.entries ?? []).slice(0, 8)}>
+                            {(e) => (
+                              <div class="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white/60 px-3 py-2 text-[11px] dark:border-slate-800 dark:bg-slate-950/40">
+                                <span class="font-mono text-slate-700 dark:text-slate-200">{e.key}</span>
+                                <span class="font-mono text-slate-500">{formatBytes(Number(e.size_bytes))}</span>
+                              </div>
+                            )}
+                          </For>
+                        </div>
+                      </Show>
+                    </div>
+                  </div>
+                </div>
+              </Show>
+
               <Show when={tab() === 'files'}>
                 <FileBrowser
                   enabled={isAuthed() && tab() === 'files'}
@@ -4399,7 +5851,7 @@ function App() {
                       <div>
                         <div class="text-sm font-semibold text-slate-900 dark:text-slate-100">FRP nodes</div>
                         <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                          Manage saved <span class="font-mono">frpc.ini</span> configs for quick reuse when creating servers.
+                          Manage FRP servers (IP/port/allocatable ports/token) and reusable configs (INI/TOML/YAML/JSON).
                         </div>
                       </div>
                       <div class="flex items-center gap-2">
@@ -4427,7 +5879,7 @@ function App() {
                             fallback={
                               <EmptyState
                                 title="No FRP nodes"
-                                description="Add one to reuse a frpc.ini config when creating Minecraft/Terraria instances."
+                                description="Add one FRP server profile and reuse it when creating Minecraft/Terraria instances."
                                 actions={
                                   <Button variant="secondary" size="sm" onClick={() => openCreateFrpNodeModal()} disabled={isReadOnly()}>
                                     Add node
@@ -4439,20 +5891,40 @@ function App() {
                             <div class="space-y-3">
                               <For each={(frpNodes.data ?? []) as unknown as FrpNodeDto[]}>
                                 {(n) => {
-                                  const endpoint = () => parseFrpcIniEndpoint(n.config)
+                                  const endpoint = () =>
+                                    n.server_addr && n.server_port ? `${n.server_addr}:${n.server_port}` : parseFrpEndpoint(n.config)
+                                  const configFormat = () => detectFrpConfigFormat(n.config)
+                                  const latencyLabel = () => (n.latency_ms != null ? `${n.latency_ms} ms` : 'offline')
+                                  const latencyClass = () =>
+                                    n.latency_ms == null
+                                      ? 'text-rose-600 dark:text-rose-300'
+                                      : n.latency_ms > 300
+                                        ? 'text-amber-600 dark:text-amber-300'
+                                        : 'text-emerald-600 dark:text-emerald-300'
+
                                   return (
                                     <div class="rounded-2xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
                                       <div class="flex flex-wrap items-start justify-between gap-3">
                                         <div class="min-w-0">
                                           <div class="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">{n.name}</div>
-                                          <div class="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
-                                            <Show when={endpoint()} fallback={<span>Endpoint: —</span>}>
-                                              {(ep) => (
-                                                <span>
-                                                  Endpoint: <span class="font-mono">{ep()}</span>
-                                                </span>
-                                              )}
+                                          <div class="mt-1 space-y-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+                                            <div>
+                                              Server: <span class="font-mono">{endpoint() ?? '—'}</span>
+                                            </div>
+                                            <div>
+                                              Latency: <span class={`font-mono ${latencyClass()}`}>{latencyLabel()}</span>
+                                            </div>
+                                            <Show when={(n.allocatable_ports ?? '').trim()}>
+                                              <div>
+                                                Alloc ports: <span class="font-mono">{n.allocatable_ports}</span>
+                                              </div>
                                             </Show>
+                                            <div>
+                                              Token: <span class="font-mono">{(n.token ?? '').trim() ? '(set)' : '(none)'}</span>
+                                            </div>
+                                            <div>
+                                              Config: <span class="font-mono uppercase">{configFormat()}</span>
+                                            </div>
                                           </div>
                                         </div>
                                         <div class="flex flex-wrap items-center gap-2">
@@ -4543,47 +6015,23 @@ function App() {
                           Used as the default <span class="font-mono">cluster_token</span> when creating DST instances (if left blank).
                         </div>
 
-                        <div class="mt-3 flex flex-wrap items-center gap-2">
+                        <div class="mt-3">
                           <Input
                             type={settingsDstKeyVisible() ? 'text' : 'password'}
                             value={settingsDstKey()}
                             onInput={(e) => setSettingsDstKey(e.currentTarget.value)}
                             placeholder={settingsStatus.data?.dst_default_klei_key_set ? '(configured — paste to update, blank to clear)' : 'Paste key…'}
                             spellcheck={false}
-                            class="min-w-[220px] flex-1 font-mono text-[11px]"
+                            class="w-full font-mono text-[11px]"
+                            rightIcon={
+                              <VisibilityToggle
+                                visible={settingsDstKeyVisible()}
+                                labelWhenHidden="Show key"
+                                labelWhenVisible="Hide key"
+                                onToggle={() => setSettingsDstKeyVisible((v) => !v)}
+                              />
+                            }
                           />
-                          <IconButton
-                            type="button"
-                            size="sm"
-                            variant="secondary"
-                            label={settingsDstKeyVisible() ? 'Hide key' : 'Show key'}
-                            onClick={() => setSettingsDstKeyVisible((v) => !v)}
-                          >
-                            <Show
-                              when={settingsDstKeyVisible()}
-                              fallback={
-                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-                                  <path d="M10 12.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5z" />
-                                  <path
-                                    fill-rule="evenodd"
-                                    d="M.664 10.59a1.651 1.651 0 010-1.186A10.004 10.004 0 0110 3c4.257 0 7.893 2.66 9.336 6.41.147.382.147.804 0 1.186A10.004 10.004 0 0110 17c-4.257 0-7.893-2.66-9.336-6.41zM14 10a4 4 0 11-8 0 4 4 0 018 0z"
-                                    clip-rule="evenodd"
-                                  />
-                                </svg>
-                              }
-                            >
-                              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-                                <path d="M13.359 11.238l1.36 1.36a4 4 0 01-5.317-5.317l1.36 1.36a2.5 2.5 0 002.597 2.597z" />
-                                <path
-                                  fill-rule="evenodd"
-                                  d="M2 4.25a.75.75 0 011.28-.53l14.5 14.5a.75.75 0 11-1.06 1.06l-2.294-2.294A9.961 9.961 0 0110 17c-4.257 0-7.893-2.66-9.336-6.41a1.651 1.651 0 010-1.186 10.03 10.03 0 012.924-4.167L2.22 3.78A.75.75 0 012 4.25zm6.12 6.12a2.5 2.5 0 003.51 3.51l-3.51-3.51z"
-                                  clip-rule="evenodd"
-                                />
-                                <path d="M12.454 8.214L9.31 5.07A4 4 0 0114.93 10.69l-2.476-2.476z" />
-                                <path d="M15.765 12.585l1.507 1.507a10.03 10.03 0 002.064-3.502 1.651 1.651 0 000-1.186A10.004 10.004 0 0010 3a9.961 9.961 0 00-3.426.608l1.65 1.65A8.473 8.473 0 0110 4.5c3.49 0 6.574 2.138 7.773 5.5a8.5 8.5 0 01-2.008 2.585z" />
-                              </svg>
-                            </Show>
-                          </IconButton>
                         </div>
 
                         <div class="mt-3 flex flex-wrap items-center gap-2">
@@ -4636,47 +6084,23 @@ function App() {
                           Required for resolving CurseForge modpacks and downloading the author-provided server pack.
                         </div>
 
-                        <div class="mt-3 flex flex-wrap items-center gap-2">
+                        <div class="mt-3">
                           <Input
                             type={settingsCurseforgeKeyVisible() ? 'text' : 'password'}
                             value={settingsCurseforgeKey()}
                             onInput={(e) => setSettingsCurseforgeKey(e.currentTarget.value)}
                             placeholder={settingsStatus.data?.curseforge_api_key_set ? '(configured — paste to update, blank to clear)' : 'Paste key…'}
                             spellcheck={false}
-                            class="min-w-[220px] flex-1 font-mono text-[11px]"
+                            class="w-full font-mono text-[11px]"
+                            rightIcon={
+                              <VisibilityToggle
+                                visible={settingsCurseforgeKeyVisible()}
+                                labelWhenHidden="Show key"
+                                labelWhenVisible="Hide key"
+                                onToggle={() => setSettingsCurseforgeKeyVisible((v) => !v)}
+                              />
+                            }
                           />
-                          <IconButton
-                            type="button"
-                            size="sm"
-                            variant="secondary"
-                            label={settingsCurseforgeKeyVisible() ? 'Hide key' : 'Show key'}
-                            onClick={() => setSettingsCurseforgeKeyVisible((v) => !v)}
-                          >
-                            <Show
-                              when={settingsCurseforgeKeyVisible()}
-                              fallback={
-                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-                                  <path d="M10 12.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5z" />
-                                  <path
-                                    fill-rule="evenodd"
-                                    d="M.664 10.59a1.651 1.651 0 010-1.186A10.004 10.004 0 0110 3c4.257 0 7.893 2.66 9.336 6.41.147.382.147.804 0 1.186A10.004 10.004 0 0110 17c-4.257 0-7.893-2.66-9.336-6.41zM14 10a4 4 0 11-8 0 4 4 0 018 0z"
-                                    clip-rule="evenodd"
-                                  />
-                                </svg>
-                              }
-                            >
-                              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-                                <path d="M13.359 11.238l1.36 1.36a4 4 0 01-5.317-5.317l1.36 1.36a2.5 2.5 0 002.597 2.597z" />
-                                <path
-                                  fill-rule="evenodd"
-                                  d="M2 4.25a.75.75 0 011.28-.53l14.5 14.5a.75.75 0 11-1.06 1.06l-2.294-2.294A9.961 9.961 0 0110 17c-4.257 0-7.893-2.66-9.336-6.41a1.651 1.651 0 010-1.186 10.03 10.03 0 012.924-4.167L2.22 3.78A.75.75 0 012 4.25zm6.12 6.12a2.5 2.5 0 003.51 3.51l-3.51-3.51z"
-                                  clip-rule="evenodd"
-                                />
-                                <path d="M12.454 8.214L9.31 5.07A4 4 0 0114.93 10.69l-2.476-2.476z" />
-                                <path d="M15.765 12.585l1.507 1.507a10.03 10.03 0 002.064-3.502 1.651 1.651 0 000-1.186A10.004 10.004 0 0010 3a9.961 9.961 0 00-3.426.608l1.65 1.65A8.473 8.473 0 0110 4.5c3.49 0 6.574 2.138 7.773 5.5a8.5 8.5 0 01-2.008 2.585z" />
-                              </svg>
-                            </Show>
-                          </IconButton>
                         </div>
 
                         <div class="mt-3 flex flex-wrap items-center gap-2">
@@ -4708,6 +6132,186 @@ function App() {
                                 setSettingsCurseforgeKey('')
                                 void queryClient.invalidateQueries({ queryKey: ['settings.status', null] })
                                 pushToast('success', 'Cleared', 'CurseForge API key cleared')
+                              } catch (e) {
+                                toastError('Clear failed', e)
+                              }
+                            }}
+                          >
+                            Clear
+                          </Button>
+                        </div>
+                      </div>
+
+                      <div class="rounded-2xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
+                        <div class="flex items-center justify-between gap-3">
+                          <div class="text-sm font-medium text-slate-900 dark:text-slate-100">SteamCMD credentials</div>
+                          <Badge variant={settingsStatus.data?.steamcmd_username_set && settingsStatus.data?.steamcmd_password_set ? 'success' : 'warning'}>
+                            {settingsStatus.data?.steamcmd_username_set && settingsStatus.data?.steamcmd_password_set ? 'Configured' : 'Not set'}
+                          </Badge>
+                        </div>
+                        <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                          Shared by SteamCMD-based templates. Supports `maFile` import and automatic Steam Guard (2FA).
+                        </div>
+                        <div class="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
+                          <Badge variant={settingsStatus.data?.steamcmd_shared_secret_set ? 'success' : 'neutral'}>
+                            {settingsStatus.data?.steamcmd_shared_secret_set ? 'Auto 2FA enabled' : 'Auto 2FA disabled'}
+                          </Badge>
+                          <Show when={settingsStatus.data?.steamcmd_account_name}>
+                            {(name) => (
+                              <Badge variant="neutral">
+                                Account {name()}
+                              </Badge>
+                            )}
+                          </Show>
+                        </div>
+
+                        <div class="mt-3 grid gap-2">
+                          <Input
+                            value={settingsSteamcmdUsername()}
+                            onInput={(e) => setSettingsSteamcmdUsername(e.currentTarget.value)}
+                            placeholder={
+                              settingsStatus.data?.steamcmd_username_set
+                                ? '(configured — paste to update, blank + clear to remove)'
+                                : 'Steam username…'
+                            }
+                            autocomplete="username"
+                            spellcheck={false}
+                            class="font-mono text-[11px]"
+                          />
+
+                          <Input
+                            type={settingsSteamcmdPasswordVisible() ? 'text' : 'password'}
+                            value={settingsSteamcmdPassword()}
+                            onInput={(e) => setSettingsSteamcmdPassword(e.currentTarget.value)}
+                            placeholder={
+                              settingsStatus.data?.steamcmd_password_set
+                                ? '(configured — paste to update, blank + clear to remove)'
+                                : 'Steam password…'
+                            }
+                            autocomplete="current-password"
+                            class="w-full font-mono text-[11px]"
+                            rightIcon={
+                              <VisibilityToggle
+                                visible={settingsSteamcmdPasswordVisible()}
+                                labelWhenHidden="Show password"
+                                labelWhenVisible="Hide password"
+                                onToggle={() => setSettingsSteamcmdPasswordVisible((v) => !v)}
+                              />
+                            }
+                          />
+
+                          <Input
+                            value={settingsSteamcmdGuardCode()}
+                            onInput={(e) => setSettingsSteamcmdGuardCode(e.currentTarget.value)}
+                            placeholder="Steam Guard code (optional, usually not needed with maFile)…"
+                            autocomplete="one-time-code"
+                            class="font-mono text-[11px]"
+                          />
+
+                          <Textarea
+                            value={settingsSteamcmdMaFile()}
+                            onInput={(e) => setSettingsSteamcmdMaFile(e.currentTarget.value)}
+                            placeholder="Paste Steam Desktop Authenticator maFile JSON here (optional)…"
+                            class="min-h-[96px] font-mono text-[11px]"
+                          />
+
+                          <div class="flex flex-wrap items-center gap-2">
+                            <input
+                              ref={(el) => {
+                                settingsSteamcmdMaFileInputEl = el
+                              }}
+                              type="file"
+                              accept=".json,application/json"
+                              class="hidden"
+                              onChange={async (e) => {
+                                const file = e.currentTarget.files?.[0]
+                                if (!file) return
+                                try {
+                                  const text = await file.text()
+                                  setSettingsSteamcmdMaFile(text)
+                                  pushToast('success', 'maFile imported', file.name)
+                                } catch {
+                                  pushToast('error', 'Import failed', 'Could not read maFile')
+                                } finally {
+                                  e.currentTarget.value = ''
+                                }
+                              }}
+                            />
+                            <Button
+                              size="xs"
+                              variant="secondary"
+                              type="button"
+                              onClick={() => settingsSteamcmdMaFileInputEl?.click()}
+                            >
+                              Import maFile
+                            </Button>
+                            <Show when={settingsSteamcmdMaFile().trim().length > 0}>
+                              <Button
+                                size="xs"
+                                variant="secondary"
+                                onClick={() => setSettingsSteamcmdMaFile('')}
+                              >
+                                Clear maFile
+                              </Button>
+                            </Show>
+                          </div>
+                        </div>
+
+                        <div class="mt-3 flex flex-wrap items-center gap-2">
+                          <Button
+                            size="sm"
+                            variant="primary"
+                            loading={setSteamcmdCredentials.isPending}
+                            disabled={isReadOnly()}
+                            onClick={async () => {
+                              const username = settingsSteamcmdUsername().trim()
+                              const password = settingsSteamcmdPassword()
+                              const steam_guard_code = settingsSteamcmdGuardCode().trim()
+                              const mafile_json = settingsSteamcmdMaFile().trim()
+                              if ((username && !password) || (!username && password)) {
+                                pushToast('error', 'Missing field', 'Enter both Steam username and password, or clear both.')
+                                return
+                              }
+                              try {
+                                await setSteamcmdCredentials.mutateAsync({
+                                  username,
+                                  password,
+                                  steam_guard_code: steam_guard_code || null,
+                                  shared_secret: null,
+                                  mafile_json: mafile_json || null,
+                                })
+                                setSettingsSteamcmdUsername('')
+                                setSettingsSteamcmdPassword('')
+                                setSettingsSteamcmdGuardCode('')
+                                setSettingsSteamcmdMaFile('')
+                                void queryClient.invalidateQueries({ queryKey: ['settings.status', null] })
+                                pushToast('success', 'Login successful', 'SteamCMD credentials verified and saved')
+                              } catch (e) {
+                                toastError('Login failed', e)
+                              }
+                            }}
+                          >
+                            Login
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            disabled={isReadOnly()}
+                            onClick={async () => {
+                              try {
+                                await setSteamcmdCredentials.mutateAsync({
+                                  username: '',
+                                  password: '',
+                                  steam_guard_code: null,
+                                  shared_secret: null,
+                                  mafile_json: null,
+                                })
+                                setSettingsSteamcmdUsername('')
+                                setSettingsSteamcmdPassword('')
+                                setSettingsSteamcmdGuardCode('')
+                                setSettingsSteamcmdMaFile('')
+                                void queryClient.invalidateQueries({ queryKey: ['settings.status', null] })
+                                pushToast('success', 'Cleared', 'SteamCMD credentials cleared')
                               } catch (e) {
                                 toastError('Clear failed', e)
                               }
@@ -5046,6 +6650,133 @@ function App() {
             Keep return() to the new layout + modals only. */}
 
         <Modal
+          open={Boolean(selectedDownloadJobId())}
+          onClose={() => setSelectedDownloadJobId(null)}
+          title="Download Task"
+          description="Task details, latest failure reason, and quick copy actions."
+          size="md"
+          footer={
+            <div class="flex gap-3">
+              <Button variant="secondary" class="flex-1" onClick={() => setSelectedDownloadJobId(null)}>
+                Close
+              </Button>
+              <Show when={selectedDownloadJob()}>
+                {(job) => (
+                  <Button variant="primary" class="flex-1" onClick={() => void copyDownloadJobDetails(job())}>
+                    Copy JSON
+                  </Button>
+                )}
+              </Show>
+            </div>
+          }
+        >
+          <Show
+            when={selectedDownloadJob()}
+            fallback={<div class="rounded-xl border border-slate-200 bg-white/70 px-3 py-2 text-xs text-slate-500 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-300">This task is no longer in queue history.</div>}
+          >
+            {(job) => {
+              const latestFailure = () => latestDownloadFailureByTarget().get(job().target)
+              const latestFailureText = () => (latestFailure()?.message ?? '').trim()
+              return (
+                <div class="space-y-3">
+                  <div class="rounded-xl border border-slate-200 bg-white/70 px-3 py-2 text-xs dark:border-slate-800 dark:bg-slate-950/40">
+                    <div class="flex flex-wrap items-center gap-2">
+                      <div class="font-semibold text-slate-800 dark:text-slate-100">{downloadTargetLabel(job().target)}</div>
+                      <Badge variant={downloadJobStatusVariant(job().state)}>{downloadJobStatusLabel(job().state)}</Badge>
+                      <span class="rounded-full border border-slate-200 bg-white/70 px-2 py-0.5 font-mono text-[11px] text-slate-600 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-300">
+                        {job().version}
+                      </span>
+                    </div>
+                    <div class="mt-2 space-y-1 font-mono text-[11px] text-slate-600 dark:text-slate-300">
+                      <div>id {job().id}</div>
+                      <Show when={job().requestId}>
+                        <div>req {job().requestId}</div>
+                      </Show>
+                    </div>
+                    <div class="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
+                      started {formatDateTime(job().startedAtUnixMs)} · updated {formatDateTime(job().updatedAtUnixMs)}
+                    </div>
+                  </div>
+
+                  <div class="rounded-xl border border-slate-200 bg-white/70 px-3 py-2 text-xs dark:border-slate-800 dark:bg-slate-950/40">
+                    <div class="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Message</div>
+                    <div class="mt-1 whitespace-pre-wrap break-words text-slate-700 dark:text-slate-200">{job().message || '—'}</div>
+                  </div>
+
+                  <div class="rounded-xl border border-rose-200 bg-rose-50/70 px-3 py-2 text-xs text-rose-900 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-200">
+                    <div class="flex items-center justify-between gap-2">
+                      <div class="text-[11px] font-semibold uppercase tracking-wide">Latest failure reason</div>
+                      <Button size="xs" variant="secondary" onClick={() => void copyDownloadFailureReason(job())}>
+                        Copy
+                      </Button>
+                    </div>
+                    <div class="mt-1 whitespace-pre-wrap break-words font-mono text-[11px]">
+                      {latestFailureText() || 'No failure recorded yet for this target.'}
+                    </div>
+                  </div>
+                </div>
+              )
+            }}
+          </Show>
+        </Modal>
+
+        <Modal
+          open={showDspInitModal()}
+          onClose={() => closeDspInitModal()}
+          title="Steam Guard required"
+          description="SteamCMD credentials come from Settings. Enter the latest Steam Guard code and retry."
+          size="md"
+          initialFocus={() => dspSteamGuardCodeEl}
+          footer={
+            <div class="flex gap-3">
+              <Button variant="secondary" class="flex-1" onClick={() => closeDspInitModal()}>
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                class="flex-1"
+                type="submit"
+                form="alloy-dsp-init"
+                loading={warmCache.isPending || createInstance.isPending}
+              >
+                {pendingCreateAfterDspInit() ? 'Retry & Create' : 'Retry'}
+              </Button>
+            </div>
+          }
+        >
+          <form
+            id="alloy-dsp-init"
+            class="grid gap-3"
+            onSubmit={async (e) => {
+              e.preventDefault()
+              await runDspInitAndMaybeCreate()
+            }}
+          >
+            <Field label="Steam Guard code" required error={warmFieldErrors().steam_guard_code}>
+              <Input
+                ref={(el) => {
+                  dspSteamGuardCodeEl = el
+                }}
+                value={dspSteamGuardCode()}
+                onInput={(e) => setDspSteamGuardCode(e.currentTarget.value)}
+                placeholder="12345"
+                invalid={Boolean(warmFieldErrors().steam_guard_code)}
+              />
+            </Field>
+
+            <Show when={warmFormError()}>
+              <div class="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-900 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-200">
+                <div class="font-semibold">Initialization failed</div>
+                <div class="mt-1 whitespace-pre-wrap break-words text-xs text-rose-800/90 dark:text-rose-200/90">{warmFormError()!.message}</div>
+                <Show when={warmFormError()!.requestId}>
+                  <div class="mt-2 text-[11px] text-rose-700/80 dark:text-rose-200/70 font-mono">req {warmFormError()!.requestId}</div>
+                </Show>
+              </div>
+            </Show>
+          </form>
+        </Modal>
+
+        <Modal
           open={showLoginModal() && !me()}
           onClose={() => setShowLoginModal(false)}
           title="Sign in"
@@ -5268,7 +6999,7 @@ function App() {
           open={showFrpNodeModal()}
           onClose={() => closeFrpNodeModal()}
           title={editingFrpNodeId() ? 'Edit FRP node' : 'Add FRP node'}
-          description="Store an frpc.ini config for reuse (contains secrets like token)."
+          description="Store FRP server info and optional config. Config format is auto-detected (INI/TOML/YAML/JSON)."
           size="lg"
           initialFocus={() => frpNodeNameEl}
           footer={
@@ -5282,7 +7013,7 @@ function App() {
                 type="submit"
                 form="alloy-frp-node"
                 loading={frpCreateNode.isPending || frpUpdateNode.isPending}
-                disabled={isReadOnly() || !frpNodeName().trim() || !frpNodeConfig().trim()}
+                disabled={isReadOnly() || !frpNodeCanSave()}
               >
                 Save
               </Button>
@@ -5298,11 +7029,20 @@ function App() {
               setFrpNodeFormError(null)
               try {
                 const id = editingFrpNodeId()
+                const parsedPort = Number.parseInt(frpNodeServerPort().trim(), 10)
+                const input = {
+                  name: frpNodeName().trim(),
+                  server_addr: frpNodeServerAddr().trim() || null,
+                  server_port: Number.isFinite(parsedPort) && parsedPort > 0 && parsedPort <= 65535 ? parsedPort : null,
+                  allocatable_ports: frpNodeAllocatablePorts().trim() || null,
+                  token: frpNodeToken().trim() || null,
+                  config: frpNodeConfig(),
+                }
                 if (!id) {
-                  const out = await frpCreateNode.mutateAsync({ name: frpNodeName().trim(), config: frpNodeConfig() })
+                  const out = await frpCreateNode.mutateAsync(input)
                   pushToast('success', 'Saved', out.name)
                 } else {
-                  const out = await frpUpdateNode.mutateAsync({ id, name: frpNodeName().trim(), config: frpNodeConfig() })
+                  const out = await frpUpdateNode.mutateAsync({ id, ...input })
                   pushToast('success', 'Saved', out.name)
                 }
                 closeFrpNodeModal()
@@ -5313,6 +7053,8 @@ function App() {
                   setFrpNodeFormError(err.data.message)
                   queueMicrotask(() => {
                     if (err.data.field_errors?.name) focusEl(frpNodeNameEl)
+                    else if (err.data.field_errors?.server_addr) focusEl(frpNodeServerAddrEl)
+                    else if (err.data.field_errors?.server_port) focusEl(frpNodeServerPortEl)
                     else if (err.data.field_errors?.config) focusEl(frpNodeConfigEl)
                   })
                   return
@@ -5334,9 +7076,70 @@ function App() {
               />
             </Field>
 
+            <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <Field label="FRP Server" required error={frpNodeFieldErrors().server_addr}>
+                <Input
+                  ref={(el) => {
+                    frpNodeServerAddrEl = el
+                  }}
+                  value={frpNodeServerAddr()}
+                  onInput={(e) => setFrpNodeServerAddr(e.currentTarget.value)}
+                  placeholder="e.g. 1.2.3.4 or frp.example.com"
+                  spellcheck={false}
+                  invalid={Boolean(frpNodeFieldErrors().server_addr)}
+                />
+              </Field>
+
+              <Field label="Server port" required error={frpNodeFieldErrors().server_port}>
+                <Input
+                  ref={(el) => {
+                    frpNodeServerPortEl = el
+                  }}
+                  type="number"
+                  value={frpNodeServerPort()}
+                  onInput={(e) => setFrpNodeServerPort(e.currentTarget.value)}
+                  placeholder="7000"
+                  invalid={Boolean(frpNodeFieldErrors().server_port)}
+                />
+              </Field>
+            </div>
+
             <Field
-              label={<LabelTip label="frpc.ini" content="Paste a complete frpc.ini. Alloy will patch local_port/local_ip per instance at runtime." />}
-              required
+              label={<LabelTip label="Allocatable ports" content="Optional. For example: 20000-20100,21000. Used when remote_port is auto." />}
+              error={frpNodeFieldErrors().allocatable_ports}
+            >
+              <Input
+                value={frpNodeAllocatablePorts()}
+                onInput={(e) => setFrpNodeAllocatablePorts(e.currentTarget.value)}
+                placeholder="20000-20100,21000"
+                spellcheck={false}
+                class="font-mono text-[11px]"
+                invalid={Boolean(frpNodeFieldErrors().allocatable_ports)}
+              />
+            </Field>
+
+            <Field label="Token (optional)" error={frpNodeFieldErrors().token}>
+              <Input
+                type={frpNodeTokenVisible() ? 'text' : 'password'}
+                value={frpNodeToken()}
+                onInput={(e) => setFrpNodeToken(e.currentTarget.value)}
+                placeholder="FRP token"
+                spellcheck={false}
+                class="font-mono text-[11px]"
+                invalid={Boolean(frpNodeFieldErrors().token)}
+                rightIcon={
+                  <VisibilityToggle
+                    visible={frpNodeTokenVisible()}
+                    labelWhenHidden="Show token"
+                    labelWhenVisible="Hide token"
+                    onToggle={() => setFrpNodeTokenVisible((v) => !v)}
+                  />
+                }
+              />
+            </Field>
+
+            <Field
+              label={<LabelTip label="Config (optional)" content="Auto-detected: INI/TOML/YAML/JSON. If empty, Alloy generates a config from server fields above." />}
               error={frpNodeFieldErrors().config}
             >
               <Textarea
@@ -5345,11 +7148,14 @@ function App() {
                 }}
                 value={frpNodeConfig()}
                 onInput={(e) => setFrpNodeConfig(e.currentTarget.value)}
-                placeholder="[common]\nserver_addr = ...\n...\n"
+                placeholder="Paste FRP config (INI/TOML/YAML/JSON)"
                 spellcheck={false}
                 class="font-mono text-[11px]"
                 invalid={Boolean(frpNodeFieldErrors().config)}
               />
+              <div class="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                Detected format: <span class="font-mono uppercase">{frpNodeDetectedFormat()}</span>
+              </div>
             </Field>
 
             <Show when={frpNodeFormError()}>
@@ -5631,7 +7437,7 @@ function App() {
                             </Field>
 
 	                          <Field
-	                            label={<LabelTip label="Public (FRP)" content="Optional. Paste an frpc config to expose this instance via FRP." />}
+	                            label={<LabelTip label="Public (FRP)" content="Optional. Paste an FRP config to expose this instance (auto-detects INI/TOML/YAML/JSON)." />}
 	                            error={editFieldErrors().frp_config}
 	                          >
 	                            <div class="space-y-2">
@@ -5697,7 +7503,7 @@ function App() {
 	                                      }}
 	                                      value={editMcFrpConfig()}
 	                                      onInput={(e) => setEditMcFrpConfig(e.currentTarget.value)}
-	                                      placeholder="Paste frpc config to set/replace (INI)"
+	                                      placeholder="Paste FRP config to set/replace (auto: INI/TOML/YAML/JSON)"
 	                                      spellcheck={false}
 	                                      class="font-mono text-[11px]"
 	                                      invalid={Boolean(editFieldErrors().frp_config)}
@@ -5833,50 +7639,26 @@ function App() {
 	                          error={editFieldErrors().password}
 	                        >
 	                          <div class="flex flex-wrap items-center gap-2">
-	                            <Input
-	                              ref={(el) => {
-	                                editTrPasswordEl = el
-	                              }}
-	                              type={editTrPasswordVisible() ? 'text' : 'password'}
-	                              value={editTrPassword()}
-	                              onInput={(e) => setEditTrPassword(e.currentTarget.value)}
-	                              placeholder="(leave blank to keep)"
-	                              invalid={Boolean(editFieldErrors().password)}
-	                              class="min-w-[220px] flex-1"
+	                          <Input
+	                          ref={(el) => {
+	                          editTrPasswordEl = el
+	                          }}
+	                          type={editTrPasswordVisible() ? 'text' : 'password'}
+	                          value={editTrPassword()}
+	                          onInput={(e) => setEditTrPassword(e.currentTarget.value)}
+	                          placeholder="(leave blank to keep)"
+	                          invalid={Boolean(editFieldErrors().password)}
+	                          class="w-full flex-1"
+	                            rightIcon={
+	                              <VisibilityToggle
+	                              visible={editTrPasswordVisible()}
+	                              labelWhenHidden="Show password"
+	                              labelWhenVisible="Hide password"
+	                              onToggle={() => setEditTrPasswordVisible((v) => !v)}
 	                            />
-	                            <IconButton
-	                              type="button"
-	                              size="sm"
-	                              variant="secondary"
-	                              label={editTrPasswordVisible() ? 'Hide password' : 'Show password'}
-	                              onClick={() => setEditTrPasswordVisible((v) => !v)}
-	                            >
-	                              <Show
-	                                when={editTrPasswordVisible()}
-	                                fallback={
-	                                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-	                                    <path d="M10 12.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5z" />
-	                                    <path
-	                                      fill-rule="evenodd"
-	                                      d="M.664 10.59a1.651 1.651 0 010-1.186A10.004 10.004 0 0110 3c4.257 0 7.893 2.66 9.336 6.41.147.382.147.804 0 1.186A10.004 10.004 0 0110 17c-4.257 0-7.893-2.66-9.336-6.41zM14 10a4 4 0 11-8 0 4 4 0 018 0z"
-	                                      clip-rule="evenodd"
-	                                    />
-	                                  </svg>
-	                                }
-	                              >
-	                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-	                                  <path d="M13.359 11.238l1.36 1.36a4 4 0 01-5.317-5.317l1.36 1.36a2.5 2.5 0 002.597 2.597z" />
-	                                  <path
-	                                    fill-rule="evenodd"
-	                                    d="M2 4.25a.75.75 0 011.28-.53l14.5 14.5a.75.75 0 11-1.06 1.06l-2.294-2.294A9.961 9.961 0 0110 17c-4.257 0-7.893-2.66-9.336-6.41a1.651 1.651 0 010-1.186 10.03 10.03 0 012.924-4.167L2.22 3.78A.75.75 0 012 4.25zm6.12 6.12a2.5 2.5 0 003.51 3.51l-3.51-3.51z"
-	                                    clip-rule="evenodd"
-	                                  />
-	                                  <path d="M12.454 8.214L9.31 5.07A4 4 0 0114.93 10.69l-2.476-2.476z" />
-	                                  <path d="M15.765 12.585l1.507 1.507a10.03 10.03 0 002.064-3.502 1.651 1.651 0 000-1.186A10.004 10.004 0 0010 3a9.961 9.961 0 00-3.426.608l1.65 1.65A8.473 8.473 0 0110 4.5c3.49 0 6.574 2.138 7.773 5.5a8.5 8.5 0 01-2.008 2.585z" />
-	                                </svg>
-	                              </Show>
-	                            </IconButton>
-	                            <IconButton
+	                            }
+	                          />
+	                          <IconButton
 	                              type="button"
 	                              size="sm"
 	                              variant="secondary"
@@ -5893,7 +7675,7 @@ function App() {
 	                        </Field>
 
 	                        <Field
-	                          label={<LabelTip label="Public (FRP)" content="Optional. Paste an frpc config to expose this instance via FRP." />}
+	                          label={<LabelTip label="Public (FRP)" content="Optional. Paste an FRP config to expose this instance (auto-detects INI/TOML/YAML/JSON)." />}
 	                          error={editFieldErrors().frp_config}
 	                        >
 	                          <div class="space-y-2">
@@ -5959,7 +7741,7 @@ function App() {
 	                                    }}
 	                                    value={editTrFrpConfig()}
 	                                    onInput={(e) => setEditTrFrpConfig(e.currentTarget.value)}
-	                                    placeholder="Paste frpc config to set/replace (INI)"
+	                                    placeholder="Paste FRP config to set/replace (auto: INI/TOML/YAML/JSON)"
 	                                    spellcheck={false}
 	                                    class="font-mono text-[11px]"
 	                                    invalid={Boolean(editFieldErrors().frp_config)}
@@ -6024,7 +7806,7 @@ function App() {
                             ? frpNodeConfigById(editMcFrpNodeId()) ?? ''
                             : editMcFrpConfig().trim()
                         if (editMcFrpEnabled() && !existing && !nextCfg)
-                          localErrors.frp_config = editMcFrpMode() === 'node' ? 'Select an FRP node.' : 'Paste frpc config.'
+                          localErrors.frp_config = editMcFrpMode() === 'node' ? 'Select an FRP node.' : 'Paste FRP config.'
                       }
 
                       if (base.template_id === 'terraria:vanilla') {
@@ -6034,7 +7816,7 @@ function App() {
                             ? frpNodeConfigById(editTrFrpNodeId()) ?? ''
                             : editTrFrpConfig().trim()
                         if (editTrFrpEnabled() && !existing && !nextCfg)
-                          localErrors.frp_config = editTrFrpMode() === 'node' ? 'Select an FRP node.' : 'Paste frpc config.'
+                          localErrors.frp_config = editTrFrpMode() === 'node' ? 'Select an FRP node.' : 'Paste FRP config.'
                       }
 
                       if (Object.keys(localErrors).length > 0) {
@@ -6059,7 +7841,7 @@ function App() {
                           setEditFieldErrors(err.data.field_errors ?? {})
                           queueMicrotask(() => focusFirstEditError(err.data.field_errors ?? {}))
                         } else {
-                          setEditFormError({ message: err instanceof Error ? err.message : 'unknown error' })
+                          setEditFormError({ message: friendlyErrorMessage(err) })
                         }
                       }
                     }}
@@ -6346,7 +8128,7 @@ function App() {
               const frpEndpoint = () => {
                 const raw = params()?.frp_config
                 if (typeof raw !== 'string') return null
-                return parseFrpcIniEndpoint(raw)
+                return parseFrpEndpoint(raw)
               }
 
               const [revealedSecrets, setRevealedSecrets] = createSignal<Record<string, boolean>>({})
@@ -6774,7 +8556,8 @@ function App() {
                           inst().config.template_id === 'minecraft:import' ||
                           inst().config.template_id === 'minecraft:curseforge' ||
                           inst().config.template_id === 'terraria:vanilla' ||
-                          inst().config.template_id === 'dst:vanilla'
+                          inst().config.template_id === 'dst:vanilla' ||
+                          inst().config.template_id === 'dsp:nebula'
                         }
                       >
                         <div class="rounded-2xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
@@ -6794,7 +8577,14 @@ function App() {
                               fallback={
                                 <Show
                                   when={inst().config.template_id === 'dst:vanilla'}
-                                  fallback={<span>Paste a world .zip URL (must contain a single Minecraft world).</span>}
+                                  fallback={
+                                    <Show
+                                      when={inst().config.template_id === 'dsp:nebula'}
+                                      fallback={<span>Paste a world .zip URL (must contain a single Minecraft world).</span>}
+                                    >
+                                      <span>Paste a .zip URL containing at least one DSP save (.dsv).</span>
+                                    </Show>
+                                  }
                                 >
                                   <span>Paste a .zip URL containing a single DST cluster (Cluster_1/).</span>
                                 </Show>

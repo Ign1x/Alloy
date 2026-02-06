@@ -17,6 +17,8 @@ chrono = { workspace = true }
 jsonwebtoken = { workspace = true }
 rand = { workspace = true }
 base64 = "0.22"
+hmac = "0.12"
+sha1 = "0.10"
 sha2 = "0.10"
 hex = "0.4"
 prost = { workspace = true }
@@ -27,6 +29,8 @@ sea-orm = { workspace = true }
 sea-orm-migration = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+serde_yaml = "0.9"
+toml = "0.8"
 specta = { workspace = true, features = ["derive"] }
 time = { workspace = true }
 tokio = { workspace = true }

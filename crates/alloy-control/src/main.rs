@@ -158,6 +158,7 @@ async fn main() -> anyhow::Result<()> {
     let state = init_db_and_migrate().await?;
 
     NodeHealthPoller::new(state.db.clone(), state.agent_hub.clone()).spawn();
+    rpc::init_download_queue_runtime(state.db.clone(), state.agent_hub.clone());
 
     let router = rpc::router();
     let (procedures, _types) = router

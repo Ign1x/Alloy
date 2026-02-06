@@ -12,7 +12,7 @@ use alloy_proto::agent_v1::{
 use tonic::{Request, Response, Status};
 
 use crate::process_manager::ProcessManager;
-use crate::{minecraft_download, terraria_download};
+use crate::{dsp, dsp_source_init, minecraft_download, terraria_download};
 
 #[derive(Debug, Clone)]
 pub struct ProcessApi {
@@ -99,6 +99,117 @@ impl ProcessService for ProcessApi {
         let params: BTreeMap<String, String> = req.params.into_iter().collect();
 
         let message = match req.template_id.as_str() {
+            "steamcmd:auth" => {
+                let steam_username = params
+                    .get("steam_username")
+                    .map(|v| v.trim())
+                    .unwrap_or_default();
+                let steam_password = params
+                    .get("steam_password")
+                    .map(String::as_str)
+                    .unwrap_or_default();
+                let steam_guard_code = params
+                    .get("steam_guard_code")
+                    .map(|v| v.trim())
+                    .filter(|v| !v.is_empty());
+
+                let mut field_errors = BTreeMap::<String, String>::new();
+                if steam_username.is_empty() {
+                    field_errors.insert(
+                        "steam_username".to_string(),
+                        "Steam username is required.".to_string(),
+                    );
+                }
+                if steam_password.is_empty() {
+                    field_errors.insert(
+                        "steam_password".to_string(),
+                        "Steam password is required.".to_string(),
+                    );
+                }
+
+                if !field_errors.is_empty() {
+                    return Err(Status::invalid_argument(crate::error_payload::encode(
+                        "invalid_param",
+                        "SteamCMD credentials are required for login verification.",
+                        Some(field_errors),
+                        Some("Enter username and password, then retry Login.".to_string()),
+                    )));
+                }
+
+                dsp_source_init::verify_steamcmd_login(
+                    steam_username,
+                    steam_password,
+                    steam_guard_code,
+                )
+                .await
+                .map_err(|e| {
+                    let detail = format!("{e:#}");
+                    let detail_l = detail.to_ascii_lowercase();
+                    let mut field_errors = BTreeMap::<String, String>::new();
+
+                    let (message, hint) = if detail_l.contains("steam guard")
+                        || detail_l.contains("two-factor")
+                        || detail_l.contains("2fa")
+                    {
+                        field_errors.insert(
+                            "steam_guard_code".to_string(),
+                            "Steam Guard code is required or invalid.".to_string(),
+                        );
+                        (
+                            "Steam Guard verification is required.",
+                            Some("Enter the latest Steam Guard code and retry Login.".to_string()),
+                        )
+                    } else if detail_l.contains("invalid password")
+                        || detail_l.contains("login failure")
+                        || detail_l.contains("incorrect login")
+                        || detail_l.contains("account logon denied")
+                    {
+                        field_errors.insert(
+                            "steam_password".to_string(),
+                            "Steam username or password is incorrect.".to_string(),
+                        );
+                        (
+                            "SteamCMD login failed: invalid credentials.",
+                            Some("Check Steam username/password and retry Login.".to_string()),
+                        )
+                    } else if detail_l.contains("rate limit")
+                        || detail_l.contains("too many")
+                    {
+                        (
+                            "Steam login is temporarily rate-limited.",
+                            Some("Wait a moment, then retry Login.".to_string()),
+                        )
+                    } else if detail_l.contains("timed out")
+                        || detail_l.contains("dns")
+                        || detail_l.contains("resolve")
+                        || detail_l.contains("network")
+                        || detail_l.contains("connection")
+                    {
+                        (
+                            "SteamCMD login failed due to a network issue.",
+                            Some("Check network connectivity and retry Login.".to_string()),
+                        )
+                    } else {
+                        (
+                            "SteamCMD login verification failed.",
+                            Some("Retry Login. If it still fails, check agent logs with request id.".to_string()),
+                        )
+                    };
+
+                    Status::invalid_argument(crate::error_payload::encode(
+                        "invalid_param",
+                        message,
+                        if field_errors.is_empty() {
+                            None
+                        } else {
+                            Some(field_errors)
+                        },
+                        hint,
+                    ))
+                })?;
+
+                "steamcmd login verified".to_string()
+            }
             "minecraft:vanilla" => {
                 let version = params
                     .get("version")
@@ -176,6 +287,161 @@ impl ProcessService for ProcessApi {
                     extracted.server_root.display()
                 )
             }
+            "dsp:nebula" => {
+                let source_root = dsp::default_source_root();
+                let source_errors = dsp::source_layout_errors(&source_root);
+
+                let init_result = if source_errors.is_empty() {
+                    None
+                } else {
+                    let steam_username = params
+                        .get("steam_username")
+                        .map(|v| v.trim())
+                        .unwrap_or_default();
+                    let steam_password = params
+                        .get("steam_password")
+                        .map(String::as_str)
+                        .unwrap_or_default();
+                    let steam_guard_code = params
+                        .get("steam_guard_code")
+                        .map(|v| v.trim())
+                        .filter(|v| !v.is_empty());
+
+                    let mut field_errors = BTreeMap::<String, String>::new();
+                    if steam_username.is_empty() {
+                        field_errors.insert(
+                            "steam_username".to_string(),
+                            "Steam username is required to initialize DSP source files.".to_string(),
+                        );
+                    }
+                    if steam_password.is_empty() {
+                        field_errors.insert(
+                            "steam_password".to_string(),
+                            "Steam password is required to initialize DSP source files.".to_string(),
+                        );
+                    }
+
+                    if !field_errors.is_empty() {
+                        return Err(Status::invalid_argument(crate::error_payload::encode(
+                            "invalid_param",
+                            format!(
+                                "dsp source files are not initialized at {}",
+                                source_root.display()
+                            ),
+                            Some(field_errors),
+                            Some(
+                                "In Create Instance → DSP, click Warm once and provide Steam credentials to initialize the default source root.".to_string(),
+                            ),
+                        )));
+                    }
+
+                    Some(
+                        dsp_source_init::init_default_source(
+                            steam_username,
+                            steam_password,
+                            steam_guard_code,
+                        )
+                        .await
+                        .map_err(|e| {
+                            let detail = format!("{e:#}");
+                            let detail_l = detail.to_ascii_lowercase();
+                            let mut field_errors = BTreeMap::<String, String>::new();
+                            let hint = if detail_l.contains("steam guard")
+                                || detail_l.contains("two-factor")
+                                || detail_l.contains("2fa")
+                            {
+                                field_errors.insert(
+                                    "steam_guard_code".to_string(),
+                                    "Steam Guard code is required or invalid.".to_string(),
+                                );
+                                Some(
+                                    "Enter the latest Steam Guard code and retry Warm."
+                                        .to_string(),
+                                )
+                            } else if detail_l.contains("invalid password")
+                                || detail_l.contains("login failure")
+                                || detail_l.contains("password") && detail_l.contains("incorrect")
+                            {
+                                field_errors.insert(
+                                    "steam_password".to_string(),
+                                    "Steam password appears invalid.".to_string(),
+                                );
+                                Some(
+                                    "Check SteamCMD credentials in Settings, then retry."
+                                        .to_string(),
+                                )
+                            } else if detail_l.contains("rate limit")
+                                || detail_l.contains("too many")
+                            {
+                                Some(
+                                    "Steam login may be rate-limited. Wait a moment and retry."
+                                        .to_string(),
+                                )
+                            } else {
+                                Some(
+                                    "Check Steam credentials, Steam Guard, and network access, then retry Warm."
+                                        .to_string(),
+                                )
+                            };
+
+                            Status::internal(crate::error_payload::encode(
+                                "download_failed",
+                                format!(
+                                    "failed to initialize DSP source files\n\nDetails:\n{}",
+                                    detail
+                                ),
+                                if field_errors.is_empty() {
+                                    None
+                                } else {
+                                    Some(field_errors)
+                                },
+                                hint,
+                            ))
+                        })?,
+                    )
+                };
+
+                let tr = dsp::validate_nebula_params(&params).map_err(|e| {
+                    Status::invalid_argument(crate::error_payload::encode(
+                        "invalid_param",
+                        format!("invalid dsp params: {e}"),
+                        None,
+                        Some("Fix the highlighted fields, then try again.".to_string()),
+                    ))
+                })?;
+
+                let marker = dsp::data_root().join("cache").join("dsp");
+                tokio::fs::create_dir_all(&marker).await.map_err(|e| {
+                    Status::internal(crate::error_payload::encode(
+                        "spawn_failed",
+                        format!("failed to prepare dsp cache marker dir: {e}"),
+                        None,
+                        Some("Check ALLOY_DATA_ROOT permissions, then retry.".to_string()),
+                    ))
+                })?;
+
+                if let Some(init) = init_result {
+                    let installed = if init.installed_packages.is_empty() {
+                        "none (already present)".to_string()
+                    } else {
+                        init.installed_packages.join(",")
+                    };
+                    format!(
+                        "dsp source initialized: root={} installed={} startup_mode={} cache={}",
+                        init.source_root.display(),
+                        installed,
+                        tr.startup_mode.as_str(),
+                        marker.display()
+                    )
+                } else {
+                    format!(
+                        "dsp cache check passed: server_root={} startup_mode={} cache={}",
+                        tr.server_root.display(),
+                        tr.startup_mode.as_str(),
+                        marker.display()
+                    )
+                }
+            }
             "demo:sleep" => "no cache needed for demo:sleep".to_string(),
             _ => return Err(Status::invalid_argument("unknown template_id")),
         };
@@ -239,6 +505,7 @@ impl ProcessService for ProcessApi {
         let entries = tokio::task::spawn_blocking(|| {
             let (mc_size, mc_last) = dir_stats(&minecraft_download::cache_dir());
             let (tr_size, tr_last) = dir_stats(&terraria_download::cache_dir());
+            let (dsp_size, dsp_last) = dir_stats(&dsp::data_root().join("cache").join("dsp"));
             vec![
                 (
                     "minecraft:vanilla".to_string(),
@@ -251,6 +518,12 @@ impl ProcessService for ProcessApi {
                     terraria_download::cache_dir(),
                     tr_size,
                     tr_last,
+                ),
+                (
+                    "dsp:nebula".to_string(),
+                    dsp::data_root().join("cache").join("dsp"),
+                    dsp_size,
+                    dsp_last,
                 ),
             ]
         })
@@ -277,6 +550,7 @@ impl ProcessService for ProcessApi {
             vec![
                 "minecraft:vanilla".to_string(),
                 "terraria:vanilla".to_string(),
+                "dsp:nebula".to_string(),
             ]
         } else {
             req.keys
@@ -313,6 +587,12 @@ impl ProcessService for ProcessApi {
             let dir = match key.as_str() {
                 "minecraft:vanilla" => minecraft_download::cache_dir(),
                 "terraria:vanilla" => terraria_download::cache_dir(),
+                "dsp:nebula" => {
+                    return Err(Status::invalid_argument(
+                        "cache clear for dsp:nebula is disabled to avoid deleting worlds; manage instances explicitly"
+                            .to_string(),
+                    ))
+                }
                 _ => {
                     return Err(Status::invalid_argument(format!(
                         "unknown cache key: {key}"

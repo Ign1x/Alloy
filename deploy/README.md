@@ -16,7 +16,7 @@ Alloy supports two agent transport modes:
 Default host ports (via compose):
 - web: `http://localhost:3000`
 - control: `http://localhost:8080`
-- games: depends on instance `port` (e.g. Minecraft `25565`, Terraria `7777`)
+- games: depends on instance `port` (e.g. Minecraft `25565`, Terraria `7777`, DSP Nebula `8469`)
 
 ## Quick start
 
@@ -85,6 +85,45 @@ services:
     volumes:
       - ./alloy-data:/data
 ```
+
+## Instance isolation (sandbox)
+
+Alloy now supports per-instance sandboxing with resource limits:
+
+- **One instance = one isolated runtime** (preferred: per-instance `docker run` container; fallback: `bwrap`/native)
+- **Resource limits** (memory / cpu / pids / open files)
+- **Least privilege defaults** (`no-new-privileges`, `cap-drop=ALL`, read-only rootfs, bounded FD/process counts)
+
+Global defaults (agent env):
+
+- `ALLOY_SANDBOX_DEFAULT_ENABLED=true`
+- `ALLOY_SANDBOX_MODE=auto` (`auto|docker|bwrap|native|off`)
+- `ALLOY_SANDBOX_DOCKER_ENABLED=true`
+- `ALLOY_SANDBOX_FORCE_MODE=docker` (recommended: fail fast instead of silently falling back)
+- `ALLOY_SANDBOX_DOCKER_DATA_VOLUME=alloy-agent-data` (for compose named-volume `/data`)
+- `ALLOY_SANDBOX_DOCKER_IMAGE=ghcr.io/ign1x/alloy-agent:latest` (required for docker sandbox; in local `docker-compose.yml` use `alloy-agent-local:latest`)
+- `ALLOY_SANDBOX_ENABLE_CGROUPS=true`
+- `ALLOY_SANDBOX_MEMORY_MB_DEFAULT=4096`
+- `ALLOY_SANDBOX_PIDS_LIMIT_DEFAULT=512`
+- `ALLOY_SANDBOX_NOFILE_LIMIT_DEFAULT=8192`
+- `ALLOY_SANDBOX_CPU_MILLICORES_DEFAULT=2000`
+
+Per-instance advanced params (in template start payload):
+
+- `sandbox_enabled` (`true|false`)
+- `sandbox_mode` (`auto|docker|bwrap|native|off`)
+- `sandbox_memory_mb` (0 to disable limit)
+- `sandbox_pids_limit` (0 to disable limit)
+- `sandbox_nofile_limit` (0 to disable limit)
+- `sandbox_cpu_millicores` (0 to disable cgroup cpu quota)
+
+Notes:
+
+- Docker mode needs the Docker socket mounted into `alloy-agent` (`/var/run/docker.sock`).
+- Mounting Docker socket is a trust boundary tradeoff: treat `alloy-agent` as privileged on that host.
+- `bwrap` is optional. In `ALLOY_SANDBOX_MODE=auto`, agent falls back to `bwrap` or native when Docker mode is unavailable.
+- Cgroup enforcement is best-effort and depends on host cgroup v2 permissions.
+- Current networking model is still host-network based for game ports; sandbox focuses on process/resource isolation first.
 
 ## Verification
 
@@ -160,6 +199,48 @@ curl -fsS -X POST -H 'content-type: application/json' \
   --data '{"template_id":"terraria:vanilla","params":{"version":"1453","port":"7777","max_players":"8","world_name":"world","world_size":"1"}}' \
   http://localhost:8080/rspc/process.start
 ```
+
+## Dyson Sphere Program (Nebula)
+
+Template id: `dsp:nebula`
+
+This template launches DSP dedicated multiplayer via Nebula headless mode.
+
+Prerequisites:
+- `alloy-agent` runtime needs Wine (included in `deploy/agent.Dockerfile`).
+- DSP source root is fixed at `/data/uploads/dsp/server`.
+  - If missing, click **Warm** once in the panel and provide Steam credentials.
+  - Warm will install DSP + BepInEx + Nebula into that default root.
+
+Key params:
+- `port` (default auto): TCP listen port (Nebula default is `8469`)
+- `startup_mode`: `auto` | `load_latest` | `load` | `newgame_default` | `newgame_cfg`
+- `save_name` (required when `startup_mode=load`)
+- `server_password` (optional)
+- `remote_access_password` (optional)
+- `auto_pause_enabled` (default `false`)
+- `ups` (default `60`)
+
+Initialize source files once (rspc warm):
+
+```bash
+curl -fsS -X POST -H 'content-type: application/json' \
+  --data '{"template_id":"dsp:nebula","params":{"steam_username":"<steam-user>","steam_password":"<steam-pass>","steam_guard_code":"<optional-code>"}}' \
+  http://localhost:8080/rspc/process.warmCache
+```
+
+Start (rspc):
+
+```bash
+curl -fsS -X POST -H 'content-type: application/json' \
+  --data '{"template_id":"dsp:nebula","params":{"port":"8469","startup_mode":"auto","ups":"60"}}' \
+  http://localhost:8080/rspc/process.start
+```
+
+Notes:
+- Players must use the same Nebula/DSP mod stack as the server.
+- `startup_mode=auto` loads latest save when present; otherwise starts `-newgame-default`.
+- Save files are stored under instance wine prefix, e.g. `instances/<id>/wineprefix/.../Dyson Sphere Program/Save`.
 
 ## Troubleshooting (common)
 

@@ -6,12 +6,15 @@ use tracing_subscriber::prelude::*;
 #[cfg(target_os = "linux")]
 #[derive(Debug, serde::Deserialize)]
 struct RunJsonForCleanup {
+    process_id: Option<String>,
     pid: Option<u32>,
     pgid: Option<i32>,
     exec: Option<String>,
     args: Option<Vec<String>>,
     cwd: Option<String>,
     template_id: Option<String>,
+    container_name: Option<String>,
+    container_id: Option<String>,
 }
 
 #[cfg(target_os = "linux")]
@@ -34,6 +37,20 @@ async fn cleanup_orphan_processes() {
         args.iter().all(|a| cmdline.iter().any(|c| c == a))
     }
 
+    fn docker_no_such_container(stderr: &str) -> bool {
+        let msg = stderr.to_ascii_lowercase();
+        msg.contains("no such container") || msg.contains("no such object")
+    }
+
+    let docker_available = std::process::Command::new("docker")
+        .env_remove("DOCKER_API_VERSION")
+        .arg("version")
+        .arg("--format")
+        .arg("{{.Server.Version}}")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+
     let data_root = crate::minecraft::data_root();
     let bases = [data_root.join("instances"), data_root.join("processes")];
 
@@ -55,6 +72,66 @@ async fn cleanup_orphan_processes() {
                 Ok(v) => v,
                 Err(_) => continue,
             };
+
+            let run_process_id = run
+                .process_id
+                .clone()
+                .unwrap_or_else(|| de.file_name().to_string_lossy().to_string());
+            let label = run
+                .template_id
+                .clone()
+                .unwrap_or_else(|| "unknown".to_string());
+
+            if docker_available {
+                let target = run
+                    .container_id
+                    .as_deref()
+                    .filter(|s| !s.trim().is_empty())
+                    .or_else(|| {
+                        run.container_name
+                            .as_deref()
+                            .filter(|s| !s.trim().is_empty())
+                    });
+                if let Some(container_ref) = target {
+                    match std::process::Command::new("docker")
+                        .env_remove("DOCKER_API_VERSION")
+                        .arg("rm")
+                        .arg("-f")
+                        .arg(container_ref)
+                        .output()
+                    {
+                        Ok(output) if output.status.success() => {
+                            tracing::warn!(
+                                process_id = %run_process_id,
+                                template_id = %label,
+                                container = %container_ref,
+                                "removed orphaned sandbox container"
+                            );
+                        }
+                        Ok(output) => {
+                            let stderr = String::from_utf8_lossy(&output.stderr);
+                            if !docker_no_such_container(&stderr) {
+                                tracing::warn!(
+                                    process_id = %run_process_id,
+                                    template_id = %label,
+                                    container = %container_ref,
+                                    err = %stderr.trim(),
+                                    "failed to cleanup orphaned sandbox container"
+                                );
+                            }
+                        }
+                        Err(err) => {
+                            tracing::warn!(
+                                process_id = %run_process_id,
+                                template_id = %label,
+                                container = %container_ref,
+                                err = %err,
+                                "failed to execute docker container cleanup"
+                            );
+                        }
+                    }
+                }
+            }
 
             let Some(pid) = run.pid else { continue };
             let proc_dir = PathBuf::from("/proc").join(pid.to_string());
@@ -96,11 +173,7 @@ async fn cleanup_orphan_processes() {
             }
 
             let pgid = run.pgid.unwrap_or(pid as i32);
-            let label = run
-                .template_id
-                .clone()
-                .unwrap_or_else(|| "unknown".to_string());
-            tracing::warn!(pid, pgid, template_id = %label, "found orphaned child process; terminating");
+            tracing::warn!(pid, pgid, process_id = %run_process_id, template_id = %label, "found orphaned child process; terminating");
 
             unsafe {
                 libc::kill(-pgid, libc::SIGTERM);
@@ -115,7 +188,7 @@ async fn cleanup_orphan_processes() {
             }
 
             if proc_dir.exists() {
-                tracing::warn!(pid, pgid, template_id = %label, "orphan still alive; sending SIGKILL");
+                tracing::warn!(pid, pgid, process_id = %run_process_id, template_id = %label, "orphan still alive; sending SIGKILL");
                 unsafe {
                     libc::kill(-pgid, libc::SIGKILL);
                 }
@@ -128,6 +201,8 @@ async fn cleanup_orphan_processes() {
 async fn cleanup_orphan_processes() {}
 
 mod control_tunnel;
+mod dsp;
+mod dsp_source_init;
 mod dst;
 mod dst_download;
 mod error_payload;
@@ -144,6 +219,7 @@ mod minecraft_modrinth;
 mod port_alloc;
 mod process_manager;
 mod process_service;
+mod sandbox;
 mod templates;
 mod terraria;
 mod terraria_download;

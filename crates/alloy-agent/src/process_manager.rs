@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, HashMap, VecDeque},
+    collections::{BTreeMap, BTreeSet, HashMap, VecDeque},
     path::{Path, PathBuf},
     sync::{Arc, OnceLock},
     time::Duration,
@@ -15,6 +15,7 @@ use tokio::{
     sync::mpsc,
 };
 
+use crate::dsp;
 use crate::dst;
 use crate::dst_download;
 use crate::minecraft;
@@ -24,6 +25,7 @@ use crate::minecraft_import;
 use crate::minecraft_launch;
 use crate::minecraft_modrinth;
 use crate::port_alloc;
+use crate::sandbox;
 use crate::templates;
 use crate::terraria;
 use crate::terraria_download;
@@ -71,6 +73,25 @@ struct RestartConfig {
     max_retries: u32,
     backoff_ms: u64,
     backoff_max_ms: u64,
+}
+
+fn format_error_chain(err: &anyhow::Error) -> String {
+    let mut parts = Vec::<String>::new();
+    for cause in err.chain() {
+        let s = cause.to_string();
+        if s.is_empty() {
+            continue;
+        }
+        if parts.last() == Some(&s) {
+            continue;
+        }
+        parts.push(s);
+    }
+    if parts.is_empty() {
+        "unknown error".to_string()
+    } else {
+        parts.join(": ")
+    }
 }
 
 fn parse_restart_config(params: &BTreeMap<String, String>) -> RestartConfig {
@@ -368,9 +389,69 @@ fn detect_java_major() -> anyhow::Result<u32> {
     parse_java_major_from_version_line(first)
 }
 
+fn materialize_minecraft_server_jar(instance_jar: &Path, cached_jar: &Path) -> anyhow::Result<()> {
+    match std::fs::symlink_metadata(instance_jar) {
+        Ok(meta) => {
+            if meta.is_dir() {
+                anyhow::bail!(
+                    "invalid instance server.jar path: {} is a directory",
+                    instance_jar.display()
+                );
+            }
+            std::fs::remove_file(instance_jar)
+                .with_context(|| format!("remove existing {}", instance_jar.display()))?;
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => {
+            return Err(e).with_context(|| format!("stat {}", instance_jar.display()));
+        }
+    }
+
+    match std::fs::hard_link(cached_jar, instance_jar) {
+        Ok(()) => Ok(()),
+        Err(_) => {
+            let tmp = instance_jar.with_extension(format!("jar.tmp.{}", std::process::id()));
+            std::fs::copy(cached_jar, &tmp).with_context(|| {
+                format!(
+                    "copy minecraft server.jar from {} to {}",
+                    cached_jar.display(),
+                    tmp.display()
+                )
+            })?;
+            std::fs::rename(&tmp, instance_jar).with_context(|| {
+                format!(
+                    "move minecraft server.jar from {} to {}",
+                    tmp.display(),
+                    instance_jar.display()
+                )
+            })?;
+            Ok(())
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::parse_java_major_from_version_line;
+    use super::{
+        materialize_minecraft_server_jar, parse_java_major_from_version_line, patch_frp_config,
+    };
+    use std::{
+        path::PathBuf,
+        sync::atomic::{AtomicU64, Ordering},
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    fn temp_dir_for(test_name: &str) -> PathBuf {
+        static COUNTER: AtomicU64 = AtomicU64::new(1);
+        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let ts = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let mut dir = std::env::temp_dir();
+        dir.push(format!("alloy-agent-{test_name}-{}-{n}-{ts}", std::process::id()));
+        dir
+    }
 
     #[test]
     fn parse_java_major_modern_openjdk() {
@@ -408,6 +489,122 @@ mod tests {
         let err = parse_java_major_from_version_line("openjdk version \"abc\"").unwrap_err();
         let msg = err.to_string();
         assert!(msg.contains("failed to parse java major"));
+    }
+
+    #[test]
+    fn patch_frp_ini_updates_local_and_remote_port() {
+        let raw = r#"[common]
+server_addr = frp.example.com
+server_port = 7000
+
+[game]
+type = tcp
+local_ip = 0.0.0.0
+local_port = 25565
+remote_port = 0
+"#;
+        let patched = patch_frp_config(raw, 25577);
+        assert!(patched.contains("local_ip = 127.0.0.1"));
+        assert!(patched.contains("local_port = 25577"));
+        assert!(patched.contains("remote_port = 25577"));
+    }
+
+    #[test]
+    fn patch_frp_ini_uses_allocatable_ports_hint() {
+        let raw = r#"[common]
+server_addr = frp.example.com
+server_port = 7000
+# alloy_alloc_ports = 30010,30011,30012
+
+[game]
+type = tcp
+local_port = 25565
+remote_port = 0
+"#;
+        let patched = patch_frp_config(raw, 25577);
+        assert!(patched.contains("remote_port = 30012"));
+    }
+
+    #[test]
+    fn patch_frp_json_is_converted_and_patched() {
+        let raw = r#"{
+  "common": {
+    "server_addr": "frp.example.com",
+    "server_port": 7000
+  },
+  "game": {
+    "type": "tcp",
+    "local_port": 25565,
+    "remote_port": 0
+  }
+}"#;
+        let patched = patch_frp_config(raw, 26666);
+        assert!(patched.contains("[common]"));
+        assert!(patched.contains("server_addr = frp.example.com"));
+        assert!(patched.contains("[game]"));
+        assert!(patched.contains("local_port = 26666"));
+        assert!(patched.contains("remote_port = 26666"));
+    }
+
+    #[test]
+    fn patch_frp_yaml_is_converted_and_patched() {
+        let raw = r#"
+common:
+  server_addr: frp.example.com
+  server_port: 7000
+proxies:
+  - name: game
+    type: tcp
+    local_port: 25565
+    remote_port: 0
+"#;
+        let patched = patch_frp_config(raw, 27777);
+        assert!(patched.contains("[game]"));
+        assert!(patched.contains("local_port = 27777"));
+        assert!(patched.contains("remote_port = 27777"));
+    }
+
+    #[test]
+    fn materialize_server_jar_replaces_existing_file() {
+        let root = temp_dir_for("materialize-server-jar-file");
+        std::fs::create_dir_all(&root).unwrap();
+
+        let cache = root.join("cache-server.jar");
+        let instance_jar = root.join("server.jar");
+
+        std::fs::write(&cache, b"fresh-jar").unwrap();
+        std::fs::write(&instance_jar, b"stale-jar").unwrap();
+
+        materialize_minecraft_server_jar(&instance_jar, &cache).unwrap();
+
+        let got = std::fs::read(&instance_jar).unwrap();
+        assert_eq!(got, b"fresh-jar");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn materialize_server_jar_replaces_existing_symlink() {
+        let root = temp_dir_for("materialize-server-jar-symlink");
+        std::fs::create_dir_all(&root).unwrap();
+
+        let cache = root.join("cache-server.jar");
+        let stale = root.join("stale-server.jar");
+        let instance_jar = root.join("server.jar");
+
+        std::fs::write(&cache, b"fresh-jar").unwrap();
+        std::fs::write(&stale, b"stale-jar").unwrap();
+        std::os::unix::fs::symlink(&stale, &instance_jar).unwrap();
+
+        materialize_minecraft_server_jar(&instance_jar, &cache).unwrap();
+
+        let meta = std::fs::symlink_metadata(&instance_jar).unwrap();
+        assert!(!meta.file_type().is_symlink());
+        let got = std::fs::read(&instance_jar).unwrap();
+        assert_eq!(got, b"fresh-jar");
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
 
@@ -569,12 +766,22 @@ struct RunInfo {
     pid: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pgid: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    container_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    container_id: Option<String>,
     exec: String,
     args: Vec<String>,
     cwd: String,
     // Params are redacted for known secret keys.
     params: BTreeMap<String, String>,
     env: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+struct RunContainerMeta {
+    container_name: Option<String>,
+    container_id: Option<String>,
 }
 
 fn redact_params(mut params: BTreeMap<String, String>) -> BTreeMap<String, String> {
@@ -626,14 +833,156 @@ fn collect_safe_env() -> BTreeMap<String, String> {
     out
 }
 
-fn patch_frpc_ini(raw: &str, local_port: u16) -> String {
-    let mut out = String::with_capacity(raw.len().saturating_add(32));
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FrpConfigFormat {
+    Ini,
+    Json,
+    Toml,
+    Yaml,
+}
+
+fn detect_frp_config_format(raw: &str) -> FrpConfigFormat {
+    let s = raw.trim();
+    if s.is_empty() {
+        return FrpConfigFormat::Ini;
+    }
+    if serde_json::from_str::<serde_json::Value>(s).is_ok() {
+        return FrpConfigFormat::Json;
+    }
+    if s.parse::<toml::Value>().is_ok() {
+        return FrpConfigFormat::Toml;
+    }
+    if serde_yaml::from_str::<serde_yaml::Value>(s).is_ok() {
+        return FrpConfigFormat::Yaml;
+    }
+    FrpConfigFormat::Ini
+}
+
+fn parse_port_scalar(raw: &str) -> Option<u16> {
+    let s = raw.trim().trim_matches('"').trim_matches('\'');
+    let p = s.parse::<u16>().ok()?;
+    if p == 0 {
+        return None;
+    }
+    Some(p)
+}
+
+fn parse_allocatable_ports_spec(raw: &str) -> Vec<u16> {
+    let mut out = BTreeSet::<u16>::new();
+    for seg in raw.split(',') {
+        let token = seg.trim();
+        if token.is_empty() {
+            continue;
+        }
+        if let Some((a_raw, b_raw)) = token.split_once('-') {
+            let Some(a) = parse_port_scalar(a_raw) else {
+                continue;
+            };
+            let Some(b) = parse_port_scalar(b_raw) else {
+                continue;
+            };
+            let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
+            if hi.saturating_sub(lo) > 4000 {
+                continue;
+            }
+            for p in lo..=hi {
+                out.insert(p);
+                if out.len() > 4000 {
+                    break;
+                }
+            }
+        } else if let Some(port) = parse_port_scalar(token) {
+            out.insert(port);
+        }
+        if out.len() > 4000 {
+            break;
+        }
+    }
+    out.into_iter().collect()
+}
+
+fn parse_allocatable_ports_hint(raw: &str) -> Vec<u16> {
+    for line in raw.lines() {
+        let s = line.trim();
+        if s.is_empty() {
+            continue;
+        }
+        let body = s
+            .strip_prefix('#')
+            .or_else(|| s.strip_prefix(';'))
+            .or_else(|| s.strip_prefix("//"))
+            .map(str::trim)
+            .unwrap_or(s);
+        if let Some((k, v)) = body.split_once('=') {
+            let key = k.trim().to_ascii_lowercase();
+            if key == "alloy_alloc_ports" || key == "allocatable_ports" {
+                return parse_allocatable_ports_spec(v);
+            }
+        }
+        if let Some((k, v)) = body.split_once(':') {
+            let key = k.trim().to_ascii_lowercase();
+            if key == "alloy_alloc_ports" || key == "allocatable_ports" {
+                return parse_allocatable_ports_spec(v);
+            }
+        }
+    }
+    Vec::new()
+}
+
+fn choose_remote_port(explicit: Option<u16>, alloc_ports: &[u16], local_port: u16) -> u16 {
+    if let Some(v) = explicit {
+        return v;
+    }
+    if alloc_ports.is_empty() {
+        return local_port;
+    }
+    let idx = usize::from(local_port) % alloc_ports.len();
+    alloc_ports[idx]
+}
+
+fn normalize_ini_scalar_value(raw: &str) -> String {
+    raw.trim()
+        .split(['#', ';'])
+        .next()
+        .unwrap_or("")
+        .trim()
+        .trim_matches('"')
+        .trim_matches('\'')
+        .to_string()
+}
+
+fn patch_frpc_ini(raw: &str, local_port: u16, alloc_ports_hint: &[u16]) -> String {
+    let mut explicit_remote_port: Option<u16> = None;
+    for line in raw.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with('#') || trimmed.starts_with(';') {
+            continue;
+        }
+        let lower = trimmed.to_ascii_lowercase();
+        if lower.starts_with("remote_port") {
+            let rest = trimmed
+                .get("remote_port".len()..)
+                .unwrap_or("")
+                .trim_start();
+            if rest.is_empty() || rest.starts_with('=') || rest.starts_with(':') {
+                if let Some((_, v_raw)) = trimmed.split_once('=') {
+                    explicit_remote_port = parse_port_scalar(&normalize_ini_scalar_value(v_raw));
+                } else if let Some((_, v_raw)) = trimmed.split_once(':') {
+                    explicit_remote_port = parse_port_scalar(&normalize_ini_scalar_value(v_raw));
+                }
+            }
+        }
+    }
+
+    let remote_port = choose_remote_port(explicit_remote_port, alloc_ports_hint, local_port);
+
+    let mut out = String::with_capacity(raw.len().saturating_add(64));
     let port = local_port.to_string();
+    let remote_port_str = remote_port.to_string();
 
     for line in raw.lines() {
         let trimmed = line.trim_start();
 
-        // Keep comments untouched.
         if trimmed.starts_with('#') || trimmed.starts_with(';') {
             out.push_str(line);
             out.push('\n');
@@ -664,11 +1013,176 @@ fn patch_frpc_ini(raw: &str, local_port: u16) -> String {
             }
         }
 
+        if lower.starts_with("remote_port") {
+            let rest = trimmed
+                .get("remote_port".len()..)
+                .unwrap_or("")
+                .trim_start();
+            if rest.is_empty() || rest.starts_with('=') || rest.starts_with(':') {
+                out.push_str(indent);
+                out.push_str("remote_port = ");
+                out.push_str(&remote_port_str);
+                out.push('\n');
+                continue;
+            }
+        }
+
         out.push_str(line);
         out.push('\n');
     }
 
     out
+}
+
+fn json_scalar_to_string(v: &serde_json::Value) -> Option<String> {
+    match v {
+        serde_json::Value::String(s) => Some(s.clone()),
+        serde_json::Value::Number(n) => Some(n.to_string()),
+        serde_json::Value::Bool(b) => Some(if *b { "true" } else { "false" }.to_string()),
+        _ => None,
+    }
+}
+
+fn patch_structured_frp_to_ini(
+    root: serde_json::Value,
+    local_port: u16,
+    alloc_ports_hint: &[u16],
+) -> Option<String> {
+    let obj = root.as_object()?;
+
+    let mut common = BTreeMap::<String, String>::new();
+    if let Some(common_obj) = obj.get("common").and_then(|v| v.as_object()) {
+        for (k, v) in common_obj {
+            if let Some(s) = json_scalar_to_string(v) {
+                common.insert(k.clone(), s);
+            }
+        }
+    }
+
+    let mut alloc_ports = common
+        .get("alloy_alloc_ports")
+        .map(|s| parse_allocatable_ports_spec(s))
+        .filter(|v| !v.is_empty())
+        .or_else(|| {
+            common
+                .get("allocatable_ports")
+                .map(|s| parse_allocatable_ports_spec(s))
+                .filter(|v| !v.is_empty())
+        })
+        .unwrap_or_else(|| alloc_ports_hint.to_vec());
+    if alloc_ports.is_empty() {
+        alloc_ports = alloc_ports_hint.to_vec();
+    }
+
+    let mut proxies: Vec<(String, BTreeMap<String, String>)> = Vec::new();
+
+    for (k, v) in obj {
+        if k == "common" || k == "proxies" {
+            continue;
+        }
+        let Some(m) = v.as_object() else {
+            continue;
+        };
+        let mut vals = BTreeMap::<String, String>::new();
+        for (kk, vv) in m {
+            if let Some(s) = json_scalar_to_string(vv) {
+                vals.insert(kk.clone(), s);
+            }
+        }
+        proxies.push((k.clone(), vals));
+    }
+
+    if let Some(arr) = obj.get("proxies").and_then(|v| v.as_array()) {
+        for (idx, item) in arr.iter().enumerate() {
+            let Some(m) = item.as_object() else {
+                continue;
+            };
+            let mut vals = BTreeMap::<String, String>::new();
+            for (kk, vv) in m {
+                if let Some(s) = json_scalar_to_string(vv) {
+                    vals.insert(kk.clone(), s);
+                }
+            }
+            let name = vals
+                .get("name")
+                .cloned()
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or_else(|| format!("proxy{}", idx + 1));
+            proxies.push((name, vals));
+        }
+    }
+
+    if proxies.is_empty() {
+        proxies.push(("alloy".to_string(), BTreeMap::new()));
+    }
+
+    for (_, vals) in proxies.iter_mut() {
+        let explicit_remote = vals
+            .get("remote_port")
+            .and_then(|v| parse_port_scalar(v))
+            .or_else(|| vals.get("remotePort").and_then(|v| parse_port_scalar(v)));
+        let remote = choose_remote_port(explicit_remote, &alloc_ports, local_port);
+
+        vals.remove("localIP");
+        vals.remove("localPort");
+        vals.remove("remotePort");
+        vals.insert("local_ip".to_string(), "127.0.0.1".to_string());
+        vals.insert("local_port".to_string(), local_port.to_string());
+        vals.insert("remote_port".to_string(), remote.to_string());
+        vals.entry("type".to_string())
+            .or_insert_with(|| "tcp".to_string());
+    }
+
+    common.remove("alloy_alloc_ports");
+    common.remove("allocatable_ports");
+
+    let mut out = String::new();
+    out.push_str("[common]\n");
+    for (k, v) in common {
+        out.push_str(&format!("{k} = {v}\n"));
+    }
+    if !alloc_ports.is_empty() {
+        let spec = alloc_ports
+            .iter()
+            .map(|p| p.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        out.push_str(&format!("# alloy_alloc_ports = {spec}\n"));
+    }
+
+    for (name, vals) in proxies {
+        out.push('\n');
+        out.push_str(&format!("[{name}]\n"));
+        for (k, v) in vals {
+            out.push_str(&format!("{k} = {v}\n"));
+        }
+    }
+
+    Some(out)
+}
+
+fn patch_frp_config(raw: &str, local_port: u16) -> String {
+    let format = detect_frp_config_format(raw);
+    let alloc_ports_hint = parse_allocatable_ports_hint(raw);
+
+    match format {
+        FrpConfigFormat::Ini => patch_frpc_ini(raw, local_port, &alloc_ports_hint),
+        FrpConfigFormat::Json => serde_json::from_str::<serde_json::Value>(raw)
+            .ok()
+            .and_then(|root| patch_structured_frp_to_ini(root, local_port, &alloc_ports_hint))
+            .unwrap_or_else(|| patch_frpc_ini(raw, local_port, &alloc_ports_hint)),
+        FrpConfigFormat::Toml => raw
+            .parse::<toml::Value>()
+            .ok()
+            .and_then(|v| serde_json::to_value(v).ok())
+            .and_then(|root| patch_structured_frp_to_ini(root, local_port, &alloc_ports_hint))
+            .unwrap_or_else(|| patch_frpc_ini(raw, local_port, &alloc_ports_hint)),
+        FrpConfigFormat::Yaml => serde_yaml::from_str::<serde_yaml::Value>(raw)
+            .ok()
+            .and_then(|v| serde_json::to_value(v).ok())
+            .and_then(|root| patch_structured_frp_to_ini(root, local_port, &alloc_ports_hint))
+            .unwrap_or_else(|| patch_frpc_ini(raw, local_port, &alloc_ports_hint)),
+    }
 }
 
 async fn start_frpc_sidecar(
@@ -680,7 +1194,8 @@ async fn start_frpc_sidecar(
 ) -> anyhow::Result<()> {
     let cfg_dir = instance_dir.join("config");
     let cfg_path = cfg_dir.join("frpc.ini");
-    let patched = patch_frpc_ini(&config_raw, local_port);
+    let detected = detect_frp_config_format(&config_raw);
+    let patched = patch_frp_config(&config_raw, local_port);
 
     tokio::fs::create_dir_all(&cfg_dir)
         .await
@@ -697,7 +1212,7 @@ async fn start_frpc_sidecar(
     let exec = std::env::var("ALLOY_FRPC_PATH").unwrap_or_else(|_| "frpc".to_string());
 
     sink.emit(format!(
-        "[alloy-agent] starting frpc tunnel (local_port={local_port})"
+        "[alloy-agent] starting frpc tunnel (local_port={local_port}, source={detected:?})"
     ))
     .await;
 
@@ -782,6 +1297,202 @@ unsafe fn set_parent_death_signal() -> std::io::Result<()> {
 #[cfg(not(target_os = "linux"))]
 unsafe fn set_parent_death_signal() -> std::io::Result<()> {
     Ok(())
+}
+
+fn prepare_instance_command(
+    process_id: &str,
+    template_id: &str,
+    params: &BTreeMap<String, String>,
+    instance_dir: &Path,
+    cwd: &Path,
+    exec: &str,
+    args: &[String],
+    extra_rw_paths: &[PathBuf],
+) -> anyhow::Result<(Command, sandbox::SandboxLaunch)> {
+    let launch = sandbox::prepare_launch(
+        process_id,
+        template_id,
+        params,
+        instance_dir,
+        cwd,
+        exec,
+        args,
+        extra_rw_paths,
+    )?;
+
+    let mut cmd = Command::new(&launch.exec);
+    cmd.current_dir(&launch.cwd)
+        .args(&launch.args)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+
+    #[cfg(unix)]
+    {
+        let limits = launch.limits.clone();
+        let apply_host_limits = launch.should_apply_host_limits();
+        unsafe {
+            cmd.pre_exec(move || {
+                set_parent_death_signal()?;
+                if libc::setpgid(0, 0) == -1 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                if apply_host_limits {
+                    limits.apply_pre_exec()?;
+                }
+                Ok(())
+            });
+        }
+    }
+
+    Ok((cmd, launch))
+}
+
+fn docker_no_such_container(stderr: &str) -> bool {
+    let msg = stderr.to_ascii_lowercase();
+    msg.contains("no such container") || msg.contains("is not running")
+}
+
+fn first_non_empty_line(stdout: &[u8]) -> Option<String> {
+    String::from_utf8_lossy(stdout)
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .map(str::to_string)
+}
+
+async fn read_run_container_meta(process_id: &str) -> Option<RunContainerMeta> {
+    let data_root = crate::minecraft::data_root();
+    for dir in ["instances", "processes"] {
+        let path = data_root.join(dir).join(process_id).join("run.json");
+        let raw = match tokio::fs::read(&path).await {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        if let Ok(meta) = serde_json::from_slice::<RunContainerMeta>(&raw) {
+            return Some(meta);
+        }
+    }
+    None
+}
+
+async fn docker_find_container_by_name(container_name: &str) -> Option<String> {
+    let name_filter = format!("name=^/{container_name}$");
+    let output = Command::new("docker")
+        .env_remove("DOCKER_API_VERSION")
+        .arg("ps")
+        .arg("-aq")
+        .arg("--no-trunc")
+        .arg("--filter")
+        .arg(name_filter)
+        .output()
+        .await
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    first_non_empty_line(&output.stdout)
+}
+
+async fn docker_find_container_by_process(process_id: &str) -> Option<String> {
+    let filter = format!("label=alloy.process_id={process_id}");
+    let output = Command::new("docker")
+        .env_remove("DOCKER_API_VERSION")
+        .arg("ps")
+        .arg("-q")
+        .arg("--no-trunc")
+        .arg("--filter")
+        .arg(filter)
+        .output()
+        .await
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    first_non_empty_line(&output.stdout)
+}
+
+async fn find_container_for_process(process_id: &str) -> Option<String> {
+    if let Some(meta) = read_run_container_meta(process_id).await {
+        if let Some(container_id) = meta.container_id.filter(|v| !v.trim().is_empty()) {
+            return Some(container_id);
+        }
+        if let Some(container_name) = meta.container_name.filter(|v| !v.trim().is_empty())
+            && let Some(container_id) = docker_find_container_by_name(&container_name).await
+        {
+            return Some(container_id);
+        }
+    }
+
+    docker_find_container_by_process(process_id).await
+}
+
+async fn refresh_docker_container_metadata(process_id: &str, run: &mut RunInfo) {
+    if run.container_name.is_none() {
+        return;
+    }
+    if run.container_id.is_some() {
+        return;
+    }
+
+    if let Some(container_id) = docker_find_container_by_process(process_id).await {
+        run.container_id = Some(container_id);
+    }
+}
+
+async fn docker_stop_container(container_id: &str, stop_timeout_secs: u64) -> anyhow::Result<()> {
+    let timeout_secs = stop_timeout_secs.max(1).to_string();
+    let output = Command::new("docker")
+        .env_remove("DOCKER_API_VERSION")
+        .arg("stop")
+        .arg("--time")
+        .arg(&timeout_secs)
+        .arg(container_id)
+        .output()
+        .await
+        .with_context(|| format!("run `docker stop` for container {container_id}"))?;
+
+    if output.status.success() {
+        return Ok(());
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if docker_no_such_container(&stderr) {
+        return Ok(());
+    }
+
+    anyhow::bail!(
+        "docker stop failed for {container_id}: {}",
+        stderr.trim().to_string()
+    );
+}
+
+async fn docker_kill_container(container_id: &str) -> anyhow::Result<()> {
+    let output = Command::new("docker")
+        .env_remove("DOCKER_API_VERSION")
+        .arg("kill")
+        .arg(container_id)
+        .output()
+        .await
+        .with_context(|| format!("run `docker kill` for container {container_id}"))?;
+
+    if output.status.success() {
+        return Ok(());
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if docker_no_such_container(&stderr) {
+        return Ok(());
+    }
+
+    anyhow::bail!(
+        "docker kill failed for {container_id}: {}",
+        stderr.trim().to_string()
+    );
 }
 
 async fn wait_for_local_tcp_port(port: u16, timeout: Duration) -> bool {
@@ -919,6 +1630,7 @@ impl ProcessManager {
             || t.template_id == "minecraft:import"
             || t.template_id == "minecraft:curseforge"
             || t.template_id == "dst:vanilla"
+            || t.template_id == "dsp:nebula"
             || t.template_id == "terraria:vanilla"
         {
             minecraft::instance_dir(&id.0)
@@ -1070,31 +1782,33 @@ impl ProcessManager {
                     })?;
 
                 let instance_jar = dir.join("server.jar");
-                if !instance_jar.exists() {
-                    #[cfg(unix)]
-                    {
-                        std::os::unix::fs::symlink(&cached_jar, &instance_jar)?;
-                    }
-                    #[cfg(not(unix))]
-                    {
-                        std::fs::copy(&cached_jar, &instance_jar)?;
-                    }
-                }
+                materialize_minecraft_server_jar(&instance_jar, &cached_jar).map_err(|e| {
+                    crate::error_payload::anyhow(
+                        "spawn_failed",
+                        format!("failed to prepare server.jar: {e}"),
+                        None,
+                        Some("Ensure the instance directory is writable, then retry.".to_string()),
+                    )
+                })?;
 
-                let mut cmd = Command::new("java");
                 let exec = "java".to_string();
-                let args = vec![
+                let raw_args = vec![
                     format!("-Xmx{}M", mc.memory_mb),
                     "-jar".to_string(),
                     "server.jar".to_string(),
                     "nogui".to_string(),
                 ];
 
-                cmd.current_dir(&dir)
-                    .args(&args)
-                    .stdin(std::process::Stdio::piped())
-                    .stdout(std::process::Stdio::piped())
-                    .stderr(std::process::Stdio::piped());
+                let (mut cmd, sandbox_launch) = prepare_instance_command(
+                    &id.0,
+                    &t.template_id,
+                    &params,
+                    &dir,
+                    &dir,
+                    &exec,
+                    &raw_args,
+                    &[],
+                )?;
 
                 let started_at_unix_ms = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
@@ -1107,19 +1821,28 @@ impl ProcessManager {
                     agent_version: env!("CARGO_PKG_VERSION").to_string(),
                     pid: None,
                     pgid: None,
-                    exec: exec.clone(),
-                    args: args.clone(),
-                    cwd: dir.display().to_string(),
+                    container_name: sandbox_launch.container_name().map(ToOwned::to_owned),
+                    container_id: None,
+                    exec: sandbox_launch.exec.clone(),
+                    args: sandbox_launch.args.clone(),
+                    cwd: sandbox_launch.cwd.display().to_string(),
                     params: redact_params(params.clone()),
                     env: collect_safe_env(),
                 };
                 let _ = write_run_json(&dir, &run).await;
 
+                sink.emit(format!("[alloy-agent] sandbox: {}", sandbox_launch.summary()))
+                    .await;
+                for warning in sandbox_launch.warnings() {
+                    sink.emit(format!("[alloy-agent] sandbox warning: {warning}"))
+                        .await;
+                }
+
                 sink.emit(format!(
                     "[alloy-agent] minecraft exec: {} {} (cwd {}) port={} version={}",
-                    exec,
-                    args.join(" "),
-                    dir.display(),
+                    sandbox_launch.exec,
+                    sandbox_launch.args.join(" "),
+                    sandbox_launch.cwd.display(),
                     mc.port,
                     resolved.version_id
                 ))
@@ -1131,19 +1854,6 @@ impl ProcessManager {
                     Some(format!("spawning minecraft server (port {})...", mc.port)),
                 )
                 .await;
-
-                #[cfg(unix)]
-                {
-                    unsafe {
-                        cmd.pre_exec(|| {
-                            set_parent_death_signal()?;
-                            if libc::setpgid(0, 0) == -1 {
-                                return Err(std::io::Error::last_os_error());
-                            }
-                            Ok(())
-                        });
-                    }
-                }
 
                 let mut child = cmd
                     .spawn()
@@ -1163,8 +1873,16 @@ impl ProcessManager {
                 let pid_u32 = child.id();
                 let pgid = pid_u32.map(|p| p as i32);
 
+                if let Some(pid) = pid_u32
+                    && let Some(warn) = sandbox_launch.attach_pid(pid)
+                {
+                    sink.emit(format!("[alloy-agent] sandbox warning: {warn}"))
+                        .await;
+                }
+
                 run.pid = pid_u32;
                 run.pgid = pgid;
+                refresh_docker_container_metadata(&id.0, &mut run).await;
                 let _ = write_run_json(&dir, &run).await;
 
                 let stdin = child.stdin.take();
@@ -1557,20 +2275,24 @@ impl ProcessManager {
                     ));
                 }
 
-                let mut cmd = Command::new("java");
                 let exec = "java".to_string();
-                let args = vec![
+                let raw_args = vec![
                     format!("-Xmx{}M", mc.memory_mb),
                     "-jar".to_string(),
                     "server.jar".to_string(),
                     "nogui".to_string(),
                 ];
 
-                cmd.current_dir(&dir)
-                    .args(&args)
-                    .stdin(std::process::Stdio::piped())
-                    .stdout(std::process::Stdio::piped())
-                    .stderr(std::process::Stdio::piped());
+                let (mut cmd, sandbox_launch) = prepare_instance_command(
+                    &id.0,
+                    &t.template_id,
+                    &params,
+                    &dir,
+                    &dir,
+                    &exec,
+                    &raw_args,
+                    &[],
+                )?;
 
                 let started_at_unix_ms = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
@@ -1583,19 +2305,28 @@ impl ProcessManager {
                     agent_version: env!("CARGO_PKG_VERSION").to_string(),
                     pid: None,
                     pgid: None,
-                    exec: exec.clone(),
-                    args: args.clone(),
-                    cwd: dir.display().to_string(),
+                    container_name: sandbox_launch.container_name().map(ToOwned::to_owned),
+                    container_id: None,
+                    exec: sandbox_launch.exec.clone(),
+                    args: sandbox_launch.args.clone(),
+                    cwd: sandbox_launch.cwd.display().to_string(),
                     params: redact_params(params.clone()),
                     env: collect_safe_env(),
                 };
                 let _ = write_run_json(&dir, &run).await;
 
+                sink.emit(format!("[alloy-agent] sandbox: {}", sandbox_launch.summary()))
+                    .await;
+                for warning in sandbox_launch.warnings() {
+                    sink.emit(format!("[alloy-agent] sandbox warning: {warning}"))
+                        .await;
+                }
+
                 sink.emit(format!(
                     "[alloy-agent] minecraft(modrinth) exec: {} {} (cwd {}) port={} minecraft={} loader={}:{}",
-                    exec,
-                    args.join(" "),
-                    dir.display(),
+                    sandbox_launch.exec,
+                    sandbox_launch.args.join(" "),
+                    sandbox_launch.cwd.display(),
                     mc.port,
                     installed.minecraft,
                     installed.loader,
@@ -1609,19 +2340,6 @@ impl ProcessManager {
                     Some(format!("spawning minecraft server (port {})...", mc.port)),
                 )
                 .await;
-
-                #[cfg(unix)]
-                {
-                    unsafe {
-                        cmd.pre_exec(|| {
-                            set_parent_death_signal()?;
-                            if libc::setpgid(0, 0) == -1 {
-                                return Err(std::io::Error::last_os_error());
-                            }
-                            Ok(())
-                        });
-                    }
-                }
 
                 let mut child = cmd
                     .spawn()
@@ -1641,8 +2359,16 @@ impl ProcessManager {
                 let pid_u32 = child.id();
                 let pgid = pid_u32.map(|p| p as i32);
 
+                if let Some(pid) = pid_u32
+                    && let Some(warn) = sandbox_launch.attach_pid(pid)
+                {
+                    sink.emit(format!("[alloy-agent] sandbox warning: {warn}"))
+                        .await;
+                }
+
                 run.pid = pid_u32;
                 run.pgid = pgid;
+                refresh_docker_container_metadata(&id.0, &mut run).await;
                 let _ = write_run_json(&dir, &run).await;
 
                 let stdin = child.stdin.take();
@@ -1999,15 +2725,19 @@ impl ProcessManager {
                     )
                 })?;
 
-                let mut cmd = Command::new(&launch.exec);
                 let exec = launch.exec.clone();
-                let args = launch.args.clone();
+                let raw_args = launch.args.clone();
 
-                cmd.current_dir(&dir)
-                    .args(&args)
-                    .stdin(std::process::Stdio::piped())
-                    .stdout(std::process::Stdio::piped())
-                    .stderr(std::process::Stdio::piped());
+                let (mut cmd, sandbox_launch) = prepare_instance_command(
+                    &id.0,
+                    &t.template_id,
+                    &params,
+                    &dir,
+                    &dir,
+                    &exec,
+                    &raw_args,
+                    &[],
+                )?;
 
                 let started_at_unix_ms = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
@@ -2020,19 +2750,28 @@ impl ProcessManager {
                     agent_version: env!("CARGO_PKG_VERSION").to_string(),
                     pid: None,
                     pgid: None,
-                    exec: exec.clone(),
-                    args: args.clone(),
-                    cwd: dir.display().to_string(),
+                    container_name: sandbox_launch.container_name().map(ToOwned::to_owned),
+                    container_id: None,
+                    exec: sandbox_launch.exec.clone(),
+                    args: sandbox_launch.args.clone(),
+                    cwd: sandbox_launch.cwd.display().to_string(),
                     params: redact_params(params.clone()),
                     env: collect_safe_env(),
                 };
                 let _ = write_run_json(&dir, &run).await;
 
+                sink.emit(format!("[alloy-agent] sandbox: {}", sandbox_launch.summary()))
+                    .await;
+                for warning in sandbox_launch.warnings() {
+                    sink.emit(format!("[alloy-agent] sandbox warning: {warning}"))
+                        .await;
+                }
+
                 sink.emit(format!(
                     "[alloy-agent] minecraft(import) exec: {} {} (cwd {}) port={} launch={}",
-                    exec,
-                    args.join(" "),
-                    dir.display(),
+                    sandbox_launch.exec,
+                    sandbox_launch.args.join(" "),
+                    sandbox_launch.cwd.display(),
                     mc.port,
                     launch.kind
                 ))
@@ -2044,19 +2783,6 @@ impl ProcessManager {
                     Some(format!("spawning minecraft server (port {})...", mc.port)),
                 )
                 .await;
-
-                #[cfg(unix)]
-                {
-                    unsafe {
-                        cmd.pre_exec(|| {
-                            set_parent_death_signal()?;
-                            if libc::setpgid(0, 0) == -1 {
-                                return Err(std::io::Error::last_os_error());
-                            }
-                            Ok(())
-                        });
-                    }
-                }
 
                 let mut child = cmd
                     .spawn()
@@ -2076,8 +2802,16 @@ impl ProcessManager {
                 let pid_u32 = child.id();
                 let pgid = pid_u32.map(|p| p as i32);
 
+                if let Some(pid) = pid_u32
+                    && let Some(warn) = sandbox_launch.attach_pid(pid)
+                {
+                    sink.emit(format!("[alloy-agent] sandbox warning: {warn}"))
+                        .await;
+                }
+
                 run.pid = pid_u32;
                 run.pgid = pgid;
+                refresh_docker_container_metadata(&id.0, &mut run).await;
                 let _ = write_run_json(&dir, &run).await;
 
                 let stdin = child.stdin.take();
@@ -2438,15 +3172,19 @@ impl ProcessManager {
                     )
                 })?;
 
-                let mut cmd = Command::new(&launch.exec);
                 let exec = launch.exec.clone();
-                let args = launch.args.clone();
+                let raw_args = launch.args.clone();
 
-                cmd.current_dir(&dir)
-                    .args(&args)
-                    .stdin(std::process::Stdio::piped())
-                    .stdout(std::process::Stdio::piped())
-                    .stderr(std::process::Stdio::piped());
+                let (mut cmd, sandbox_launch) = prepare_instance_command(
+                    &id.0,
+                    &t.template_id,
+                    &params,
+                    &dir,
+                    &dir,
+                    &exec,
+                    &raw_args,
+                    &[],
+                )?;
 
                 let started_at_unix_ms = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
@@ -2459,19 +3197,28 @@ impl ProcessManager {
                     agent_version: env!("CARGO_PKG_VERSION").to_string(),
                     pid: None,
                     pgid: None,
-                    exec: exec.clone(),
-                    args: args.clone(),
-                    cwd: dir.display().to_string(),
+                    container_name: sandbox_launch.container_name().map(ToOwned::to_owned),
+                    container_id: None,
+                    exec: sandbox_launch.exec.clone(),
+                    args: sandbox_launch.args.clone(),
+                    cwd: sandbox_launch.cwd.display().to_string(),
                     params: redact_params(params.clone()),
                     env: collect_safe_env(),
                 };
                 let _ = write_run_json(&dir, &run).await;
 
+                sink.emit(format!("[alloy-agent] sandbox: {}", sandbox_launch.summary()))
+                    .await;
+                for warning in sandbox_launch.warnings() {
+                    sink.emit(format!("[alloy-agent] sandbox warning: {warning}"))
+                        .await;
+                }
+
                 sink.emit(format!(
                     "[alloy-agent] minecraft(curseforge) exec: {} {} (cwd {}) port={} launch={} cf_mod_id={} cf_file_id={} cf_server_pack_file_id={}",
-                    exec,
-                    args.join(" "),
-                    dir.display(),
+                    sandbox_launch.exec,
+                    sandbox_launch.args.join(" "),
+                    sandbox_launch.cwd.display(),
                     mc.port,
                     launch.kind,
                     installed.mod_id,
@@ -2486,19 +3233,6 @@ impl ProcessManager {
                     Some(format!("spawning minecraft server (port {})...", mc.port)),
                 )
                 .await;
-
-                #[cfg(unix)]
-                {
-                    unsafe {
-                        cmd.pre_exec(|| {
-                            set_parent_death_signal()?;
-                            if libc::setpgid(0, 0) == -1 {
-                                return Err(std::io::Error::last_os_error());
-                            }
-                            Ok(())
-                        });
-                    }
-                }
 
                 let mut child = cmd
                     .spawn()
@@ -2518,8 +3252,16 @@ impl ProcessManager {
                 let pid_u32 = child.id();
                 let pgid = pid_u32.map(|p| p as i32);
 
+                if let Some(pid) = pid_u32
+                    && let Some(warn) = sandbox_launch.attach_pid(pid)
+                {
+                    sink.emit(format!("[alloy-agent] sandbox warning: {warn}"))
+                        .await;
+                }
+
                 run.pid = pid_u32;
                 run.pgid = pgid;
+                refresh_docker_container_metadata(&id.0, &mut run).await;
                 let _ = write_run_json(&dir, &run).await;
 
                 let stdin = child.stdin.take();
@@ -2894,9 +3636,8 @@ impl ProcessManager {
 
                 let persistent_root = dir.join("klei");
 
-                let mut cmd = Command::new(&server.bin);
                 let exec = server.bin.display().to_string();
-                let args = vec![
+                let raw_args = vec![
                     "-console".to_string(),
                     "-cluster".to_string(),
                     "Cluster_1".to_string(),
@@ -2907,12 +3648,22 @@ impl ProcessManager {
                     "-conf_dir".to_string(),
                     "DoNotStarveTogether".to_string(),
                 ];
+                let spawn_cwd = server
+                    .bin
+                    .parent()
+                    .map(std::path::Path::to_path_buf)
+                    .unwrap_or_else(|| server.server_root.clone());
 
-                cmd.current_dir(&server.server_root)
-                    .args(&args)
-                    .stdin(std::process::Stdio::piped())
-                    .stdout(std::process::Stdio::piped())
-                    .stderr(std::process::Stdio::piped());
+                let (mut cmd, sandbox_launch) = prepare_instance_command(
+                    &id.0,
+                    &t.template_id,
+                    &params,
+                    &dir,
+                    &spawn_cwd,
+                    &exec,
+                    &raw_args,
+                    &[server.server_root.clone()],
+                )?;
 
                 let started_at_unix_ms = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
@@ -2925,19 +3676,28 @@ impl ProcessManager {
                     agent_version: env!("CARGO_PKG_VERSION").to_string(),
                     pid: None,
                     pgid: None,
-                    exec: exec.clone(),
-                    args: args.clone(),
-                    cwd: server.server_root.display().to_string(),
+                    container_name: sandbox_launch.container_name().map(ToOwned::to_owned),
+                    container_id: None,
+                    exec: sandbox_launch.exec.clone(),
+                    args: sandbox_launch.args.clone(),
+                    cwd: sandbox_launch.cwd.display().to_string(),
                     params: redact_params(params.clone()),
                     env: collect_safe_env(),
                 };
                 let _ = write_run_json(&dir, &run).await;
 
+                sink.emit(format!("[alloy-agent] sandbox: {}", sandbox_launch.summary()))
+                    .await;
+                for warning in sandbox_launch.warnings() {
+                    sink.emit(format!("[alloy-agent] sandbox warning: {warning}"))
+                        .await;
+                }
+
                 sink.emit(format!(
                     "[alloy-agent] dst exec: {} {} (cwd {}) ports=udp:{} master={} auth={}",
-                    exec,
-                    args.join(" "),
-                    server.server_root.display(),
+                    sandbox_launch.exec,
+                    sandbox_launch.args.join(" "),
+                    sandbox_launch.cwd.display(),
                     tr.port,
                     tr.master_port,
                     tr.auth_port,
@@ -2950,19 +3710,6 @@ impl ProcessManager {
                     Some(format!("spawning dst server (udp {})...", tr.port)),
                 )
                 .await;
-
-                #[cfg(unix)]
-                {
-                    unsafe {
-                        cmd.pre_exec(|| {
-                            set_parent_death_signal()?;
-                            if libc::setpgid(0, 0) == -1 {
-                                return Err(std::io::Error::last_os_error());
-                            }
-                            Ok(())
-                        });
-                    }
-                }
 
                 let mut child = cmd
                     .spawn()
@@ -2979,8 +3726,16 @@ impl ProcessManager {
                 let pid_u32 = child.id();
                 let pgid = pid_u32.map(|p| p as i32);
 
+                if let Some(pid) = pid_u32
+                    && let Some(warn) = sandbox_launch.attach_pid(pid)
+                {
+                    sink.emit(format!("[alloy-agent] sandbox warning: {warn}"))
+                        .await;
+                }
+
                 run.pid = pid_u32;
                 run.pgid = pgid;
+                refresh_docker_container_metadata(&id.0, &mut run).await;
                 let _ = write_run_json(&dir, &run).await;
 
                 let stdin = child.stdin.take();
@@ -3314,21 +4069,26 @@ impl ProcessManager {
                     ));
                 }
 
-                let mut cmd = Command::new(exec_path);
                 let ld_library_path = format!(
                     "{}:{}:{}",
                     extracted.server_root.join("lib64").display(),
                     extracted.server_root.display(),
                     std::env::var("LD_LIBRARY_PATH").unwrap_or_default()
                 );
-                cmd.current_dir(&extracted.server_root)
-                    .env("TERM", "xterm")
-                    .env("LD_LIBRARY_PATH", &ld_library_path)
-                    .arg("-config")
-                    .arg(&config_path)
-                    .stdin(std::process::Stdio::piped())
-                    .stdout(std::process::Stdio::piped())
-                    .stderr(std::process::Stdio::piped());
+                let exec = exec_path.display().to_string();
+                let raw_args = vec!["-config".to_string(), config_path.display().to_string()];
+                let (mut cmd, sandbox_launch) = prepare_instance_command(
+                    &id.0,
+                    &t.template_id,
+                    &params,
+                    &dir,
+                    &extracted.server_root,
+                    &exec,
+                    &raw_args,
+                    &[extracted.server_root.clone()],
+                )?;
+                cmd.env("TERM", "xterm")
+                    .env("LD_LIBRARY_PATH", &ld_library_path);
 
                 let started_at_unix_ms = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
@@ -3338,7 +4098,6 @@ impl ProcessManager {
                 env.insert("TERM".to_string(), "xterm".to_string());
                 env.insert("LD_LIBRARY_PATH".to_string(), ld_library_path.clone());
 
-                let args = vec!["-config".to_string(), config_path.display().to_string()];
                 let mut run = RunInfo {
                     process_id: id.0.clone(),
                     template_id: t.template_id.clone(),
@@ -3346,19 +4105,28 @@ impl ProcessManager {
                     agent_version: env!("CARGO_PKG_VERSION").to_string(),
                     pid: None,
                     pgid: None,
-                    exec: exec_path.display().to_string(),
-                    args: args.clone(),
-                    cwd: extracted.server_root.display().to_string(),
+                    container_name: sandbox_launch.container_name().map(ToOwned::to_owned),
+                    container_id: None,
+                    exec: sandbox_launch.exec.clone(),
+                    args: sandbox_launch.args.clone(),
+                    cwd: sandbox_launch.cwd.display().to_string(),
                     params: redact_params(params.clone()),
                     env,
                 };
                 let _ = write_run_json(&dir, &run).await;
 
+                sink.emit(format!("[alloy-agent] sandbox: {}", sandbox_launch.summary()))
+                    .await;
+                for warning in sandbox_launch.warnings() {
+                    sink.emit(format!("[alloy-agent] sandbox warning: {warning}"))
+                        .await;
+                }
+
                 sink.emit(format!(
                     "[alloy-agent] terraria exec: {} {} (cwd {}) port={} version={}",
-                    exec_path.display(),
-                    args.join(" "),
-                    extracted.server_root.display(),
+                    sandbox_launch.exec,
+                    sandbox_launch.args.join(" "),
+                    sandbox_launch.cwd.display(),
                     tr.port,
                     resolved.version_id
                 ))
@@ -3370,19 +4138,6 @@ impl ProcessManager {
                     Some(format!("spawning terraria server (port {})...", tr.port)),
                 )
                 .await;
-
-                #[cfg(unix)]
-                {
-                    unsafe {
-                        cmd.pre_exec(|| {
-                            set_parent_death_signal()?;
-                            if libc::setpgid(0, 0) == -1 {
-                                return Err(std::io::Error::last_os_error());
-                            }
-                            Ok(())
-                        });
-                    }
-                }
 
                 let mut child = cmd
                     .spawn()
@@ -3408,8 +4163,16 @@ impl ProcessManager {
                 let pid_u32 = child.id();
                 let pgid = pid_u32.map(|p| p as i32);
 
+                if let Some(pid) = pid_u32
+                    && let Some(warn) = sandbox_launch.attach_pid(pid)
+                {
+                    sink.emit(format!("[alloy-agent] sandbox warning: {warn}"))
+                        .await;
+                }
+
                 run.pid = pid_u32;
                 run.pgid = pgid;
+                refresh_docker_container_metadata(&id.0, &mut run).await;
                 let _ = write_run_json(&dir, &run).await;
 
                 let stdin = child.stdin.take();
@@ -3703,18 +4466,449 @@ impl ProcessManager {
                 });
             }
 
-            let mut cmd = Command::new(&t.command);
-            let exec = t.command.clone();
-            let args = t.args.clone();
-            let restart = parse_restart_config(&params);
-            cmd.args(&args)
-                .stdin(std::process::Stdio::piped())
-                .stdout(std::process::Stdio::piped())
-                .stderr(std::process::Stdio::piped());
+            if t.template_id == "dsp:nebula" {
+                ensure_min_free_space(&dsp::data_root()).map_err(|e| {
+                    crate::error_payload::anyhow(
+                        "insufficient_disk",
+                        e.to_string(),
+                        None,
+                        Some("Free up disk space under ALLOY_DATA_ROOT and try again.".to_string()),
+                    )
+                })?;
 
-            let cwd = std::env::current_dir()
-                .map(|p| p.display().to_string())
-                .unwrap_or_else(|_| "<unknown>".to_string());
+                let tr = dsp::validate_nebula_params(&params)?;
+
+                let tr_port = port_alloc::allocate_tcp_port(tr.port).map_err(|e| {
+                    let mut fields = BTreeMap::new();
+                    fields.insert("port".to_string(), e.to_string());
+                    crate::error_payload::anyhow(
+                        "invalid_param",
+                        "invalid port",
+                        Some(fields),
+                        Some(
+                            "Pick another port, or leave it blank (0) to auto-assign a free port."
+                                .to_string(),
+                        ),
+                    )
+                })?;
+
+                params.insert("port".to_string(), tr_port.to_string());
+                let restart = parse_restart_config(&params);
+
+                let dir = dsp::instance_dir(&id.0);
+                let prepared = dsp::prepare_nebula_launch(
+                    &dir,
+                    &dsp::NebulaParams {
+                        port: tr_port,
+                        ..tr
+                    },
+                    tr_port,
+                )
+                .map_err(|e| {
+                    crate::error_payload::anyhow(
+                        "spawn_failed",
+                        format!("failed to prepare dsp nebula server launch: {e}"),
+                        None,
+                        Some(
+                            "Ensure server_root contains DSPGAME.exe + BepInEx + Nebula, and wine is installed."
+                                .to_string(),
+                        ),
+                    )
+                })?;
+
+                let exec_path = prepared.launcher_script;
+                let exec = exec_path.display().to_string();
+                let raw_args = Vec::<String>::new();
+                let (mut cmd, sandbox_launch) = prepare_instance_command(
+                    &id.0,
+                    &t.template_id,
+                    &params,
+                    &dir,
+                    &dir,
+                    &exec,
+                    &raw_args,
+                    &[],
+                )?;
+
+                let started_at_unix_ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as u64;
+
+                let mut run = RunInfo {
+                    process_id: id.0.clone(),
+                    template_id: t.template_id.clone(),
+                    started_at_unix_ms,
+                    agent_version: env!("CARGO_PKG_VERSION").to_string(),
+                    pid: None,
+                    pgid: None,
+                    container_name: sandbox_launch.container_name().map(ToOwned::to_owned),
+                    container_id: None,
+                    exec: sandbox_launch.exec.clone(),
+                    args: sandbox_launch.args.clone(),
+                    cwd: sandbox_launch.cwd.display().to_string(),
+                    params: redact_params(params.clone()),
+                    env: collect_safe_env(),
+                };
+                let _ = write_run_json(&dir, &run).await;
+
+                sink.emit(format!("[alloy-agent] sandbox: {}", sandbox_launch.summary()))
+                    .await;
+                for warning in sandbox_launch.warnings() {
+                    sink.emit(format!("[alloy-agent] sandbox warning: {warning}"))
+                        .await;
+                }
+
+                sink.emit(format!(
+                    "[alloy-agent] dsp exec: {} (cwd {}) startup_mode={} port={} wine={}",
+                    sandbox_launch.exec,
+                    sandbox_launch.cwd.display(),
+                    prepared.effective_startup_mode.as_str(),
+                    tr_port,
+                    prepared.wine_bin,
+                ))
+                .await;
+
+                set_entry_message(
+                    &self.inner,
+                    &id.0,
+                    Some(format!("spawning dsp nebula server (port {})...", tr_port)),
+                )
+                .await;
+
+                let mut child = cmd
+                    .spawn()
+                    .with_context(|| {
+                        format!(
+                            "spawn dsp nebula server: exec={} (cwd {})",
+                            exec_path.display(),
+                            dir.display(),
+                        )
+                    })
+                    .map_err(|e| {
+                        crate::error_payload::anyhow(
+                            "spawn_failed",
+                            e.to_string(),
+                            None,
+                            Some(
+                                "Ensure wine is installed and server_root is valid."
+                                    .to_string(),
+                            ),
+                        )
+                    })?;
+                let started = tokio::time::Instant::now();
+                let pid_u32 = child.id();
+                let pgid = pid_u32.map(|p| p as i32);
+
+                if let Some(pid) = pid_u32
+                    && let Some(warn) = sandbox_launch.attach_pid(pid)
+                {
+                    sink.emit(format!("[alloy-agent] sandbox warning: {warn}"))
+                        .await;
+                }
+
+                run.pid = pid_u32;
+                run.pgid = pgid;
+                refresh_docker_container_metadata(&id.0, &mut run).await;
+                let _ = write_run_json(&dir, &run).await;
+
+                let stdin = child.stdin.take();
+                let stdout = child.stdout.take();
+                let stderr = child.stderr.take();
+
+                if let Some(out) = stdout {
+                    let sink = sink.clone();
+                    tokio::spawn(async move {
+                        let mut lines = BufReader::new(out).lines();
+                        while let Ok(Some(line)) = lines.next_line().await {
+                            sink.emit(format!("[stdout] {line}")).await;
+                        }
+                    });
+                }
+                if let Some(err) = stderr {
+                    let sink = sink.clone();
+                    tokio::spawn(async move {
+                        let mut lines = BufReader::new(err).lines();
+                        while let Ok(Some(line)) = lines.next_line().await {
+                            sink.emit(format!("[stderr] {line}")).await;
+                        }
+                    });
+                }
+
+                {
+                    let mut inner = self.inner.lock().await;
+                    inner.insert(
+                        id.0.clone(),
+                        ProcessEntry {
+                            template_id: ProcessTemplateId(t.template_id.clone()),
+                            state: ProcessState::Starting,
+                            pid: pid_u32,
+                            resources: None,
+                            exit_code: None,
+                            message: Some(format!("waiting for port {}...", tr_port)),
+                            restart,
+                            restart_attempts: reused_restart_attempts,
+                            stdin,
+                            graceful_stdin: t.graceful_stdin.clone(),
+                            pgid,
+                            logs: logs.clone(),
+                            log_file_tx: Some(log_tx.clone()),
+                        },
+                    );
+                }
+
+                if let Some(pid) = pid_u32 {
+                    self.spawn_resource_sampler(id.0.clone(), pid);
+                }
+
+                let manager = self.clone();
+                let inner = self.inner.clone();
+                let id_str = id.0.clone();
+
+                let probe_sink = sink.clone();
+                let port = tr_port;
+                let frp_config = params
+                    .get("frp_config")
+                    .map(|v| v.trim())
+                    .filter(|v| !v.is_empty())
+                    .map(|v| v.to_string());
+                let frp_instance_dir = dir.clone();
+                tokio::spawn({
+                    let inner = inner.clone();
+                    let id_str = id_str.clone();
+                    let frp_config = frp_config.clone();
+                    let frp_instance_dir = frp_instance_dir.clone();
+                    async move {
+                        let timeout = port_probe_timeout();
+                        let ok = wait_for_local_tcp_port(port, timeout).await;
+
+                        let (pgid, should_kill) = {
+                            let mut map = inner.lock().await;
+                            let Some(e) = map.get_mut(&id_str) else {
+                                return;
+                            };
+                            if e.pid != pid_u32 || !matches!(e.state, ProcessState::Starting) {
+                                return;
+                            }
+
+                            if ok {
+                                e.state = ProcessState::Running;
+                                e.message = None;
+                                (e.pgid, false)
+                            } else {
+                                e.state = ProcessState::Failed;
+                                e.message = Some(format!(
+                                    "port {} did not open within {}ms",
+                                    port,
+                                    timeout.as_millis()
+                                ));
+                                (e.pgid, true)
+                            }
+                        };
+
+                        if ok {
+                            if let (Some(cfg), Some(pgid)) = (frp_config.clone(), pgid) {
+                                if let Err(e) = start_frpc_sidecar(
+                                    probe_sink.clone(),
+                                    frp_instance_dir.clone(),
+                                    pgid,
+                                    port,
+                                    cfg,
+                                )
+                                .await
+                                {
+                                    probe_sink
+                                        .emit(format!("[alloy-agent] frpc start failed: {e}"))
+                                        .await;
+                                }
+                            }
+                            probe_sink
+                                .emit(format!(
+                                    "[alloy-agent] dsp nebula port {} is accepting connections",
+                                    port
+                                ))
+                                .await;
+                        } else {
+                            probe_sink
+                                .emit(format!(
+                                    "[alloy-agent] dsp nebula port {} did not open in time",
+                                    port
+                                ))
+                                .await;
+                            if should_kill && let Some(pgid) = pgid {
+                                #[cfg(unix)]
+                                unsafe {
+                                    libc::kill(-pgid, libc::SIGTERM);
+                                }
+                            }
+                        }
+                    }
+                });
+
+                let process_pgid = pgid;
+                let wait_sink = sink.clone();
+                let template_id = t.template_id.clone();
+                let params_for_restart = params.clone();
+                tokio::spawn(async move {
+                    let res = child.wait().await;
+                    #[cfg(unix)]
+                    if let Some(pgid) = process_pgid {
+                        unsafe {
+                            libc::kill(-pgid, libc::SIGTERM);
+                        }
+                        tokio::time::sleep(Duration::from_millis(500)).await;
+                        let alive = unsafe { libc::kill(-pgid, 0) == 0 };
+                        if alive {
+                            unsafe {
+                                libc::kill(-pgid, libc::SIGKILL);
+                            }
+                        }
+                    }
+                    let runtime = started.elapsed();
+
+                    let mut restart_after: Option<Duration> = None;
+                    let mut restart_attempt = 0u32;
+
+                    let (final_state, exit_code) = {
+                        let mut map = inner.lock().await;
+                        let Some(e) = map.get_mut(&id_str) else {
+                            return;
+                        };
+
+                        e.stdin = None;
+                        let stopping = matches!(e.state, ProcessState::Stopping);
+
+                        match res {
+                            Ok(status) => {
+                                e.exit_code = status.code();
+
+                                if stopping {
+                                    e.state = ProcessState::Exited;
+                                    e.message = Some("stopped".to_string());
+                                } else if runtime < early_exit_threshold() {
+                                    e.state = ProcessState::Failed;
+                                    e.message = Some(format!(
+                                        "exited too quickly ({}ms)",
+                                        runtime.as_millis()
+                                    ));
+                                } else if status.success() {
+                                    e.state = ProcessState::Exited;
+                                    e.message = Some("exited".to_string());
+                                } else {
+                                    e.state = ProcessState::Failed;
+                                    e.message = Some(format!(
+                                        "exited with code {}",
+                                        status.code().unwrap_or_default()
+                                    ));
+                                }
+                            }
+                            Err(err) => {
+                                e.state = ProcessState::Failed;
+                                e.message = Some(format!("wait failed: {err}"));
+                            }
+                        }
+
+                        if !stopping {
+                            let is_failure = matches!(e.state, ProcessState::Failed)
+                                || e.exit_code.is_some_and(|c| c != 0);
+                            let should_restart = match e.restart.policy {
+                                RestartPolicy::Off => false,
+                                RestartPolicy::Always => true,
+                                RestartPolicy::OnFailure => is_failure,
+                            };
+
+                            if should_restart && e.restart_attempts < e.restart.max_retries {
+                                e.restart_attempts = e.restart_attempts.saturating_add(1);
+                                let delay_ms = compute_backoff_ms(e.restart, e.restart_attempts);
+                                restart_after = Some(Duration::from_millis(delay_ms));
+                                restart_attempt = e.restart_attempts;
+                                e.message = Some(format!(
+                                    "restarting in {}ms (attempt {}/{})",
+                                    delay_ms, restart_attempt, e.restart.max_retries
+                                ));
+                            }
+                        }
+
+                        (e.state, e.exit_code)
+                    };
+
+                    wait_sink
+                        .emit(format!(
+                            "[alloy-agent] process exited: state={:?} exit_code={:?} runtime_ms={}",
+                            final_state,
+                            exit_code,
+                            runtime.as_millis()
+                        ))
+                        .await;
+
+                    if let Some(delay) = restart_after {
+                        wait_sink
+                            .emit(format!(
+                                "[alloy-agent] auto-restart scheduled in {}ms (attempt {})",
+                                delay.as_millis(),
+                                restart_attempt
+                            ))
+                            .await;
+                        let handle = tokio::runtime::Handle::current();
+                        let wait_sink = wait_sink.clone();
+                        tokio::task::spawn_blocking(move || {
+                            std::thread::sleep(delay);
+                            let res = handle.block_on(manager.start_from_template_with_process_id(
+                                &id_str,
+                                &template_id,
+                                params_for_restart,
+                            ));
+                            match res {
+                                Ok(st) if matches!(st.state, ProcessState::Failed) => {
+                                    let msg = st
+                                        .message
+                                        .filter(|s| !s.trim().is_empty())
+                                        .unwrap_or_else(|| "unknown error".to_string());
+                                    handle.block_on(wait_sink.emit(format!(
+                                        "[alloy-agent] auto-restart failed: {msg}"
+                                    )));
+                                }
+                                Ok(_) => {
+                                    handle.block_on(wait_sink.emit(
+                                        "[alloy-agent] auto-restart triggered".to_string(),
+                                    ));
+                                }
+                                Err(err) => {
+                                    handle.block_on(wait_sink.emit(format!(
+                                        "[alloy-agent] auto-restart failed: {err}"
+                                    )));
+                                }
+                            }
+                        });
+                    }
+                });
+
+                return Ok(ProcessStatus {
+                    id: id.clone(),
+                    template_id: ProcessTemplateId(t.template_id.clone()),
+                    state: ProcessState::Starting,
+                    pid: pid_u32,
+                    exit_code: None,
+                    message: Some(format!("waiting for port {}...", tr_port)),
+                    resources: None,
+                });
+            }
+
+            let exec = t.command.clone();
+            let raw_args = t.args.clone();
+            let restart = parse_restart_config(&params);
+            let cwd_path = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+
+            let (mut cmd, sandbox_launch) = prepare_instance_command(
+                &id.0,
+                &t.template_id,
+                &params,
+                &root_dir,
+                &cwd_path,
+                &exec,
+                &raw_args,
+                &[],
+            )?;
 
             let started_at_unix_ms = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -3727,39 +4921,40 @@ impl ProcessManager {
                 agent_version: env!("CARGO_PKG_VERSION").to_string(),
                 pid: None,
                 pgid: None,
-                exec: exec.clone(),
-                args: args.clone(),
-                cwd: cwd.clone(),
+                container_name: sandbox_launch.container_name().map(ToOwned::to_owned),
+                container_id: None,
+                exec: sandbox_launch.exec.clone(),
+                args: sandbox_launch.args.clone(),
+                cwd: sandbox_launch.cwd.display().to_string(),
                 params: redact_params(params.clone()),
                 env: collect_safe_env(),
             };
             let _ = write_run_json(&root_dir, &run).await;
 
+            sink.emit(format!("[alloy-agent] sandbox: {}", sandbox_launch.summary()))
+                .await;
+            for warning in sandbox_launch.warnings() {
+                sink.emit(format!("[alloy-agent] sandbox warning: {warning}"))
+                    .await;
+            }
+
             sink.emit(format!(
                 "[alloy-agent] exec: {} {} (cwd {})",
-                exec,
-                args.join(" "),
-                cwd
+                sandbox_launch.exec,
+                sandbox_launch.args.join(" "),
+                sandbox_launch.cwd.display()
             ))
             .await;
 
-            #[cfg(unix)]
-            {
-                unsafe {
-                    cmd.pre_exec(|| {
-                        // Start a dedicated process group so we can signal the whole tree.
-                        set_parent_death_signal()?;
-                        if libc::setpgid(0, 0) == -1 {
-                            return Err(std::io::Error::last_os_error());
-                        }
-                        Ok(())
-                    });
-                }
-            }
-
             let mut child = cmd
                 .spawn()
-                .with_context(|| format!("spawn process: exec={exec} (cwd {cwd})"))
+                .with_context(|| {
+                    format!(
+                        "spawn process: exec={} (cwd {})",
+                        sandbox_launch.exec,
+                        sandbox_launch.cwd.display()
+                    )
+                })
                 .map_err(|e| {
                     crate::error_payload::anyhow(
                         "spawn_failed",
@@ -3772,8 +4967,16 @@ impl ProcessManager {
             let pid_u32 = child.id();
             let pgid = pid_u32.map(|p| p as i32);
 
+            if let Some(pid) = pid_u32
+                && let Some(warn) = sandbox_launch.attach_pid(pid)
+            {
+                sink.emit(format!("[alloy-agent] sandbox warning: {warn}"))
+                    .await;
+            }
+
             run.pid = pid_u32;
             run.pgid = pgid;
+            refresh_docker_container_metadata(&id.0, &mut run).await;
             let _ = write_run_json(&root_dir, &run).await;
 
             let stdin = child.stdin.take();
@@ -3968,10 +5171,10 @@ impl ProcessManager {
         match result {
             Ok(st) => Ok(st),
             Err(err) => {
-                sink.emit(format!("[alloy-agent] start failed: {err}"))
+                let msg = format_error_chain(&err);
+                sink.emit(format!("[alloy-agent] start failed: {msg}"))
                     .await;
 
-                let msg = err.to_string();
                 let restart = parse_restart_config(&params);
 
                 {
@@ -4065,6 +5268,7 @@ impl ProcessManager {
         let logs: Arc<Mutex<LogBuffer>>;
         let log_tx: Option<mpsc::UnboundedSender<String>>;
         let mut graceful: Option<(ChildStdin, String)> = None;
+        let docker_container: Option<String>;
 
         {
             let mut inner = self.inner.lock().await;
@@ -4117,6 +5321,19 @@ impl ProcessManager {
         )
         .await;
 
+        docker_container = find_container_for_process(process_id).await;
+        if let Some(container_id) = docker_container.as_deref() {
+            emit(
+                format!(
+                    "[alloy-agent] stop: docker container detected ({})",
+                    container_id.chars().take(12).collect::<String>()
+                ),
+                logs.clone(),
+                log_tx.clone(),
+            )
+            .await;
+        }
+
         if let Some((mut stdin, cmd)) = graceful.take() {
             let _ = stdin.write_all(cmd.as_bytes()).await;
             let _ = stdin.flush().await;
@@ -4131,18 +5348,40 @@ impl ProcessManager {
         }
 
         // If we didn't have a graceful command, send SIGTERM right away.
-        if !graceful_sent && let Some(pgid) = pgid {
-            #[cfg(unix)]
-            unsafe {
-                libc::kill(-pgid, libc::SIGTERM);
+        if !graceful_sent {
+            if let Some(container_id) = docker_container.as_deref() {
+                match docker_stop_container(container_id, timeout.as_secs().max(1)).await {
+                    Ok(()) => {
+                        term_sent = true;
+                        emit(
+                            "[alloy-agent] stop: requested docker stop".to_string(),
+                            logs.clone(),
+                            log_tx.clone(),
+                        )
+                        .await;
+                    }
+                    Err(err) => {
+                        emit(
+                            format!("[alloy-agent] stop: docker stop failed: {err}"),
+                            logs.clone(),
+                            log_tx.clone(),
+                        )
+                        .await;
+                    }
+                }
+            } else if let Some(pgid) = pgid {
+                #[cfg(unix)]
+                unsafe {
+                    libc::kill(-pgid, libc::SIGTERM);
+                }
+                term_sent = true;
+                emit(
+                    "[alloy-agent] stop: sent SIGTERM".to_string(),
+                    logs.clone(),
+                    log_tx.clone(),
+                )
+                .await;
             }
-            term_sent = true;
-            emit(
-                "[alloy-agent] stop: sent SIGTERM".to_string(),
-                logs.clone(),
-                log_tx.clone(),
-            )
-            .await;
         }
 
         let start = tokio::time::Instant::now();
@@ -4172,6 +5411,7 @@ impl ProcessManager {
                 "saving players",
             ],
             "terraria:vanilla" => &["saving world", "world saved"],
+            "dsp:nebula" => &["save game", "game saved", "autosave"],
             _ => &[],
         };
 
@@ -4227,38 +5467,84 @@ impl ProcessManager {
                 }
             }
 
-            if !term_sent
-                && now >= term_deadline
-                && let Some(pgid) = pgid
-            {
-                #[cfg(unix)]
-                unsafe {
-                    libc::kill(-pgid, libc::SIGTERM);
+            if !term_sent && now >= term_deadline {
+                if let Some(container_id) = docker_container.as_deref() {
+                    let remaining_secs = kill_deadline
+                        .saturating_duration_since(now)
+                        .as_secs()
+                        .max(1);
+                    match docker_stop_container(container_id, remaining_secs).await {
+                        Ok(()) => {
+                            term_sent = true;
+                            emit(
+                                "[alloy-agent] stop: requested docker stop (late)".to_string(),
+                                logs.clone(),
+                                log_tx.clone(),
+                            )
+                            .await;
+                        }
+                        Err(err) => {
+                            emit(
+                                format!("[alloy-agent] stop: docker stop failed (late): {err}"),
+                                logs.clone(),
+                                log_tx.clone(),
+                            )
+                            .await;
+                        }
+                    }
+                } else if let Some(pgid) = pgid {
+                    #[cfg(unix)]
+                    unsafe {
+                        libc::kill(-pgid, libc::SIGTERM);
+                    }
+                    term_sent = true;
+                    emit(
+                        "[alloy-agent] stop: sent SIGTERM (late)".to_string(),
+                        logs.clone(),
+                        log_tx.clone(),
+                    )
+                    .await;
                 }
-                term_sent = true;
-                emit(
-                    "[alloy-agent] stop: sent SIGTERM (late)".to_string(),
-                    logs.clone(),
-                    log_tx.clone(),
-                )
-                .await;
             }
 
             if now >= kill_deadline {
-                // Escalate to SIGKILL.
+                // Escalate to hard-kill.
                 let mut killed = false;
-                let mut inner = self.inner.lock().await;
-                if let Some(e) = inner.get_mut(process_id)
-                    && let Some(pgid) = e.pgid
+                let mut timeout_pgid: Option<i32> = None;
                 {
+                    let mut inner = self.inner.lock().await;
+                    if let Some(e) = inner.get_mut(process_id) {
+                        timeout_pgid = e.pgid;
+                        if timeout_pgid.is_some() || docker_container.is_some() {
+                            e.message = Some("killed after timeout".to_string());
+                        }
+                    }
+                }
+
+                if let Some(container_id) = docker_container.as_deref() {
+                    match docker_kill_container(container_id).await {
+                        Ok(()) => {
+                            killed = true;
+                        }
+                        Err(err) => {
+                            emit(
+                                format!("[alloy-agent] stop: docker kill failed: {err}"),
+                                logs.clone(),
+                                log_tx.clone(),
+                            )
+                            .await;
+                        }
+                    }
+                }
+
+                if let Some(pgid) = timeout_pgid {
                     #[cfg(unix)]
                     unsafe {
                         libc::kill(-pgid, libc::SIGKILL);
                     }
-                    e.message = Some("killed after timeout".to_string());
                     killed = true;
                 }
-                drop(inner);
+
                 if killed {
                     emit(
                         "[alloy-agent] stop: sent SIGKILL (timeout)".to_string(),

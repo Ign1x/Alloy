@@ -26,18 +26,47 @@ function titleCase(s: string): string {
 
 function CubeIcon() {
   return (
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-5 w-5" aria-hidden="true">
-      <path d="M10 2 3 6l7 4 7-4-7-4z" opacity="0.9" />
-      <path d="M3 6v8l7 4v-8L3 6z" opacity="0.7" />
-      <path d="M17 6v8l-7 4v-8l7-4z" opacity="0.5" />
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="none" class="h-5 w-5" aria-hidden="true">
+      <path d="M10 2.25 3.5 5.75 10 9.25l6.5-3.5L10 2.25Z" stroke="currentColor" stroke-width="1.35" stroke-linejoin="round" />
+      <path d="M3.5 5.75v8L10 17.25v-8L3.5 5.75Z" stroke="currentColor" stroke-width="1.35" stroke-linejoin="round" />
+      <path d="M16.5 5.75v8L10 17.25v-8l6.5-3.5Z" stroke="currentColor" stroke-width="1.35" stroke-linejoin="round" />
+      <path d="M10 9.25v8" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" />
     </svg>
   )
 }
 
 function TreeIcon() {
   return (
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-5 w-5" aria-hidden="true">
-      <path d="M10 2 4.5 10H7L5 14h3v4h4v-4h3l-2-4h2.5L10 2z" />
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="none" class="h-5 w-5" aria-hidden="true">
+      <path d="M10 2.2 5.05 8.5H7.5L5.9 11.8h2.35L6.95 15h6.1l-1.3-3.2h2.35L12.5 8.5h2.45L10 2.2Z" fill="currentColor" />
+      <path d="M10 15v2.8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" />
+    </svg>
+  )
+}
+
+function DstWilsonIcon() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="none" class="h-5 w-5" aria-hidden="true">
+      <path
+        d="M10 1.7 11.4 3.8l2.3-.8-.4 2.3 2.3-.4-1 2 1.9.6-1.5 1.2 1.2 1.5-2-.1.2 1.9-1.8-.7-.8 2-1.4-1.2-1.4 1.2-.8-2-1.8.7.2-1.9-2 .1 1.2-1.5-1.5-1.2 1.9-.6-1-2 2.3.4-.4-2.3 2.3.8L10 1.7Z"
+        stroke="currentColor"
+        stroke-width="1.05"
+        stroke-linejoin="round"
+      />
+      <path d="M10 5.9c2.1 0 3.7 1.6 3.7 3.6 0 2-1.6 3.6-3.7 3.6s-3.7-1.6-3.7-3.6c0-2 1.6-3.6 3.7-3.6Z" stroke="currentColor" stroke-width="1.05" />
+      <circle cx="8.7" cy="8.9" r="0.42" fill="currentColor" />
+      <circle cx="11.3" cy="8.9" r="0.42" fill="currentColor" />
+      <path d="M9.25 10.45c.2.26.45.4.75.4.3 0 .55-.14.75-.4" stroke="currentColor" stroke-width="1.05" stroke-linecap="round" />
+    </svg>
+  )
+}
+
+function PlanetRingIcon() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="none" class="h-5 w-5" aria-hidden="true">
+      <circle cx="10" cy="10" r="2.8" stroke="currentColor" stroke-width="1.35" />
+      <ellipse cx="10" cy="10" rx="7.2" ry="3.55" stroke="currentColor" stroke-width="1.2" />
+      <path d="M9.6 6.35 8.6 10h1.4l-.6 3.65 2.35-4.35h-1.5l.95-2.95Z" fill="currentColor" />
     </svg>
   )
 }
@@ -61,17 +90,6 @@ function GamepadIcon() {
   )
 }
 
-function CampfireIcon() {
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-5 w-5" aria-hidden="true">
-      <rect x="3.5" y="13.5" width="13" height="2" rx="1" transform="rotate(25 10 14.5)" opacity="0.6" />
-      <rect x="3.5" y="13.5" width="13" height="2" rx="1" transform="rotate(-25 10 14.5)" opacity="0.6" />
-      <path d="M10 2.25c-2.2 2.33-3.5 4.7-3.5 6.85 0 2.55 1.74 4.4 3.5 4.4s3.5-1.85 3.5-4.4c0-2.15-1.3-4.52-3.5-6.85Z" />
-      <path d="M10 6.2c-1.12 1.25-1.75 2.53-1.75 3.68 0 1.36.86 2.35 1.75 2.35s1.75-.99 1.75-2.35c0-1.15-.63-2.43-1.75-3.68Z" opacity="0.7" />
-    </svg>
-  )
-}
-
 export function TemplateMark(props: TemplateMarkProps) {
   const meta = createMemo<TemplateMarkInfo>(() => {
     const kind = templateKind(props.templateId)
@@ -88,7 +106,7 @@ export function TemplateMark(props: TemplateMarkProps) {
         label: "Don't Starve Together",
         class:
           'border-amber-200 bg-amber-50/80 text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-200',
-        icon: <CampfireIcon />,
+        icon: <DstWilsonIcon />,
       }
     }
     if (kind === 'terraria') {
@@ -97,6 +115,14 @@ export function TemplateMark(props: TemplateMarkProps) {
         class:
           'border-sky-200 bg-sky-50/80 text-sky-900 dark:border-sky-900/40 dark:bg-sky-950/20 dark:text-sky-200',
         icon: <TreeIcon />,
+      }
+    }
+    if (kind === 'dsp') {
+      return {
+        label: 'Dyson Sphere Program',
+        class:
+          'border-violet-200 bg-violet-50/80 text-violet-900 dark:border-violet-900/40 dark:bg-violet-950/20 dark:text-violet-200',
+        icon: <PlanetRingIcon />,
       }
     }
     if (kind === 'demo') {

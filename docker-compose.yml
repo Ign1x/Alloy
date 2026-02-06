@@ -11,6 +11,7 @@ services:
     restart: unless-stopped
 
   alloy-agent:
+    image: alloy-agent-local:latest
     build:
       context: .
       dockerfile: deploy/agent.Dockerfile
@@ -23,6 +24,20 @@ services:
     environment:
       - RUST_LOG=info
       - ALLOY_DATA_ROOT=/data
+      # Secure-by-default instance sandboxing.
+      - ALLOY_SANDBOX_DEFAULT_ENABLED=true
+      # auto: prefer docker per-instance containers, then bwrap, then native.
+      - ALLOY_SANDBOX_MODE=auto
+      - ALLOY_SANDBOX_DOCKER_ENABLED=true
+      - ALLOY_SANDBOX_FORCE_MODE=docker
+      - ALLOY_SANDBOX_DOCKER_IMAGE=alloy-agent-local:latest
+      - ALLOY_SANDBOX_DOCKER_DATA_VOLUME=alloy-agent-data
+      # Best-effort cgroup v2 quota enforcement (memory/cpu/pids).
+      - ALLOY_SANDBOX_ENABLE_CGROUPS=true
+      - ALLOY_SANDBOX_MEMORY_MB_DEFAULT=4096
+      - ALLOY_SANDBOX_PIDS_LIMIT_DEFAULT=512
+      - ALLOY_SANDBOX_NOFILE_LIMIT_DEFAULT=8192
+      - ALLOY_SANDBOX_CPU_MILLICORES_DEFAULT=2000
       # Enable filesystem write operations (mkdir/write/rename/remove) via the agent FS service.
       # Without this, the UI can only browse/read files.
       - ALLOY_FS_WRITE_ENABLED=true
@@ -32,6 +47,8 @@ services:
       - ALLOY_NODE_NAME=default
     volumes:
       - alloy-agent-data:/data
+      # Required for per-instance `docker run` sandbox mode.
+      - /var/run/docker.sock:/var/run/docker.sock
     restart: unless-stopped
 
   alloy-control:

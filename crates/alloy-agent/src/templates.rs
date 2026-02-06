@@ -40,6 +40,28 @@ fn param_string(
     }
 }
 
+fn param_string_advanced(
+    key: &str,
+    label: &str,
+    required: bool,
+    default_value: &str,
+    enum_values: Vec<&str>,
+    placeholder: &str,
+    help: &str,
+) -> TemplateParam {
+    let mut p = param_string(
+        key,
+        label,
+        required,
+        default_value,
+        enum_values,
+        placeholder,
+        help,
+    );
+    p.advanced = true;
+    p
+}
+
 fn param_int(
     key: &str,
     label: &str,
@@ -64,6 +86,142 @@ fn param_int(
         help: help.to_string(),
         advanced: false,
     }
+}
+
+fn param_int_advanced(
+    key: &str,
+    label: &str,
+    required: bool,
+    default_value: &str,
+    min_int: i64,
+    max_int: i64,
+    placeholder: &str,
+    help: &str,
+) -> TemplateParam {
+    let mut p = param_int(
+        key,
+        label,
+        required,
+        default_value,
+        min_int,
+        max_int,
+        placeholder,
+        help,
+    );
+    p.advanced = true;
+    p
+}
+
+fn param_bool_advanced(
+    key: &str,
+    label: &str,
+    required: bool,
+    default_value: bool,
+    help: &str,
+) -> TemplateParam {
+    let mut p = param_bool(key, label, required, default_value, help);
+    p.advanced = true;
+    p
+}
+
+fn sandbox_params() -> Vec<TemplateParam> {
+    vec![
+        param_bool_advanced(
+            "sandbox_enabled",
+            "Sandbox enabled",
+            false,
+            true,
+            "Enable sandbox isolation wrapper + resource limits for this instance.",
+        ),
+        param_string_advanced(
+            "sandbox_mode",
+            "Sandbox mode",
+            false,
+            "auto",
+            vec!["auto", "docker", "bwrap", "native", "off"],
+            "auto",
+            "Per-instance sandbox backend override.",
+        ),
+        param_int_advanced(
+            "sandbox_memory_mb",
+            "Sandbox memory (MiB)",
+            false,
+            "4096",
+            256,
+            131072,
+            "4096",
+            "Hard memory ceiling. 0 means unlimited (not recommended).",
+        ),
+        param_int_advanced(
+            "sandbox_pids_limit",
+            "Sandbox PID limit",
+            false,
+            "512",
+            32,
+            32768,
+            "512",
+            "Maximum process count for the instance process tree.",
+        ),
+        param_int_advanced(
+            "sandbox_nofile_limit",
+            "Sandbox open files",
+            false,
+            "8192",
+            256,
+            1048576,
+            "8192",
+            "Maximum number of open file descriptors.",
+        ),
+        param_int_advanced(
+            "sandbox_cpu_millicores",
+            "Sandbox CPU (millicores)",
+            false,
+            "2000",
+            100,
+            64000,
+            "2000",
+            "CPU quota hint for cgroup (1000 = 1 core).",
+        ),
+        param_string_advanced(
+            "restart_policy",
+            "Restart policy",
+            false,
+            "off",
+            vec!["off", "always", "on-failure"],
+            "off",
+            "Auto-restart behavior after process exit.",
+        ),
+        param_int_advanced(
+            "restart_max_retries",
+            "Restart max retries",
+            false,
+            "10",
+            0,
+            1000,
+            "10",
+            "Maximum auto-restart attempts.",
+        ),
+        param_int_advanced(
+            "restart_backoff_ms",
+            "Restart backoff (ms)",
+            false,
+            "1000",
+            100,
+            600000,
+            "1000",
+            "Initial restart delay in milliseconds.",
+        ),
+        param_int_advanced(
+            "restart_backoff_max_ms",
+            "Restart max backoff (ms)",
+            false,
+            "30000",
+            100,
+            3600000,
+            "30000",
+            "Maximum restart delay in milliseconds.",
+        ),
+    ]
 }
 
 fn param_bool(
@@ -115,7 +273,7 @@ fn param_secret(
 pub fn list_templates() -> Vec<ProcessTemplate> {
     // Phase 1: hardcoded templates to avoid turning the control plane into RCE.
     // These are demos; game adapters will provide real templates later.
-    vec![
+    let mut templates = vec![
         ProcessTemplate {
             template_id: "demo:sleep".to_string(),
             display_name: "Demo: sleep".to_string(),
@@ -384,6 +542,90 @@ pub fn list_templates() -> Vec<ProcessTemplate> {
             graceful_stdin: Some("exit\n".to_string()),
         },
         ProcessTemplate {
+            template_id: "dsp:nebula".to_string(),
+            display_name: "Dyson Sphere Program: Nebula".to_string(),
+            // Placeholder; spawn spec is prepared by the dsp module.
+            command: "sh".to_string(),
+            args: vec![],
+            params: vec![
+                param_int(
+                    "port",
+                    "Port",
+                    false,
+                    "0",
+                    0,
+                    65535,
+                    "8469 (leave blank for auto)",
+                    "TCP port to bind. Use 0 or leave blank to auto-assign a free port.",
+                ),
+                param_string(
+                    "startup_mode",
+                    "Startup mode",
+                    false,
+                    "auto",
+                    vec![
+                        "auto",
+                        "load_latest",
+                        "load",
+                        "newgame_default",
+                        "newgame_cfg",
+                    ],
+                    "auto",
+                    "How to start the server save flow. load requires save_name.",
+                ),
+                param_string(
+                    "save_name",
+                    "Save name",
+                    false,
+                    "",
+                    Vec::new(),
+                    "MyFactory",
+                    "Used only when startup_mode=load. Do not include .dsv.",
+                ),
+                param_secret(
+                    "server_password",
+                    "Server password",
+                    false,
+                    "",
+                    "Optional join password for players.",
+                ),
+                param_secret(
+                    "remote_access_password",
+                    "Remote access password",
+                    false,
+                    "",
+                    "Optional password for Nebula remote server commands.",
+                ),
+                param_bool(
+                    "auto_pause_enabled",
+                    "Auto pause when empty",
+                    false,
+                    false,
+                    "If true, server auto-pauses when no players are connected.",
+                ),
+                param_int(
+                    "ups",
+                    "UPS",
+                    false,
+                    "60",
+                    1,
+                    240,
+                    "60",
+                    "Simulation UPS passed as -ups (1..240).",
+                ),
+                param_string(
+                    "wine_bin",
+                    "Wine binary",
+                    false,
+                    "wine64",
+                    Vec::new(),
+                    "wine64",
+                    "Wine executable used to run DSPGAME.exe (default wine64).",
+                ),
+            ],
+            graceful_stdin: None,
+        },
+        ProcessTemplate {
             template_id: "dst:vanilla".to_string(),
             display_name: "Don't Starve Together".to_string(),
             command: "./dontstarve_dedicated_server_nullrenderer".to_string(),
@@ -455,7 +697,15 @@ pub fn list_templates() -> Vec<ProcessTemplate> {
             ],
             graceful_stdin: None,
         },
-    ]
+    ];
+
+    for t in &mut templates {
+        if t.template_id != "demo:sleep" {
+            t.params.extend(sandbox_params());
+        }
+    }
+
+    templates
 }
 
 pub fn find_template(template_id: &str) -> Option<ProcessTemplate> {
@@ -528,6 +778,10 @@ pub fn apply_params(
 
     if t.template_id == "dst:vanilla" {
         let _ = crate::dst::validate_vanilla_params(params)?;
+    }
+
+    if t.template_id == "dsp:nebula" {
+        let _ = crate::dsp::validate_nebula_params(params)?;
     }
 
     Ok(t)

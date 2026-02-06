@@ -154,6 +154,7 @@ async fn ensure_persisted_ports(inst: &mut PersistedInstance) -> Result<(), Stat
         | "minecraft:modrinth"
         | "minecraft:import"
         | "minecraft:curseforge"
+        | "dsp:nebula"
         | "terraria:vanilla" => {
             let current = inst.params.get("port").map(|s| s.trim()).unwrap_or("");
             if current.is_empty() || current == "0" {
@@ -842,6 +843,69 @@ impl InstanceService for InstanceApi {
                     let _ = std::fs::remove_dir_all(&extracted_root);
 
                     return Ok(("dst cluster imported".to_string(), target, backup));
+                }
+
+                if template_id == "dsp:nebula" {
+                    let is_zip = is_zip_hint || file_magic_is_zip(&download_path2);
+                    if !is_zip {
+                        return Err(Status::invalid_argument(
+                            "dsp save import expects a .zip containing .dsv save files",
+                        ));
+                    }
+
+                    let extracted_root = imports_dir2.join(format!("extracted-{nonce}"));
+                    extract_zip_safely(&download_path2, &extracted_root).map_err(|e| {
+                        Status::invalid_argument(format!("failed to extract zip: {e}"))
+                    })?;
+
+                    let mut dsv = find_single_file_by_suffix(&extracted_root, ".dsv")
+                        .map_err(|e| Status::invalid_argument(format!("invalid dsp save: {e}")))?;
+                    // Prefer requested save_name when provided and present in archive.
+                    if let Some(requested) = params
+                        .get("save_name")
+                        .map(|s| s.trim())
+                        .filter(|s| !s.is_empty())
+                    {
+                        let candidate = extracted_root.join(format!("{requested}.dsv"));
+                        if candidate.is_file() {
+                            dsv = candidate;
+                        }
+                    }
+
+                    let save_name = dsv
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .filter(|s| !s.is_empty())
+                        .unwrap_or("autosave")
+                        .to_string();
+
+                    let users_dir = instance_dir2
+                        .join("wineprefix")
+                        .join("drive_c")
+                        .join("users")
+                        .join("steamuser")
+                        .join("Documents")
+                        .join("Dyson Sphere Program")
+                        .join("Save");
+                    std::fs::create_dir_all(&users_dir).map_err(|e| {
+                        Status::internal(format!("failed to create dsp save dir: {e}"))
+                    })?;
+                    let target = users_dir.join(format!("{save_name}.dsv"));
+
+                    let mut backup: Option<PathBuf> = None;
+                    if target.exists() {
+                        let backup_path = users_dir.join(format!("{save_name}.backup_{nonce}.dsv"));
+                        std::fs::rename(&target, &backup_path).map_err(|e| {
+                            Status::internal(format!("failed to backup existing save: {e}"))
+                        })?;
+                        backup = Some(backup_path);
+                    }
+
+                    std::fs::rename(&dsv, &target)
+                        .map_err(|e| Status::internal(format!("failed to install save: {e}")))?;
+                    let _ = std::fs::remove_dir_all(&extracted_root);
+
+                    return Ok(("dsp save imported".to_string(), target, backup));
                 }
 
                 Err(Status::unimplemented(
