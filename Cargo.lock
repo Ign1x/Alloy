@@ -104,6 +104,7 @@ dependencies = [
  "reqwest",
  "rspc",
  "rspc-axum",
+ "rspc-procedure",
  "sea-orm",
  "sea-orm-migration",
  "serde",

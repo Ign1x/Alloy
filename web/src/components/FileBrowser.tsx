@@ -1,7 +1,7 @@
 import { createEffect, createMemo, createSignal, For, Show } from 'solid-js'
 import { isAlloyApiError, rspc } from '../rspc'
 import { Badge } from './ui/Badge'
-import { Button } from './ui/Button'
+import { cn } from './ui/cn'
 import { EmptyState } from './ui/EmptyState'
 import { ErrorState } from './ui/ErrorState'
 import { IconButton } from './ui/IconButton'
@@ -87,11 +87,11 @@ function highlightJsonLine(line: string) {
       const after = line.slice(m.index + token.length)
       const isKey = /^\s*:/.test(after)
       parts.push(
-        <span class={isKey ? 'text-sky-300' : 'text-emerald-300'}>{str}</span>,
+        <span class={isKey ? 'text-sky-700 dark:text-sky-300' : 'text-emerald-700 dark:text-emerald-300'}>{str}</span>,
       )
-    } else if (num) parts.push(<span class="text-violet-300">{num}</span>)
-    else if (kw) parts.push(<span class="text-amber-300">{kw}</span>)
-    else if (punc) parts.push(<span class="text-slate-400">{punc}</span>)
+    } else if (num) parts.push(<span class="text-violet-700 dark:text-violet-300">{num}</span>)
+    else if (kw) parts.push(<span class="text-amber-700 dark:text-amber-300">{kw}</span>)
+    else if (punc) parts.push(<span class="text-slate-500 dark:text-slate-400">{punc}</span>)
     else parts.push(token)
     last = m.index + token.length
   }
@@ -106,9 +106,9 @@ function highlightKeyValueLine(line: string) {
   return (
     <>
       {indent}
-      <span class="text-sky-300">{key}</span>
-      <span class="text-slate-400">{sep}</span>
-      <span class="text-emerald-300">{rest}</span>
+      <span class="text-sky-700 dark:text-sky-300">{key}</span>
+      <span class="text-slate-500 dark:text-slate-400">{sep}</span>
+      <span class="text-emerald-700 dark:text-emerald-300">{rest}</span>
     </>
   )
 }
@@ -194,6 +194,15 @@ export function FileBrowser(props: FileBrowserProps) {
   })
 
   createEffect(() => setPathDraft(path()))
+
+  const resolvedPathDraft = createMemo(() => {
+    const draft = normalizePath(pathDraft())
+    const root = rootPath()
+    if (root && draft && !draft.startsWith(root)) return `${root}/${draft}`
+    return draft || root
+  })
+
+  const canNavigateToDraft = createMemo(() => resolvedPathDraft() !== path())
 
   function navigate(nextRaw: string, mode: 'push' | 'replace' = 'push') {
     const root = rootPath()
@@ -370,18 +379,37 @@ export function FileBrowser(props: FileBrowserProps) {
   const [goLineDraft, setGoLineDraft] = createSignal('')
   let codeScrollEl: HTMLDivElement | undefined
 
+  const goLineNumber = createMemo(() => {
+    const raw = goLineDraft().trim()
+    if (!raw) return null
+    const n = Number.parseInt(raw, 10)
+    if (!Number.isFinite(n) || n <= 0) return null
+    return n
+  })
+
+  const goLineInvalid = createMemo(() => {
+    const raw = goLineDraft().trim()
+    if (!raw) return false
+    const n = goLineNumber()
+    if (n == null) return true
+    const max = fileLines().length
+    if (max > 0 && n > max) return true
+    return false
+  })
+
   function jumpToLine() {
-    const n = Number.parseInt(goLineDraft().trim(), 10)
-    if (!Number.isFinite(n) || n <= 0) return
+    const n = goLineNumber()
+    if (n == null) return
+    const max = fileLines().length
+    if (max > 0 && n > max) return
     const idx = n - 1
     const lh = 18
     if (codeScrollEl) codeScrollEl.scrollTop = Math.max(0, idx * lh - codeScrollEl.clientHeight * 0.25)
   }
 
   return (
-    <div class={props.class}>
-      <div class="flex min-h-0 flex-1 flex-col md:flex-row">
-        <aside class="flex w-full flex-none flex-col border-b border-slate-200 bg-white/60 dark:border-slate-800 dark:bg-slate-950/60 md:w-[420px] md:border-b-0 md:border-r max-h-[45vh] md:max-h-none">
+    <div class={cn('flex min-h-0 flex-1 flex-col md:flex-row', props.class)}>
+      <aside class="flex w-full flex-none flex-col border-b border-slate-200 bg-white/60 dark:border-slate-800 dark:bg-slate-950/60 md:w-[420px] md:border-b-0 md:border-r max-h-[45vh] md:max-h-none">
           <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-white/60 px-4 py-3 dark:border-slate-800 dark:bg-slate-950/60">
             <div class="min-w-0">
               <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">{props.title ?? 'Files'}</div>
@@ -486,23 +514,39 @@ export function FileBrowser(props: FileBrowserProps) {
             </div>
 
             <form
-              class="mt-2 flex items-center gap-2"
+              class="mt-2"
               onSubmit={(e) => {
                 e.preventDefault()
-                const draft = normalizePath(pathDraft())
-                const root = rootPath()
-                if (root && draft && !draft.startsWith(root)) navigate(`${root}/${draft}`)
-                else navigate(draft)
+                navigate(resolvedPathDraft())
               }}
             >
               <Input
                 value={pathDraft()}
                 onInput={(e) => setPathDraft(e.currentTarget.value)}
                 placeholder={rootPath() ? 'Type a path (relative to this root)' : 'Type a path (relative to /data)'}
+                rightIcon={
+                  <button
+                    type="submit"
+                    class={cn(
+                      'rounded-lg p-1.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/35 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:focus-visible:ring-amber-400/35 dark:focus-visible:ring-offset-slate-950',
+                      canNavigateToDraft()
+                        ? 'hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-900/60 dark:hover:text-slate-200'
+                        : '',
+                    )}
+                    disabled={!canNavigateToDraft()}
+                    aria-label="Go"
+                    title={canNavigateToDraft() ? 'Go (Enter)' : 'Already here'}
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
+                      <path
+                        fill-rule="evenodd"
+                        d="M3 10a.75.75 0 01.75-.75h10.638L10.22 5.28a.75.75 0 111.06-1.06l5.25 5.25a.75.75 0 010 1.06l-5.25 5.25a.75.75 0 11-1.06-1.06l4.168-4.17H3.75A.75.75 0 013 10z"
+                        clip-rule="evenodd"
+                      />
+                    </svg>
+                  </button>
+                }
               />
-              <Button size="xs" variant="secondary" type="submit">
-                Go
-              </Button>
             </form>
           </div>
 
@@ -610,21 +654,20 @@ export function FileBrowser(props: FileBrowserProps) {
               </Show>
             </Show>
           </div>
-        </aside>
+      </aside>
 
-        <section class="min-w-0 flex-1 overflow-auto bg-transparent p-4">
-          <div class="mx-auto w-full max-w-[min(72rem,92%)]">
-            <Show
-              when={selectedFile()}
-              fallback={
-                <EmptyState
-                  title="Select a file"
-                  description="Pick a file from the left to preview its contents."
-                />
-              }
-            >
-              {(file) => (
-              <div class="space-y-3">
+      <section class="min-w-0 flex-1 overflow-hidden bg-transparent p-4">
+        <div class="mx-auto flex h-full w-full max-w-[min(72rem,92%)] flex-col">
+          <Show
+            when={selectedFile()}
+            fallback={
+              <div class="flex flex-1 items-center justify-center">
+                <EmptyState title="Select a file" description="Pick a file from the left to preview its contents." />
+              </div>
+            }
+          >
+            {(file) => (
+            <div class="flex min-h-0 flex-1 flex-col gap-3">
                 <div class="flex flex-wrap items-start justify-between gap-3 rounded-2xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
                   <div class="min-w-0">
                     <div class="truncate font-mono text-sm font-semibold text-slate-900 dark:text-slate-100">{selectedFileName()}</div>
@@ -694,6 +737,7 @@ export function FileBrowser(props: FileBrowserProps) {
                       onLiveChange={setLogLive}
                       onClear={() => setLogLines([])}
                       storageKey={`alloy.filelog.${file()}`}
+                      class="min-h-0 flex-1"
                     />
                   </Show>
                 </Show>
@@ -731,53 +775,74 @@ export function FileBrowser(props: FileBrowserProps) {
                     }
                   >
                     <Show when={fileText.data?.text != null}>
-                      <div class="flex flex-wrap items-center justify-between gap-2">
-                        <form
-                          class="flex items-center gap-2"
-                          onSubmit={(e) => {
-                            e.preventDefault()
-                            jumpToLine()
-                          }}
-                        >
-                          <Input
-                            value={goLineDraft()}
-                            onInput={(e) => setGoLineDraft(e.currentTarget.value)}
-                            class="w-28"
-                            placeholder="Go to line"
-                          />
-                          <Button size="xs" variant="secondary" type="submit">
-                            Go
-                          </Button>
-                        </form>
-                        <div class="text-[11px] text-slate-500 dark:text-slate-400">{fileLines().length} lines</div>
-                      </div>
+                      <div class="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white/70 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
+                        <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-white/50 px-3 py-2 dark:border-slate-800 dark:bg-slate-950/30">
+                          <form
+                            class="flex items-center gap-2"
+                            onSubmit={(e) => {
+                              e.preventDefault()
+                              jumpToLine()
+                            }}
+                          >
+                            <Input
+                              value={goLineDraft()}
+                              onInput={(e) => setGoLineDraft(e.currentTarget.value)}
+                              class="w-28"
+                              placeholder="Line #"
+                              invalid={goLineInvalid()}
+                              rightIcon={
+                                <button
+                                  type="submit"
+                                  class={cn(
+                                    'rounded-lg p-1.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/35 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:focus-visible:ring-amber-400/35 dark:focus-visible:ring-offset-slate-950',
+                                    !goLineInvalid() && goLineDraft().trim()
+                                      ? 'hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-900/60 dark:hover:text-slate-200'
+                                      : '',
+                                  )}
+                                  disabled={goLineInvalid() || !goLineDraft().trim()}
+                                  aria-label="Go to line"
+                                  title="Go (Enter)"
+                                >
+                                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
+                                    <path
+                                      fill-rule="evenodd"
+                                      d="M3 10a.75.75 0 01.75-.75h10.638L10.22 5.28a.75.75 0 111.06-1.06l5.25 5.25a.75.75 0 010 1.06l-5.25 5.25a.75.75 0 11-1.06-1.06l4.168-4.17H3.75A.75.75 0 013 10z"
+                                      clip-rule="evenodd"
+                                    />
+                                  </svg>
+                                </button>
+                              }
+                            />
+                          </form>
+                          <div class="font-mono text-[11px] text-slate-500 dark:text-slate-400">{fileLines().length} lines</div>
+                        </div>
 
-                      <VirtualLines
-                        lines={fileLines()}
-                        wrap={false}
-                        showLineNumbers={true}
-                        fontSize={12}
-                        lineHeight={18}
-                        onScrollEl={(el) => {
-                          codeScrollEl = el
-                        }}
-                        class="mt-3 !bg-slate-950 !text-slate-100 !border-slate-800"
-                        renderLine={(line) => {
-                          const lang = fileLanguage()
-                          if (lang === 'json') return highlightJsonLine(line)
-                          if (lang === 'yaml' || lang === 'toml' || lang === 'ini') return highlightKeyValueLine(line)
-                          return line
-                        }}
-                      />
+                        <VirtualLines
+                          lines={fileLines()}
+                          wrap={false}
+                          showLineNumbers={true}
+                          fontSize={12}
+                          lineHeight={18}
+                          onScrollEl={(el) => {
+                            codeScrollEl = el
+                          }}
+                          class="!rounded-none !border-0 !bg-transparent flex-1 min-h-0"
+                          renderLine={(line) => {
+                            const lang = fileLanguage()
+                            if (lang === 'json') return highlightJsonLine(line)
+                            if (lang === 'yaml' || lang === 'toml' || lang === 'ini') return highlightKeyValueLine(line)
+                            return line
+                          }}
+                        />
+                      </div>
                     </Show>
                   </Show>
                 </Show>
               </div>
             )}
-            </Show>
-          </div>
-        </section>
-      </div>
+          </Show>
+        </div>
+      </section>
     </div>
   )
 }

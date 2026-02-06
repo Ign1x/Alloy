@@ -30,6 +30,8 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value)
 }
 
+const API_ERROR_JSON_PREFIX = 'ALLOY_API_ERROR_JSON:'
+
 function toErrorString(value: unknown): string {
   if (value == null) return ''
   if (typeof value === 'string') return value
@@ -51,6 +53,24 @@ function parseFieldErrors(value: unknown): Record<string, string> | undefined {
   return Object.keys(out).length > 0 ? out : undefined
 }
 
+function parseApiErrorFromLegacyMessage(raw: string): AlloyApiErrorData | null {
+  const s = raw.trim()
+  if (!s.startsWith(API_ERROR_JSON_PREFIX)) return null
+  const json = s.slice(API_ERROR_JSON_PREFIX.length).trim()
+  if (!json) return null
+  try {
+    const value = JSON.parse(json) as unknown
+    if (!isPlainObject(value)) return null
+    if (typeof value.code !== 'string' || typeof value.message !== 'string') return null
+    const request_id = typeof value.request_id === 'string' ? value.request_id : ''
+    const field_errors = parseFieldErrors((value as any).field_errors ?? (value as any).fieldErrors)
+    const hint = typeof (value as any).hint === 'string' ? (value as any).hint : null
+    return { code: value.code, message: value.message, request_id, field_errors, hint }
+  } catch {
+    return null
+  }
+}
+
 type OperationType = 'query' | 'mutation' | 'subscription' | 'subscriptionStop'
 
 class AlloyFetchTransport {
@@ -68,6 +88,31 @@ class AlloyFetchTransport {
     meta: { key: string; operation: OperationType; httpStatus: number; requestId: string },
   ): AlloyApiError {
     if (isPlainObject(data)) {
+      const legacyMsg =
+        typeof data.message === 'string'
+          ? data.message
+          : typeof data.error === 'string'
+            ? data.error
+            : ''
+      if (legacyMsg.trim()) {
+        const parsed = parseApiErrorFromLegacyMessage(legacyMsg)
+        if (parsed) {
+          return new AlloyApiError({
+            ...parsed,
+            request_id: parsed.request_id || meta.requestId,
+          })
+        }
+        const raw = legacyMsg.trim()
+        if (raw.startsWith('Resolver(') || raw.includes('ResolverError')) {
+          return new AlloyApiError({
+            code: 'internal',
+            message: 'Backend resolver error. Please retry.',
+            request_id: meta.requestId,
+            hint: raw,
+          })
+        }
+      }
+
       const code =
         typeof data.code === 'string'
           ? data.code
@@ -100,6 +145,13 @@ class AlloyFetchTransport {
 
     if (typeof data === 'string' && data.trim()) {
       const raw = data.trim()
+      const parsed = parseApiErrorFromLegacyMessage(raw)
+      if (parsed) {
+        return new AlloyApiError({
+          ...parsed,
+          request_id: parsed.request_id || meta.requestId,
+        })
+      }
       if (raw.startsWith('Resolver(') || raw.includes('ResolverError')) {
         return new AlloyApiError({
           code: 'internal',

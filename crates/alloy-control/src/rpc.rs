@@ -18,6 +18,9 @@ use std::{
 use crate::agent_transport::AgentTransport;
 use crate::audit;
 
+const SETTING_DST_DEFAULT_KLEI_KEY: &str = "dst.default_klei_key";
+const SETTING_CURSEFORGE_API_KEY: &str = "minecraft.curseforge_api_key";
+
 fn random_token(n: usize) -> String {
     use base64::Engine;
     use rand::RngCore;
@@ -45,6 +48,24 @@ fn normalize_node_name(name: &str) -> Result<String, ()> {
     if !n
         .chars()
         .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+    {
+        return Err(());
+    }
+    Ok(n.to_string())
+}
+
+fn normalize_frp_node_name(name: &str) -> Result<String, ()> {
+    let n = name.trim();
+    if n.is_empty() {
+        return Err(());
+    }
+    if n.len() > 64 {
+        return Err(());
+    }
+    // Allow spaces but keep it simple/safe for UI.
+    if !n
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | ' '))
     {
         return Err(());
     }
@@ -97,7 +118,14 @@ pub struct ApiError {
 impl rspc::Error for ApiError {
     fn into_procedure_error(self) -> ProcedureError {
         // Keep error payload intentionally minimal/safe for frontend.
-        ResolverError::new(self, Option::<std::io::Error>::None).into()
+        //
+        // NOTE: rspc-axum's legacy JSON-RPC executor currently discards the resolver value and only
+        // forwards a string message. Use `LegacyErrorInterop` to preserve a structured error for the
+        // frontend while still remaining compatible with future non-legacy executors.
+        let msg = serde_json::to_string(&self)
+            .map(|json| format!("ALLOY_API_ERROR_JSON:{json}"))
+            .unwrap_or_else(|_| format!("ALLOY_API_ERROR:{}", self.message));
+        ResolverError::new(self, Some(rspc_procedure::LegacyErrorInterop(msg))).into()
     }
 }
 
@@ -463,6 +491,38 @@ pub struct NodeDto {
     pub last_error: Option<String>,
 }
 
+#[derive(Debug, Clone, serde::Serialize, Type)]
+pub struct FrpNodeDto {
+    pub id: String,
+    pub name: String,
+    pub config: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, serde::Deserialize, Type)]
+pub struct FrpNodeCreateInput {
+    pub name: String,
+    pub config: String,
+}
+
+#[derive(Debug, Clone, serde::Deserialize, Type)]
+pub struct FrpNodeUpdateInput {
+    pub id: String,
+    pub name: String,
+    pub config: String,
+}
+
+#[derive(Debug, Clone, serde::Deserialize, Type)]
+pub struct FrpNodeDeleteInput {
+    pub id: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize, Type)]
+pub struct FrpNodeDeleteOutput {
+    pub ok: bool,
+}
+
 #[derive(Debug, Clone, serde::Deserialize, Type)]
 pub struct NodeCreateInput {
     pub name: String,
@@ -534,6 +594,45 @@ pub struct UpdateInstanceInput {
     pub instance_id: String,
     pub params: std::collections::BTreeMap<String, String>,
     pub display_name: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, Type)]
+pub struct SettingsStatusOutput {
+    pub dst_default_klei_key_set: bool,
+    pub curseforge_api_key_set: bool,
+}
+
+#[derive(Debug, Clone, serde::Deserialize, Type)]
+pub struct SetDstDefaultKleiKeyInput {
+    pub key: String,
+}
+
+#[derive(Debug, Clone, serde::Deserialize, Type)]
+pub struct SetCurseforgeApiKeyInput {
+    pub key: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize, Type)]
+pub struct UpdateLatestReleaseDto {
+    pub tag: String,
+    pub version: Option<String>,
+    pub url: String,
+    pub published_at: Option<String>,
+    pub body: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, Type)]
+pub struct UpdateCheckOutput {
+    pub current_version: String,
+    pub latest: Option<UpdateLatestReleaseDto>,
+    pub update_available: bool,
+    pub can_trigger_update: bool,
+}
+
+#[derive(Debug, Clone, serde::Serialize, Type)]
+pub struct UpdateTriggerOutput {
+    pub ok: bool,
+    pub message: String,
 }
 
 #[derive(Debug, Clone, serde::Deserialize, Type)]
@@ -666,6 +765,71 @@ fn clamp_u64_to_u32(v: u64) -> u32 {
 
 fn agent_transport(ctx: &Ctx) -> AgentTransport {
     AgentTransport::new(ctx.agent_hub.clone())
+}
+
+async fn setting_get(
+    db: &alloy_db::sea_orm::DatabaseConnection,
+    key: &str,
+) -> Result<Option<String>, sea_orm::DbErr> {
+    use alloy_db::entities::settings;
+    use sea_orm::EntityTrait;
+    Ok(settings::Entity::find_by_id(key.to_string())
+        .one(db)
+        .await?
+        .map(|m| m.value))
+}
+
+async fn setting_is_set(
+    db: &alloy_db::sea_orm::DatabaseConnection,
+    key: &str,
+) -> Result<bool, sea_orm::DbErr> {
+    Ok(setting_get(db, key)
+        .await?
+        .is_some_and(|v| !v.trim().is_empty()))
+}
+
+async fn setting_set_secret(
+    db: &alloy_db::sea_orm::DatabaseConnection,
+    key: &str,
+    value: &str,
+) -> Result<(), sea_orm::DbErr> {
+    use alloy_db::entities::settings;
+    use sea_orm::{EntityTrait, Set};
+
+    let now: sea_orm::prelude::DateTimeWithTimeZone = chrono::Utc::now().into();
+    let model = settings::ActiveModel {
+        key: Set(key.to_string()),
+        value: Set(value.to_string()),
+        is_secret: Set(true),
+        created_at: Set(now),
+        updated_at: Set(now),
+    };
+
+    settings::Entity::insert(model)
+        .on_conflict(
+            sea_orm::sea_query::OnConflict::column(settings::Column::Key)
+                .update_columns([
+                    settings::Column::Value,
+                    settings::Column::IsSecret,
+                    settings::Column::UpdatedAt,
+                ])
+                .to_owned(),
+        )
+        .exec(db)
+        .await?;
+    Ok(())
+}
+
+async fn setting_clear(
+    db: &alloy_db::sea_orm::DatabaseConnection,
+    key: &str,
+) -> Result<(), sea_orm::DbErr> {
+    use alloy_db::entities::settings;
+    use sea_orm::EntityTrait;
+    let _ = settings::Entity::delete_by_id(key.to_string())
+        .exec(db)
+        .await?;
+    Ok(())
 }
 
 pub fn router() -> Router<Ctx> {
@@ -1236,13 +1400,63 @@ pub fn router() -> Router<Ctx> {
                     ensure_writable(&ctx)?;
                     enforce_rate_limit(&ctx)?;
 
+                    let mut params = input.params;
+
+                    // Defaults and control-plane settings injection.
+                    if input.template_id == "dst:vanilla" {
+                        let current = params.get("cluster_token").map(|s| s.trim()).unwrap_or("");
+                        if current.is_empty() {
+                            if let Some(v) = setting_get(&*ctx.db, SETTING_DST_DEFAULT_KLEI_KEY)
+                                .await
+                                .map_err(|e| {
+                                    api_error(&ctx, "db_error", format!("db error: {e}"))
+                                })?
+                            {
+                                let v = v.trim().to_string();
+                                if !v.is_empty() {
+                                    params.insert("cluster_token".to_string(), v);
+                                }
+                            }
+                        }
+                    }
+
+                    if input.template_id == "minecraft:curseforge" {
+                        let current = params
+                            .get("curseforge_api_key")
+                            .map(|s| s.trim())
+                            .unwrap_or("");
+                        if current.is_empty() {
+                            let v = setting_get(&*ctx.db, SETTING_CURSEFORGE_API_KEY)
+                                .await
+                                .map_err(|e| {
+                                    api_error(&ctx, "db_error", format!("db error: {e}"))
+                                })?;
+                            let Some(v) = v else {
+                                return Err(api_error(
+                                    &ctx,
+                                    "missing_setting",
+                                    "CurseForge API key is not configured",
+                                ));
+                            };
+                            let v = v.trim().to_string();
+                            if v.is_empty() {
+                                return Err(api_error(
+                                    &ctx,
+                                    "missing_setting",
+                                    "CurseForge API key is not configured",
+                                ));
+                            }
+                            params.insert("curseforge_api_key".to_string(), v);
+                        }
+                    }
+
                     let transport = agent_transport(&ctx);
                     let resp: alloy_proto::agent_v1::CreateInstanceResponse = transport
                         .call(
                             "/alloy.agent.v1.InstanceService/Create",
                             CreateInstanceRequest {
                                 template_id: input.template_id,
-                                params: input.params.into_iter().collect(),
+                                params: params.into_iter().collect(),
                                 display_name: input.display_name.unwrap_or_default(),
                             },
                         )
@@ -1916,11 +2130,491 @@ pub fn router() -> Router<Ctx> {
         }),
     );
 
+    let settings = Router::new()
+        .procedure(
+            "status",
+            Procedure::builder::<ApiError>().query(|ctx: Ctx, _: ()| async move {
+                let dst_set = setting_is_set(&*ctx.db, SETTING_DST_DEFAULT_KLEI_KEY)
+                    .await
+                    .map_err(|e| api_error(&ctx, "db_error", format!("db error: {e}")))?;
+                let cf_set = setting_is_set(&*ctx.db, SETTING_CURSEFORGE_API_KEY)
+                    .await
+                    .map_err(|e| api_error(&ctx, "db_error", format!("db error: {e}")))?;
+                Ok(SettingsStatusOutput {
+                    dst_default_klei_key_set: dst_set,
+                    curseforge_api_key_set: cf_set,
+                })
+            }),
+        )
+        .procedure(
+            "setDstDefaultKleiKey",
+            Procedure::builder::<ApiError>().mutation(
+                |ctx, input: SetDstDefaultKleiKeyInput| async move {
+                    ensure_writable(&ctx)?;
+                    enforce_rate_limit(&ctx)?;
+
+                    let user = ctx
+                        .user
+                        .clone()
+                        .ok_or_else(|| api_error(&ctx, "unauthorized", "unauthorized"))?;
+                    if !user.is_admin {
+                        return Err(api_error(&ctx, "forbidden", "forbidden"));
+                    }
+
+                    let v = input.key.trim().to_string();
+                    if v.is_empty() {
+                        setting_clear(&*ctx.db, SETTING_DST_DEFAULT_KLEI_KEY)
+                            .await
+                            .map_err(|e| api_error(&ctx, "db_error", format!("db error: {e}")))?;
+                    } else {
+                        setting_set_secret(&*ctx.db, SETTING_DST_DEFAULT_KLEI_KEY, &v)
+                            .await
+                            .map_err(|e| api_error(&ctx, "db_error", format!("db error: {e}")))?;
+                    }
+
+                    audit::record(
+                        &ctx,
+                        "settings.setDstDefaultKleiKey",
+                        SETTING_DST_DEFAULT_KLEI_KEY,
+                        None,
+                    )
+                    .await;
+
+                    let dst_set = !v.is_empty();
+                    let cf_set = setting_is_set(&*ctx.db, SETTING_CURSEFORGE_API_KEY)
+                        .await
+                        .map_err(|e| api_error(&ctx, "db_error", format!("db error: {e}")))?;
+                    Ok(SettingsStatusOutput {
+                        dst_default_klei_key_set: dst_set,
+                        curseforge_api_key_set: cf_set,
+                    })
+                },
+            ),
+        )
+        .procedure(
+            "setCurseforgeApiKey",
+            Procedure::builder::<ApiError>().mutation(
+                |ctx, input: SetCurseforgeApiKeyInput| async move {
+                    ensure_writable(&ctx)?;
+                    enforce_rate_limit(&ctx)?;
+
+                    let user = ctx
+                        .user
+                        .clone()
+                        .ok_or_else(|| api_error(&ctx, "unauthorized", "unauthorized"))?;
+                    if !user.is_admin {
+                        return Err(api_error(&ctx, "forbidden", "forbidden"));
+                    }
+
+                    let v = input.key.trim().to_string();
+                    if v.is_empty() {
+                        setting_clear(&*ctx.db, SETTING_CURSEFORGE_API_KEY)
+                            .await
+                            .map_err(|e| api_error(&ctx, "db_error", format!("db error: {e}")))?;
+                    } else {
+                        setting_set_secret(&*ctx.db, SETTING_CURSEFORGE_API_KEY, &v)
+                            .await
+                            .map_err(|e| api_error(&ctx, "db_error", format!("db error: {e}")))?;
+                    }
+
+                    audit::record(
+                        &ctx,
+                        "settings.setCurseforgeApiKey",
+                        SETTING_CURSEFORGE_API_KEY,
+                        None,
+                    )
+                    .await;
+
+                    let dst_set = setting_is_set(&*ctx.db, SETTING_DST_DEFAULT_KLEI_KEY)
+                        .await
+                        .map_err(|e| api_error(&ctx, "db_error", format!("db error: {e}")))?;
+                    let cf_set = !v.is_empty();
+                    Ok(SettingsStatusOutput {
+                        dst_default_klei_key_set: dst_set,
+                        curseforge_api_key_set: cf_set,
+                    })
+                },
+            ),
+        );
+
+    let update = Router::new()
+        .procedure(
+            "check",
+            Procedure::builder::<ApiError>().query(|ctx: Ctx, _: ()| async move {
+                let user = ctx
+                    .user
+                    .clone()
+                    .ok_or_else(|| api_error(&ctx, "unauthorized", "unauthorized"))?;
+                if !user.is_admin {
+                    return Err(api_error(&ctx, "forbidden", "forbidden"));
+                }
+
+                let current_version = env!("CARGO_PKG_VERSION").to_string();
+                let current = crate::update::parse_simple_version(&current_version);
+
+                let latest = crate::update::latest_release().await.map_err(|e| {
+                    api_error(
+                        &ctx,
+                        "upstream_error",
+                        format!("update.check failed: {e}"),
+                    )
+                })?;
+
+                let latest_version = crate::update::parse_simple_version(&latest.tag_name)
+                    .map(|v| format!("{}.{}.{}", v.major, v.minor, v.patch));
+                let latest_parsed = crate::update::parse_simple_version(&latest.tag_name);
+                let update_available = match (current, latest_parsed) {
+                    (Some(cur), Some(lat)) => lat > cur,
+                    _ => false,
+                };
+
+                Ok(UpdateCheckOutput {
+                    current_version,
+                    latest: Some(UpdateLatestReleaseDto {
+                        tag: latest.tag_name.clone(),
+                        version: latest_version,
+                        url: latest.html_url.clone(),
+                        published_at: latest.published_at.clone(),
+                        body: latest.body.as_deref().and_then(|b| {
+                            let trimmed = b.trim();
+                            if trimmed.is_empty() {
+                                return None;
+                            }
+                            // Keep payload bounded; the UI can link to the full release page.
+                            const MAX: usize = 16 * 1024;
+                            if trimmed.len() <= MAX {
+                                return Some(trimmed.to_string());
+                            }
+                            let mut out = trimmed[..MAX].to_string();
+                            out.push_str("\n…");
+                            Some(out)
+                        }),
+                    }),
+                    update_available,
+                    can_trigger_update: crate::update::watchtower_configured(),
+                })
+            }),
+        )
+        .procedure(
+            "trigger",
+            Procedure::builder::<ApiError>().mutation(|ctx: Ctx, _: ()| async move {
+                ensure_writable(&ctx)?;
+                enforce_rate_limit(&ctx)?;
+
+                let user = ctx
+                    .user
+                    .clone()
+                    .ok_or_else(|| api_error(&ctx, "unauthorized", "unauthorized"))?;
+                if !user.is_admin {
+                    return Err(api_error(&ctx, "forbidden", "forbidden"));
+                }
+
+                if !crate::update::watchtower_configured() {
+                    let mut err = api_error(&ctx, "not_supported", "updater is not configured");
+                    err.hint = Some(
+                        "Set ALLOY_UPDATE_WATCHTOWER_URL and ALLOY_UPDATE_WATCHTOWER_TOKEN, then restart control."
+                            .to_string(),
+                    );
+                    return Err(err);
+                }
+
+                let msg = crate::update::trigger_watchtower_update()
+                    .await
+                    .map_err(|e| {
+                        api_error(
+                            &ctx,
+                            "updater_failed",
+                            format!("trigger watchtower update failed: {e}"),
+                        )
+                    })?;
+
+                audit::record(&ctx, "update.trigger", "watchtower", None).await;
+
+                Ok(UpdateTriggerOutput {
+                    ok: true,
+                    message: msg,
+                })
+            }),
+        );
+
+    let frp = Router::new()
+        .procedure(
+            "list",
+            Procedure::builder::<ApiError>().query(|ctx: Ctx, _: ()| async move {
+                use alloy_db::entities::frp_nodes;
+                use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
+
+                let user = ctx
+                    .user
+                    .clone()
+                    .ok_or_else(|| api_error(&ctx, "unauthorized", "unauthorized"))?;
+                let user_id = sea_orm::prelude::Uuid::parse_str(&user.user_id)
+                    .map_err(|_| api_error(&ctx, "unauthorized", "unauthorized"))?;
+
+                let rows = frp_nodes::Entity::find()
+                    .filter(frp_nodes::Column::UserId.eq(user_id))
+                    .order_by_asc(frp_nodes::Column::Name)
+                    .all(&*ctx.db)
+                    .await
+                    .map_err(|e| api_error(&ctx, "db_error", format!("db error: {e}")))?;
+
+                Ok(rows
+                    .into_iter()
+                    .map(|n| FrpNodeDto {
+                        id: n.id.to_string(),
+                        name: n.name,
+                        config: n.config,
+                        created_at: n.created_at.to_rfc3339(),
+                        updated_at: n.updated_at.to_rfc3339(),
+                    })
+                    .collect::<Vec<_>>())
+            }),
+        )
+        .procedure(
+            "create",
+            Procedure::builder::<ApiError>().mutation(
+                |ctx: Ctx, input: FrpNodeCreateInput| async move {
+                    use alloy_db::entities::frp_nodes;
+                    use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
+
+                    ensure_writable(&ctx)?;
+                    enforce_rate_limit(&ctx)?;
+
+                    let user = ctx
+                        .user
+                        .clone()
+                        .ok_or_else(|| api_error(&ctx, "unauthorized", "unauthorized"))?;
+                    let user_id = sea_orm::prelude::Uuid::parse_str(&user.user_id)
+                        .map_err(|_| api_error(&ctx, "unauthorized", "unauthorized"))?;
+
+                    let name = normalize_frp_node_name(&input.name).map_err(|_| {
+                        api_error_with_field(
+                            &ctx,
+                            "invalid_param",
+                            "invalid frp node name",
+                            "name",
+                            "invalid name",
+                        )
+                    })?;
+
+                    let cfg = input.config.trim().to_string();
+                    if cfg.is_empty() {
+                        return Err(api_error_with_field(
+                            &ctx,
+                            "invalid_param",
+                            "invalid frp config",
+                            "config",
+                            "config is required",
+                        ));
+                    }
+                    if cfg.len() > 128 * 1024 {
+                        return Err(api_error_with_field(
+                            &ctx,
+                            "invalid_param",
+                            "invalid frp config",
+                            "config",
+                            "config too large (max 128KiB)",
+                        ));
+                    }
+
+                    let existing = frp_nodes::Entity::find()
+                        .filter(frp_nodes::Column::UserId.eq(user_id))
+                        .filter(frp_nodes::Column::Name.eq(name.clone()))
+                        .one(&*ctx.db)
+                        .await
+                        .map_err(|e| api_error(&ctx, "db_error", format!("db error: {e}")))?;
+                    if existing.is_some() {
+                        return Err(api_error_with_field(
+                            &ctx,
+                            "already_exists",
+                            "frp node already exists",
+                            "name",
+                            "name already exists",
+                        ));
+                    }
+
+                    let now: chrono::DateTime<chrono::FixedOffset> = chrono::Utc::now().into();
+                    let model = frp_nodes::ActiveModel {
+                        id: Set(sea_orm::prelude::Uuid::new_v4()),
+                        user_id: Set(user_id),
+                        name: Set(name.clone()),
+                        config: Set(cfg),
+                        created_at: Set(now),
+                        updated_at: Set(now),
+                    };
+
+                    let inserted = model
+                        .insert(&*ctx.db)
+                        .await
+                        .map_err(|e| api_error(&ctx, "db_error", format!("db error: {e}")))?;
+
+                    audit::record(
+                        &ctx,
+                        "frp.create",
+                        &inserted.id.to_string(),
+                        Some(serde_json::json!({ "name": inserted.name })),
+                    )
+                    .await;
+
+                    Ok(FrpNodeDto {
+                        id: inserted.id.to_string(),
+                        name: inserted.name,
+                        config: inserted.config,
+                        created_at: inserted.created_at.to_rfc3339(),
+                        updated_at: inserted.updated_at.to_rfc3339(),
+                    })
+                },
+            ),
+        )
+        .procedure(
+            "update",
+            Procedure::builder::<ApiError>().mutation(
+                |ctx: Ctx, input: FrpNodeUpdateInput| async move {
+                    use alloy_db::entities::frp_nodes;
+                    use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
+
+                    ensure_writable(&ctx)?;
+                    enforce_rate_limit(&ctx)?;
+
+                    let user = ctx
+                        .user
+                        .clone()
+                        .ok_or_else(|| api_error(&ctx, "unauthorized", "unauthorized"))?;
+                    let user_id = sea_orm::prelude::Uuid::parse_str(&user.user_id)
+                        .map_err(|_| api_error(&ctx, "unauthorized", "unauthorized"))?;
+
+                    let id = sea_orm::prelude::Uuid::parse_str(&input.id)
+                        .map_err(|_| api_error(&ctx, "invalid_param", "invalid id"))?;
+
+                    let model = frp_nodes::Entity::find_by_id(id)
+                        .one(&*ctx.db)
+                        .await
+                        .map_err(|e| api_error(&ctx, "db_error", format!("db error: {e}")))?
+                        .ok_or_else(|| api_error(&ctx, "not_found", "frp node not found"))?;
+                    if model.user_id != user_id {
+                        return Err(api_error(&ctx, "forbidden", "forbidden"));
+                    }
+
+                    let name = normalize_frp_node_name(&input.name).map_err(|_| {
+                        api_error_with_field(
+                            &ctx,
+                            "invalid_param",
+                            "invalid frp node name",
+                            "name",
+                            "invalid name",
+                        )
+                    })?;
+
+                    let cfg = input.config.trim().to_string();
+                    if cfg.is_empty() {
+                        return Err(api_error_with_field(
+                            &ctx,
+                            "invalid_param",
+                            "invalid frp config",
+                            "config",
+                            "config is required",
+                        ));
+                    }
+                    if cfg.len() > 128 * 1024 {
+                        return Err(api_error_with_field(
+                            &ctx,
+                            "invalid_param",
+                            "invalid frp config",
+                            "config",
+                            "config too large (max 128KiB)",
+                        ));
+                    }
+
+                    let name_conflict = frp_nodes::Entity::find()
+                        .filter(frp_nodes::Column::UserId.eq(user_id))
+                        .filter(frp_nodes::Column::Name.eq(name.clone()))
+                        .filter(frp_nodes::Column::Id.ne(id))
+                        .one(&*ctx.db)
+                        .await
+                        .map_err(|e| api_error(&ctx, "db_error", format!("db error: {e}")))?;
+                    if name_conflict.is_some() {
+                        return Err(api_error_with_field(
+                            &ctx,
+                            "already_exists",
+                            "frp node already exists",
+                            "name",
+                            "name already exists",
+                        ));
+                    }
+
+                    let mut active: frp_nodes::ActiveModel = model.into();
+                    active.name = Set(name.clone());
+                    active.config = Set(cfg);
+                    active.updated_at = Set(chrono::Utc::now().into());
+                    let updated = active
+                        .update(&*ctx.db)
+                        .await
+                        .map_err(|e| api_error(&ctx, "db_error", format!("db error: {e}")))?;
+
+                    audit::record(
+                        &ctx,
+                        "frp.update",
+                        &updated.id.to_string(),
+                        Some(serde_json::json!({ "name": updated.name })),
+                    )
+                    .await;
+
+                    Ok(FrpNodeDto {
+                        id: updated.id.to_string(),
+                        name: updated.name,
+                        config: updated.config,
+                        created_at: updated.created_at.to_rfc3339(),
+                        updated_at: updated.updated_at.to_rfc3339(),
+                    })
+                },
+            ),
+        )
+        .procedure(
+            "delete",
+            Procedure::builder::<ApiError>().mutation(
+                |ctx: Ctx, input: FrpNodeDeleteInput| async move {
+                    use alloy_db::entities::frp_nodes;
+                    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+
+                    ensure_writable(&ctx)?;
+                    enforce_rate_limit(&ctx)?;
+
+                    let user = ctx
+                        .user
+                        .clone()
+                        .ok_or_else(|| api_error(&ctx, "unauthorized", "unauthorized"))?;
+                    let user_id = sea_orm::prelude::Uuid::parse_str(&user.user_id)
+                        .map_err(|_| api_error(&ctx, "unauthorized", "unauthorized"))?;
+
+                    let id = sea_orm::prelude::Uuid::parse_str(&input.id)
+                        .map_err(|_| api_error(&ctx, "invalid_param", "invalid id"))?;
+
+                    let rows = frp_nodes::Entity::delete_many()
+                        .filter(frp_nodes::Column::Id.eq(id))
+                        .filter(frp_nodes::Column::UserId.eq(user_id))
+                        .exec(&*ctx.db)
+                        .await
+                        .map_err(|e| api_error(&ctx, "db_error", format!("db error: {e}")))?;
+
+                    if rows.rows_affected == 0 {
+                        return Err(api_error(&ctx, "not_found", "frp node not found"));
+                    }
+
+                    audit::record(&ctx, "frp.delete", &id.to_string(), None).await;
+
+                    Ok(FrpNodeDeleteOutput { ok: true })
+                },
+            ),
+        );
+
     Router::new()
         .nest("control", control)
         .nest("agent", agent)
         .nest("process", process)
         .nest("minecraft", minecraft)
+        .nest("settings", settings)
+        .nest("update", update)
+        .nest("frp", frp)
         .nest("fs", fs)
         .nest("log", log)
         .nest("instance", instance)

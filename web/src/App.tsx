@@ -105,6 +105,8 @@ function formatRelativeTime(unixMs: number | null | undefined): string {
 function startProgressSteps(templateId: string): string[] {
   if (templateId === 'minecraft:vanilla') return ['Resolve', 'Download', 'Spawn', 'Wait']
   if (templateId === 'minecraft:modrinth') return ['Resolve', 'Download', 'Install', 'Spawn', 'Wait']
+  if (templateId === 'minecraft:import') return ['Import', 'Extract', 'Spawn', 'Wait']
+  if (templateId === 'minecraft:curseforge') return ['Resolve', 'Download', 'Extract', 'Spawn', 'Wait']
   if (templateId === 'terraria:vanilla') return ['Resolve', 'Download', 'Extract', 'Spawn', 'Wait']
   return ['Spawn', 'Wait']
 }
@@ -116,6 +118,7 @@ function startProgressIndex(templateId: string, message: string): number {
   const find = (label: string) => steps.findIndex((s) => s.toLowerCase() === label)
   const clamp = (idx: number) => Math.max(0, Math.min(steps.length - 1, idx))
 
+  if (m.includes('import')) return clamp(find('import'))
   if (m.includes('resolve')) return clamp(find('resolve'))
   if (m.includes('download')) return clamp(find('download'))
   if (m.includes('install')) return clamp(find('install'))
@@ -218,6 +221,7 @@ async function safeCopy(text: string) {
 function isSecretParamKey(key: string) {
   const k = key.toLowerCase()
   if (k.includes('password') || k.includes('token') || k.includes('secret')) return true
+  if (k.includes('api_key') || k.includes('apikey')) return true
   if (k.includes('frp') && k.includes('config')) return true
   return false
 }
@@ -331,7 +335,26 @@ function optionsWithCurrentValue(
   return [{ value: v, label: v }, ...options]
 }
 
-type UiTab = 'instances' | 'files' | 'nodes'
+type UiTab = 'instances' | 'files' | 'nodes' | 'frp' | 'settings'
+
+type MinecraftCreateMode = 'vanilla' | 'modrinth' | 'import' | 'curseforge'
+type FrpConfigMode = 'paste' | 'node'
+
+const CREATE_TEMPLATE_MINECRAFT = '__minecraft__'
+
+const MINECRAFT_TEMPLATE_ID_BY_MODE: Record<MinecraftCreateMode, string> = {
+  vanilla: 'minecraft:vanilla',
+  modrinth: 'minecraft:modrinth',
+  import: 'minecraft:import',
+  curseforge: 'minecraft:curseforge',
+}
+
+const MINECRAFT_MODE_BY_TEMPLATE_ID: Partial<Record<string, MinecraftCreateMode>> = {
+  'minecraft:vanilla': 'vanilla',
+  'minecraft:modrinth': 'modrinth',
+  'minecraft:import': 'import',
+  'minecraft:curseforge': 'curseforge',
+}
 
 type ToastVariant = 'info' | 'success' | 'error'
 type Toast = {
@@ -369,15 +392,19 @@ function App() {
   let createSleepSecondsEl: HTMLInputElement | undefined
   let createMcEulaEl: HTMLInputElement | undefined
   let createMcMrpackEl: HTMLInputElement | undefined
+  let createMcImportPackEl: HTMLInputElement | undefined
+  let createMcCurseforgeEl: HTMLInputElement | undefined
   let createMcPortEl: HTMLInputElement | undefined
   let createMcMemoryEl: HTMLInputElement | undefined
   let createMcFrpConfigEl: HTMLTextAreaElement | undefined
+  let createMcFrpNodeEl: HTMLDivElement | undefined
   let createTrPortEl: HTMLInputElement | undefined
   let createTrMaxPlayersEl: HTMLInputElement | undefined
   let createTrWorldNameEl: HTMLInputElement | undefined
   let createTrWorldSizeEl: HTMLInputElement | undefined
   let createTrPasswordEl: HTMLInputElement | undefined
   let createTrFrpConfigEl: HTMLTextAreaElement | undefined
+  let createTrFrpNodeEl: HTMLDivElement | undefined
   let createDstClusterTokenEl: HTMLInputElement | undefined
   let createDstClusterNameEl: HTMLInputElement | undefined
   let createDstMaxPlayersEl: HTMLInputElement | undefined
@@ -390,12 +417,14 @@ function App() {
   let editMcMemoryEl: HTMLInputElement | undefined
   let editMcPortEl: HTMLInputElement | undefined
   let editMcFrpConfigEl: HTMLTextAreaElement | undefined
+  let editMcFrpNodeEl: HTMLDivElement | undefined
   let editTrPortEl: HTMLInputElement | undefined
   let editTrMaxPlayersEl: HTMLInputElement | undefined
   let editTrWorldNameEl: HTMLInputElement | undefined
   let editTrWorldSizeEl: HTMLInputElement | undefined
   let editTrPasswordEl: HTMLInputElement | undefined
   let editTrFrpConfigEl: HTMLTextAreaElement | undefined
+  let editTrFrpNodeEl: HTMLDivElement | undefined
 
   const THEME_STORAGE_KEY = 'alloy.theme'
   type ThemePreference = 'system' | 'light' | 'dark'
@@ -617,18 +646,66 @@ function App() {
     () => ({ enabled: isAuthed() }),
   )
 
+  const templateDisplayName = (templateId: string) => {
+    const id = templateId.trim()
+    if (!id) return templateId
+    return (
+      (templates.data ?? []).find(
+        (t: { template_id: string; display_name: string }) => t.template_id === id,
+      )?.display_name ?? templateId
+    )
+  }
+
   type TemplateOption = { value: string; label: string; meta: string }
-  const templateOptions = createMemo<TemplateOption[]>(() =>
-    (templates.data ?? []).map((t: { template_id: string; display_name: string }) => ({
-      value: t.template_id,
-      label: t.display_name,
-      meta: t.template_id,
-    })),
-  )
+  const templateOptions = createMemo<TemplateOption[]>(() => {
+    const out: TemplateOption[] = []
+    const list = (templates.data ?? []) as Array<{ template_id: string; display_name: string }>
+    const groupedMinecraft = new Set(Object.values(MINECRAFT_TEMPLATE_ID_BY_MODE))
+    let insertedMinecraft = false
+
+    for (const t of list) {
+      if (groupedMinecraft.has(t.template_id)) {
+        if (!insertedMinecraft) {
+          insertedMinecraft = true
+          out.push({
+            value: CREATE_TEMPLATE_MINECRAFT,
+            label: 'Minecraft',
+            meta: 'Vanilla / Modrinth / Import / CurseForge',
+          })
+        }
+        continue
+      }
+      out.push({
+        value: t.template_id,
+        label: t.display_name,
+        meta: t.template_id,
+      })
+    }
+    return out
+  })
+
+  const availableMinecraftCreateModes = createMemo<MinecraftCreateMode[]>(() => {
+    const ids = new Set((templates.data ?? []).map((t: { template_id: string }) => t.template_id))
+    const out: MinecraftCreateMode[] = []
+    if (ids.has(MINECRAFT_TEMPLATE_ID_BY_MODE.vanilla)) out.push('vanilla')
+    if (ids.has(MINECRAFT_TEMPLATE_ID_BY_MODE.modrinth)) out.push('modrinth')
+    if (ids.has(MINECRAFT_TEMPLATE_ID_BY_MODE.import)) out.push('import')
+    if (ids.has(MINECRAFT_TEMPLATE_ID_BY_MODE.curseforge)) out.push('curseforge')
+    return out
+  })
 
   createEffect(() => {
     const opts = templateOptions()
     if (!opts.length) return
+    const hasMinecraftGroup = opts.some((o) => o.value === CREATE_TEMPLATE_MINECRAFT)
+    if (hasMinecraftGroup) {
+      const mappedMode = MINECRAFT_MODE_BY_TEMPLATE_ID[selectedTemplate()]
+      if (mappedMode) {
+        setSelectedTemplate(CREATE_TEMPLATE_MINECRAFT)
+        setMcCreateMode(mappedMode)
+        return
+      }
+    }
     if (!opts.some((o: { value: string }) => o.value === selectedTemplate())) {
       setSelectedTemplate(opts[0].value)
     }
@@ -936,8 +1013,12 @@ function App() {
     setEditTrPasswordVisible(false)
     setEditMcFrpEnabled(false)
     setEditMcFrpConfig('')
+    setEditMcFrpMode('paste')
+    setEditMcFrpNodeId('')
     setEditTrFrpEnabled(false)
     setEditTrFrpConfig('')
+    setEditTrFrpMode('paste')
+    setEditTrFrpNodeId('')
   }
 
   function openEditModal(inst: { config: { instance_id: string; template_id: string; params: unknown; display_name: string | null } }) {
@@ -956,8 +1037,12 @@ function App() {
     setEditAdvanced(false)
     setEditMcFrpEnabled(false)
     setEditMcFrpConfig('')
+    setEditMcFrpMode('paste')
+    setEditMcFrpNodeId('')
     setEditTrFrpEnabled(false)
     setEditTrFrpConfig('')
+    setEditTrFrpMode('paste')
+    setEditTrFrpNodeId('')
 
     setEditDisplayName(base.display_name ?? '')
 
@@ -1014,6 +1099,53 @@ function App() {
   const isReadOnly = createMemo(() => controlDiagnostics.data?.read_only ?? false)
   const fsWriteEnabled = createMemo(() => controlDiagnostics.data?.fs?.write_enabled ?? true)
 
+  const settingsStatus = rspc.createQuery(
+    () => ['settings.status', null],
+    () => ({ enabled: isAuthed(), refetchOnWindowFocus: false }),
+  )
+
+  const updateCheck = rspc.createQuery(
+    () => ['update.check', null],
+    () => ({ enabled: isAuthed() && (me()?.is_admin ?? false), refetchOnWindowFocus: false }),
+  )
+  const triggerUpdate = rspc.createMutation(() => 'update.trigger')
+
+  const frpNodes = rspc.createQuery(
+    () => ['frp.list', null],
+    () => ({ enabled: isAuthed(), refetchOnWindowFocus: false }),
+  )
+  const frpCreateNode = rspc.createMutation(() => 'frp.create')
+  const frpUpdateNode = rspc.createMutation(() => 'frp.update')
+  const frpDeleteNode = rspc.createMutation(() => 'frp.delete')
+
+  async function invalidateFrpNodes() {
+    await queryClient.invalidateQueries({ queryKey: ['frp.list', null] })
+  }
+
+  const frpNodeDropdownOptions = createMemo(() => {
+    const list = (frpNodes.data ?? []) as unknown as FrpNodeDto[]
+    const out: { value: string; label: string; meta?: string }[] = []
+    out.push({
+      value: '',
+      label: list.length > 0 ? 'Select node…' : 'No nodes yet',
+      meta: list.length > 0 ? undefined : "Open FRP tab to add one.",
+    })
+    for (const n of list) {
+      const endpoint = parseFrpcIniEndpoint(n.config)
+      out.push({ value: n.id, label: n.name, meta: endpoint ?? 'invalid config' })
+    }
+    return out
+  })
+
+  function frpNodeConfigById(nodeId: string): string | null {
+    const id = nodeId.trim()
+    if (!id) return null
+    const list = (frpNodes.data ?? []) as unknown as FrpNodeDto[]
+    const n = list.find((x) => x.id === id) ?? null
+    const cfg = (n?.config ?? '').trim()
+    return cfg ? cfg : null
+  }
+
   const instanceDeletePreview = rspc.createQuery(
     () => [
       'instance.deletePreview',
@@ -1029,6 +1161,14 @@ function App() {
 
   const warmCache = rspc.createMutation(() => 'process.warmCache')
   const clearCache = rspc.createMutation(() => 'process.clearCache')
+
+  const setDstDefaultKleiKey = rspc.createMutation(() => 'settings.setDstDefaultKleiKey')
+  const setCurseforgeApiKey = rspc.createMutation(() => 'settings.setCurseforgeApiKey')
+
+  const [settingsDstKey, setSettingsDstKey] = createSignal('')
+  const [settingsDstKeyVisible, setSettingsDstKeyVisible] = createSignal(false)
+  const [settingsCurseforgeKey, setSettingsCurseforgeKey] = createSignal('')
+  const [settingsCurseforgeKeyVisible, setSettingsCurseforgeKeyVisible] = createSignal(false)
 
   type InstanceOp = 'starting' | 'stopping' | 'restarting' | 'deleting' | 'updating'
   const [instanceOpById, setInstanceOpById] = createSignal<Record<string, InstanceOp | undefined>>({})
@@ -1091,6 +1231,8 @@ function App() {
   const [editMcPort, setEditMcPort] = createSignal('')
   const [editMcFrpEnabled, setEditMcFrpEnabled] = createSignal(false)
   const [editMcFrpConfig, setEditMcFrpConfig] = createSignal('')
+  const [editMcFrpMode, setEditMcFrpMode] = createSignal<FrpConfigMode>('paste')
+  const [editMcFrpNodeId, setEditMcFrpNodeId] = createSignal('')
 
   const [editTrVersion, setEditTrVersion] = createSignal('1453')
   const [editTrPort, setEditTrPort] = createSignal('')
@@ -1101,6 +1243,8 @@ function App() {
   const [editTrPasswordVisible, setEditTrPasswordVisible] = createSignal(false)
   const [editTrFrpEnabled, setEditTrFrpEnabled] = createSignal(false)
   const [editTrFrpConfig, setEditTrFrpConfig] = createSignal('')
+  const [editTrFrpMode, setEditTrFrpMode] = createSignal<FrpConfigMode>('paste')
+  const [editTrFrpNodeId, setEditTrFrpNodeId] = createSignal('')
 
   const [editAdvanced, setEditAdvanced] = createSignal(false)
 
@@ -1125,7 +1269,11 @@ function App() {
       out.memory_mb = editMcMemory().trim() || out.memory_mb || '2048'
       out.port = editMcPort().trim() || out.port || ''
       if (!editMcFrpEnabled()) delete out.frp_config
-      else if (editMcFrpConfig().trim()) out.frp_config = editMcFrpConfig()
+      else {
+        const nodeCfg = editMcFrpMode() === 'node' ? frpNodeConfigById(editMcFrpNodeId()) : null
+        if (nodeCfg) out.frp_config = nodeCfg
+        else if (editMcFrpConfig().trim()) out.frp_config = editMcFrpConfig().trim()
+      }
     }
 
     if (base.template_id === 'terraria:vanilla') {
@@ -1139,7 +1287,11 @@ function App() {
       if (!editTrPassword().trim() && 'password' in base.params && base.params.password) out.password = base.params.password
       if (!editTrPassword().trim() && !('password' in base.params)) delete out.password
       if (!editTrFrpEnabled()) delete out.frp_config
-      else if (editTrFrpConfig().trim()) out.frp_config = editTrFrpConfig()
+      else {
+        const nodeCfg = editTrFrpMode() === 'node' ? frpNodeConfigById(editTrFrpNodeId()) : null
+        if (nodeCfg) out.frp_config = nodeCfg
+        else if (editTrFrpConfig().trim()) out.frp_config = editTrFrpConfig().trim()
+      }
     }
 
     return out
@@ -1186,13 +1338,18 @@ function App() {
     return Array.from(risky)
   })
 
+  const [mcCreateMode, setMcCreateMode] = createSignal<MinecraftCreateMode>('vanilla')
   const [mcEula, setMcEula] = createSignal(false)
   const [mcVersion, setMcVersion] = createSignal('latest_release')
   const [mcMrpack, setMcMrpack] = createSignal('')
+  const [mcImportPack, setMcImportPack] = createSignal('')
+  const [mcCurseforge, setMcCurseforge] = createSignal('')
   const [mcMemory, setMcMemory] = createSignal('2048')
   const [mcPort, setMcPort] = createSignal('')
   const [mcFrpEnabled, setMcFrpEnabled] = createSignal(false)
   const [mcFrpConfig, setMcFrpConfig] = createSignal('')
+  const [mcFrpMode, setMcFrpMode] = createSignal<FrpConfigMode>('paste')
+  const [mcFrpNodeId, setMcFrpNodeId] = createSignal('')
 
   const [trVersion, setTrVersion] = createSignal('1453')
   const [trPort, setTrPort] = createSignal('')
@@ -1203,6 +1360,8 @@ function App() {
   const [trPasswordVisible, setTrPasswordVisible] = createSignal(false)
   const [trFrpEnabled, setTrFrpEnabled] = createSignal(false)
   const [trFrpConfig, setTrFrpConfig] = createSignal('')
+  const [trFrpMode, setTrFrpMode] = createSignal<FrpConfigMode>('paste')
+  const [trFrpNodeId, setTrFrpNodeId] = createSignal('')
 
   const [dstClusterToken, setDstClusterToken] = createSignal('')
   const [dstClusterTokenVisible, setDstClusterTokenVisible] = createSignal(false)
@@ -1214,10 +1373,36 @@ function App() {
   const [dstMasterPort, setDstMasterPort] = createSignal('0')
   const [dstAuthPort, setDstAuthPort] = createSignal('0')
 
+  const createTemplateId = createMemo(() => {
+    const raw = selectedTemplate()
+    if (raw !== CREATE_TEMPLATE_MINECRAFT) return raw
+    const avail = availableMinecraftCreateModes()
+    const mode = mcCreateMode()
+    const chosen = avail.includes(mode) ? mode : avail[0] ?? 'vanilla'
+    return MINECRAFT_TEMPLATE_ID_BY_MODE[chosen]
+  })
+
+  const minecraftCreateModeOptions = createMemo(() => {
+    const labels: Record<MinecraftCreateMode, string> = {
+      vanilla: 'Vanilla',
+      modrinth: 'Modrinth',
+      import: 'Import',
+      curseforge: 'CurseForge',
+    }
+    return availableMinecraftCreateModes().map((value) => ({ value, label: labels[value] }))
+  })
+
+  createEffect(() => {
+    if (selectedTemplate() !== CREATE_TEMPLATE_MINECRAFT) return
+    const avail = availableMinecraftCreateModes()
+    if (!avail.length) return
+    if (!avail.includes(mcCreateMode())) setMcCreateMode(avail[0])
+  })
+
   const [createAdvanced, setCreateAdvanced] = createSignal(false)
   const createAdvancedDirty = createMemo(() => {
-    const template = selectedTemplate()
-    if (template === 'minecraft:vanilla' || template === 'minecraft:modrinth') {
+    const template = createTemplateId()
+    if (template.startsWith('minecraft:')) {
       return mcPort().trim().length > 0 || mcFrpEnabled() || mcFrpConfig().trim().length > 0
     }
     if (template === 'terraria:vanilla') {
@@ -1241,8 +1426,8 @@ function App() {
   })
 
   const createPreview = createMemo(() => {
-    const template_id = selectedTemplate()
-    const templateLabel = templateOptions().find((o) => o.value === template_id)?.label ?? template_id
+    const template_id = createTemplateId()
+    const templateLabel = templateDisplayName(template_id)
 
     const rows: { label: string; value: string; isSecret?: boolean }[] = []
 
@@ -1300,6 +1485,55 @@ function App() {
       if (!src) warnings.push('Paste a Modrinth version link or a direct .mrpack URL.')
     }
 
+    if (template_id === 'minecraft:import') {
+      const src = mcImportPack().trim()
+      rows.push({ label: 'Pack', value: src || '(not set)' })
+      rows.push({ label: 'Memory (MB)', value: mcMemory().trim() || '2048' })
+
+      const portRaw = mcPort().trim()
+      const portLabel = !portRaw || portRaw === '0' ? 'auto' : portRaw
+      rows.push({ label: 'Port', value: portLabel })
+      rows.push({
+        label: 'Connect',
+        value: portLabel === 'auto' ? 'TBD (auto port)' : `${connectHost()}:${portLabel}`,
+      })
+
+      if (mcFrpEnabled()) {
+        const ep = parseFrpcIniEndpoint(mcFrpConfig())
+        rows.push({ label: 'FRP', value: ep ?? '(enabled)' })
+        if (!mcFrpConfig().trim()) warnings.push('Paste FRP config or disable FRP.')
+      }
+
+      if (!mcEula()) warnings.push('Accept the Minecraft EULA to start.')
+      if (!src) warnings.push('Provide a server pack zip URL, or a path under /data.')
+    }
+
+    if (template_id === 'minecraft:curseforge') {
+      const src = mcCurseforge().trim()
+      rows.push({ label: 'Modpack', value: src || '(not set)' })
+      rows.push({ label: 'Memory (MB)', value: mcMemory().trim() || '2048' })
+
+      const portRaw = mcPort().trim()
+      const portLabel = !portRaw || portRaw === '0' ? 'auto' : portRaw
+      rows.push({ label: 'Port', value: portLabel })
+      rows.push({
+        label: 'Connect',
+        value: portLabel === 'auto' ? 'TBD (auto port)' : `${connectHost()}:${portLabel}`,
+      })
+
+      if (mcFrpEnabled()) {
+        const ep = parseFrpcIniEndpoint(mcFrpConfig())
+        rows.push({ label: 'FRP', value: ep ?? '(enabled)' })
+        if (!mcFrpConfig().trim()) warnings.push('Paste FRP config or disable FRP.')
+      }
+
+      if (!mcEula()) warnings.push('Accept the Minecraft EULA to start.')
+      if (!src) warnings.push('Paste a CurseForge file URL, or modId:fileId.')
+      if (settingsStatus.data && !settingsStatus.data.curseforge_api_key_set) {
+        warnings.push('CurseForge API key is not configured (Settings).')
+      }
+    }
+
     if (template_id === 'dst:vanilla') {
       rows.push({ label: 'Cluster token', value: dstClusterToken().trim() ? '(set)' : '(not set)', isSecret: true })
       rows.push({ label: 'Cluster name', value: dstClusterName().trim() || 'Alloy DST server' })
@@ -1324,7 +1558,13 @@ function App() {
         rows.push({ label: 'Auth port', value: authLabel })
       }
 
-      if (!dstClusterToken().trim()) warnings.push('Paste your Klei cluster token to start.')
+      if (!dstClusterToken().trim()) {
+        if (settingsStatus.data?.dst_default_klei_key_set) {
+          warnings.push('No cluster token provided; default key from Settings will be used.')
+        } else {
+          warnings.push('Paste your Klei cluster token to start (or set a default in Settings).')
+        }
+      }
     }
 
     if (template_id === 'terraria:vanilla') {
@@ -1384,8 +1624,14 @@ function App() {
     return true
   }
 
+  function focusDropdown(root: HTMLDivElement | undefined): boolean {
+    if (!root) return false
+    const btn = root.querySelector('button') as HTMLElement | null
+    return focusEl(btn ?? undefined)
+  }
+
   function focusFirstCreateError(errors: Record<string, string>) {
-    const template_id = selectedTemplate()
+    const template_id = createTemplateId()
     const order: string[] =
       template_id === 'demo:sleep'
         ? ['seconds', 'display_name']
@@ -1393,11 +1639,15 @@ function App() {
           ? ['accept_eula', 'version', 'memory_mb', 'port', 'frp_config', 'display_name']
           : template_id === 'minecraft:modrinth'
             ? ['accept_eula', 'mrpack', 'memory_mb', 'port', 'frp_config', 'display_name']
-          : template_id === 'dst:vanilla'
-            ? ['cluster_token', 'cluster_name', 'max_players', 'password', 'port', 'master_port', 'auth_port', 'display_name']
-          : template_id === 'terraria:vanilla'
-            ? ['version', 'max_players', 'world_name', 'port', 'world_size', 'password', 'frp_config', 'display_name']
-            : ['display_name']
+            : template_id === 'minecraft:import'
+              ? ['accept_eula', 'pack', 'memory_mb', 'port', 'frp_config', 'display_name']
+              : template_id === 'minecraft:curseforge'
+                ? ['accept_eula', 'curseforge', 'memory_mb', 'port', 'frp_config', 'display_name']
+              : template_id === 'dst:vanilla'
+                ? ['cluster_token', 'cluster_name', 'max_players', 'password', 'port', 'master_port', 'auth_port', 'display_name']
+              : template_id === 'terraria:vanilla'
+                ? ['version', 'max_players', 'world_name', 'port', 'world_size', 'password', 'frp_config', 'display_name']
+                : ['display_name']
 
     const needsAdvanced =
       !createAdvanced() &&
@@ -1416,11 +1666,21 @@ function App() {
         if (key === 'display_name' && focusEl(createInstanceNameEl)) return
         if (key === 'seconds' && focusEl(createSleepSecondsEl)) return
 
-        if (template_id === 'minecraft:vanilla' || template_id === 'minecraft:modrinth') {
+        if (
+          template_id === 'minecraft:vanilla' ||
+          template_id === 'minecraft:modrinth' ||
+          template_id === 'minecraft:import' ||
+          template_id === 'minecraft:curseforge'
+        ) {
           if (key === 'accept_eula' && focusEl(createMcEulaEl)) return
           if (key === 'mrpack' && focusEl(createMcMrpackEl)) return
+          if (key === 'pack' && focusEl(createMcImportPackEl)) return
+          if (key === 'curseforge' && focusEl(createMcCurseforgeEl)) return
           if (key === 'port' && focusEl(createMcPortEl)) return
-          if (key === 'frp_config' && focusEl(createMcFrpConfigEl)) return
+          if (key === 'frp_config') {
+            if (mcFrpEnabled() && mcFrpMode() === 'node' && focusDropdown(createMcFrpNodeEl)) return
+            if (focusEl(createMcFrpConfigEl)) return
+          }
           if (key === 'memory_mb' && focusEl(createMcMemoryEl)) return
         }
 
@@ -1428,7 +1688,10 @@ function App() {
           if (key === 'port' && focusEl(createTrPortEl)) return
           if (key === 'world_size' && focusEl(createTrWorldSizeEl)) return
           if (key === 'password' && focusEl(createTrPasswordEl)) return
-          if (key === 'frp_config' && focusEl(createTrFrpConfigEl)) return
+          if (key === 'frp_config') {
+            if (trFrpEnabled() && trFrpMode() === 'node' && focusDropdown(createTrFrpNodeEl)) return
+            if (focusEl(createTrFrpConfigEl)) return
+          }
           if (key === 'world_name' && focusEl(createTrWorldNameEl)) return
           if (key === 'max_players' && focusEl(createTrMaxPlayersEl)) return
         }
@@ -1476,7 +1739,10 @@ function App() {
 
         if (template_id === 'minecraft:vanilla') {
           if (key === 'port' && focusEl(editMcPortEl)) return
-          if (key === 'frp_config' && focusEl(editMcFrpConfigEl)) return
+          if (key === 'frp_config') {
+            if (editMcFrpEnabled() && editMcFrpMode() === 'node' && focusDropdown(editMcFrpNodeEl)) return
+            if (focusEl(editMcFrpConfigEl)) return
+          }
           if (key === 'memory_mb' && focusEl(editMcMemoryEl)) return
         }
 
@@ -1486,7 +1752,10 @@ function App() {
           if (key === 'world_name' && focusEl(editTrWorldNameEl)) return
           if (key === 'world_size' && focusEl(editTrWorldSizeEl)) return
           if (key === 'password' && focusEl(editTrPasswordEl)) return
-          if (key === 'frp_config' && focusEl(editTrFrpConfigEl)) return
+          if (key === 'frp_config') {
+            if (editTrFrpEnabled() && editTrFrpMode() === 'node' && focusDropdown(editTrFrpNodeEl)) return
+            if (focusEl(editTrFrpConfigEl)) return
+          }
         }
       }
     }
@@ -1556,7 +1825,7 @@ function App() {
     if (typeof paramName === 'string' && paramName.trim()) return paramName.trim()
     const templateId = inst.config?.template_id
     if (typeof templateId === 'string' && templateId.trim()) {
-      return templateOptions().find((o) => o.value === templateId)?.label ?? templateId
+      return templateDisplayName(templateId)
     }
     return inst.config?.instance_id ?? null
   })
@@ -1647,6 +1916,50 @@ function App() {
     has_connect_token?: boolean
   }
   type NodeCreateResult = { node: NodeDto; connect_token: string }
+
+  type FrpNodeDto = {
+    id: string
+    name: string
+    config: string
+    created_at: string
+    updated_at: string
+  }
+
+  const [showFrpNodeModal, setShowFrpNodeModal] = createSignal(false)
+  const [editingFrpNodeId, setEditingFrpNodeId] = createSignal<string | null>(null)
+  const [frpNodeName, setFrpNodeName] = createSignal('')
+  const [frpNodeConfig, setFrpNodeConfig] = createSignal('')
+  const [frpNodeFieldErrors, setFrpNodeFieldErrors] = createSignal<Record<string, string>>({})
+  const [frpNodeFormError, setFrpNodeFormError] = createSignal<string | null>(null)
+  let frpNodeNameEl: HTMLInputElement | undefined
+  let frpNodeConfigEl: HTMLTextAreaElement | undefined
+
+  function closeFrpNodeModal() {
+    setShowFrpNodeModal(false)
+    setEditingFrpNodeId(null)
+    setFrpNodeName('')
+    setFrpNodeConfig('')
+    setFrpNodeFieldErrors({})
+    setFrpNodeFormError(null)
+  }
+
+  function openCreateFrpNodeModal() {
+    setEditingFrpNodeId(null)
+    setFrpNodeName('')
+    setFrpNodeConfig('')
+    setFrpNodeFieldErrors({})
+    setFrpNodeFormError(null)
+    setShowFrpNodeModal(true)
+  }
+
+  function openEditFrpNodeModal(node: FrpNodeDto) {
+    setEditingFrpNodeId(node.id)
+    setFrpNodeName(node.name)
+    setFrpNodeConfig(node.config)
+    setFrpNodeFieldErrors({})
+    setFrpNodeFormError(null)
+    setShowFrpNodeModal(true)
+  }
 
   const createNode = rspc.createMutation(() => 'node.create')
   const [showCreateNodeModal, setShowCreateNodeModal] = createSignal(false)
@@ -1854,6 +2167,59 @@ function App() {
                 <span class="text-sm font-medium">Nodes</span>
               </Show>
             </button>
+
+            <button
+              type="button"
+              class={`group flex items-center gap-3 rounded-xl px-3 py-2 transition-colors ${
+                tab() === 'frp'
+                  ? 'bg-amber-500/10 text-amber-800 ring-1 ring-inset ring-amber-500/20 dark:text-amber-200'
+                  : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-900/60 dark:hover:text-slate-100'
+              } ${sidebarExpanded() ? '' : 'justify-center'}`}
+              onClick={() => setTab('frp')}
+              aria-label="FRP"
+              title="FRP"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-5 w-5">
+                <path
+                  fill-rule="evenodd"
+                  d="M2 10a.75.75 0 01.75-.75h8.69L9.22 7.03a.75.75 0 111.06-1.06l3.5 3.5a.75.75 0 010 1.06l-3.5 3.5a.75.75 0 11-1.06-1.06l2.22-2.22H2.75A.75.75 0 012 10z"
+                  clip-rule="evenodd"
+                />
+                <path
+                  fill-rule="evenodd"
+                  d="M18 10a.75.75 0 01-.75.75H8.56l2.22 2.22a.75.75 0 11-1.06 1.06l-3.5-3.5a.75.75 0 010-1.06l3.5-3.5a.75.75 0 111.06 1.06L8.56 9.25h8.69A.75.75 0 0118 10z"
+                  clip-rule="evenodd"
+                />
+              </svg>
+              <Show when={sidebarExpanded()}>
+                <span class="text-sm font-medium">FRP</span>
+              </Show>
+            </button>
+
+            <Show when={me()?.is_admin}>
+              <button
+                type="button"
+                class={`group flex items-center gap-3 rounded-xl px-3 py-2 transition-colors ${
+                  tab() === 'settings'
+                    ? 'bg-amber-500/10 text-amber-800 ring-1 ring-inset ring-amber-500/20 dark:text-amber-200'
+                    : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-900/60 dark:hover:text-slate-100'
+                } ${sidebarExpanded() ? '' : 'justify-center'}`}
+                onClick={() => setTab('settings')}
+                aria-label="Settings"
+                title="Settings"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-5 w-5">
+                  <path
+                    fill-rule="evenodd"
+                    d="M7.84 1.804A1 1 0 018.82 1h2.36a1 1 0 01.98.804l.238 1.19a7.97 7.97 0 011.794.74l1.09-.56a1 1 0 011.24.29l1.667 1.667a1 1 0 01.29 1.24l-.56 1.09c.309.56.56 1.16.74 1.794l1.19.238a1 1 0 01.804.98v2.36a1 1 0 01-.804.98l-1.19.238a7.97 7.97 0 01-.74 1.794l.56 1.09a1 1 0 01-.29 1.24l-1.667 1.667a1 1 0 01-1.24.29l-1.09-.56a7.97 7.97 0 01-1.794.74l-.238 1.19a1 1 0 01-.98.804H8.82a1 1 0 01-.98-.804l-.238-1.19a7.97 7.97 0 01-1.794-.74l-1.09.56a1 1 0 01-1.24-.29L1.81 15.62a1 1 0 01-.29-1.24l.56-1.09a7.97 7.97 0 01-.74-1.794l-1.19-.238A1 1 0 010 10.48V8.12a1 1 0 01.804-.98l1.19-.238c.18-.634.431-1.234.74-1.794l-.56-1.09a1 1 0 01.29-1.24L4.13 1.11a1 1 0 011.24-.29l1.09.56c.56-.309 1.16-.56 1.794-.74l.238-1.19zM10 7a3 3 0 100 6 3 3 0 000-6z"
+                    clip-rule="evenodd"
+                  />
+                </svg>
+                <Show when={sidebarExpanded()}>
+                  <span class="text-sm font-medium">Settings</span>
+                </Show>
+              </button>
+            </Show>
           </div>
 
           <div class={`mt-auto flex w-full flex-col items-center gap-2 pb-2 ${sidebarExpanded() ? 'px-1' : ''}`}>
@@ -1863,11 +2229,22 @@ function App() {
               onClick={() => setSidebarExpanded((v) => !v)}
             >
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-                <path
-                  fill-rule="evenodd"
-                  d="M6.22 5.22a.75.75 0 011.06 0L11 8.94l3.72-3.72a.75.75 0 111.06 1.06l-4.25 4.25a.75.75 0 01-1.06 0L6.22 6.28a.75.75 0 010-1.06z"
-                  clip-rule="evenodd"
-                />
+                <Show
+                  when={sidebarExpanded()}
+                  fallback={
+                    <path
+                      fill-rule="evenodd"
+                      d="M8.22 4.47a.75.75 0 011.06 0l5 5a.75.75 0 010 1.06l-5 5a.75.75 0 11-1.06-1.06L12.69 10 8.22 5.53a.75.75 0 010-1.06z"
+                      clip-rule="evenodd"
+                    />
+                  }
+                >
+                  <path
+                    fill-rule="evenodd"
+                    d="M11.78 15.53a.75.75 0 01-1.06 0l-5-5a.75.75 0 010-1.06l5-5a.75.75 0 111.06 1.06L7.31 10l4.47 4.47a.75.75 0 010 1.06z"
+                    clip-rule="evenodd"
+                  />
+                </Show>
               </svg>
             </IconButton>
             <IconButton
@@ -2002,24 +2379,24 @@ function App() {
                   <div class="relative">
                     <button
                       type="button"
-                      class="group flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 py-1 pl-2 pr-2 shadow-sm backdrop-blur-sm transition-all hover:bg-white hover:shadow active:scale-[0.99] dark:border-slate-800 dark:bg-slate-950/60 dark:hover:bg-slate-950/80"
+                      class="group inline-flex h-8 w-8 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white/70 p-1 shadow-sm backdrop-blur-sm transition-all duration-150 hover:bg-white hover:shadow active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/35 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-50 dark:border-slate-800 dark:bg-slate-950/60 dark:hover:bg-slate-950/80 dark:shadow-none dark:focus-visible:ring-amber-400/35 dark:focus-visible:ring-offset-slate-950 sm:w-auto sm:justify-start sm:px-2 sm:py-1"
                       onPointerDown={(ev) => ev.stopPropagation()}
                       onClick={() => setShowAccountMenu((v) => !v)}
                       aria-expanded={showAccountMenu()}
+                      aria-haspopup="menu"
                     >
-                      <div class="flex h-7 w-7 items-center justify-center rounded-full bg-slate-900 text-xs font-semibold text-white shadow-sm dark:bg-slate-100 dark:text-slate-900">
+                      <div class="flex h-5 w-5 items-center justify-center rounded-full bg-amber-500/10 text-[10px] font-semibold text-amber-900 ring-1 ring-inset ring-amber-500/20 dark:bg-amber-500/15 dark:text-amber-100 dark:ring-amber-500/25 sm:text-[11px]">
                         {me()!.username.slice(0, 1).toUpperCase()}
                       </div>
-                      <div class="flex min-w-0 flex-col leading-none">
-                        <span class="truncate text-sm font-medium text-slate-900 dark:text-slate-100">{me()!.username}</span>
-                        <span class="mt-0.5 inline-flex items-center gap-1.5 text-[11px] text-slate-500">
-                          <span class="h-1.5 w-1.5 rounded-full bg-emerald-400" title="session active" />
-                          <span class="rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 dark:border-slate-800 dark:bg-slate-950/40">
-                            {me()!.is_admin ? 'Admin' : 'User'}
-                          </span>
-                        </span>
-                      </div>
-                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4 text-slate-500 transition-transform group-hover:translate-y-0.5">
+                      <span class="hidden max-w-[11rem] truncate text-sm font-medium text-slate-900 dark:text-slate-100 sm:inline">
+                        {me()!.username}
+                      </span>
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        viewBox="0 0 20 20"
+                        fill="currentColor"
+                        class="hidden h-4 w-4 text-slate-500 transition-transform group-hover:translate-y-0.5 sm:block"
+                      >
                           <path
                             fill-rule="evenodd"
                             d="M5.23 7.21a.75.75 0 011.06.02L10 10.94l3.71-3.71a.75.75 0 111.06 1.06l-4.24 4.24a.75.75 0 01-1.06 0L5.21 8.29a.75.75 0 01.02-1.08z"
@@ -2032,12 +2409,25 @@ function App() {
                       <Portal>
                         <div class="fixed inset-0 z-[9999]" onPointerDown={() => setShowAccountMenu(false)}>
                           <div
-                            class="absolute right-5 top-14 mt-2 w-36 origin-top-right overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-900/10 backdrop-blur transition-all duration-150 animate-in fade-in zoom-in-95 dark:border-slate-800 dark:bg-slate-950"
+                            class="absolute right-5 top-14 mt-2 w-56 origin-top-right overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-900/10 backdrop-blur transition-all duration-150 animate-in fade-in zoom-in-95 dark:border-slate-800 dark:bg-slate-950"
                             onPointerDown={(e) => e.stopPropagation()}
                           >
+                            <div class="border-b border-slate-200 px-3 py-2.5 dark:border-slate-800">
+                              <div class="flex items-center gap-3">
+                                <div class="flex h-7 w-7 items-center justify-center rounded-full bg-amber-500/10 text-xs font-semibold text-amber-900 ring-1 ring-inset ring-amber-500/20 dark:bg-amber-500/15 dark:text-amber-100 dark:ring-amber-500/25">
+                                  {me()!.username.slice(0, 1).toUpperCase()}
+                                </div>
+                                <div class="min-w-0">
+                                  <div class="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">{me()!.username}</div>
+                                  <div class="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+                                    {me()!.is_admin ? 'Administrator' : 'User'}
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
                             <button
                               type="button"
-                              class="flex w-full items-center justify-between px-3 py-2 text-sm text-slate-700 transition-colors hover:bg-slate-50 active:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-900/50 dark:active:bg-slate-900"
+                              class="flex w-full items-center px-3 py-2 text-sm text-slate-700 transition-colors hover:bg-slate-50 active:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-900/50 dark:active:bg-slate-900"
                               onPointerDown={(e) => e.stopPropagation()}
                               onClick={() => {
                                 setShowAccountMenu(false)
@@ -2045,11 +2435,10 @@ function App() {
                               }}
                             >
                               <span>Diagnostics</span>
-                              <span class="text-xs text-slate-400">⌘</span>
                             </button>
                             <button
                               type="button"
-                              class="flex w-full items-center justify-between px-3 py-2 text-sm text-slate-700 transition-colors hover:bg-slate-50 active:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-900/50 dark:active:bg-slate-900"
+                              class="flex w-full items-center px-3 py-2 text-sm text-slate-700 transition-colors hover:bg-slate-50 active:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-900/50 dark:active:bg-slate-900"
                               onPointerDown={(e) => e.stopPropagation()}
                               onClick={async () => {
                                 setShowAccountMenu(false)
@@ -2057,7 +2446,6 @@ function App() {
                               }}
                             >
                               <span>Logout</span>
-                              <span class="text-xs text-slate-400">↩</span>
                             </button>
                           </div>
                         </div>
@@ -2113,6 +2501,36 @@ function App() {
               >
                 Nodes
               </button>
+              <button
+                type="button"
+                class={`w-full rounded-xl border px-3 py-2 text-left text-sm font-medium transition-colors ${
+                  tab() === 'frp'
+                    ? 'border-amber-500/20 bg-amber-500/10 text-amber-900 dark:border-amber-500/25 dark:bg-amber-500/15 dark:text-amber-100'
+                    : 'border-slate-200 bg-white/70 text-slate-800 hover:bg-white dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:hover:bg-slate-900'
+                }`}
+                onClick={() => {
+                  setTab('frp')
+                  setMobileNavOpen(false)
+                }}
+              >
+                FRP
+              </button>
+              <Show when={me()?.is_admin}>
+                <button
+                  type="button"
+                  class={`w-full rounded-xl border px-3 py-2 text-left text-sm font-medium transition-colors ${
+                    tab() === 'settings'
+                      ? 'border-amber-500/20 bg-amber-500/10 text-amber-900 dark:border-amber-500/25 dark:bg-amber-500/15 dark:text-amber-100'
+                      : 'border-slate-200 bg-white/70 text-slate-800 hover:bg-white dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:hover:bg-slate-900'
+                  }`}
+                  onClick={() => {
+                    setTab('settings')
+                    setMobileNavOpen(false)
+                  }}
+                >
+                  Settings
+                </button>
+              </Show>
             </div>
 
             <div class="mt-4 flex flex-wrap items-center gap-2">
@@ -2323,11 +2741,26 @@ function App() {
                         </Field>
                       </Show>
 
-                      <Show when={selectedTemplate() === 'minecraft:vanilla'}>
+                      <Show
+                        when={
+                          selectedTemplate() === CREATE_TEMPLATE_MINECRAFT ||
+                          Boolean(MINECRAFT_MODE_BY_TEMPLATE_ID[selectedTemplate()])
+                        }
+                      >
                         <div class="space-y-3 border-t border-slate-200 pt-3 dark:border-slate-800">
-                          <div class="flex items-center justify-between gap-3">
-                            <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                              Minecraft settings
+                          <div class="flex flex-wrap items-center justify-between gap-3">
+                            <div class="flex flex-wrap items-center gap-3">
+                              <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                                Minecraft
+                              </div>
+                              <Tabs
+                                value={mcCreateMode()}
+                                options={minecraftCreateModeOptions()}
+                                onChange={(mode) => {
+                                  setSelectedTemplate(CREATE_TEMPLATE_MINECRAFT)
+                                  setMcCreateMode(mode)
+                                }}
+                              />
                             </div>
                             <Button
                               size="xs"
@@ -2357,12 +2790,8 @@ function App() {
                                 onChange={(e) => setMcEula(e.currentTarget.checked)}
                               />
                               <span class="leading-tight">
-                                I agree to the{' '}
-                                <Link
-                                  href="https://account.mojang.com/documents/minecraft_eula"
-                                  target="_blank"
-                                  rel="noreferrer noopener"
-                                >
+                                I accept the{' '}
+                                <Link href="https://aka.ms/MinecraftEULA" target="_blank" rel="noreferrer noopener">
                                   Minecraft EULA
                                 </Link>
                                 <span class="mt-0.5 block text-xs text-slate-500 dark:text-slate-400">
@@ -2375,169 +2804,116 @@ function App() {
                             </Show>
                           </div>
 
-	                          <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-		                            <Field
-		                              label={<LabelTip label="Version" content="Use Latest release unless you know you need a specific version." />}
-		                              error={createFieldErrors().version}
-		                            >
-                              <div class="space-y-2">
+                          <Show
+                            when={
+                              createTemplateId() === 'minecraft:curseforge' &&
+                              settingsStatus.data &&
+                              !settingsStatus.data.curseforge_api_key_set
+                            }
+                          >
+                            <Banner
+                              variant="warning"
+                              title="CurseForge API key not set"
+                              message="Set it in Settings to enable CurseForge installs."
+                              actions={
+                                <Show when={me()?.is_admin}>
+                                  <Button size="xs" variant="secondary" onClick={() => setTab('settings')}>
+                                    Open Settings
+                                  </Button>
+                                </Show>
+                              }
+                            />
+                          </Show>
+
+                          <Show when={createTemplateId() === 'minecraft:modrinth'}>
+                            <Field
+                              label={
+                                <LabelTip
+                                  label="Modpack (mrpack)"
+                                  content="Paste a Modrinth version link (recommended) or a direct .mrpack URL."
+                                />
+                              }
+                              required
+                              error={createFieldErrors().mrpack}
+                            >
+                              <Input
+                                ref={(el) => {
+                                  createMcMrpackEl = el
+                                }}
+                                value={mcMrpack()}
+                                onInput={(e) => setMcMrpack(e.currentTarget.value)}
+                                placeholder="https://modrinth.com/modpack/.../version/..."
+                                spellcheck={false}
+                                invalid={Boolean(createFieldErrors().mrpack)}
+                              />
+                            </Field>
+                          </Show>
+
+                          <Show when={createTemplateId() === 'minecraft:import'}>
+                            <Field
+                              label={
+                                <LabelTip
+                                  label="Server pack (zip/path/url)"
+                                  content="Paste a direct server pack .zip URL, or a path under /data (ALLOY_DATA_ROOT). The pack should be server-ready."
+                                />
+                              }
+                              required
+                              error={createFieldErrors().pack}
+                            >
+                              <Input
+                                ref={(el) => {
+                                  createMcImportPackEl = el
+                                }}
+                                value={mcImportPack()}
+                                onInput={(e) => setMcImportPack(e.currentTarget.value)}
+                                placeholder="uploads/pack.zip or https://example.com/pack.zip"
+                                spellcheck={false}
+                                invalid={Boolean(createFieldErrors().pack)}
+                              />
+                            </Field>
+                          </Show>
+
+                          <Show when={createTemplateId() === 'minecraft:curseforge'}>
+                            <Field
+                              label={
+                                <LabelTip
+                                  label="Modpack file"
+                                  content="Paste a CurseForge file URL (recommended), or modId:fileId. Alloy will prefer the author's server pack when available."
+                                />
+                              }
+                              required
+                              error={createFieldErrors().curseforge}
+                            >
+                              <Input
+                                ref={(el) => {
+                                  createMcCurseforgeEl = el
+                                }}
+                                value={mcCurseforge()}
+                                onInput={(e) => setMcCurseforge(e.currentTarget.value)}
+                                placeholder="https://www.curseforge.com/minecraft/modpacks/.../files/..."
+                                spellcheck={false}
+                                invalid={Boolean(createFieldErrors().curseforge)}
+                              />
+                            </Field>
+                          </Show>
+
+                          <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                            <Show when={createTemplateId() === 'minecraft:vanilla'}>
+                              <Field
+                                label={<LabelTip label="Version" content="Use Latest release unless you know you need a specific version." />}
+                                error={createFieldErrors().version}
+                              >
                                 <Dropdown
                                   label=""
                                   value={mcVersion()}
                                   options={optionsWithCurrentValue(mcVersionOptions(), mcVersion())}
                                   onChange={setMcVersion}
                                 />
-                              </div>
-	                            </Field>
-
-	                            <Field
-	                              label={
-	                                <LabelTip
-	                                  label="Memory (MB)"
-	                                  content="Sets JVM heap size. Too low can crash; too high can starve the host."
-	                                />
-	                              }
-	                              error={createFieldErrors().memory_mb}
-	                            >
-                              <Input
-                                ref={(el) => {
-                                  createMcMemoryEl = el
-                                }}
-                                type="number"
-                                value={mcMemory()}
-                                onInput={(e) => setMcMemory(e.currentTarget.value)}
-                                placeholder="2048"
-                                invalid={Boolean(createFieldErrors().memory_mb)}
-                              />
-                            </Field>
-                          </div>
-
-	                          <Show when={createAdvanced()}>
-	                            <div class="space-y-3">
-	                              <Field
-	                                label={<LabelTip label="Port (optional)" content="Leave blank for auto-assign." />}
-	                                error={createFieldErrors().port}
-	                              >
-                                <Input
-                                  ref={(el) => {
-                                    createMcPortEl = el
-                                  }}
-                                  type="number"
-                                  value={mcPort()}
-                                  onInput={(e) => setMcPort(e.currentTarget.value)}
-                                  placeholder="25565"
-                                  invalid={Boolean(createFieldErrors().port)}
-                                />
                               </Field>
-
-	                              <Field
-	                                label={<LabelTip label="Public (FRP)" content="Optional. Paste an frpc config to expose this instance via FRP." />}
-	                                error={createFieldErrors().frp_config}
-	                              >
-	                                <div class="space-y-2">
-	                                  <label class="inline-flex items-center gap-2 text-[12px] text-slate-700 dark:text-slate-200">
-	                                    <input
-	                                      type="checkbox"
-	                                      class="h-4 w-4 rounded border-slate-300 bg-white text-amber-600 focus:ring-amber-400 dark:border-slate-700 dark:bg-slate-950/60 dark:text-amber-400"
-	                                      checked={mcFrpEnabled()}
-	                                      onChange={(e) => setMcFrpEnabled(e.currentTarget.checked)}
-	                                    />
-	                                    <span>Enable</span>
-	                                  </label>
-	                                  <Show when={mcFrpEnabled()}>
-	                                    <Textarea
-	                                      ref={(el) => {
-	                                        createMcFrpConfigEl = el
-	                                      }}
-	                                      value={mcFrpConfig()}
-	                                      onInput={(e) => setMcFrpConfig(e.currentTarget.value)}
-	                                      placeholder="Paste frpc config (INI)"
-	                                      spellcheck={false}
-	                                      class="font-mono text-[11px]"
-	                                      invalid={Boolean(createFieldErrors().frp_config)}
-	                                    />
-	                                  </Show>
-	                                </div>
-	                              </Field>
-	                            </div>
-                          </Show>
-                        </div>
-                      </Show>
-
-                      <Show when={selectedTemplate() === 'minecraft:modrinth'}>
-                        <div class="space-y-3 border-t border-slate-200 pt-3 dark:border-slate-800">
-                          <div class="flex items-center justify-between gap-3">
-                            <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                              Minecraft modpack
-                            </div>
-                            <Button
-                              size="xs"
-                              variant={createAdvanced() ? 'secondary' : 'ghost'}
-                              onClick={() => setCreateAdvanced((v) => !v)}
-                              title="Show or hide advanced fields"
-                            >
-                              <span class="inline-flex items-center gap-2">
-                                {createAdvanced() ? 'Hide advanced' : 'Advanced'}
-                                <Show when={!createAdvanced() && createAdvancedDirty()}>
-                                  <span class="h-1.5 w-1.5 rounded-full bg-amber-500" aria-hidden="true" />
-                                </Show>
-                              </span>
-                            </Button>
-                          </div>
-
-                          <div class="rounded-2xl border border-slate-200 bg-white/70 p-3 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
-                            <label for="mc-eula" class="flex items-start gap-3 text-sm text-slate-800 dark:text-slate-300">
-                              <input
-                                ref={(el) => {
-                                  createMcEulaEl = el
-                                }}
-                                id="mc-eula"
-                                type="checkbox"
-                                checked={mcEula()}
-                                onChange={(e) => setMcEula(e.currentTarget.checked)}
-                                class="mt-1 h-4 w-4 rounded border-slate-300 bg-white text-amber-600 focus:ring-amber-400 dark:border-slate-700 dark:bg-slate-950/60 dark:text-amber-400"
-                              />
-                              <span class="leading-snug">
-                                I accept the Minecraft EULA
-                                <a
-                                  class="ml-2 text-amber-700 underline decoration-dotted underline-offset-4 hover:text-amber-800 dark:text-amber-300 dark:hover:text-amber-200"
-                                  href="https://aka.ms/MinecraftEULA"
-                                  target="_blank"
-                                  rel="noreferrer"
-                                >
-                                  (read)
-                                </a>
-                              </span>
-                            </label>
-                            <Show when={createFieldErrors().accept_eula}>
-                              {(msg) => <div class="mt-2 text-[12px] text-rose-700 dark:text-rose-300">{msg()}</div>}
                             </Show>
-                          </div>
 
-                          <Field
-                            label={
-                              <LabelTip
-                                label="Modpack (mrpack)"
-                                content="Paste a Modrinth version link (recommended) or a direct .mrpack URL."
-                              />
-                            }
-                            required
-                            error={createFieldErrors().mrpack}
-                          >
-                            <Input
-                              ref={(el) => {
-                                createMcMrpackEl = el
-                              }}
-                              value={mcMrpack()}
-                              onInput={(e) => setMcMrpack(e.currentTarget.value)}
-                              placeholder="https://modrinth.com/modpack/.../version/..."
-                              spellcheck={false}
-                              invalid={Boolean(createFieldErrors().mrpack)}
-                            />
-                          </Field>
-
-                          <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
                             <Field
+                              class={createTemplateId() === 'minecraft:vanilla' ? '' : 'sm:col-span-2'}
                               label={<LabelTip label="Memory (MiB)" content="Max heap size passed to Java (Xmx)." />}
                               error={createFieldErrors().memory_mb}
                             >
@@ -2587,17 +2963,58 @@ function App() {
                                     <span>Enable</span>
                                   </label>
                                   <Show when={mcFrpEnabled()}>
-                                    <Textarea
-                                      ref={(el) => {
-                                        createMcFrpConfigEl = el
-                                      }}
-                                      value={mcFrpConfig()}
-                                      onInput={(e) => setMcFrpConfig(e.currentTarget.value)}
-                                      placeholder="Paste frpc config (INI)"
-                                      spellcheck={false}
-                                      class="font-mono text-[11px]"
-                                      invalid={Boolean(createFieldErrors().frp_config)}
-                                    />
+                                    <div class="space-y-2">
+                                      <div class="flex flex-wrap items-center justify-between gap-2">
+                                        <Tabs
+                                          value={mcFrpMode()}
+                                          options={[
+                                            { value: 'paste', label: 'Paste' },
+                                            { value: 'node', label: 'Node' },
+                                          ]}
+                                          onChange={(mode) => {
+                                            setMcFrpMode(mode)
+                                            if (mode === 'paste') setMcFrpNodeId('')
+                                            if (mode === 'node') setMcFrpConfig('')
+                                          }}
+                                        />
+                                        <Button size="xs" variant="secondary" onClick={() => setTab('frp')}>
+                                          Manage nodes
+                                        </Button>
+                                      </div>
+
+                                      <Show when={mcFrpMode() === 'node'}>
+                                        <div
+                                          ref={(el) => {
+                                            createMcFrpNodeEl = el
+                                          }}
+                                        >
+                                          <Dropdown
+                                            label=""
+                                            value={mcFrpNodeId()}
+                                            options={frpNodeDropdownOptions()}
+                                            placeholder="Select node…"
+                                            onChange={setMcFrpNodeId}
+                                          />
+                                        </div>
+                                        <div class="text-[11px] text-slate-500 dark:text-slate-400">
+                                          Uses the saved frpc.ini and patches <span class="font-mono">local_port</span> automatically.
+                                        </div>
+                                      </Show>
+
+                                      <Show when={mcFrpMode() === 'paste'}>
+                                        <Textarea
+                                          ref={(el) => {
+                                            createMcFrpConfigEl = el
+                                          }}
+                                          value={mcFrpConfig()}
+                                          onInput={(e) => setMcFrpConfig(e.currentTarget.value)}
+                                          placeholder="Paste frpc config (INI)"
+                                          spellcheck={false}
+                                          class="font-mono text-[11px]"
+                                          invalid={Boolean(createFieldErrors().frp_config)}
+                                        />
+                                      </Show>
+                                    </div>
                                   </Show>
                                 </div>
                               </Field>
@@ -2605,6 +3022,12 @@ function App() {
                           </Show>
                         </div>
                       </Show>
+
+
+
+
+
+
 
                       <Show when={selectedTemplate() === 'dst:vanilla'}>
                         <div class="space-y-3 border-t border-slate-200 pt-3 dark:border-slate-800">
@@ -3026,17 +3449,58 @@ function App() {
 	                                  <span>Enable</span>
 	                                </label>
 	                                <Show when={trFrpEnabled()}>
-	                                  <Textarea
-	                                    ref={(el) => {
-	                                      createTrFrpConfigEl = el
-	                                    }}
-	                                    value={trFrpConfig()}
-	                                    onInput={(e) => setTrFrpConfig(e.currentTarget.value)}
-	                                    placeholder="Paste frpc config (INI)"
-	                                    spellcheck={false}
-	                                    class="font-mono text-[11px]"
-	                                    invalid={Boolean(createFieldErrors().frp_config)}
-	                                  />
+	                                  <div class="space-y-2">
+	                                    <div class="flex flex-wrap items-center justify-between gap-2">
+	                                      <Tabs
+	                                        value={trFrpMode()}
+	                                        options={[
+	                                          { value: 'paste', label: 'Paste' },
+	                                          { value: 'node', label: 'Node' },
+	                                        ]}
+	                                        onChange={(mode) => {
+	                                          setTrFrpMode(mode)
+	                                          if (mode === 'paste') setTrFrpNodeId('')
+	                                          if (mode === 'node') setTrFrpConfig('')
+	                                        }}
+	                                      />
+	                                      <Button size="xs" variant="secondary" onClick={() => setTab('frp')}>
+	                                        Manage nodes
+	                                      </Button>
+	                                    </div>
+
+	                                    <Show when={trFrpMode() === 'node'}>
+	                                      <div
+	                                        ref={(el) => {
+	                                          createTrFrpNodeEl = el
+	                                        }}
+	                                      >
+	                                        <Dropdown
+	                                          label=""
+	                                          value={trFrpNodeId()}
+	                                          options={frpNodeDropdownOptions()}
+	                                          placeholder="Select node…"
+	                                          onChange={setTrFrpNodeId}
+	                                        />
+	                                      </div>
+	                                      <div class="text-[11px] text-slate-500 dark:text-slate-400">
+	                                        Uses the saved frpc.ini and patches <span class="font-mono">local_port</span> automatically.
+	                                      </div>
+	                                    </Show>
+
+	                                    <Show when={trFrpMode() === 'paste'}>
+	                                      <Textarea
+	                                        ref={(el) => {
+	                                          createTrFrpConfigEl = el
+	                                        }}
+	                                        value={trFrpConfig()}
+	                                        onInput={(e) => setTrFrpConfig(e.currentTarget.value)}
+	                                        placeholder="Paste frpc config (INI)"
+	                                        spellcheck={false}
+	                                        class="font-mono text-[11px]"
+	                                        invalid={Boolean(createFieldErrors().frp_config)}
+	                                      />
+	                                    </Show>
+	                                  </div>
 	                                </Show>
 	                              </div>
 	                            </Field>
@@ -3107,36 +3571,68 @@ function App() {
 	                          loading={createInstance.isPending}
 	                          disabled={isReadOnly()}
 	                          title={isReadOnly() ? 'Read-only mode' : 'Create instance'}
-                          onClick={async () => {
-                            const template_id = selectedTemplate()
-                            const params: Record<string, string> = {}
-                            const display_name = instanceName().trim() ? instanceName().trim() : null
+	                          onClick={async () => {
+	                            const template_id = createTemplateId()
+	                            const params: Record<string, string> = {}
+	                            const display_name = instanceName().trim() ? instanceName().trim() : null
 
                             setCreateFormError(null)
                             setCreateFieldErrors({})
 
                             const localErrors: Record<string, string> = {}
+                            const mcFrpCfg = mcFrpEnabled()
+                              ? mcFrpMode() === 'node'
+                                ? frpNodeConfigById(mcFrpNodeId()) ?? ''
+                                : mcFrpConfig().trim()
+                              : ''
+                            const trFrpCfg = trFrpEnabled()
+                              ? trFrpMode() === 'node'
+                                ? frpNodeConfigById(trFrpNodeId()) ?? ''
+                                : trFrpConfig().trim()
+                              : ''
 
                             if (template_id === 'demo:sleep') {
                               params.seconds = sleepSeconds()
                             } else if (template_id === 'minecraft:vanilla') {
                               if (!mcEula()) localErrors.accept_eula = 'You must accept the EULA to start a Minecraft server.'
-                              if (mcFrpEnabled() && !mcFrpConfig().trim()) localErrors.frp_config = 'Paste frpc config.'
+                              if (mcFrpEnabled() && !mcFrpCfg)
+                                localErrors.frp_config = mcFrpMode() === 'node' ? 'Select an FRP node.' : 'Paste frpc config.'
                               params.accept_eula = 'true'
                               const v = mcVersion().trim()
                               params.version = v || 'latest_release'
                               params.memory_mb = mcMemory() || '2048'
                               if (mcPort().trim()) params.port = mcPort().trim()
-                              if (mcFrpEnabled() && mcFrpConfig().trim()) params.frp_config = mcFrpConfig().trim()
+                              if (mcFrpEnabled() && mcFrpCfg) params.frp_config = mcFrpCfg
                             } else if (template_id === 'minecraft:modrinth') {
                               if (!mcEula()) localErrors.accept_eula = 'You must accept the EULA to start a Minecraft server.'
                               if (!mcMrpack().trim()) localErrors.mrpack = 'Paste a Modrinth version link or a direct .mrpack URL.'
-                              if (mcFrpEnabled() && !mcFrpConfig().trim()) localErrors.frp_config = 'Paste frpc config.'
+                              if (mcFrpEnabled() && !mcFrpCfg)
+                                localErrors.frp_config = mcFrpMode() === 'node' ? 'Select an FRP node.' : 'Paste frpc config.'
                               params.accept_eula = 'true'
                               params.mrpack = mcMrpack().trim()
                               params.memory_mb = mcMemory() || '2048'
                               if (mcPort().trim()) params.port = mcPort().trim()
-                              if (mcFrpEnabled() && mcFrpConfig().trim()) params.frp_config = mcFrpConfig().trim()
+                              if (mcFrpEnabled() && mcFrpCfg) params.frp_config = mcFrpCfg
+                            } else if (template_id === 'minecraft:import') {
+                              if (!mcEula()) localErrors.accept_eula = 'You must accept the EULA to start a Minecraft server.'
+                              if (!mcImportPack().trim()) localErrors.pack = 'Provide a server pack zip URL, or a path under /data.'
+                              if (mcFrpEnabled() && !mcFrpCfg)
+                                localErrors.frp_config = mcFrpMode() === 'node' ? 'Select an FRP node.' : 'Paste frpc config.'
+                              params.accept_eula = 'true'
+                              params.pack = mcImportPack().trim()
+                              params.memory_mb = mcMemory() || '2048'
+                              if (mcPort().trim()) params.port = mcPort().trim()
+                              if (mcFrpEnabled() && mcFrpCfg) params.frp_config = mcFrpCfg
+                            } else if (template_id === 'minecraft:curseforge') {
+                              if (!mcEula()) localErrors.accept_eula = 'You must accept the EULA to start a Minecraft server.'
+                              if (!mcCurseforge().trim()) localErrors.curseforge = 'Paste a CurseForge file URL, or modId:fileId.'
+                              if (mcFrpEnabled() && !mcFrpCfg)
+                                localErrors.frp_config = mcFrpMode() === 'node' ? 'Select an FRP node.' : 'Paste frpc config.'
+                              params.accept_eula = 'true'
+                              params.curseforge = mcCurseforge().trim()
+                              params.memory_mb = mcMemory() || '2048'
+                              if (mcPort().trim()) params.port = mcPort().trim()
+                              if (mcFrpEnabled() && mcFrpCfg) params.frp_config = mcFrpCfg
                             } else if (template_id === 'terraria:vanilla') {
                               const v = trVersion().trim()
                               params.version = v || '1453'
@@ -3145,10 +3641,10 @@ function App() {
                               params.world_name = trWorldName().trim() || 'world'
                               params.world_size = trWorldSize().trim() || '1'
                               if (trPassword().trim()) params.password = trPassword().trim()
-                              if (trFrpEnabled() && !trFrpConfig().trim()) localErrors.frp_config = 'Paste frpc config.'
-                              if (trFrpEnabled() && trFrpConfig().trim()) params.frp_config = trFrpConfig().trim()
+                              if (trFrpEnabled() && !trFrpCfg)
+                                localErrors.frp_config = trFrpMode() === 'node' ? 'Select an FRP node.' : 'Paste frpc config.'
+                              if (trFrpEnabled() && trFrpCfg) params.frp_config = trFrpCfg
                             } else if (template_id === 'dst:vanilla') {
-                              if (!dstClusterToken().trim()) localErrors.cluster_token = 'Paste your Klei cluster token.'
                               params.cluster_token = dstClusterToken().trim()
                               params.cluster_name = dstClusterName().trim() || 'Alloy DST server'
                               params.max_players = dstMaxPlayers().trim() || '6'
@@ -3204,16 +3700,16 @@ function App() {
 	                          loading={warmCache.isPending}
 	                          disabled={
 	                            isReadOnly() ||
-                            createInstance.isPending ||
-                            !['minecraft:vanilla', 'terraria:vanilla'].includes(selectedTemplate())
-                          }
+	                            createInstance.isPending ||
+	                            !['minecraft:vanilla', 'terraria:vanilla'].includes(createTemplateId())
+	                          }
                           title={isReadOnly() ? 'Read-only mode' : 'Only download required files (no start)'}
-                          onClick={async () => {
-                            const template_id = selectedTemplate()
-                            const params: Record<string, string> = {}
-                            if (template_id === 'minecraft:vanilla') {
-                              const v = mcVersion().trim()
-                              params.version = v || 'latest_release'
+	                          onClick={async () => {
+	                            const template_id = createTemplateId()
+	                            const params: Record<string, string> = {}
+	                            if (template_id === 'minecraft:vanilla') {
+	                              const v = mcVersion().trim()
+	                              params.version = v || 'latest_release'
                             }
                             if (template_id === 'terraria:vanilla') {
                               const v = trVersion().trim()
@@ -3896,6 +4392,465 @@ function App() {
                 />
               </Show>
 
+              <Show when={tab() === 'frp'}>
+                <div class="min-h-0 flex-1 overflow-auto p-4">
+                  <div class="mx-auto w-full max-w-3xl space-y-4">
+                    <div class="flex items-start justify-between gap-3">
+                      <div>
+                        <div class="text-sm font-semibold text-slate-900 dark:text-slate-100">FRP nodes</div>
+                        <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                          Manage saved <span class="font-mono">frpc.ini</span> configs for quick reuse when creating servers.
+                        </div>
+                      </div>
+                      <div class="flex items-center gap-2">
+                        <Show when={frpNodes.isPending}>
+                          <Badge variant="neutral">Loading</Badge>
+                        </Show>
+                        <Button
+                          size="sm"
+                          variant="primary"
+                          disabled={!isAuthed() || isReadOnly()}
+                          title={!isAuthed() ? 'Sign in required' : isReadOnly() ? 'Read-only mode' : 'Add FRP node'}
+                          onClick={() => openCreateFrpNodeModal()}
+                        >
+                          New
+                        </Button>
+                      </div>
+                    </div>
+
+                    <Show when={isAuthed()} fallback={<EmptyState title="Sign in required" description="Sign in to manage FRP nodes." />}>
+                      <Show
+                        when={frpNodes.isError}
+                        fallback={
+                          <Show
+                            when={(frpNodes.data ?? []).length > 0}
+                            fallback={
+                              <EmptyState
+                                title="No FRP nodes"
+                                description="Add one to reuse a frpc.ini config when creating Minecraft/Terraria instances."
+                                actions={
+                                  <Button variant="secondary" size="sm" onClick={() => openCreateFrpNodeModal()} disabled={isReadOnly()}>
+                                    Add node
+                                  </Button>
+                                }
+                              />
+                            }
+                          >
+                            <div class="space-y-3">
+                              <For each={(frpNodes.data ?? []) as unknown as FrpNodeDto[]}>
+                                {(n) => {
+                                  const endpoint = () => parseFrpcIniEndpoint(n.config)
+                                  return (
+                                    <div class="rounded-2xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
+                                      <div class="flex flex-wrap items-start justify-between gap-3">
+                                        <div class="min-w-0">
+                                          <div class="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">{n.name}</div>
+                                          <div class="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                                            <Show when={endpoint()} fallback={<span>Endpoint: —</span>}>
+                                              {(ep) => (
+                                                <span>
+                                                  Endpoint: <span class="font-mono">{ep()}</span>
+                                                </span>
+                                              )}
+                                            </Show>
+                                          </div>
+                                        </div>
+                                        <div class="flex flex-wrap items-center gap-2">
+                                          <IconButton
+                                            size="sm"
+                                            variant="secondary"
+                                            label="Copy endpoint"
+                                            disabled={!endpoint()}
+                                            onClick={async () => {
+                                              const ep = endpoint()
+                                              if (!ep) return
+                                              await safeCopy(ep)
+                                              pushToast('success', 'Copied', ep)
+                                            }}
+                                          >
+                                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
+                                              <path d="M5.75 2A2.75 2.75 0 003 4.75v9.5A2.75 2.75 0 005.75 17h1.5a.75.75 0 000-1.5h-1.5c-.69 0-1.25-.56-1.25-1.25v-9.5c0-.69.56-1.25 1.25-1.25h5.5c.69 0 1.25.56 1.25 1.25v1a.75.75 0 001.5 0v-1A2.75 2.75 0 0011.25 2h-5.5z" />
+                                              <path d="M8.75 6A2.75 2.75 0 006 8.75v6.5A2.75 2.75 0 008.75 18h5.5A2.75 2.75 0 0017 15.25v-6.5A2.75 2.75 0 0014.25 6h-5.5z" />
+                                            </svg>
+                                          </IconButton>
+                                          <Button size="sm" variant="secondary" onClick={() => openEditFrpNodeModal(n)}>
+                                            Edit
+                                          </Button>
+                                          <Button
+                                            size="sm"
+                                            variant="danger"
+                                            disabled={isReadOnly() || frpDeleteNode.isPending}
+                                            onClick={async () => {
+                                              if (!window.confirm(`Delete FRP node “${n.name}”?`)) return
+                                              try {
+                                                await frpDeleteNode.mutateAsync({ id: n.id })
+                                                pushToast('success', 'Deleted', n.name)
+                                                void invalidateFrpNodes()
+                                              } catch (e) {
+                                                toastError('Delete failed', e)
+                                              }
+                                            }}
+                                          >
+                                            Delete
+                                          </Button>
+                                        </div>
+                                      </div>
+                                      <div class="mt-3 text-[11px] text-slate-500 dark:text-slate-400">
+                                        Updated <span class="font-mono">{n.updated_at}</span>
+                                      </div>
+                                    </div>
+                                  )
+                                }}
+                              </For>
+                            </div>
+                          </Show>
+                        }
+                      >
+                        <ErrorState title="Failed to load FRP nodes" error={frpNodes.error} onRetry={() => void invalidateFrpNodes()} />
+                      </Show>
+                    </Show>
+                  </div>
+                </div>
+              </Show>
+
+              <Show when={tab() === 'settings'}>
+                <div class="min-h-0 flex-1 overflow-auto p-4">
+                  <div class="mx-auto w-full max-w-2xl space-y-4">
+                    <div class="flex items-start justify-between gap-3">
+                      <div>
+                        <div class="text-sm font-semibold text-slate-900 dark:text-slate-100">Settings</div>
+                        <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                          Configure shared secrets used by templates.
+                        </div>
+                      </div>
+                      <Show when={settingsStatus.isPending}>
+                        <Badge variant="neutral">Loading</Badge>
+                      </Show>
+                    </div>
+
+                    <Show
+                      when={me()?.is_admin}
+                      fallback={<EmptyState title="Forbidden" description="Administrator access required." />}
+                    >
+                      <div class="rounded-2xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
+                        <div class="flex items-center justify-between gap-3">
+                          <div class="text-sm font-medium text-slate-900 dark:text-slate-100">DST default Klei key</div>
+                          <Badge variant={settingsStatus.data?.dst_default_klei_key_set ? 'success' : 'warning'}>
+                            {settingsStatus.data?.dst_default_klei_key_set ? 'Configured' : 'Not set'}
+                          </Badge>
+                        </div>
+                        <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                          Used as the default <span class="font-mono">cluster_token</span> when creating DST instances (if left blank).
+                        </div>
+
+                        <div class="mt-3 flex flex-wrap items-center gap-2">
+                          <Input
+                            type={settingsDstKeyVisible() ? 'text' : 'password'}
+                            value={settingsDstKey()}
+                            onInput={(e) => setSettingsDstKey(e.currentTarget.value)}
+                            placeholder={settingsStatus.data?.dst_default_klei_key_set ? '(configured — paste to update, blank to clear)' : 'Paste key…'}
+                            spellcheck={false}
+                            class="min-w-[220px] flex-1 font-mono text-[11px]"
+                          />
+                          <IconButton
+                            type="button"
+                            size="sm"
+                            variant="secondary"
+                            label={settingsDstKeyVisible() ? 'Hide key' : 'Show key'}
+                            onClick={() => setSettingsDstKeyVisible((v) => !v)}
+                          >
+                            <Show
+                              when={settingsDstKeyVisible()}
+                              fallback={
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
+                                  <path d="M10 12.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5z" />
+                                  <path
+                                    fill-rule="evenodd"
+                                    d="M.664 10.59a1.651 1.651 0 010-1.186A10.004 10.004 0 0110 3c4.257 0 7.893 2.66 9.336 6.41.147.382.147.804 0 1.186A10.004 10.004 0 0110 17c-4.257 0-7.893-2.66-9.336-6.41zM14 10a4 4 0 11-8 0 4 4 0 018 0z"
+                                    clip-rule="evenodd"
+                                  />
+                                </svg>
+                              }
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
+                                <path d="M13.359 11.238l1.36 1.36a4 4 0 01-5.317-5.317l1.36 1.36a2.5 2.5 0 002.597 2.597z" />
+                                <path
+                                  fill-rule="evenodd"
+                                  d="M2 4.25a.75.75 0 011.28-.53l14.5 14.5a.75.75 0 11-1.06 1.06l-2.294-2.294A9.961 9.961 0 0110 17c-4.257 0-7.893-2.66-9.336-6.41a1.651 1.651 0 010-1.186 10.03 10.03 0 012.924-4.167L2.22 3.78A.75.75 0 012 4.25zm6.12 6.12a2.5 2.5 0 003.51 3.51l-3.51-3.51z"
+                                  clip-rule="evenodd"
+                                />
+                                <path d="M12.454 8.214L9.31 5.07A4 4 0 0114.93 10.69l-2.476-2.476z" />
+                                <path d="M15.765 12.585l1.507 1.507a10.03 10.03 0 002.064-3.502 1.651 1.651 0 000-1.186A10.004 10.004 0 0010 3a9.961 9.961 0 00-3.426.608l1.65 1.65A8.473 8.473 0 0110 4.5c3.49 0 6.574 2.138 7.773 5.5a8.5 8.5 0 01-2.008 2.585z" />
+                              </svg>
+                            </Show>
+                          </IconButton>
+                        </div>
+
+                        <div class="mt-3 flex flex-wrap items-center gap-2">
+                          <Button
+                            size="sm"
+                            variant="primary"
+                            loading={setDstDefaultKleiKey.isPending}
+                            disabled={isReadOnly()}
+                            onClick={async () => {
+                              try {
+                                await setDstDefaultKleiKey.mutateAsync({ key: settingsDstKey() })
+                                setSettingsDstKey('')
+                                void queryClient.invalidateQueries({ queryKey: ['settings.status', null] })
+                                pushToast('success', 'Saved', 'DST default key updated')
+                              } catch (e) {
+                                toastError('Save failed', e)
+                              }
+                            }}
+                          >
+                            Save
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            disabled={isReadOnly()}
+                            onClick={async () => {
+                              try {
+                                await setDstDefaultKleiKey.mutateAsync({ key: '' })
+                                setSettingsDstKey('')
+                                void queryClient.invalidateQueries({ queryKey: ['settings.status', null] })
+                                pushToast('success', 'Cleared', 'DST default key cleared')
+                              } catch (e) {
+                                toastError('Clear failed', e)
+                              }
+                            }}
+                          >
+                            Clear
+                          </Button>
+                        </div>
+                      </div>
+
+                      <div class="rounded-2xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
+                        <div class="flex items-center justify-between gap-3">
+                          <div class="text-sm font-medium text-slate-900 dark:text-slate-100">CurseForge API key</div>
+                          <Badge variant={settingsStatus.data?.curseforge_api_key_set ? 'success' : 'warning'}>
+                            {settingsStatus.data?.curseforge_api_key_set ? 'Configured' : 'Not set'}
+                          </Badge>
+                        </div>
+                        <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                          Required for resolving CurseForge modpacks and downloading the author-provided server pack.
+                        </div>
+
+                        <div class="mt-3 flex flex-wrap items-center gap-2">
+                          <Input
+                            type={settingsCurseforgeKeyVisible() ? 'text' : 'password'}
+                            value={settingsCurseforgeKey()}
+                            onInput={(e) => setSettingsCurseforgeKey(e.currentTarget.value)}
+                            placeholder={settingsStatus.data?.curseforge_api_key_set ? '(configured — paste to update, blank to clear)' : 'Paste key…'}
+                            spellcheck={false}
+                            class="min-w-[220px] flex-1 font-mono text-[11px]"
+                          />
+                          <IconButton
+                            type="button"
+                            size="sm"
+                            variant="secondary"
+                            label={settingsCurseforgeKeyVisible() ? 'Hide key' : 'Show key'}
+                            onClick={() => setSettingsCurseforgeKeyVisible((v) => !v)}
+                          >
+                            <Show
+                              when={settingsCurseforgeKeyVisible()}
+                              fallback={
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
+                                  <path d="M10 12.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5z" />
+                                  <path
+                                    fill-rule="evenodd"
+                                    d="M.664 10.59a1.651 1.651 0 010-1.186A10.004 10.004 0 0110 3c4.257 0 7.893 2.66 9.336 6.41.147.382.147.804 0 1.186A10.004 10.004 0 0110 17c-4.257 0-7.893-2.66-9.336-6.41zM14 10a4 4 0 11-8 0 4 4 0 018 0z"
+                                    clip-rule="evenodd"
+                                  />
+                                </svg>
+                              }
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
+                                <path d="M13.359 11.238l1.36 1.36a4 4 0 01-5.317-5.317l1.36 1.36a2.5 2.5 0 002.597 2.597z" />
+                                <path
+                                  fill-rule="evenodd"
+                                  d="M2 4.25a.75.75 0 011.28-.53l14.5 14.5a.75.75 0 11-1.06 1.06l-2.294-2.294A9.961 9.961 0 0110 17c-4.257 0-7.893-2.66-9.336-6.41a1.651 1.651 0 010-1.186 10.03 10.03 0 012.924-4.167L2.22 3.78A.75.75 0 012 4.25zm6.12 6.12a2.5 2.5 0 003.51 3.51l-3.51-3.51z"
+                                  clip-rule="evenodd"
+                                />
+                                <path d="M12.454 8.214L9.31 5.07A4 4 0 0114.93 10.69l-2.476-2.476z" />
+                                <path d="M15.765 12.585l1.507 1.507a10.03 10.03 0 002.064-3.502 1.651 1.651 0 000-1.186A10.004 10.004 0 0010 3a9.961 9.961 0 00-3.426.608l1.65 1.65A8.473 8.473 0 0110 4.5c3.49 0 6.574 2.138 7.773 5.5a8.5 8.5 0 01-2.008 2.585z" />
+                              </svg>
+                            </Show>
+                          </IconButton>
+                        </div>
+
+                        <div class="mt-3 flex flex-wrap items-center gap-2">
+                          <Button
+                            size="sm"
+                            variant="primary"
+                            loading={setCurseforgeApiKey.isPending}
+                            disabled={isReadOnly()}
+                            onClick={async () => {
+                              try {
+                                await setCurseforgeApiKey.mutateAsync({ key: settingsCurseforgeKey() })
+                                setSettingsCurseforgeKey('')
+                                void queryClient.invalidateQueries({ queryKey: ['settings.status', null] })
+                                pushToast('success', 'Saved', 'CurseForge API key updated')
+                              } catch (e) {
+                                toastError('Save failed', e)
+                              }
+                            }}
+                          >
+                            Save
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            disabled={isReadOnly()}
+                            onClick={async () => {
+                              try {
+                                await setCurseforgeApiKey.mutateAsync({ key: '' })
+                                setSettingsCurseforgeKey('')
+                                void queryClient.invalidateQueries({ queryKey: ['settings.status', null] })
+                                pushToast('success', 'Cleared', 'CurseForge API key cleared')
+                              } catch (e) {
+                                toastError('Clear failed', e)
+                              }
+                            }}
+                          >
+                            Clear
+                          </Button>
+                        </div>
+                      </div>
+
+                      <div class="rounded-2xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
+                        <div class="flex flex-wrap items-start justify-between gap-3">
+                          <div class="min-w-0">
+                            <div class="text-sm font-medium text-slate-900 dark:text-slate-100">Updates</div>
+                            <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                              Current <span class="font-mono">{controlDiagnostics.data?.control_version ?? '—'}</span>
+                              <Show when={updateCheck.data?.latest}>
+                                {(latest) => (
+                                  <>
+                                    {' '}
+                                    · Latest{' '}
+                                    <a
+                                      href={latest().url}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      class="font-mono text-slate-900 underline decoration-slate-300 underline-offset-2 hover:decoration-slate-500 dark:text-slate-100 dark:decoration-slate-700 dark:hover:decoration-slate-500"
+                                    >
+                                      {latest().tag}
+                                    </a>
+                                  </>
+                                )}
+                              </Show>
+                            </div>
+                          </div>
+                          <div class="flex flex-wrap items-center gap-2">
+                            <Show when={updateCheck.isPending}>
+                              <Badge variant="neutral">Checking</Badge>
+                            </Show>
+                            <Show when={updateCheck.data && !updateCheck.isPending && !updateCheck.isError}>
+                              <Badge variant={updateCheck.data?.update_available ? 'warning' : 'success'}>
+                                {updateCheck.data?.update_available ? 'Update available' : 'Up to date'}
+                              </Badge>
+                            </Show>
+                          </div>
+                        </div>
+
+                        <Show when={updateCheck.data?.latest?.published_at}>
+                          {(publishedAt) => (
+                            <div class="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
+                              Published <span class="font-mono">{publishedAt()}</span>
+                            </div>
+                          )}
+                        </Show>
+
+                        <Show when={updateCheck.data?.latest?.body}>
+                          {(body) => (
+                            <pre class="mt-3 max-h-56 overflow-auto rounded-xl border border-slate-200 bg-slate-50 p-3 text-[11px] leading-relaxed text-slate-700 dark:border-slate-800 dark:bg-slate-900/40 dark:text-slate-200">
+                              {body()}
+                            </pre>
+                          )}
+                        </Show>
+
+                        <Show when={updateCheck.isError}>
+                          <ErrorState title="Failed to check updates" error={updateCheck.error} onRetry={() => updateCheck.refetch()} class="mt-3" />
+                        </Show>
+
+                        <div class="mt-3 flex flex-wrap items-center gap-2">
+                          <Button size="sm" variant="secondary" disabled={updateCheck.isPending} onClick={() => updateCheck.refetch()}>
+                            Check
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="primary"
+                            loading={triggerUpdate.isPending}
+                            disabled={
+                              isReadOnly() ||
+                              triggerUpdate.isPending ||
+                              updateCheck.isPending ||
+                              !updateCheck.data?.can_trigger_update ||
+                              !updateCheck.data?.update_available
+                            }
+                            title={
+                              isReadOnly()
+                                ? 'Read-only mode'
+                                : !updateCheck.data?.can_trigger_update
+                                  ? 'Updater not configured'
+                                  : !updateCheck.data?.update_available
+                                    ? 'Already up to date'
+                                    : 'Trigger update'
+                            }
+                            onClick={async () => {
+                              try {
+                                const out = await triggerUpdate.mutateAsync(null)
+                                pushToast('success', 'Update triggered', out.message || 'Watchtower update requested.')
+                                setTimeout(() => {
+                                  try {
+                                    window.location.reload()
+                                  } catch {
+                                    // ignore
+                                  }
+                                }, 3000)
+                              } catch (e) {
+                                toastError('Update failed', e)
+                              }
+                            }}
+                          >
+                            Update now
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            onClick={async () => {
+                              const cmd = 'docker compose pull && docker compose up -d'
+                              try {
+                                await safeCopy(cmd)
+                                pushToast('success', 'Copied', cmd)
+                              } catch (e) {
+                                toastError('Copy failed', e)
+                              }
+                            }}
+                          >
+                            Copy docker command
+                          </Button>
+                        </div>
+
+                        <div class="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3 font-mono text-[11px] text-slate-700 dark:border-slate-800 dark:bg-slate-900/40 dark:text-slate-200">
+                          docker compose pull && docker compose up -d
+                        </div>
+
+                        <Show when={updateCheck.data && !updateCheck.data.can_trigger_update}>
+                          <div class="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
+                            One-click update requires Watchtower HTTP API. Set{' '}
+                            <span class="font-mono">ALLOY_UPDATE_WATCHTOWER_URL</span> and{' '}
+                            <span class="font-mono">ALLOY_UPDATE_WATCHTOWER_TOKEN</span> on{' '}
+                            <span class="font-mono">alloy-control</span>.
+                          </div>
+                        </Show>
+                      </div>
+                    </Show>
+                  </div>
+                </div>
+              </Show>
+
               <Show when={tab() === 'nodes'}>
                 <NodesPage
                   tabLabel="Nodes"
@@ -4310,6 +5265,104 @@ function App() {
         </Modal>
 
         <Modal
+          open={showFrpNodeModal()}
+          onClose={() => closeFrpNodeModal()}
+          title={editingFrpNodeId() ? 'Edit FRP node' : 'Add FRP node'}
+          description="Store an frpc.ini config for reuse (contains secrets like token)."
+          size="lg"
+          initialFocus={() => frpNodeNameEl}
+          footer={
+            <div class="flex gap-3">
+              <Button variant="secondary" class="flex-1" onClick={() => closeFrpNodeModal()}>
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                class="flex-1"
+                type="submit"
+                form="alloy-frp-node"
+                loading={frpCreateNode.isPending || frpUpdateNode.isPending}
+                disabled={isReadOnly() || !frpNodeName().trim() || !frpNodeConfig().trim()}
+              >
+                Save
+              </Button>
+            </div>
+          }
+        >
+          <form
+            id="alloy-frp-node"
+            class="grid gap-4"
+            onSubmit={async (e) => {
+              e.preventDefault()
+              setFrpNodeFieldErrors({})
+              setFrpNodeFormError(null)
+              try {
+                const id = editingFrpNodeId()
+                if (!id) {
+                  const out = await frpCreateNode.mutateAsync({ name: frpNodeName().trim(), config: frpNodeConfig() })
+                  pushToast('success', 'Saved', out.name)
+                } else {
+                  const out = await frpUpdateNode.mutateAsync({ id, name: frpNodeName().trim(), config: frpNodeConfig() })
+                  pushToast('success', 'Saved', out.name)
+                }
+                closeFrpNodeModal()
+                void invalidateFrpNodes()
+              } catch (err) {
+                if (isAlloyApiError(err)) {
+                  setFrpNodeFieldErrors(err.data.field_errors ?? {})
+                  setFrpNodeFormError(err.data.message)
+                  queueMicrotask(() => {
+                    if (err.data.field_errors?.name) focusEl(frpNodeNameEl)
+                    else if (err.data.field_errors?.config) focusEl(frpNodeConfigEl)
+                  })
+                  return
+                }
+                setFrpNodeFormError(err instanceof Error ? err.message : 'save failed')
+              }
+            }}
+          >
+            <Field label="Name" required error={frpNodeFieldErrors().name}>
+              <Input
+                ref={(el) => {
+                  frpNodeNameEl = el
+                }}
+                value={frpNodeName()}
+                onInput={(e) => setFrpNodeName(e.currentTarget.value)}
+                placeholder="e.g. my-frp"
+                spellcheck={false}
+                invalid={Boolean(frpNodeFieldErrors().name)}
+              />
+            </Field>
+
+            <Field
+              label={<LabelTip label="frpc.ini" content="Paste a complete frpc.ini. Alloy will patch local_port/local_ip per instance at runtime." />}
+              required
+              error={frpNodeFieldErrors().config}
+            >
+              <Textarea
+                ref={(el) => {
+                  frpNodeConfigEl = el
+                }}
+                value={frpNodeConfig()}
+                onInput={(e) => setFrpNodeConfig(e.currentTarget.value)}
+                placeholder="[common]\nserver_addr = ...\n...\n"
+                spellcheck={false}
+                class="font-mono text-[11px]"
+                invalid={Boolean(frpNodeFieldErrors().config)}
+              />
+            </Field>
+
+            <Show when={frpNodeFormError()}>
+              {(msg) => (
+                <div class="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-[12px] text-rose-800 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-200">
+                  {msg()}
+                </div>
+              )}
+            </Show>
+          </form>
+        </Modal>
+
+        <Modal
           open={confirmDeleteInstanceId() != null}
           onClose={() => setConfirmDeleteInstanceId(null)}
           title="Delete instance"
@@ -4589,23 +5642,68 @@ function App() {
 	                                  checked={editMcFrpEnabled()}
 	                                  onChange={(e) => {
 	                                    setEditMcFrpEnabled(e.currentTarget.checked)
-	                                    if (!e.currentTarget.checked) setEditMcFrpConfig('')
+	                                    if (!e.currentTarget.checked) {
+	                                      setEditMcFrpConfig('')
+	                                      setEditMcFrpMode('paste')
+	                                      setEditMcFrpNodeId('')
+	                                    }
 	                                  }}
 	                                />
 	                                <span>Enable</span>
 	                              </label>
 	                              <Show when={editMcFrpEnabled()}>
-	                                <Textarea
-	                                  ref={(el) => {
-	                                    editMcFrpConfigEl = el
-	                                  }}
-	                                  value={editMcFrpConfig()}
-	                                  onInput={(e) => setEditMcFrpConfig(e.currentTarget.value)}
-	                                  placeholder="Paste frpc config to set/replace (INI)"
-	                                  spellcheck={false}
-	                                  class="font-mono text-[11px]"
-	                                  invalid={Boolean(editFieldErrors().frp_config)}
-	                                />
+	                                <div class="space-y-2">
+	                                  <div class="flex flex-wrap items-center justify-between gap-2">
+	                                    <Tabs
+	                                      value={editMcFrpMode()}
+	                                      options={[
+	                                        { value: 'paste', label: 'Paste' },
+	                                        { value: 'node', label: 'Node' },
+	                                      ]}
+	                                      onChange={(mode) => {
+	                                        setEditMcFrpMode(mode)
+	                                        if (mode === 'paste') setEditMcFrpNodeId('')
+	                                        if (mode === 'node') setEditMcFrpConfig('')
+	                                      }}
+	                                    />
+	                                    <Button size="xs" variant="secondary" onClick={() => setTab('frp')}>
+	                                      Manage nodes
+	                                    </Button>
+	                                  </div>
+
+	                                  <Show when={editMcFrpMode() === 'node'}>
+	                                    <div
+	                                      ref={(el) => {
+	                                        editMcFrpNodeEl = el
+	                                      }}
+	                                    >
+	                                      <Dropdown
+	                                        label=""
+	                                        value={editMcFrpNodeId()}
+	                                        options={frpNodeDropdownOptions()}
+	                                        placeholder="Select node…"
+	                                        onChange={setEditMcFrpNodeId}
+	                                      />
+	                                    </div>
+	                                    <div class="text-[11px] text-slate-500 dark:text-slate-400">
+	                                      If you don’t select a node, the existing config (if any) stays unchanged.
+	                                    </div>
+	                                  </Show>
+
+	                                  <Show when={editMcFrpMode() === 'paste'}>
+	                                    <Textarea
+	                                      ref={(el) => {
+	                                        editMcFrpConfigEl = el
+	                                      }}
+	                                      value={editMcFrpConfig()}
+	                                      onInput={(e) => setEditMcFrpConfig(e.currentTarget.value)}
+	                                      placeholder="Paste frpc config to set/replace (INI)"
+	                                      spellcheck={false}
+	                                      class="font-mono text-[11px]"
+	                                      invalid={Boolean(editFieldErrors().frp_config)}
+	                                    />
+	                                  </Show>
+	                                </div>
 	                              </Show>
 	                            </div>
 	                          </Field>
@@ -4806,23 +5904,68 @@ function App() {
 	                                checked={editTrFrpEnabled()}
 	                                onChange={(e) => {
 	                                  setEditTrFrpEnabled(e.currentTarget.checked)
-	                                  if (!e.currentTarget.checked) setEditTrFrpConfig('')
+	                                  if (!e.currentTarget.checked) {
+	                                    setEditTrFrpConfig('')
+	                                    setEditTrFrpMode('paste')
+	                                    setEditTrFrpNodeId('')
+	                                  }
 	                                }}
 	                              />
 	                              <span>Enable</span>
 	                            </label>
 	                            <Show when={editTrFrpEnabled()}>
-	                              <Textarea
-	                                ref={(el) => {
-	                                  editTrFrpConfigEl = el
-	                                }}
-	                                value={editTrFrpConfig()}
-	                                onInput={(e) => setEditTrFrpConfig(e.currentTarget.value)}
-	                                placeholder="Paste frpc config to set/replace (INI)"
-	                                spellcheck={false}
-	                                class="font-mono text-[11px]"
-	                                invalid={Boolean(editFieldErrors().frp_config)}
-	                              />
+	                              <div class="space-y-2">
+	                                <div class="flex flex-wrap items-center justify-between gap-2">
+	                                  <Tabs
+	                                    value={editTrFrpMode()}
+	                                    options={[
+	                                      { value: 'paste', label: 'Paste' },
+	                                      { value: 'node', label: 'Node' },
+	                                    ]}
+	                                    onChange={(mode) => {
+	                                      setEditTrFrpMode(mode)
+	                                      if (mode === 'paste') setEditTrFrpNodeId('')
+	                                      if (mode === 'node') setEditTrFrpConfig('')
+	                                    }}
+	                                  />
+	                                  <Button size="xs" variant="secondary" onClick={() => setTab('frp')}>
+	                                    Manage nodes
+	                                  </Button>
+	                                </div>
+
+	                                <Show when={editTrFrpMode() === 'node'}>
+	                                  <div
+	                                    ref={(el) => {
+	                                      editTrFrpNodeEl = el
+	                                    }}
+	                                  >
+	                                    <Dropdown
+	                                      label=""
+	                                      value={editTrFrpNodeId()}
+	                                      options={frpNodeDropdownOptions()}
+	                                      placeholder="Select node…"
+	                                      onChange={setEditTrFrpNodeId}
+	                                    />
+	                                  </div>
+	                                  <div class="text-[11px] text-slate-500 dark:text-slate-400">
+	                                    If you don’t select a node, the existing config (if any) stays unchanged.
+	                                  </div>
+	                                </Show>
+
+	                                <Show when={editTrFrpMode() === 'paste'}>
+	                                  <Textarea
+	                                    ref={(el) => {
+	                                      editTrFrpConfigEl = el
+	                                    }}
+	                                    value={editTrFrpConfig()}
+	                                    onInput={(e) => setEditTrFrpConfig(e.currentTarget.value)}
+	                                    placeholder="Paste frpc config to set/replace (INI)"
+	                                    spellcheck={false}
+	                                    class="font-mono text-[11px]"
+	                                    invalid={Boolean(editFieldErrors().frp_config)}
+	                                  />
+	                                </Show>
+	                              </div>
 	                            </Show>
 	                          </div>
 	                        </Field>
@@ -4876,12 +6019,22 @@ function App() {
 
                       if (base.template_id === 'minecraft:vanilla') {
                         const existing = (base.params.frp_config ?? '').trim()
-                        if (editMcFrpEnabled() && !existing && !editMcFrpConfig().trim()) localErrors.frp_config = 'Paste frpc config.'
+                        const nextCfg =
+                          editMcFrpMode() === 'node'
+                            ? frpNodeConfigById(editMcFrpNodeId()) ?? ''
+                            : editMcFrpConfig().trim()
+                        if (editMcFrpEnabled() && !existing && !nextCfg)
+                          localErrors.frp_config = editMcFrpMode() === 'node' ? 'Select an FRP node.' : 'Paste frpc config.'
                       }
 
                       if (base.template_id === 'terraria:vanilla') {
                         const existing = (base.params.frp_config ?? '').trim()
-                        if (editTrFrpEnabled() && !existing && !editTrFrpConfig().trim()) localErrors.frp_config = 'Paste frpc config.'
+                        const nextCfg =
+                          editTrFrpMode() === 'node'
+                            ? frpNodeConfigById(editTrFrpNodeId()) ?? ''
+                            : editTrFrpConfig().trim()
+                        if (editTrFrpEnabled() && !existing && !nextCfg)
+                          localErrors.frp_config = editTrFrpMode() === 'node' ? 'Select an FRP node.' : 'Paste frpc config.'
                       }
 
                       if (Object.keys(localErrors).length > 0) {
@@ -5618,6 +6771,8 @@ function App() {
                         when={
                           inst().config.template_id === 'minecraft:vanilla' ||
                           inst().config.template_id === 'minecraft:modrinth' ||
+                          inst().config.template_id === 'minecraft:import' ||
+                          inst().config.template_id === 'minecraft:curseforge' ||
                           inst().config.template_id === 'terraria:vanilla' ||
                           inst().config.template_id === 'dst:vanilla'
                         }

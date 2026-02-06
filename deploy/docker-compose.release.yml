@@ -1,0 +1,90 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_DB=alloy
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+    # Intentionally not published to host. Access it via the compose network.
+    volumes:
+      - alloy-postgres:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  alloy-agent:
+    image: ghcr.io/ign1x/alloy-agent:latest
+    # Use host networking so game servers can bind arbitrary ports without
+    # needing explicit `ports:` mappings (best for multi-game + dynamic ports).
+    #
+    # NOTE: `network_mode: host` is Linux-only. On macOS/Windows, use bridge
+    # networking and explicit `ports:` mappings instead.
+    network_mode: "host"
+    environment:
+      - RUST_LOG=info
+      - ALLOY_DATA_ROOT=/data
+      # Enable filesystem write operations (mkdir/write/rename/remove) via the agent FS service.
+      # Without this, the UI can only browse/read files.
+      - ALLOY_FS_WRITE_ENABLED=true
+      # Reverse-connect back to the control plane over WebSocket.
+      # This avoids fragile host-network -> container networking (and enables NAT'd nodes).
+      - ALLOY_CONTROL_WS_URL=http://127.0.0.1:8080/agent/ws
+      - ALLOY_NODE_NAME=default
+    volumes:
+      - alloy-agent-data:/data
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+    restart: unless-stopped
+
+  alloy-control:
+    image: ghcr.io/ign1x/alloy-control:latest
+    ports:
+      - "8080:8080"
+    extra_hosts:
+      # Allow reaching the host network (and host-networked alloy-agent) from this container.
+      - "host.docker.internal:host-gateway"
+    environment:
+      - RUST_LOG=info
+      # gRPC target for host-networked alloy-agent.
+      - ALLOY_AGENT_ENDPOINT=http://host.docker.internal:50051
+      - DATABASE_URL=postgres://postgres:postgres@postgres:5432/alloy
+      # Used by CSRF/Origin middleware for browser requests.
+      - ALLOY_ALLOWED_ORIGINS=http://localhost:3000,http://localhost:5173,http://127.0.0.1:5173
+      # One-click updates (optional): control triggers Watchtower's HTTP API.
+      - ALLOY_UPDATE_WATCHTOWER_URL=http://watchtower:8080
+      - ALLOY_UPDATE_WATCHTOWER_TOKEN=${ALLOY_WATCHTOWER_TOKEN:-}
+    depends_on:
+      - postgres
+      - alloy-agent
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+    restart: unless-stopped
+
+  web:
+    image: ghcr.io/ign1x/alloy-web:latest
+    ports:
+      - "3000:80"
+    depends_on:
+      - alloy-control
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+    restart: unless-stopped
+
+  watchtower:
+    # This is a fork that is actively maintained (unlike `containrrr/watchtower`).
+    image: nickfedor/watchtower:latest
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      # Only update containers with the `com.centurylinklabs.watchtower.enable=true` label.
+      - WATCHTOWER_LABEL_ENABLE=true
+      # Enable HTTP API mode (updates are triggered via `/v1/update`).
+      - WATCHTOWER_HTTP_API_UPDATE=true
+      - WATCHTOWER_HTTP_API_TOKEN=${ALLOY_WATCHTOWER_TOKEN:-}
+      # Optional: remove old images after updating to save disk.
+      - WATCHTOWER_CLEANUP=true
+    labels:
+      - "com.centurylinklabs.watchtower.enable=false"
+    restart: unless-stopped
+
+volumes:
+  alloy-agent-data:
+  alloy-postgres:

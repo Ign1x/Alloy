@@ -5,6 +5,8 @@ mod m0002_create_nodes;
 mod m0003_create_refresh_tokens;
 mod m0004_create_audit_events;
 mod m0005_add_node_connect_token;
+mod m0006_create_settings;
+mod m0007_create_frp_nodes;
 
 pub struct Migrator;
 
@@ -17,6 +19,8 @@ impl MigratorTrait for Migrator {
             Box::new(m0003_create_refresh_tokens::Migration),
             Box::new(m0004_create_audit_events::Migration),
             Box::new(m0005_add_node_connect_token::Migration),
+            Box::new(m0006_create_settings::Migration),
+            Box::new(m0007_create_frp_nodes::Migration),
         ]
     }
 }

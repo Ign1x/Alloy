@@ -61,6 +61,17 @@ function GamepadIcon() {
   )
 }
 
+function CampfireIcon() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-5 w-5" aria-hidden="true">
+      <rect x="3.5" y="13.5" width="13" height="2" rx="1" transform="rotate(25 10 14.5)" opacity="0.6" />
+      <rect x="3.5" y="13.5" width="13" height="2" rx="1" transform="rotate(-25 10 14.5)" opacity="0.6" />
+      <path d="M10 2.25c-2.2 2.33-3.5 4.7-3.5 6.85 0 2.55 1.74 4.4 3.5 4.4s3.5-1.85 3.5-4.4c0-2.15-1.3-4.52-3.5-6.85Z" />
+      <path d="M10 6.2c-1.12 1.25-1.75 2.53-1.75 3.68 0 1.36.86 2.35 1.75 2.35s1.75-.99 1.75-2.35c0-1.15-.63-2.43-1.75-3.68Z" opacity="0.7" />
+    </svg>
+  )
+}
+
 export function TemplateMark(props: TemplateMarkProps) {
   const meta = createMemo<TemplateMarkInfo>(() => {
     const kind = templateKind(props.templateId)
@@ -70,6 +81,14 @@ export function TemplateMark(props: TemplateMarkProps) {
         class:
           'border-emerald-200 bg-emerald-50/80 text-emerald-900 dark:border-emerald-900/40 dark:bg-emerald-950/20 dark:text-emerald-200',
         icon: <CubeIcon />,
+      }
+    }
+    if (kind === 'dst') {
+      return {
+        label: "Don't Starve Together",
+        class:
+          'border-amber-200 bg-amber-50/80 text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-200',
+        icon: <CampfireIcon />,
       }
     }
     if (kind === 'terraria') {

@@ -18,7 +18,10 @@ use tokio::{
 use crate::dst;
 use crate::dst_download;
 use crate::minecraft;
+use crate::minecraft_curseforge;
 use crate::minecraft_download;
+use crate::minecraft_import;
+use crate::minecraft_launch;
 use crate::minecraft_modrinth;
 use crate::port_alloc;
 use crate::templates;
@@ -580,6 +583,8 @@ fn redact_params(mut params: BTreeMap<String, String>) -> BTreeMap<String, Strin
         let is_secret = key.contains("password")
             || key.contains("token")
             || key.contains("secret")
+            || key.contains("api_key")
+            || key.contains("apikey")
             || (key.contains("frp") && key.contains("config"));
         if is_secret && !v.is_empty() {
             *v = "<redacted>".to_string();
@@ -911,6 +916,8 @@ impl ProcessManager {
 
         let root_dir = if t.template_id == "minecraft:vanilla"
             || t.template_id == "minecraft:modrinth"
+            || t.template_id == "minecraft:import"
+            || t.template_id == "minecraft:curseforge"
             || t.template_id == "dst:vanilla"
             || t.template_id == "terraria:vanilla"
         {
@@ -1920,6 +1927,883 @@ impl ProcessManager {
                 });
             }
 
+            if t.template_id == "minecraft:import" {
+                ensure_min_free_space(&minecraft::data_root()).map_err(|e| {
+                    crate::error_payload::anyhow(
+                        "insufficient_disk",
+                        e.to_string(),
+                        None,
+                        Some("Free up disk space under ALLOY_DATA_ROOT and try again.".to_string()),
+                    )
+                })?;
+
+                let mc = minecraft_import::validate_params(&params)?;
+
+                let mc_port = port_alloc::allocate_tcp_port(mc.port).map_err(|e| {
+                    let mut fields = BTreeMap::new();
+                    fields.insert("port".to_string(), e.to_string());
+                    crate::error_payload::anyhow(
+                        "invalid_param",
+                        "invalid port",
+                        Some(fields),
+                        Some(
+                            "Pick another port, or leave it blank (0) to auto-assign a free port."
+                                .to_string(),
+                        ),
+                    )
+                })?;
+                let mc = minecraft_import::ImportParams { port: mc_port, ..mc };
+                params.insert("port".to_string(), mc_port.to_string());
+                let restart = parse_restart_config(&params);
+
+                let dir = minecraft::instance_dir(&id.0);
+
+                set_entry_message(
+                    &self.inner,
+                    &id.0,
+                    Some("importing server pack...".to_string()),
+                )
+                .await;
+                sink.emit("[alloy-agent] importing minecraft server pack".to_string())
+                    .await;
+
+                minecraft_import::ensure_imported(&dir, &mc.pack)
+                    .await
+                    .map_err(|e| {
+                        crate::error_payload::anyhow(
+                            "install_failed",
+                            format!("failed to import server pack: {e}"),
+                            None,
+                            Some("Ensure the pack is a server-ready zip or directory.".to_string()),
+                        )
+                    })?;
+
+                minecraft::ensure_vanilla_instance_layout(
+                    &dir,
+                    &minecraft::VanillaParams {
+                        version: "latest_release".to_string(),
+                        memory_mb: mc.memory_mb,
+                        port: mc.port,
+                    },
+                )?;
+
+                let launch = minecraft_launch::resolve_launch_spec(&dir, mc.memory_mb).map_err(|e| {
+                    crate::error_payload::anyhow(
+                        "install_failed",
+                        format!("failed to detect launch command: {e}"),
+                        None,
+                        Some(
+                            "Expected server.jar (fabric/vanilla) or libraries/**/unix_args.txt (forge)."
+                                .to_string(),
+                        ),
+                    )
+                })?;
+
+                let mut cmd = Command::new(&launch.exec);
+                let exec = launch.exec.clone();
+                let args = launch.args.clone();
+
+                cmd.current_dir(&dir)
+                    .args(&args)
+                    .stdin(std::process::Stdio::piped())
+                    .stdout(std::process::Stdio::piped())
+                    .stderr(std::process::Stdio::piped());
+
+                let started_at_unix_ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as u64;
+                let mut run = RunInfo {
+                    process_id: id.0.clone(),
+                    template_id: t.template_id.clone(),
+                    started_at_unix_ms,
+                    agent_version: env!("CARGO_PKG_VERSION").to_string(),
+                    pid: None,
+                    pgid: None,
+                    exec: exec.clone(),
+                    args: args.clone(),
+                    cwd: dir.display().to_string(),
+                    params: redact_params(params.clone()),
+                    env: collect_safe_env(),
+                };
+                let _ = write_run_json(&dir, &run).await;
+
+                sink.emit(format!(
+                    "[alloy-agent] minecraft(import) exec: {} {} (cwd {}) port={} launch={}",
+                    exec,
+                    args.join(" "),
+                    dir.display(),
+                    mc.port,
+                    launch.kind
+                ))
+                .await;
+
+                set_entry_message(
+                    &self.inner,
+                    &id.0,
+                    Some(format!("spawning minecraft server (port {})...", mc.port)),
+                )
+                .await;
+
+                #[cfg(unix)]
+                {
+                    unsafe {
+                        cmd.pre_exec(|| {
+                            set_parent_death_signal()?;
+                            if libc::setpgid(0, 0) == -1 {
+                                return Err(std::io::Error::last_os_error());
+                            }
+                            Ok(())
+                        });
+                    }
+                }
+
+                let mut child = cmd
+                    .spawn()
+                    .with_context(|| format!("spawn minecraft server (cwd {})", dir.display()))
+                    .map_err(|e| {
+                        crate::error_payload::anyhow(
+                            "spawn_failed",
+                            e.to_string(),
+                            None,
+                            Some(
+                                "Ensure Java is installed and the instance directory is writable."
+                                    .to_string(),
+                            ),
+                        )
+                    })?;
+                let started = tokio::time::Instant::now();
+                let pid_u32 = child.id();
+                let pgid = pid_u32.map(|p| p as i32);
+
+                run.pid = pid_u32;
+                run.pgid = pgid;
+                let _ = write_run_json(&dir, &run).await;
+
+                let stdin = child.stdin.take();
+                let stdout = child.stdout.take();
+                let stderr = child.stderr.take();
+
+                if let Some(out) = stdout {
+                    let sink = sink.clone();
+                    tokio::spawn(async move {
+                        let mut lines = BufReader::new(out).lines();
+                        while let Ok(Some(line)) = lines.next_line().await {
+                            sink.emit(format!("[stdout] {line}")).await;
+                        }
+                    });
+                }
+                if let Some(err) = stderr {
+                    let sink = sink.clone();
+                    tokio::spawn(async move {
+                        let mut lines = BufReader::new(err).lines();
+                        while let Ok(Some(line)) = lines.next_line().await {
+                            sink.emit(format!("[stderr] {line}")).await;
+                        }
+                    });
+                }
+
+                {
+                    let mut inner = self.inner.lock().await;
+                    inner.insert(
+                        id.0.clone(),
+                        ProcessEntry {
+                            template_id: ProcessTemplateId(t.template_id.clone()),
+                            state: ProcessState::Starting,
+                            pid: pid_u32,
+                            resources: None,
+                            exit_code: None,
+                            message: Some(format!("waiting for port {}...", mc.port)),
+                            restart,
+                            restart_attempts: reused_restart_attempts,
+                            stdin,
+                            graceful_stdin: t.graceful_stdin.clone(),
+                            pgid,
+                            logs: logs.clone(),
+                            log_file_tx: Some(log_tx.clone()),
+                        },
+                    );
+                }
+
+                if let Some(pid) = pid_u32 {
+                    self.spawn_resource_sampler(id.0.clone(), pid);
+                }
+
+                let manager = self.clone();
+                let inner = self.inner.clone();
+                let id_str = id.0.clone();
+
+                let probe_sink = sink.clone();
+                let port = mc.port;
+                let frp_config = params
+                    .get("frp_config")
+                    .map(|v| v.trim())
+                    .filter(|v| !v.is_empty())
+                    .map(|v| v.to_string());
+                let frp_instance_dir = dir.clone();
+                tokio::spawn({
+                    let inner = inner.clone();
+                    let id_str = id_str.clone();
+                    let frp_config = frp_config.clone();
+                    let frp_instance_dir = frp_instance_dir.clone();
+                    async move {
+                        let timeout = port_probe_timeout();
+                        let ok = wait_for_local_tcp_port(port, timeout).await;
+
+                        let (pgid, should_kill) = {
+                            let mut map = inner.lock().await;
+                            let Some(e) = map.get_mut(&id_str) else {
+                                return;
+                            };
+                            if e.pid != pid_u32 || !matches!(e.state, ProcessState::Starting) {
+                                return;
+                            }
+
+                            if ok {
+                                e.state = ProcessState::Running;
+                                e.message = None;
+                                (e.pgid, false)
+                            } else {
+                                e.state = ProcessState::Failed;
+                                e.message = Some(format!(
+                                    "port {} did not open within {}ms",
+                                    port,
+                                    timeout.as_millis()
+                                ));
+                                (e.pgid, true)
+                            }
+                        };
+
+                        if ok {
+                            if let (Some(cfg), Some(pgid)) = (frp_config.clone(), pgid) {
+                                if let Err(e) = start_frpc_sidecar(
+                                    probe_sink.clone(),
+                                    frp_instance_dir.clone(),
+                                    pgid,
+                                    port,
+                                    cfg,
+                                )
+                                .await
+                                {
+                                    probe_sink
+                                        .emit(format!("[alloy-agent] frpc start failed: {e}"))
+                                        .await;
+                                }
+                            }
+                            probe_sink
+                                .emit(format!(
+                                    "[alloy-agent] minecraft port {} is accepting connections",
+                                    port
+                                ))
+                                .await;
+                        } else {
+                            probe_sink
+                                .emit(format!(
+                                    "[alloy-agent] minecraft port {} did not open in time",
+                                    port
+                                ))
+                                .await;
+                            if should_kill && let Some(pgid) = pgid {
+                                #[cfg(unix)]
+                                unsafe {
+                                    libc::kill(-pgid, libc::SIGTERM);
+                                }
+                            }
+                        }
+                    }
+                });
+
+                let process_pgid = pgid;
+                let wait_sink = sink.clone();
+                let template_id = t.template_id.clone();
+                let params_for_restart = params.clone();
+                tokio::spawn(async move {
+                    let res = child.wait().await;
+                    #[cfg(unix)]
+                    if let Some(pgid) = process_pgid {
+                        unsafe {
+                            libc::kill(-pgid, libc::SIGTERM);
+                        }
+                        tokio::time::sleep(Duration::from_millis(500)).await;
+                        let alive = unsafe { libc::kill(-pgid, 0) == 0 };
+                        if alive {
+                            unsafe {
+                                libc::kill(-pgid, libc::SIGKILL);
+                            }
+                        }
+                    }
+                    let runtime = tokio::time::Instant::now().duration_since(started);
+
+                    let mut restart_after: Option<Duration> = None;
+                    let mut restart_attempt: u32 = 0;
+
+                    let (final_state, exit_code) = {
+                        let mut map = inner.lock().await;
+                        let Some(e) = map.get_mut(&id_str) else {
+                            return;
+                        };
+
+                        e.stdin = None;
+                        let stopping = matches!(e.state, ProcessState::Stopping);
+
+                        match res {
+                            Ok(status) => {
+                                e.exit_code = status.code();
+
+                                if stopping {
+                                    e.state = ProcessState::Exited;
+                                    e.message = Some("stopped".to_string());
+                                } else if runtime < early_exit_threshold() {
+                                    e.state = ProcessState::Failed;
+                                    e.message = Some(format!(
+                                        "exited too quickly ({}ms)",
+                                        runtime.as_millis()
+                                    ));
+                                } else if status.success() {
+                                    e.state = ProcessState::Exited;
+                                    e.message = Some("exited".to_string());
+                                } else {
+                                    e.state = ProcessState::Failed;
+                                    e.message = Some(format!(
+                                        "exited with code {}",
+                                        status.code().unwrap_or_default()
+                                    ));
+                                }
+                            }
+                            Err(err) => {
+                                e.state = ProcessState::Failed;
+                                e.message = Some(format!("wait failed: {err}"));
+                            }
+                        }
+
+                        if !stopping {
+                            let is_failure = matches!(e.state, ProcessState::Failed)
+                                || e.exit_code.is_some_and(|c| c != 0);
+                            let should_restart = match e.restart.policy {
+                                RestartPolicy::Off => false,
+                                RestartPolicy::Always => true,
+                                RestartPolicy::OnFailure => is_failure,
+                            };
+
+                            if should_restart && e.restart_attempts < e.restart.max_retries {
+                                e.restart_attempts = e.restart_attempts.saturating_add(1);
+                                let delay_ms = compute_backoff_ms(e.restart, e.restart_attempts);
+                                restart_after = Some(Duration::from_millis(delay_ms));
+                                restart_attempt = e.restart_attempts;
+                                e.message = Some(format!(
+                                    "restarting in {}ms (attempt {}/{})",
+                                    delay_ms, restart_attempt, e.restart.max_retries
+                                ));
+                            }
+                        }
+
+                        (e.state, e.exit_code)
+                    };
+
+                    wait_sink
+                        .emit(format!(
+                            "[alloy-agent] process exited: state={:?} exit_code={:?} runtime_ms={}",
+                            final_state,
+                            exit_code,
+                            runtime.as_millis()
+                        ))
+                        .await;
+
+                    if let Some(delay) = restart_after {
+                        wait_sink
+                            .emit(format!(
+                                "[alloy-agent] auto-restart scheduled in {}ms (attempt {})",
+                                delay.as_millis(),
+                                restart_attempt
+                            ))
+                            .await;
+                        let handle = tokio::runtime::Handle::current();
+                        let wait_sink = wait_sink.clone();
+                        tokio::task::spawn_blocking(move || {
+                            std::thread::sleep(delay);
+                            let res = handle.block_on(manager.start_from_template_with_process_id(
+                                &id_str,
+                                &template_id,
+                                params_for_restart,
+                            ));
+                            match res {
+                                Ok(st) if matches!(st.state, ProcessState::Failed) => {
+                                    let msg = st
+                                        .message
+                                        .filter(|s| !s.trim().is_empty())
+                                        .unwrap_or_else(|| "unknown error".to_string());
+                                    handle.block_on(wait_sink.emit(format!(
+                                        "[alloy-agent] auto-restart failed: {msg}"
+                                    )));
+                                }
+                                Ok(_) => {
+                                    handle.block_on(wait_sink.emit(
+                                        "[alloy-agent] auto-restart triggered".to_string(),
+                                    ));
+                                }
+                                Err(err) => {
+                                    handle.block_on(wait_sink.emit(format!(
+                                        "[alloy-agent] auto-restart failed: {err}"
+                                    )));
+                                }
+                            }
+                        });
+                    }
+                });
+
+                return Ok(ProcessStatus {
+                    id: id.clone(),
+                    template_id: ProcessTemplateId(t.template_id.clone()),
+                    state: ProcessState::Starting,
+                    pid: pid_u32,
+                    exit_code: None,
+                    message: Some(format!("waiting for port {}...", mc.port)),
+                    resources: None,
+                });
+            }
+
+            if t.template_id == "minecraft:curseforge" {
+                ensure_min_free_space(&minecraft::data_root()).map_err(|e| {
+                    crate::error_payload::anyhow(
+                        "insufficient_disk",
+                        e.to_string(),
+                        None,
+                        Some("Free up disk space under ALLOY_DATA_ROOT and try again.".to_string()),
+                    )
+                })?;
+
+                let mc = minecraft_curseforge::validate_params(&params)?;
+
+                let mc_port = port_alloc::allocate_tcp_port(mc.port).map_err(|e| {
+                    let mut fields = BTreeMap::new();
+                    fields.insert("port".to_string(), e.to_string());
+                    crate::error_payload::anyhow(
+                        "invalid_param",
+                        "invalid port",
+                        Some(fields),
+                        Some(
+                            "Pick another port, or leave it blank (0) to auto-assign a free port."
+                                .to_string(),
+                        ),
+                    )
+                })?;
+                let mc = minecraft_curseforge::CurseforgeParams { port: mc_port, ..mc };
+                params.insert("port".to_string(), mc_port.to_string());
+                let restart = parse_restart_config(&params);
+
+                let dir = minecraft::instance_dir(&id.0);
+
+                set_entry_message(
+                    &self.inner,
+                    &id.0,
+                    Some("resolving curseforge modpack...".to_string()),
+                )
+                .await;
+                sink.emit("[alloy-agent] resolving curseforge modpack".to_string())
+                    .await;
+
+                let installed = minecraft_curseforge::ensure_installed(
+                    &dir,
+                    &mc.source,
+                    &mc.api_key,
+                )
+                .await
+                .map_err(|e| {
+                    crate::error_payload::anyhow(
+                        "download_failed",
+                        format!("failed to install curseforge pack: {e}"),
+                        None,
+                        Some("Check the CurseForge API key and network connectivity.".to_string()),
+                    )
+                })?;
+
+                minecraft::ensure_vanilla_instance_layout(
+                    &dir,
+                    &minecraft::VanillaParams {
+                        version: "latest_release".to_string(),
+                        memory_mb: mc.memory_mb,
+                        port: mc.port,
+                    },
+                )?;
+
+                let launch = minecraft_launch::resolve_launch_spec(&dir, mc.memory_mb).map_err(|e| {
+                    crate::error_payload::anyhow(
+                        "install_failed",
+                        format!("failed to detect launch command: {e}"),
+                        None,
+                        Some(
+                            "Expected server.jar (fabric/vanilla) or libraries/**/unix_args.txt (forge)."
+                                .to_string(),
+                        ),
+                    )
+                })?;
+
+                let mut cmd = Command::new(&launch.exec);
+                let exec = launch.exec.clone();
+                let args = launch.args.clone();
+
+                cmd.current_dir(&dir)
+                    .args(&args)
+                    .stdin(std::process::Stdio::piped())
+                    .stdout(std::process::Stdio::piped())
+                    .stderr(std::process::Stdio::piped());
+
+                let started_at_unix_ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as u64;
+                let mut run = RunInfo {
+                    process_id: id.0.clone(),
+                    template_id: t.template_id.clone(),
+                    started_at_unix_ms,
+                    agent_version: env!("CARGO_PKG_VERSION").to_string(),
+                    pid: None,
+                    pgid: None,
+                    exec: exec.clone(),
+                    args: args.clone(),
+                    cwd: dir.display().to_string(),
+                    params: redact_params(params.clone()),
+                    env: collect_safe_env(),
+                };
+                let _ = write_run_json(&dir, &run).await;
+
+                sink.emit(format!(
+                    "[alloy-agent] minecraft(curseforge) exec: {} {} (cwd {}) port={} launch={} cf_mod_id={} cf_file_id={} cf_server_pack_file_id={}",
+                    exec,
+                    args.join(" "),
+                    dir.display(),
+                    mc.port,
+                    launch.kind,
+                    installed.mod_id,
+                    installed.file_id,
+                    installed.server_pack_file_id,
+                ))
+                .await;
+
+                set_entry_message(
+                    &self.inner,
+                    &id.0,
+                    Some(format!("spawning minecraft server (port {})...", mc.port)),
+                )
+                .await;
+
+                #[cfg(unix)]
+                {
+                    unsafe {
+                        cmd.pre_exec(|| {
+                            set_parent_death_signal()?;
+                            if libc::setpgid(0, 0) == -1 {
+                                return Err(std::io::Error::last_os_error());
+                            }
+                            Ok(())
+                        });
+                    }
+                }
+
+                let mut child = cmd
+                    .spawn()
+                    .with_context(|| format!("spawn minecraft server (cwd {})", dir.display()))
+                    .map_err(|e| {
+                        crate::error_payload::anyhow(
+                            "spawn_failed",
+                            e.to_string(),
+                            None,
+                            Some(
+                                "Ensure Java is installed and the instance directory is writable."
+                                    .to_string(),
+                            ),
+                        )
+                    })?;
+                let started = tokio::time::Instant::now();
+                let pid_u32 = child.id();
+                let pgid = pid_u32.map(|p| p as i32);
+
+                run.pid = pid_u32;
+                run.pgid = pgid;
+                let _ = write_run_json(&dir, &run).await;
+
+                let stdin = child.stdin.take();
+                let stdout = child.stdout.take();
+                let stderr = child.stderr.take();
+
+                if let Some(out) = stdout {
+                    let sink = sink.clone();
+                    tokio::spawn(async move {
+                        let mut lines = BufReader::new(out).lines();
+                        while let Ok(Some(line)) = lines.next_line().await {
+                            sink.emit(format!("[stdout] {line}")).await;
+                        }
+                    });
+                }
+                if let Some(err) = stderr {
+                    let sink = sink.clone();
+                    tokio::spawn(async move {
+                        let mut lines = BufReader::new(err).lines();
+                        while let Ok(Some(line)) = lines.next_line().await {
+                            sink.emit(format!("[stderr] {line}")).await;
+                        }
+                    });
+                }
+
+                {
+                    let mut inner = self.inner.lock().await;
+                    inner.insert(
+                        id.0.clone(),
+                        ProcessEntry {
+                            template_id: ProcessTemplateId(t.template_id.clone()),
+                            state: ProcessState::Starting,
+                            pid: pid_u32,
+                            resources: None,
+                            exit_code: None,
+                            message: Some(format!("waiting for port {}...", mc.port)),
+                            restart,
+                            restart_attempts: reused_restart_attempts,
+                            stdin,
+                            graceful_stdin: t.graceful_stdin.clone(),
+                            pgid,
+                            logs: logs.clone(),
+                            log_file_tx: Some(log_tx.clone()),
+                        },
+                    );
+                }
+
+                if let Some(pid) = pid_u32 {
+                    self.spawn_resource_sampler(id.0.clone(), pid);
+                }
+
+                let manager = self.clone();
+                let inner = self.inner.clone();
+                let id_str = id.0.clone();
+
+                let probe_sink = sink.clone();
+                let port = mc.port;
+                let frp_config = params
+                    .get("frp_config")
+                    .map(|v| v.trim())
+                    .filter(|v| !v.is_empty())
+                    .map(|v| v.to_string());
+                let frp_instance_dir = dir.clone();
+                tokio::spawn({
+                    let inner = inner.clone();
+                    let id_str = id_str.clone();
+                    let frp_config = frp_config.clone();
+                    let frp_instance_dir = frp_instance_dir.clone();
+                    async move {
+                        let timeout = port_probe_timeout();
+                        let ok = wait_for_local_tcp_port(port, timeout).await;
+
+                        let (pgid, should_kill) = {
+                            let mut map = inner.lock().await;
+                            let Some(e) = map.get_mut(&id_str) else {
+                                return;
+                            };
+                            if e.pid != pid_u32 || !matches!(e.state, ProcessState::Starting) {
+                                return;
+                            }
+
+                            if ok {
+                                e.state = ProcessState::Running;
+                                e.message = None;
+                                (e.pgid, false)
+                            } else {
+                                e.state = ProcessState::Failed;
+                                e.message = Some(format!(
+                                    "port {} did not open within {}ms",
+                                    port,
+                                    timeout.as_millis()
+                                ));
+                                (e.pgid, true)
+                            }
+                        };
+
+                        if ok {
+                            if let (Some(cfg), Some(pgid)) = (frp_config.clone(), pgid) {
+                                if let Err(e) = start_frpc_sidecar(
+                                    probe_sink.clone(),
+                                    frp_instance_dir.clone(),
+                                    pgid,
+                                    port,
+                                    cfg,
+                                )
+                                .await
+                                {
+                                    probe_sink
+                                        .emit(format!("[alloy-agent] frpc start failed: {e}"))
+                                        .await;
+                                }
+                            }
+                            probe_sink
+                                .emit(format!(
+                                    "[alloy-agent] minecraft port {} is accepting connections",
+                                    port
+                                ))
+                                .await;
+                        } else {
+                            probe_sink
+                                .emit(format!(
+                                    "[alloy-agent] minecraft port {} did not open in time",
+                                    port
+                                ))
+                                .await;
+                            if should_kill && let Some(pgid) = pgid {
+                                #[cfg(unix)]
+                                unsafe {
+                                    libc::kill(-pgid, libc::SIGTERM);
+                                }
+                            }
+                        }
+                    }
+                });
+
+                let process_pgid = pgid;
+                let wait_sink = sink.clone();
+                let template_id = t.template_id.clone();
+                let params_for_restart = params.clone();
+                tokio::spawn(async move {
+                    let res = child.wait().await;
+                    #[cfg(unix)]
+                    if let Some(pgid) = process_pgid {
+                        unsafe {
+                            libc::kill(-pgid, libc::SIGTERM);
+                        }
+                        tokio::time::sleep(Duration::from_millis(500)).await;
+                        let alive = unsafe { libc::kill(-pgid, 0) == 0 };
+                        if alive {
+                            unsafe {
+                                libc::kill(-pgid, libc::SIGKILL);
+                            }
+                        }
+                    }
+                    let runtime = tokio::time::Instant::now().duration_since(started);
+
+                    let mut restart_after: Option<Duration> = None;
+                    let mut restart_attempt: u32 = 0;
+
+                    let (final_state, exit_code) = {
+                        let mut map = inner.lock().await;
+                        let Some(e) = map.get_mut(&id_str) else {
+                            return;
+                        };
+
+                        e.stdin = None;
+                        let stopping = matches!(e.state, ProcessState::Stopping);
+
+                        match res {
+                            Ok(status) => {
+                                e.exit_code = status.code();
+
+                                if stopping {
+                                    e.state = ProcessState::Exited;
+                                    e.message = Some("stopped".to_string());
+                                } else if runtime < early_exit_threshold() {
+                                    e.state = ProcessState::Failed;
+                                    e.message = Some(format!(
+                                        "exited too quickly ({}ms)",
+                                        runtime.as_millis()
+                                    ));
+                                } else if status.success() {
+                                    e.state = ProcessState::Exited;
+                                    e.message = Some("exited".to_string());
+                                } else {
+                                    e.state = ProcessState::Failed;
+                                    e.message = Some(format!(
+                                        "exited with code {}",
+                                        status.code().unwrap_or_default()
+                                    ));
+                                }
+                            }
+                            Err(err) => {
+                                e.state = ProcessState::Failed;
+                                e.message = Some(format!("wait failed: {err}"));
+                            }
+                        }
+
+                        if !stopping {
+                            let is_failure = matches!(e.state, ProcessState::Failed)
+                                || e.exit_code.is_some_and(|c| c != 0);
+                            let should_restart = match e.restart.policy {
+                                RestartPolicy::Off => false,
+                                RestartPolicy::Always => true,
+                                RestartPolicy::OnFailure => is_failure,
+                            };
+
+                            if should_restart && e.restart_attempts < e.restart.max_retries {
+                                e.restart_attempts = e.restart_attempts.saturating_add(1);
+                                let delay_ms = compute_backoff_ms(e.restart, e.restart_attempts);
+                                restart_after = Some(Duration::from_millis(delay_ms));
+                                restart_attempt = e.restart_attempts;
+                                e.message = Some(format!(
+                                    "restarting in {}ms (attempt {}/{})",
+                                    delay_ms, restart_attempt, e.restart.max_retries
+                                ));
+                            }
+                        }
+
+                        (e.state, e.exit_code)
+                    };
+
+                    wait_sink
+                        .emit(format!(
+                            "[alloy-agent] process exited: state={:?} exit_code={:?} runtime_ms={}",
+                            final_state,
+                            exit_code,
+                            runtime.as_millis()
+                        ))
+                        .await;
+
+                    if let Some(delay) = restart_after {
+                        wait_sink
+                            .emit(format!(
+                                "[alloy-agent] auto-restart scheduled in {}ms (attempt {})",
+                                delay.as_millis(),
+                                restart_attempt
+                            ))
+                            .await;
+                        let handle = tokio::runtime::Handle::current();
+                        let wait_sink = wait_sink.clone();
+                        tokio::task::spawn_blocking(move || {
+                            std::thread::sleep(delay);
+                            let res = handle.block_on(manager.start_from_template_with_process_id(
+                                &id_str,
+                                &template_id,
+                                params_for_restart,
+                            ));
+                            match res {
+                                Ok(st) if matches!(st.state, ProcessState::Failed) => {
+                                    let msg = st
+                                        .message
+                                        .filter(|s| !s.trim().is_empty())
+                                        .unwrap_or_else(|| "unknown error".to_string());
+                                    handle.block_on(wait_sink.emit(format!(
+                                        "[alloy-agent] auto-restart failed: {msg}"
+                                    )));
+                                }
+                                Ok(_) => {
+                                    handle.block_on(wait_sink.emit(
+                                        "[alloy-agent] auto-restart triggered".to_string(),
+                                    ));
+                                }
+                                Err(err) => {
+                                    handle.block_on(wait_sink.emit(format!(
+                                        "[alloy-agent] auto-restart failed: {err}"
+                                    )));
+                                }
+                            }
+                        });
+                    }
+                });
+
+                return Ok(ProcessStatus {
+                    id: id.clone(),
+                    template_id: ProcessTemplateId(t.template_id.clone()),
+                    state: ProcessState::Starting,
+                    pid: pid_u32,
+                    exit_code: None,
+                    message: Some(format!("waiting for port {}...", mc.port)),
+                    resources: None,
+                });
+            }
+
             if t.template_id == "dst:vanilla" {
                 ensure_min_free_space(&dst::data_root()).map_err(|e| {
                     crate::error_payload::anyhow(
@@ -2002,7 +2886,7 @@ impl ProcessManager {
                         format!("failed to install dst server: {e}"),
                         None,
                         Some(
-                            "SteamCMD requires 32-bit runtime support on amd64 (libc6-i386, lib32gcc-s1, lib32stdc++6, lib32z1, lib32tinfo6). Rebuild the agent image and retry."
+                            "SteamCMD uses 32-bit binaries on amd64. Ensure 32-bit runtime libs are installed (libc6-i386, lib32gcc-s1, lib32stdc++6, lib32z1, lib32tinfo6). The error message includes SteamCMD output tail for debugging."
                                 .to_string(),
                         ),
                     )

@@ -65,14 +65,24 @@ pub struct ResolvedServerJar {
     pub java_major: u32,
 }
 
+fn manifest_url() -> String {
+    std::env::var("ALLOY_MINECRAFT_MANIFEST_URL")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| {
+            "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json".to_string()
+        })
+}
+
 pub async fn resolve_server_jar(version: &str) -> anyhow::Result<ResolvedServerJar> {
     let client = reqwest::Client::builder()
         .user_agent("alloy-agent")
+        .timeout(Duration::from_secs(60))
         .build()?;
 
-    let manifest_url = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
     let manifest: VersionManifestV2 = client
-        .get(manifest_url)
+        .get(manifest_url())
         .send()
         .await
         .context("fetch version manifest")?

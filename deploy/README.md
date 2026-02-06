@@ -26,6 +26,34 @@ Build and start:
 docker compose up -d --build
 ```
 
+## Updates
+
+Alloy stores persistent data in Docker volumes (not the container filesystem), so updating containers does **not** wipe worlds/configs as long as you keep the same volumes.
+
+### Source build (this repo)
+
+Pull latest code and rebuild:
+
+```bash
+git pull
+docker compose up -d --build
+```
+
+### Release images (recommended)
+
+Use the prebuilt image-based compose file:
+
+```bash
+docker compose -f deploy/docker-compose.release.yml pull
+docker compose -f deploy/docker-compose.release.yml up -d
+```
+
+### One-click updates (optional)
+
+`deploy/docker-compose.release.yml` includes a `watchtower` service with an HTTP API. If you set `ALLOY_WATCHTOWER_TOKEN` (compose `.env`) and keep the panel admin-only, you can trigger updates from the UI:
+
+- Web → **Settings** → **Updates** → **Update now**
+
 Stop (keep data):
 
 ```bash

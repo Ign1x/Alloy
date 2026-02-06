@@ -150,7 +150,11 @@ async fn ensure_persisted_ports(inst: &mut PersistedInstance) -> Result<(), Stat
     // Only persist auto-assigned ports on first start.
     // This keeps connection info stable across restarts.
     match inst.template_id.as_str() {
-        "minecraft:vanilla" | "minecraft:modrinth" | "terraria:vanilla" => {
+        "minecraft:vanilla"
+        | "minecraft:modrinth"
+        | "minecraft:import"
+        | "minecraft:curseforge"
+        | "terraria:vanilla" => {
             let current = inst.params.get("port").map(|s| s.trim()).unwrap_or("");
             if current.is_empty() || current == "0" {
                 let port = port_alloc::allocate_tcp_port(0)
@@ -307,6 +311,31 @@ fn extract_zip_safely(zip_path: &Path, out_dir: &Path) -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+fn file_magic_is_zip(path: &Path) -> bool {
+    use std::io::Read;
+
+    let mut f = match std::fs::File::open(path) {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+    let mut header = [0u8; 4];
+    let n = match f.read(&mut header) {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+    if n < header.len() {
+        return false;
+    }
+
+    matches!(
+        header,
+        [b'P', b'K', 0x03, 0x04]
+            | [b'P', b'K', 0x05, 0x06]
+            | [b'P', b'K', 0x07, 0x08]
+            | [b'P', b'K', 0x01, 0x02]
+    )
 }
 
 fn find_single_file_by_suffix(root: &Path, suffix: &str) -> anyhow::Result<PathBuf> {
@@ -677,13 +706,13 @@ impl InstanceService for InstanceApi {
             move || -> Result<(String, PathBuf, Option<PathBuf>), Status> {
                 let nonce = alloy_process::ProcessId::new().0;
 
-                if template_id == "minecraft:vanilla" || template_id == "minecraft:modrinth" {
+                if template_id == "minecraft:vanilla"
+                    || template_id == "minecraft:modrinth"
+                    || template_id == "minecraft:import"
+                    || template_id == "minecraft:curseforge"
+                {
                     // Minecraft expects a world directory (zip recommended).
-                    let is_zip = is_zip_hint
-                        || download_path2
-                            .to_string_lossy()
-                            .to_ascii_lowercase()
-                            .ends_with(".zip");
+                    let is_zip = is_zip_hint || file_magic_is_zip(&download_path2);
                     if !is_zip {
                         return Err(Status::invalid_argument(
                             "minecraft save import expects a .zip world",
@@ -740,11 +769,7 @@ impl InstanceService for InstanceApi {
                     })?;
                     let target = worlds_dir.join(format!("{world_name}.wld"));
 
-                    let is_zip = is_zip_hint
-                        || download_path2
-                            .to_string_lossy()
-                            .to_ascii_lowercase()
-                            .ends_with(".zip");
+                    let is_zip = is_zip_hint || file_magic_is_zip(&download_path2);
                     let source_wld = if is_zip {
                         let extracted_root = imports_dir2.join(format!("extracted-{nonce}"));
                         extract_zip_safely(&download_path2, &extracted_root).map_err(|e| {
@@ -783,13 +808,11 @@ impl InstanceService for InstanceApi {
                 }
 
                 if template_id == "dst:vanilla" {
-                    let is_zip = is_zip_hint
-                        || download_path2
-                            .to_string_lossy()
-                            .to_ascii_lowercase()
-                            .ends_with(".zip");
+                    let is_zip = is_zip_hint || file_magic_is_zip(&download_path2);
                     if !is_zip {
-                        return Err(Status::invalid_argument("dst save import expects a .zip cluster (Cluster_1/)"));
+                        return Err(Status::invalid_argument(
+                            "dst save import expects a .zip cluster (Cluster_1/)",
+                        ));
                     }
 
                     let extracted_root = imports_dir2.join(format!("extracted-{nonce}"));
@@ -797,14 +820,12 @@ impl InstanceService for InstanceApi {
                         Status::invalid_argument(format!("failed to extract zip: {e}"))
                     })?;
 
-                    let cluster_root = find_dst_cluster_root(&extracted_root).map_err(|e| {
-                        Status::invalid_argument(format!("invalid dst save: {e}"))
-                    })?;
+                    let cluster_root = find_dst_cluster_root(&extracted_root)
+                        .map_err(|e| Status::invalid_argument(format!("invalid dst save: {e}")))?;
 
                     let dst_root = instance_dir2.join("klei").join("DoNotStarveTogether");
-                    std::fs::create_dir_all(&dst_root).map_err(|e| {
-                        Status::internal(format!("failed to create dst root: {e}"))
-                    })?;
+                    std::fs::create_dir_all(&dst_root)
+                        .map_err(|e| Status::internal(format!("failed to create dst root: {e}")))?;
 
                     let target = dst_root.join("Cluster_1");
                     let mut backup: Option<PathBuf> = None;

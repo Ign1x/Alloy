@@ -40,7 +40,7 @@ fn parse_timeout_ms(raw: Option<String>) -> Duration {
         .parse::<u64>()
         .ok()
         .unwrap_or(30_000)
-        .clamp(1000, 10 * 60_000);
+        .clamp(1000, 60 * 60_000);
     Duration::from_millis(ms)
 }
 
@@ -83,6 +83,34 @@ fn code_from_i32(v: i32) -> tonic::Code {
     }
 }
 
+fn safe_to_retry_over_direct(method: &str) -> bool {
+    matches!(
+        method,
+        "/alloy.agent.v1.AgentHealthService/Check"
+            | "/alloy.agent.v1.FilesystemService/GetCapabilities"
+            | "/alloy.agent.v1.FilesystemService/ListDir"
+            | "/alloy.agent.v1.FilesystemService/ReadFile"
+            | "/alloy.agent.v1.LogsService/TailFile"
+            | "/alloy.agent.v1.ProcessService/ListTemplates"
+            | "/alloy.agent.v1.ProcessService/GetCacheStats"
+            | "/alloy.agent.v1.ProcessService/ListProcesses"
+            | "/alloy.agent.v1.ProcessService/GetStatus"
+            | "/alloy.agent.v1.ProcessService/TailLogs"
+            | "/alloy.agent.v1.InstanceService/List"
+            | "/alloy.agent.v1.InstanceService/Get"
+    )
+}
+
+fn is_long_running_method(method: &str) -> bool {
+    matches!(
+        method,
+        "/alloy.agent.v1.ProcessService/WarmTemplateCache"
+            | "/alloy.agent.v1.ProcessService/StartFromTemplate"
+            | "/alloy.agent.v1.InstanceService/Start"
+            | "/alloy.agent.v1.InstanceService/ImportSaveFromUrl"
+    )
+}
+
 #[derive(Clone)]
 pub struct AgentTransport {
     hub: AgentHub,
@@ -122,28 +150,62 @@ impl AgentTransport {
 
     pub async fn call<Req, Res>(&self, method: &'static str, req: Req) -> Result<Res, tonic::Status>
     where
-        Req: prost::Message + 'static,
+        Req: prost::Message + Default + 'static,
         Res: prost::Message + Default + 'static,
     {
+        let req_bytes = req.encode_to_vec();
+        let timeout = if is_long_running_method(method) {
+            self.timeout.max(Duration::from_secs(30 * 60))
+        } else {
+            self.timeout
+        };
+
         match self.mode {
-            TransportMode::TunnelOnly => self.call_tunnel(method, req).await,
-            TransportMode::DirectOnly => self.call_direct(method, req).await,
+            TransportMode::TunnelOnly => self.call_tunnel_bytes(method, req_bytes, timeout).await,
+            TransportMode::DirectOnly => {
+                self.call_direct_bytes::<Req, Res>(method, req_bytes, timeout)
+                    .await
+            }
             TransportMode::Auto => {
                 if self.pick_tunnel_conn().await.is_some() {
-                    return self.call_tunnel(method, req).await;
+                    let tunnel = self
+                        .call_tunnel_bytes(method, req_bytes.clone(), timeout)
+                        .await;
+                    match tunnel {
+                        Ok(v) => return Ok(v),
+                        Err(status) => {
+                            // Tunnel can be transiently flaky; in Auto mode, try direct gRPC as a
+                            // fallback for better UX in docker/dev setups.
+                            if status.code() == tonic::Code::Unavailable {
+                                let msg = status.message();
+                                let not_delivered = msg.contains("no active tunnel")
+                                    || msg.contains("tunnel send failed");
+                                if not_delivered || safe_to_retry_over_direct(method) {
+                                    if let Ok(v) = self
+                                        .call_direct_bytes::<Req, Res>(method, req_bytes, timeout)
+                                        .await
+                                    {
+                                        return Ok(v);
+                                    }
+                                }
+                            }
+                            return Err(status);
+                        }
+                    }
                 }
-                self.call_direct(method, req).await
+                self.call_direct_bytes::<Req, Res>(method, req_bytes, timeout)
+                    .await
             }
         }
     }
 
-    async fn call_tunnel<Req, Res>(
+    async fn call_tunnel_bytes<Res>(
         &self,
         method: &'static str,
-        req: Req,
+        req_bytes: Vec<u8>,
+        timeout: Duration,
     ) -> Result<Res, tonic::Status>
     where
-        Req: prost::Message + 'static,
         Res: prost::Message + Default + 'static,
     {
         let Some(conn) = self.pick_tunnel_conn().await else {
@@ -156,7 +218,7 @@ impl AgentTransport {
         let (tx, rx) = oneshot::channel::<TunnelResponse>();
         conn.pending.lock().await.insert(id.clone(), tx);
 
-        let payload = self.b64.encode(req.encode_to_vec());
+        let payload = self.b64.encode(req_bytes);
         let frame = ControlToAgentFrame::Req {
             id: &id,
             method,
@@ -173,14 +235,16 @@ impl AgentTransport {
             .is_err()
         {
             let _ = conn.pending.lock().await.remove(&id);
-            return Err(tonic::Status::unavailable("agent connection closed"));
+            self.hub.remove(&conn.node).await;
+            return Err(tonic::Status::unavailable("agent tunnel send failed"));
         }
 
-        let resp = match tokio::time::timeout(self.timeout, rx).await {
+        let resp = match tokio::time::timeout(timeout, rx).await {
             Ok(Ok(v)) => v,
             Ok(Err(_)) => {
                 let _ = conn.pending.lock().await.remove(&id);
-                return Err(tonic::Status::unavailable("agent connection closed"));
+                self.hub.remove(&conn.node).await;
+                return Err(tonic::Status::unavailable("agent tunnel disconnected"));
             }
             Err(_) => {
                 let _ = conn.pending.lock().await.remove(&id);
@@ -209,15 +273,19 @@ impl AgentTransport {
             .map_err(|e| tonic::Status::internal(format!("failed to decode response: {e}")))
     }
 
-    async fn call_direct<Req, Res>(
+    async fn call_direct_bytes<Req, Res>(
         &self,
         method: &'static str,
-        req: Req,
+        req_bytes: Vec<u8>,
+        timeout: Duration,
     ) -> Result<Res, tonic::Status>
     where
-        Req: prost::Message + 'static,
+        Req: prost::Message + Default + 'static,
         Res: prost::Message + Default + 'static,
     {
+        let req = Req::decode(req_bytes.as_slice())
+            .map_err(|e| tonic::Status::internal(format!("failed to decode request: {e}")))?;
+
         let endpoint = agent_endpoint();
         let channel = tonic::transport::Channel::from_shared(endpoint.clone())
             .map_err(|e| tonic::Status::internal(format!("invalid agent endpoint: {e}")))?
@@ -230,7 +298,7 @@ impl AgentTransport {
             tonic::Status::unavailable(format!("agent is not ready ({endpoint}): {e}"))
         })?;
         let mut request = tonic::Request::new(req);
-        request.set_timeout(self.timeout);
+        request.set_timeout(timeout);
 
         let path = tonic::codegen::http::uri::PathAndQuery::from_static(method);
         let codec = tonic::codec::ProstCodec::default();

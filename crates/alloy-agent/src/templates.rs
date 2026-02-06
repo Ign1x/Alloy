@@ -226,6 +226,96 @@ pub fn list_templates() -> Vec<ProcessTemplate> {
             graceful_stdin: Some("stop\n".to_string()),
         },
         ProcessTemplate {
+            template_id: "minecraft:import".to_string(),
+            display_name: "Minecraft: Import Pack".to_string(),
+            command: "java".to_string(),
+            args: vec![],
+            params: vec![
+                param_bool(
+                    "accept_eula",
+                    "Accept EULA",
+                    true,
+                    false,
+                    "Required to start Minecraft server. You must agree to Mojang's EULA.",
+                ),
+                param_string(
+                    "pack",
+                    "Server pack (zip/path/url)",
+                    true,
+                    "",
+                    Vec::new(),
+                    "uploads/pack.zip or https://example.com/pack.zip",
+                    "Provide a server pack .zip URL, or a path under /data (ALLOY_DATA_ROOT).",
+                ),
+                param_int(
+                    "memory_mb",
+                    "Memory (MiB)",
+                    false,
+                    "2048",
+                    512,
+                    65536,
+                    "2048",
+                    "Max heap size passed to Java (Xmx).",
+                ),
+                param_int(
+                    "port",
+                    "Port",
+                    false,
+                    "0",
+                    1024,
+                    65535,
+                    "25565 (leave blank for auto)",
+                    "TCP port to bind. Use 0 or leave blank to auto-assign a free port.",
+                ),
+            ],
+            graceful_stdin: Some("stop\n".to_string()),
+        },
+        ProcessTemplate {
+            template_id: "minecraft:curseforge".to_string(),
+            display_name: "Minecraft: CurseForge Pack".to_string(),
+            command: "java".to_string(),
+            args: vec![],
+            params: vec![
+                param_bool(
+                    "accept_eula",
+                    "Accept EULA",
+                    true,
+                    false,
+                    "Required to start Minecraft server. You must agree to Mojang's EULA.",
+                ),
+                param_string(
+                    "curseforge",
+                    "Modpack (CurseForge file)",
+                    true,
+                    "",
+                    Vec::new(),
+                    "https://www.curseforge.com/minecraft/modpacks/.../files/...",
+                    "Paste a CurseForge file URL, or modId:fileId. Server pack is preferred when available.",
+                ),
+                param_int(
+                    "memory_mb",
+                    "Memory (MiB)",
+                    false,
+                    "2048",
+                    512,
+                    65536,
+                    "2048",
+                    "Max heap size passed to Java (Xmx).",
+                ),
+                param_int(
+                    "port",
+                    "Port",
+                    false,
+                    "0",
+                    1024,
+                    65535,
+                    "25565 (leave blank for auto)",
+                    "TCP port to bind. Use 0 or leave blank to auto-assign a free port.",
+                ),
+            ],
+            graceful_stdin: Some("stop\n".to_string()),
+        },
+        ProcessTemplate {
             template_id: "terraria:vanilla".to_string(),
             display_name: "Terraria: Vanilla".to_string(),
             // Placeholder; spawn spec is prepared by the terraria module.
@@ -422,6 +512,14 @@ pub fn apply_params(
 
     if t.template_id == "minecraft:modrinth" {
         let _ = crate::minecraft_modrinth::validate_params(params)?;
+    }
+
+    if t.template_id == "minecraft:import" {
+        let _ = crate::minecraft_import::validate_params(params)?;
+    }
+
+    if t.template_id == "minecraft:curseforge" {
+        let _ = crate::minecraft_curseforge::validate_params(params)?;
     }
 
     if t.template_id == "terraria:vanilla" {
