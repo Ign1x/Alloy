@@ -637,6 +637,23 @@ impl ProcessService for ProcessApi {
         &self,
         request: Request<ClearCacheRequest>,
     ) -> Result<Response<ClearCacheResponse>, Status> {
+        fn template_id_for_cache_key(key: &str) -> Option<&'static str> {
+            if key == "minecraft:vanilla" || key.starts_with("minecraft:vanilla@") {
+                return Some("minecraft:vanilla");
+            }
+            if key == "terraria:vanilla" || key.starts_with("terraria:vanilla@") {
+                return Some("terraria:vanilla");
+            }
+            if key == "dsp:nebula" || key == "dsp:nebula@source" {
+                return Some("dsp:nebula");
+            }
+            None
+        }
+
+        fn validate_sha1_hex(s: &str) -> bool {
+            s.len() == 40 && s.chars().all(|c| c.is_ascii_hexdigit())
+        }
+
         let req = request.into_inner();
         let keys: Vec<String> = if req.keys.is_empty() {
             vec![
@@ -665,9 +682,12 @@ impl ProcessService for ProcessApi {
             .collect::<std::collections::HashSet<_>>();
 
         for key in &keys {
-            if running.contains(key) {
+            let Some(template_id) = template_id_for_cache_key(key) else {
+                return Err(Status::invalid_argument(format!("unknown cache key: {key}")));
+            };
+            if running.contains(template_id) {
                 return Err(Status::failed_precondition(format!(
-                    "cannot clear cache while process is running: {key}"
+                    "cannot clear cache while process is running: {template_id}"
                 )));
             }
         }
@@ -676,20 +696,33 @@ impl ProcessService for ProcessApi {
         let mut cleared = Vec::new();
 
         for key in keys {
-            let dir = match key.as_str() {
-                "minecraft:vanilla" => minecraft_download::cache_dir(),
-                "terraria:vanilla" => terraria_download::cache_dir(),
-                "dsp:nebula" => {
-                    return Err(Status::invalid_argument(
-                        "cache clear for dsp:nebula is disabled to avoid deleting worlds; manage instances explicitly"
-                            .to_string(),
-                    ))
-                }
-                _ => {
+            let dir = if key == "minecraft:vanilla" {
+                minecraft_download::cache_dir()
+            } else if let Some(rest) = key.strip_prefix("minecraft:vanilla@") {
+                let (_, sha1) = rest
+                    .split_once('#')
+                    .ok_or_else(|| Status::invalid_argument(format!("invalid minecraft cache key: {key}")))?;
+                if !validate_sha1_hex(sha1) {
                     return Err(Status::invalid_argument(format!(
-                        "unknown cache key: {key}"
+                        "invalid minecraft cache sha1: {sha1}"
                     )));
                 }
+                minecraft_download::cache_dir().join(sha1)
+            } else if key == "terraria:vanilla" {
+                terraria_download::cache_dir()
+            } else if let Some(version) = key.strip_prefix("terraria:vanilla@") {
+                if version.is_empty() || !version.chars().all(|c| c.is_ascii_digit()) {
+                    return Err(Status::invalid_argument(format!(
+                        "invalid terraria cache key: {key}"
+                    )));
+                }
+                terraria_download::cache_dir().join(version)
+            } else if key == "dsp:nebula@source" {
+                dsp::default_source_root()
+            } else if key == "dsp:nebula" {
+                dsp::data_root().join("cache").join("dsp")
+            } else {
+                return Err(Status::invalid_argument(format!("unknown cache key: {key}")));
             };
 
             let (size_bytes, last_used_unix_ms) = tokio::task::spawn_blocking({
