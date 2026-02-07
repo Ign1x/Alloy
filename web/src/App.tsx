@@ -1,663 +1,55 @@
 import { isAlloyApiError, onAuthEvent, queryClient, rspc } from './rspc'
-import { createEffect, createMemo, createSignal, For, Show, onCleanup, type JSX } from 'solid-js'
+import { createEffect, createMemo, createSignal, Show, onCleanup } from 'solid-js'
 import { Portal } from 'solid-js/web'
 import type { ProcessStatusDto } from './bindings'
-import { ensureCsrfCookie, login, logout, whoami } from './auth'
-import { Dropdown } from './components/Dropdown'
+import { ensureCsrfCookie, logout, whoami } from './auth'
 import { Banner } from './components/ui/Banner'
 import { Badge } from './components/ui/Badge'
 import { Button } from './components/ui/Button'
 import { Drawer } from './components/ui/Drawer'
-import { EmptyState } from './components/ui/EmptyState'
-import { ErrorState } from './components/ui/ErrorState'
-import { Field } from './components/ui/Field'
 import { IconButton } from './components/ui/IconButton'
-import { TemplateMark } from './components/ui/TemplateMark'
-import { Input } from './components/ui/Input'
-import { Link } from './components/ui/Link'
-import { Modal } from './components/ui/Modal'
-import { Skeleton } from './components/ui/Skeleton'
-import { Tabs } from './components/ui/Tabs'
-import { Textarea } from './components/ui/Textarea'
-import { Tooltip } from './components/ui/Tooltip'
+import AddNodeModal from './components/AddNodeModal'
+import DeleteInstanceModal from './components/DeleteInstanceModal'
+import ControlDiagnosticsModal from './components/ControlDiagnosticsModal'
+import DspInitModal from './components/DspInitModal'
+import EditInstanceModal from './components/EditInstanceModal'
 import { FileBrowser } from './components/FileBrowser'
-import { LogViewer } from './components/LogViewer'
-import InstancesPage from './pages/InstancesPage'
-import NodesPage from './pages/NodesPage'
-import { ArrowUpDown, Moon, Monitor, Search, Sun } from 'lucide-solid'
-
-function statusDotClass(state: { loading: boolean; error: boolean }) {
-  if (state.loading) return 'bg-slate-600 animate-pulse'
-  if (state.error) return 'bg-rose-500'
-  return 'bg-emerald-400'
-}
-
-type InstanceCardBackdrop = {
-  src: string
-  position: string
-}
-
-function templateKind(templateId: string): string {
-  const i = templateId.indexOf(':')
-  return i >= 0 ? templateId.slice(0, i) : templateId
-}
-
-function instanceCardBackdrop(templateId: string): InstanceCardBackdrop | null {
-  const kind = templateKind(templateId)
-  if (kind === 'minecraft') return { src: '/game-backdrops/minecraft-bg.jpg', position: '66% 52%' }
-  if (kind === 'dst') return { src: '/game-backdrops/dst-bg.jpg', position: '82% 56%' }
-  if (kind === 'terraria') return { src: '/game-backdrops/terraria-bg.jpg', position: '80% 58%' }
-  if (kind === 'dsp') return { src: '/game-backdrops/dsp-bg.jpg', position: '78% 54%' }
-  return null
-}
-
-function VisibilityToggle(props: {
-  visible: boolean
-  labelWhenHidden: string
-  labelWhenVisible: string
-  onToggle: () => void
-}) {
-  const label = () => (props.visible ? props.labelWhenVisible : props.labelWhenHidden)
-  return (
-    <button
-      type="button"
-      class="inline-flex h-6 w-6 items-center justify-center rounded-md text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/35 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-200 dark:focus-visible:ring-amber-400/35"
-      aria-label={label()}
-      title={label()}
-      onClick={props.onToggle}
-    >
-      <Show
-        when={props.visible}
-        fallback={
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4" aria-hidden="true">
-            <path d="M10 12.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5z" />
-            <path
-              fill-rule="evenodd"
-              d="M.664 10.59a1.651 1.651 0 010-1.186A10.004 10.004 0 0110 3c4.257 0 7.893 2.66 9.336 6.41.147.382.147.804 0 1.186A10.004 10.004 0 0110 17c-4.257 0-7.893-2.66-9.336-6.41zM14 10a4 4 0 11-8 0 4 4 0 018 0z"
-              clip-rule="evenodd"
-            />
-          </svg>
-        }
-      >
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4" aria-hidden="true">
-          <path d="M13.359 11.238l1.36 1.36a4 4 0 01-5.317-5.317l1.36 1.36a2.5 2.5 0 002.597 2.597z" />
-          <path
-            fill-rule="evenodd"
-            d="M2 4.25a.75.75 0 011.28-.53l14.5 14.5a.75.75 0 11-1.06 1.06l-2.294-2.294A9.961 9.961 0 0110 17c-4.257 0-7.893-2.66-9.336-6.41a1.651 1.651 0 010-1.186 10.03 10.03 0 012.924-4.167L2.22 3.78A.75.75 0 012 4.25zm6.12 6.12a2.5 2.5 0 003.51 3.51l-3.51-3.51z"
-            clip-rule="evenodd"
-          />
-          <path d="M12.454 8.214L9.31 5.07A4 4 0 0114.93 10.69l-2.476-2.476z" />
-          <path d="M15.765 12.585l1.507 1.507a10.03 10.03 0 002.064-3.502 1.651 1.651 0 000-1.186A10.004 10.004 0 0010 3a9.961 9.961 0 00-3.426.608l1.65 1.65A8.473 8.473 0 0110 4.5c3.49 0 6.574 2.138 7.773 5.5a8.5 8.5 0 01-2.008 2.585z" />
-        </svg>
-      </Show>
-    </button>
-  )
-}
-
-const AGENT_ERROR_PREFIX = 'ALLOY_ERROR_JSON:'
-const DSP_DEFAULT_SOURCE_ROOT = '/data/uploads/dsp/server'
-type AgentErrorPayload = {
-  code: string
-  message: string
-  field_errors?: Record<string, string> | null
-  hint?: string | null
-}
-
-function parseAgentErrorPayload(raw: string | null | undefined): AgentErrorPayload | null {
-  if (!raw) return null
-  const s = raw.trim()
-  if (!s.startsWith(AGENT_ERROR_PREFIX)) return null
-  try {
-    const parsed = JSON.parse(s.slice(AGENT_ERROR_PREFIX.length)) as unknown
-    if (!parsed || typeof parsed !== 'object') return null
-    const p = parsed as Record<string, unknown>
-    if (typeof p.code !== 'string' || typeof p.message !== 'string') return null
-    return {
-      code: p.code,
-      message: p.message,
-      field_errors: typeof p.field_errors === 'object' ? (p.field_errors as Record<string, string>) : null,
-      hint: typeof p.hint === 'string' ? p.hint : null,
-    }
-  } catch {
-    return null
-  }
-}
-
-function formatBytes(bytes: number | null | undefined): string {
-  if (bytes == null || !Number.isFinite(bytes)) return '—'
-  const sign = bytes < 0 ? '-' : ''
-  let v = Math.abs(bytes)
-  const units = ['B', 'KB', 'MB', 'GB', 'TB'] as const
-  let i = 0
-  while (v >= 1024 && i < units.length - 1) {
-    v /= 1024
-    i++
-  }
-  const decimals = i === 0 ? 0 : v >= 10 ? 1 : 2
-  return `${sign}${v.toFixed(decimals)}${units[i]}`
-}
-
-function parseU64(s: string | null | undefined): number | null {
-  if (!s) return null
-  const n = Number(s)
-  if (!Number.isFinite(n)) return null
-  return n
-}
-
-function formatCpuPercent(cpuX100: number | null | undefined): string {
-  if (cpuX100 == null || !Number.isFinite(cpuX100)) return '—'
-  const pct = cpuX100 / 100
-  if (pct >= 10) return `${pct.toFixed(1)}%`
-  if (pct >= 1) return `${pct.toFixed(2)}%`
-  return `${pct.toFixed(2)}%`
-}
-
-function formatRelativeTime(unixMs: number | null | undefined): string {
-  if (!unixMs || !Number.isFinite(unixMs) || unixMs <= 0) return '—'
-  const deltaMs = Date.now() - unixMs
-  const sec = Math.floor(deltaMs / 1000)
-  if (sec < 10) return 'just now'
-  if (sec < 60) return `${sec}s ago`
-  const min = Math.floor(sec / 60)
-  if (min < 60) return `${min}m ago`
-  const hr = Math.floor(min / 60)
-  if (hr < 48) return `${hr}h ago`
-  const day = Math.floor(hr / 24)
-  return `${day}d ago`
-}
-
-function startProgressSteps(templateId: string): string[] {
-  if (templateId === 'minecraft:vanilla') return ['Resolve', 'Download', 'Spawn', 'Wait']
-  if (templateId === 'minecraft:modrinth') return ['Resolve', 'Download', 'Install', 'Spawn', 'Wait']
-  if (templateId === 'minecraft:import') return ['Import', 'Extract', 'Spawn', 'Wait']
-  if (templateId === 'minecraft:curseforge') return ['Resolve', 'Download', 'Extract', 'Spawn', 'Wait']
-  if (templateId === 'terraria:vanilla') return ['Resolve', 'Download', 'Extract', 'Spawn', 'Wait']
-  if (templateId === 'dsp:nebula') return ['Resolve', 'Spawn', 'Wait']
-  return ['Spawn', 'Wait']
-}
-
-function startProgressIndex(templateId: string, message: string): number {
-  const m = message.toLowerCase()
-  const steps = startProgressSteps(templateId)
-
-  const find = (label: string) => steps.findIndex((s) => s.toLowerCase() === label)
-  const clamp = (idx: number) => Math.max(0, Math.min(steps.length - 1, idx))
-
-  if (m.includes('import')) return clamp(find('import'))
-  if (m.includes('resolve')) return clamp(find('resolve'))
-  if (m.includes('download')) return clamp(find('download'))
-  if (m.includes('install')) return clamp(find('install'))
-  if (m.includes('extract')) return clamp(find('extract'))
-  if (m.includes('spawn')) return clamp(find('spawn'))
-  if (m.includes('wait')) return clamp(find('wait'))
-  return 0
-}
-
-function StartProgress(props: { templateId: string; message: string }) {
-  const steps = () => startProgressSteps(props.templateId)
-  const active = () => startProgressIndex(props.templateId, props.message)
-  return (
-    <div class="mt-2 rounded-xl border border-slate-200 bg-white/60 px-3 py-2 text-[11px] text-slate-600 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-300">
-      <div class="flex flex-wrap items-center gap-2">
-        <For each={steps()}>
-          {(s, idx) => {
-            const i = idx()
-            const state = () => (i < active() ? 'done' : i === active() ? 'active' : 'todo')
-            const dot = () =>
-              state() === 'done'
-                ? 'bg-emerald-400'
-                : state() === 'active'
-                  ? 'bg-amber-400 animate-pulse'
-                  : 'bg-slate-400'
-            const text = () =>
-              state() === 'active' ? 'text-slate-900 dark:text-slate-100' : 'text-slate-600 dark:text-slate-300'
-
-            return (
-              <div class="flex items-center gap-2">
-                <span class={`h-1.5 w-1.5 rounded-full ${dot()}`} aria-hidden="true" />
-                <span class={text()}>{s}</span>
-                <Show when={i < steps().length - 1}>
-                  <span class="text-slate-300 dark:text-slate-700" aria-hidden="true">
-                    ›
-                  </span>
-                </Show>
-              </div>
-            )
-          }}
-        </For>
-
-        <span class="ml-auto truncate font-mono text-[11px] text-slate-500 dark:text-slate-400" title={props.message}>
-          {props.message}
-        </span>
-      </div>
-    </div>
-  )
-}
-
-function DownloadProgress(props: { templateId: string; message: string }) {
-  const steps = () => downloadProgressSteps(props.templateId)
-  const active = () => downloadProgressIndex(props.templateId, props.message)
-
-  return (
-    <div class="mt-2 rounded-xl border border-slate-200 bg-white/60 px-3 py-2 text-[11px] text-slate-600 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-300">
-      <div class="flex flex-wrap items-center gap-2">
-        <For each={steps()}>
-          {(s, idx) => {
-            const i = idx()
-            const state = () => (i < active() ? 'done' : i === active() ? 'active' : 'todo')
-            const dot = () =>
-              state() === 'done'
-                ? 'bg-emerald-400'
-                : state() === 'active'
-                  ? 'bg-amber-400 animate-pulse'
-                  : 'bg-slate-400'
-            const text = () =>
-              state() === 'active' ? 'text-slate-900 dark:text-slate-100' : 'text-slate-600 dark:text-slate-300'
-
-            return (
-              <div class="flex items-center gap-2">
-                <span class={`h-1.5 w-1.5 rounded-full ${dot()}`} aria-hidden="true" />
-                <span class={text()}>{s}</span>
-                <Show when={i < steps().length - 1}>
-                  <span class="text-slate-300 dark:text-slate-700" aria-hidden="true">
-                    ›
-                  </span>
-                </Show>
-              </div>
-            )
-          }}
-        </For>
-
-        <span class="ml-auto truncate font-mono text-[11px] text-slate-500 dark:text-slate-400" title={props.message}>
-          {props.message}
-        </span>
-      </div>
-    </div>
-  )
-}
-
-function StatusPill(props: {
-  label: string
-  status: string
-  state: { loading: boolean; error: boolean }
-}) {
-  return (
-    <div class="flex items-center gap-2 rounded-full border border-slate-200 bg-white/60 px-2.5 py-1 shadow-sm backdrop-blur-sm dark:border-slate-800 dark:bg-slate-950/60">
-      <span class={`h-1.5 w-1.5 rounded-full ${statusDotClass(props.state)}`} />
-      <span class="font-display text-[11px] tracking-wide text-slate-600 dark:text-slate-300">{props.label}</span>
-      <span class="font-mono text-[11px] text-slate-500">{props.status}</span>
-    </div>
-  )
-}
-
-function instanceStateLabel(status: ProcessStatusDto | null) {
-  if (!status) return 'Stopped'
-  switch (status.state) {
-    case 'PROCESS_STATE_STARTING':
-      return 'Starting'
-    case 'PROCESS_STATE_RUNNING':
-      return 'Running'
-    case 'PROCESS_STATE_STOPPING':
-      return 'Stopping'
-    case 'PROCESS_STATE_EXITED':
-      return 'Stopped'
-    case 'PROCESS_STATE_FAILED':
-      return 'Failed'
-    default:
-      return status.state
-  }
-}
-
-function canStartInstance(status: ProcessStatusDto | null) {
-  if (!status) return true
-  return status.state === 'PROCESS_STATE_EXITED' || status.state === 'PROCESS_STATE_FAILED'
-}
-
-function isStopping(status: ProcessStatusDto | null) {
-  return status?.state === 'PROCESS_STATE_STOPPING'
-}
-
-async function safeCopy(text: string) {
-  try {
-    await navigator.clipboard.writeText(text)
-  } catch {
-    // ignore clipboard errors
-  }
-}
-
-function isSecretParamKey(key: string) {
-  const k = key.toLowerCase()
-  if (k.includes('password') || k.includes('token') || k.includes('secret')) return true
-  if (k.includes('api_key') || k.includes('apikey')) return true
-  if (k.includes('frp') && k.includes('config')) return true
-  return false
-}
-
-type FrpConfigFormat = 'ini' | 'json' | 'toml' | 'yaml' | 'unknown'
-
-function detectFrpConfigFormat(config: string | null | undefined): FrpConfigFormat {
-  const raw = (config ?? '').trim()
-  if (!raw) return 'unknown'
-
-  try {
-    const v = JSON.parse(raw) as unknown
-    if (v && typeof v === 'object') return 'json'
-  } catch {
-    // ignore
-  }
-
-  if (/^\s*common\s*:/m.test(raw) || /^\s*proxies\s*:/m.test(raw)) return 'yaml'
-  if (/^\s*\[\[\s*proxies\s*\]\]/m.test(raw)) return 'toml'
-  if (/^\s*\[\s*common\s*\]/m.test(raw)) return 'ini'
-  if (/^\s*\[\s*[A-Za-z0-9_.-]+\s*\]\s*$/m.test(raw)) return 'toml'
-
-  return 'unknown'
-}
-
-function parseFrpEndpoint(config: string | null | undefined): string | null {
-  const raw = (config ?? '').trim()
-  if (!raw) return null
-
-  try {
-    const v = JSON.parse(raw) as unknown as {
-      common?: { server_addr?: unknown; server_port?: unknown }
-    }
-    const addr = typeof v?.common?.server_addr === 'string' ? v.common.server_addr.trim() : ''
-    const portRaw = v?.common?.server_port
-    const port = typeof portRaw === 'number' || typeof portRaw === 'string' ? String(portRaw).trim() : ''
-    if (addr && port) return `${addr}:${port}`
-  } catch {
-    // ignore
-  }
-
-  if (/^\s*common\s*:/m.test(raw)) {
-    const addr = /^\s*server_addr\s*:\s*(.+)$/m.exec(raw)?.[1]?.trim() ?? ''
-    const port = /^\s*server_port\s*:\s*(.+)$/m.exec(raw)?.[1]?.trim() ?? ''
-    if (addr && port) return `${addr}:${port}`
-  }
-
-  if (/^\s*\[\s*common\s*\]/m.test(raw)) {
-    let serverAddr: string | null = null
-    let serverPort: string | null = null
-    let section: string | null = null
-
-    for (const lineRaw of raw.split('\n')) {
-      const line = lineRaw.trim()
-      if (!line || line.startsWith('#') || line.startsWith(';')) continue
-
-      const sec = /^\[(.+)\]$/.exec(line)
-      if (sec) {
-        section = sec[1].trim().toLowerCase()
-        continue
-      }
-
-      const kv = /^([A-Za-z0-9_.-]+)\s*=\s*(.+)\s*$/.exec(line)
-      if (!kv) continue
-      const key = kv[1].trim().toLowerCase()
-      let val = kv[2].trim()
-      val = val.replace(/\s*[#;].*$/, '').trim()
-      val = val.replace(/^"(.*)"$/, '$1').replace(/^'(.*)'$/, '$1')
-
-      if (section !== 'common') continue
-      if (key === 'server_addr') serverAddr = val
-      if (key === 'server_port') serverPort = val
-    }
-
-    if (serverAddr && serverPort) return `${serverAddr}:${serverPort}`
-  }
-
-  return null
-}
-
-function LabelTip(props: { label: string; content: JSX.Element }) {
-  return (
-    <Tooltip content={props.content}>
-      <span class="cursor-help underline decoration-dotted underline-offset-4">{props.label}</span>
-    </Tooltip>
-  )
-}
-
-function downloadJson(filename: string, value: unknown) {
-  const blob = new Blob([JSON.stringify(value, null, 2)], { type: 'application/json' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  a.click()
-  URL.revokeObjectURL(url)
-}
-
-function statusMessageParts(status: ProcessStatusDto | null): { text: string | null; code: string | null; hint: string | null } {
-  const raw = status?.message ?? null
-  const payload = parseAgentErrorPayload(raw)
-  if (payload) return { text: payload.message, code: payload.code, hint: payload.hint ?? null }
-  return { text: raw, code: null, hint: null }
-}
-
-function parsePort(value: unknown): number | null {
-  if (value == null) return null
-  const n = Number.parseInt(String(value), 10)
-  if (!Number.isFinite(n) || n <= 0) return null
-  return n
-}
-
-function instancePort(info: { config: { template_id: string; params: unknown } }): number | null {
-  const params = info.config.params as Record<string, unknown> | null | undefined
-  return parsePort(params?.port)
-}
-
-function connectHost() {
-  try {
-    return window.location.hostname || 'localhost'
-  } catch {
-    return 'localhost'
-  }
-}
-
-function defaultControlWsUrl() {
-  try {
-    const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
-    const host = window.location.host || 'localhost'
-    return `${proto}://${host}/agent/ws`
-  } catch {
-    return 'ws://<panel-host>/agent/ws'
-  }
-}
-
-function shortId(id: string, head = 8, tail = 4): string {
-  const s = id.trim()
-  if (s.length <= head + tail + 1) return s
-  return `${s.slice(0, head)}…${s.slice(-tail)}`
-}
-
-function optionsWithCurrentValue(
-  options: { value: string; label: string; meta?: string }[],
-  currentValue: string,
-): { value: string; label: string; meta?: string }[] {
-  const v = currentValue.trim()
-  if (!v) return options
-  if (options.some((o) => o.value === v)) return options
-  return [{ value: v, label: v }, ...options]
-}
-
-type UiTab = 'instances' | 'downloads' | 'files' | 'nodes' | 'frp' | 'settings'
-
-type MinecraftCreateMode = 'vanilla' | 'modrinth' | 'import' | 'curseforge'
-type FrpConfigMode = 'paste' | 'node'
-type DownloadTarget = 'minecraft_vanilla' | 'terraria_vanilla' | 'dsp_nebula'
-type DownloadCenterView = 'library' | 'queue' | 'installed' | 'updates'
-type DownloadJobState = 'queued' | 'running' | 'paused' | 'success' | 'error' | 'canceled'
-type DownloadJob = {
-  id: string
-  target: DownloadTarget
-  templateId: string
-  version: string
-  params: Record<string, string>
-  state: DownloadJobState
-  message: string
-  requestId?: string
-  startedAtUnixMs: number
-  updatedAtUnixMs: number
-}
-
-function downloadTargetLabel(target: DownloadTarget): string {
-  if (target === 'minecraft_vanilla') return 'Minecraft (Vanilla)'
-  if (target === 'terraria_vanilla') return 'Terraria (Vanilla)'
-  return 'DSP (Nebula)'
-}
-
-function downloadProgressSteps(templateId: string): string[] {
-  if (templateId === 'minecraft:vanilla') return ['Resolve', 'Download', 'Verify', 'Ready']
-  if (templateId === 'terraria:vanilla') return ['Resolve', 'Download', 'Extract', 'Ready']
-  if (templateId === 'dsp:nebula') return ['Login', 'Download', 'Install', 'Ready']
-  return ['Queue', 'Run', 'Ready']
-}
-
-function downloadProgressIndex(templateId: string, message: string): number {
-  const m = message.toLowerCase()
-  const steps = downloadProgressSteps(templateId)
-
-  const find = (label: string) => steps.findIndex((s) => s.toLowerCase() === label)
-  const clamp = (idx: number) => Math.max(0, Math.min(steps.length - 1, idx))
-
-  if (m.includes('resolve')) return clamp(find('resolve'))
-  if (m.includes('login')) return clamp(find('login'))
-  if (m.includes('download')) return clamp(find('download'))
-  if (m.includes('extract')) return clamp(find('extract'))
-  if (m.includes('install')) return clamp(find('install'))
-  if (m.includes('verify')) return clamp(find('verify'))
-  if (m.includes('ready') || m.includes('warmed') || m.includes('completed')) return clamp(find('ready'))
-  return 0
-}
-
-function downloadEstimatedMessage(templateId: string, elapsedMs: number): string {
-  if (templateId === 'minecraft:vanilla') {
-    if (elapsedMs < 2_000) return 'resolving minecraft version metadata…'
-    if (elapsedMs < 15_000) return 'downloading minecraft server files…'
-    return 'verifying cache and preparing ready state…'
-  }
-  if (templateId === 'terraria:vanilla') {
-    if (elapsedMs < 2_000) return 'resolving terraria release metadata…'
-    if (elapsedMs < 15_000) return 'downloading terraria server package…'
-    return 'extracting and verifying terraria server files…'
-  }
-  if (templateId === 'dsp:nebula') {
-    if (elapsedMs < 3_000) return 'logging in via steamcmd…'
-    if (elapsedMs < 30_000) return 'downloading dsp server files via steamcmd…'
-    return 'installing and validating dsp runtime files…'
-  }
-  return 'preparing files…'
-}
-
-function downloadJobProgressMessage(job: DownloadJob, nowUnixMs: number): string {
-  if (job.state !== 'running') return job.message
-  const elapsed = Math.max(0, nowUnixMs - job.startedAtUnixMs)
-  return downloadEstimatedMessage(job.templateId, elapsed)
-}
-
-function downloadJobStatusVariant(state: DownloadJobState): 'warning' | 'neutral' | 'success' | 'danger' {
-  if (state === 'running') return 'warning'
-  if (state === 'queued' || state === 'paused') return 'neutral'
-  if (state === 'success') return 'success'
-  return 'danger'
-}
-
-function downloadJobStatusLabel(state: DownloadJobState): string {
-  if (state === 'running') return 'Running'
-  if (state === 'queued') return 'Queued'
-  if (state === 'paused') return 'Paused'
-  if (state === 'success') return 'Success'
-  if (state === 'canceled') return 'Canceled'
-  return 'Failed'
-}
-
-function formatDateTime(unixMs: number | null | undefined): string {
-  if (!unixMs || !Number.isFinite(unixMs) || unixMs <= 0) return '—'
-  try {
-    return new Date(unixMs).toLocaleString()
-  } catch {
-    return '—'
-  }
-}
-
-const DOWNLOAD_VIEW_STORAGE_KEY = 'alloy.download.view.v1'
-
-function parseUnixMs(value: unknown): number {
-  const raw = typeof value === 'string' ? value : typeof value === 'number' ? String(value) : '0'
-  const n = Number.parseInt(raw, 10)
-  return Number.isFinite(n) ? n : 0
-}
-
-function mapDownloadJobFromServer(raw: unknown): DownloadJob | null {
-  if (!raw || typeof raw !== 'object') return null
-  const row = raw as Record<string, unknown>
-
-  const id = typeof row.id === 'string' ? row.id : ''
-  const targetRaw = row.target
-  const templateId = typeof row.template_id === 'string' ? row.template_id : ''
-  const version = typeof row.version === 'string' ? row.version : ''
-  const stateRaw = row.state
-  const message = typeof row.message === 'string' ? row.message : ''
-  if (!id || !templateId) return null
-  if (targetRaw !== 'minecraft_vanilla' && targetRaw !== 'terraria_vanilla' && targetRaw !== 'dsp_nebula') return null
-  if (
-    stateRaw !== 'queued' &&
-    stateRaw !== 'running' &&
-    stateRaw !== 'paused' &&
-    stateRaw !== 'success' &&
-    stateRaw !== 'error' &&
-    stateRaw !== 'canceled'
-  ) {
-    return null
-  }
-  const target: DownloadTarget = targetRaw
-  const state: DownloadJobState = stateRaw
-
-  const paramsRaw = typeof row.params === 'object' && row.params ? (row.params as Record<string, unknown>) : {}
-  const params: Record<string, string> = {}
-  for (const [k, v] of Object.entries(paramsRaw)) {
-    if (!k || v == null) continue
-    params[k] = String(v)
-  }
-
-  return {
-    id,
-    target,
-    templateId,
-    version,
-    params,
-    state,
-    message,
-    requestId: typeof row.request_id === 'string' ? row.request_id : undefined,
-    startedAtUnixMs: parseUnixMs(row.started_at_unix_ms) || parseUnixMs(row.created_at_unix_ms),
-    updatedAtUnixMs: parseUnixMs(row.updated_at_unix_ms),
-  }
-}
-
-const CREATE_TEMPLATE_MINECRAFT = '__minecraft__'
-
-const MINECRAFT_TEMPLATE_ID_BY_MODE: Record<MinecraftCreateMode, string> = {
-  vanilla: 'minecraft:vanilla',
-  modrinth: 'minecraft:modrinth',
-  import: 'minecraft:import',
-  curseforge: 'minecraft:curseforge',
-}
-
-const MINECRAFT_MODE_BY_TEMPLATE_ID: Partial<Record<string, MinecraftCreateMode>> = {
-  'minecraft:vanilla': 'vanilla',
-  'minecraft:modrinth': 'modrinth',
-  'minecraft:import': 'import',
-  'minecraft:curseforge': 'curseforge',
-}
-
-type ToastVariant = 'info' | 'success' | 'error'
-type Toast = {
-  id: string
-  variant: ToastVariant
-  title: string
-  message?: string
-  requestId?: string
-}
+import DownloadTaskModal from './components/DownloadTaskModal'
+import FrpNodeModal from './components/FrpNodeModal'
+import LoginModal from './components/LoginModal'
+import InstanceDetailsModal from './components/InstanceDetailsModal'
+import ToastPortal from './components/ToastPortal'
+import { StatusPill } from './app/primitives/StatusPill'
+import { parseAgentErrorPayload } from './app/helpers/agentErrors'
+import { mapDownloadJobFromServer, downloadTargetLabel } from './app/helpers/downloads'
+import { buildCreatePreview, computeCreateAdvancedDirty } from './app/helpers/createInstancePreview'
+import { formatRelativeTime } from './app/helpers/format'
+import {
+  focusFirstCreateError as focusFirstCreateErrorInForm,
+  focusFirstEditError as focusFirstEditErrorInForm,
+} from './app/helpers/formFocus'
+import { defaultControlWsUrl, detectFrpConfigFormat, instancePort, parseFrpEndpoint } from './app/helpers/network'
+import { optionsWithCurrentValue, safeCopy } from './app/helpers/misc'
+import {
+  CREATE_TEMPLATE_MINECRAFT,
+  DOWNLOAD_VIEW_STORAGE_KEY,
+  MINECRAFT_MODE_BY_TEMPLATE_ID,
+  MINECRAFT_TEMPLATE_ID_BY_MODE,
+  type DownloadCenterView,
+  type DownloadJob,
+  type DownloadTarget,
+  type FrpConfigMode,
+  type MinecraftCreateMode,
+  type Toast,
+  type ToastVariant,
+  type UiTab,
+} from './app/types'
+import DownloadsTab from './pages/DownloadsTab'
+import FrpTab from './pages/FrpTab'
+import InstancesTab from './pages/InstancesTab'
+import NodesTab from './pages/NodesTab'
+import SettingsTab from './pages/SettingsTab'
+import { Moon, Monitor, Sun } from 'lucide-solid'
 
 function App() {
   // Ensure CSRF cookie exists early so authenticated POSTs (auth/rspc mutations)
@@ -714,8 +106,6 @@ function App() {
   let createDspRemoteAccessPasswordEl: HTMLInputElement | undefined
   let createDspUpsEl: HTMLInputElement | undefined
   let createDspWineBinEl: HTMLInputElement | undefined
-  let dspSteamGuardCodeEl: HTMLInputElement | undefined
-  let settingsSteamcmdMaFileInputEl: HTMLInputElement | undefined
   let editDisplayNameEl: HTMLInputElement | undefined
   let editSleepSecondsEl: HTMLInputElement | undefined
   let editMcMemoryEl: HTMLInputElement | undefined
@@ -1882,241 +1272,73 @@ function App() {
   })
 
   const [createAdvanced, setCreateAdvanced] = createSignal(false)
-  const createAdvancedDirty = createMemo(() => {
-    const template = createTemplateId()
-    if (template.startsWith('minecraft:')) {
-      return mcPort().trim().length > 0 || mcFrpEnabled() || mcEffectiveFrpConfig().trim().length > 0
-    }
-    if (template === 'terraria:vanilla') {
-      if (trPort().trim()) return true
-      const ws = trWorldSize().trim()
-      if (ws && ws !== '1') return true
-      if (trPassword().trim()) return true
-      if (trFrpEnabled() || trEffectiveFrpConfig().trim()) return true
-      return false
-    }
-    if (template === 'dst:vanilla') {
-      const p = dstPort().trim()
-      const mp = dstMasterPort().trim()
-      const ap = dstAuthPort().trim()
-      if (p && p !== '0') return true
-      if (mp && mp !== '0') return true
-      if (ap && ap !== '0') return true
-      return false
-    }
-    if (template === 'dsp:nebula') {
-      const p = dspPort().trim()
-      if (p && p !== '0') return true
-      if (dspServerPassword().trim()) return true
-      if (dspRemoteAccessPassword().trim()) return true
-      if (dspAutoPauseEnabled()) return true
-      const ups = dspUps().trim()
-      if (ups && ups !== '60') return true
-      const wine = dspWineBin().trim()
-      if (wine && wine !== 'wine64') return true
-      return false
-    }
-    return false
-  })
+  const createAdvancedDirty = createMemo(() =>
+    computeCreateAdvancedDirty({
+      templateId: createTemplateId(),
+      mcPort: mcPort(),
+      mcFrpEnabled: mcFrpEnabled(),
+      mcEffectiveFrpConfig: mcEffectiveFrpConfig(),
+      trPort: trPort(),
+      trWorldSize: trWorldSize(),
+      trPassword: trPassword(),
+      trFrpEnabled: trFrpEnabled(),
+      trEffectiveFrpConfig: trEffectiveFrpConfig(),
+      dstPort: dstPort(),
+      dstMasterPort: dstMasterPort(),
+      dstAuthPort: dstAuthPort(),
+      dspPort: dspPort(),
+      dspServerPassword: dspServerPassword(),
+      dspRemoteAccessPassword: dspRemoteAccessPassword(),
+      dspAutoPauseEnabled: dspAutoPauseEnabled(),
+      dspUps: dspUps(),
+      dspWineBin: dspWineBin(),
+    }),
+  )
 
-  const createPreview = createMemo(() => {
-    const template_id = createTemplateId()
-    const templateLabel = templateDisplayName(template_id)
-
-    const rows: { label: string; value: string; isSecret?: boolean }[] = []
-
-    const name = instanceName().trim()
-    if (name) rows.push({ label: 'Name', value: name })
-
-    const warnings: string[] = []
-
-    if (template_id === 'demo:sleep') {
-      rows.push({ label: 'Seconds', value: sleepSeconds().trim() || '60' })
-    }
-
-    if (template_id === 'minecraft:vanilla') {
-      const v = mcVersion().trim() || 'latest_release'
-      rows.push({ label: 'Version', value: v })
-      rows.push({ label: 'Memory (MB)', value: mcMemory().trim() || '2048' })
-
-      const portRaw = mcPort().trim()
-      const portLabel = !portRaw || portRaw === '0' ? 'auto' : portRaw
-      rows.push({ label: 'Port', value: portLabel })
-      rows.push({
-        label: 'Connect',
-        value: portLabel === 'auto' ? 'TBD (auto port)' : `${connectHost()}:${portLabel}`,
-      })
-
-      if (mcFrpEnabled()) {
-        const ep = parseFrpEndpoint(mcEffectiveFrpConfig())
-        rows.push({ label: 'FRP', value: ep ?? '(enabled)' })
-        if (!mcEffectiveFrpConfig().trim()) warnings.push('Paste FRP config or disable FRP.')
-      }
-
-      if (!mcEula()) warnings.push('Accept the Minecraft EULA to start.')
-    }
-
-    if (template_id === 'minecraft:modrinth') {
-      const src = mcMrpack().trim()
-      rows.push({ label: 'Modpack', value: src || '(not set)' })
-      rows.push({ label: 'Memory (MB)', value: mcMemory().trim() || '2048' })
-
-      const portRaw = mcPort().trim()
-      const portLabel = !portRaw || portRaw === '0' ? 'auto' : portRaw
-      rows.push({ label: 'Port', value: portLabel })
-      rows.push({
-        label: 'Connect',
-        value: portLabel === 'auto' ? 'TBD (auto port)' : `${connectHost()}:${portLabel}`,
-      })
-
-      if (mcFrpEnabled()) {
-        const ep = parseFrpEndpoint(mcEffectiveFrpConfig())
-        rows.push({ label: 'FRP', value: ep ?? '(enabled)' })
-        if (!mcEffectiveFrpConfig().trim()) warnings.push('Paste FRP config or disable FRP.')
-      }
-
-      if (!mcEula()) warnings.push('Accept the Minecraft EULA to start.')
-      if (!src) warnings.push('Paste a Modrinth version link or a direct .mrpack URL.')
-    }
-
-    if (template_id === 'minecraft:import') {
-      const src = mcImportPack().trim()
-      rows.push({ label: 'Pack', value: src || '(not set)' })
-      rows.push({ label: 'Memory (MB)', value: mcMemory().trim() || '2048' })
-
-      const portRaw = mcPort().trim()
-      const portLabel = !portRaw || portRaw === '0' ? 'auto' : portRaw
-      rows.push({ label: 'Port', value: portLabel })
-      rows.push({
-        label: 'Connect',
-        value: portLabel === 'auto' ? 'TBD (auto port)' : `${connectHost()}:${portLabel}`,
-      })
-
-      if (mcFrpEnabled()) {
-        const ep = parseFrpEndpoint(mcEffectiveFrpConfig())
-        rows.push({ label: 'FRP', value: ep ?? '(enabled)' })
-        if (!mcEffectiveFrpConfig().trim()) warnings.push('Paste FRP config or disable FRP.')
-      }
-
-      if (!mcEula()) warnings.push('Accept the Minecraft EULA to start.')
-      if (!src) warnings.push('Provide a server pack zip URL, or a path under /data.')
-    }
-
-    if (template_id === 'minecraft:curseforge') {
-      const src = mcCurseforge().trim()
-      rows.push({ label: 'Modpack', value: src || '(not set)' })
-      rows.push({ label: 'Memory (MB)', value: mcMemory().trim() || '2048' })
-
-      const portRaw = mcPort().trim()
-      const portLabel = !portRaw || portRaw === '0' ? 'auto' : portRaw
-      rows.push({ label: 'Port', value: portLabel })
-      rows.push({
-        label: 'Connect',
-        value: portLabel === 'auto' ? 'TBD (auto port)' : `${connectHost()}:${portLabel}`,
-      })
-
-      if (mcFrpEnabled()) {
-        const ep = parseFrpEndpoint(mcEffectiveFrpConfig())
-        rows.push({ label: 'FRP', value: ep ?? '(enabled)' })
-        if (!mcEffectiveFrpConfig().trim()) warnings.push('Paste FRP config or disable FRP.')
-      }
-
-      if (!mcEula()) warnings.push('Accept the Minecraft EULA to start.')
-      if (!src) warnings.push('Paste a CurseForge file URL, or modId:fileId.')
-      if (settingsStatus.data && !settingsStatus.data.curseforge_api_key_set) {
-        warnings.push('CurseForge API key is not configured (Settings).')
-      }
-    }
-
-    if (template_id === 'dst:vanilla') {
-      rows.push({ label: 'Cluster token', value: dstClusterToken().trim() ? '(set)' : '(not set)', isSecret: true })
-      rows.push({ label: 'Cluster name', value: dstClusterName().trim() || 'Alloy DST server' })
-      rows.push({ label: 'Max players', value: dstMaxPlayers().trim() || '6' })
-      rows.push({ label: 'Password', value: dstPassword().trim() ? '(set)' : '(none)', isSecret: true })
-
-      const portRaw = dstPort().trim()
-      const portLabel = !portRaw || portRaw === '0' ? 'auto' : portRaw
-      rows.push({ label: 'UDP port', value: portLabel })
-      rows.push({
-        label: 'Connect',
-        value: portLabel === 'auto' ? 'TBD (auto port)' : `${connectHost()}:${portLabel}`,
-      })
-
-      if (createAdvanced() || createAdvancedDirty()) {
-        const masterRaw = dstMasterPort().trim()
-        const masterLabel = !masterRaw || masterRaw === '0' ? 'auto' : masterRaw
-        rows.push({ label: 'Master port', value: masterLabel })
-
-        const authRaw = dstAuthPort().trim()
-        const authLabel = !authRaw || authRaw === '0' ? 'auto' : authRaw
-        rows.push({ label: 'Auth port', value: authLabel })
-      }
-
-      if (!dstClusterToken().trim()) {
-        if (settingsStatus.data?.dst_default_klei_key_set) {
-          warnings.push('No cluster token provided; default key from Settings will be used.')
-        } else {
-          warnings.push('Paste your Klei cluster token to start (or set a default in Settings).')
-        }
-      }
-    }
-
-    if (template_id === 'terraria:vanilla') {
-      const v = trVersion().trim() || '1453'
-      rows.push({ label: 'Version', value: v })
-
-      const portRaw = trPort().trim()
-      const portLabel = !portRaw || portRaw === '0' ? 'auto' : portRaw
-      rows.push({ label: 'Port', value: portLabel })
-      rows.push({
-        label: 'Connect',
-        value: portLabel === 'auto' ? 'TBD (auto port)' : `${connectHost()}:${portLabel}`,
-      })
-
-      if (trFrpEnabled()) {
-        const ep = parseFrpEndpoint(trEffectiveFrpConfig())
-        rows.push({ label: 'FRP', value: ep ?? '(enabled)' })
-        if (!trEffectiveFrpConfig().trim()) warnings.push('Paste FRP config or disable FRP.')
-      }
-
-      rows.push({ label: 'Max players', value: trMaxPlayers().trim() || '8' })
-      rows.push({ label: 'World name', value: trWorldName().trim() || 'world' })
-      rows.push({ label: 'World size', value: trWorldSize().trim() || '1' })
-      rows.push({ label: 'Password', value: trPassword().trim() ? '(set)' : '(none)', isSecret: true })
-
-    }
-
-    if (template_id === 'dsp:nebula') {
-      const mode = dspStartupMode().trim() || 'auto'
-      const save = dspSaveName().trim()
-
-      rows.push({ label: 'Server source', value: DSP_DEFAULT_SOURCE_ROOT })
-      rows.push({ label: 'Startup mode', value: mode })
-      if (mode === 'load') rows.push({ label: 'Save name', value: save || '(not set)' })
-      else if (save) rows.push({ label: 'Save name', value: save })
-
-      const portRaw = dspPort().trim()
-      const portLabel = !portRaw || portRaw === '0' ? 'auto' : portRaw
-      rows.push({ label: 'Port', value: portLabel })
-      rows.push({
-        label: 'Connect',
-        value: portLabel === 'auto' ? 'TBD (auto port)' : `${connectHost()}:${portLabel}`,
-      })
-
-      if (createAdvanced() || createAdvancedDirty()) {
-        rows.push({ label: 'Server password', value: dspServerPassword().trim() ? '(set)' : '(none)', isSecret: true })
-        rows.push({ label: 'Remote password', value: dspRemoteAccessPassword().trim() ? '(set)' : '(none)', isSecret: true })
-        rows.push({ label: 'Auto pause', value: dspAutoPauseEnabled() ? 'enabled' : 'disabled' })
-        rows.push({ label: 'UPS', value: dspUps().trim() || '60' })
-        rows.push({ label: 'Wine', value: dspWineBin().trim() || 'wine64' })
-      }
-
-      if (mode === 'load' && !save) warnings.push('Provide Save name when startup mode is load.')
-    }
-
-    return { template_id, templateLabel, rows, warnings }
-  })
-
+  const createPreview = createMemo(() =>
+    buildCreatePreview({
+      templateId: createTemplateId(),
+      templateLabel: templateDisplayName(createTemplateId()),
+      instanceName: instanceName(),
+      sleepSeconds: sleepSeconds(),
+      createAdvanced: createAdvanced(),
+      createAdvancedDirty: createAdvancedDirty(),
+      mcVersion: mcVersion(),
+      mcMemory: mcMemory(),
+      mcPort: mcPort(),
+      mcFrpEnabled: mcFrpEnabled(),
+      mcEffectiveFrpConfig: mcEffectiveFrpConfig(),
+      mcEula: mcEula(),
+      mcMrpack: mcMrpack(),
+      mcImportPack: mcImportPack(),
+      mcCurseforge: mcCurseforge(),
+      curseforgeApiKeySet: Boolean(settingsStatus.data?.curseforge_api_key_set),
+      dstClusterToken: dstClusterToken(),
+      dstClusterName: dstClusterName(),
+      dstMaxPlayers: dstMaxPlayers(),
+      dstPassword: dstPassword(),
+      dstPort: dstPort(),
+      dstMasterPort: dstMasterPort(),
+      dstAuthPort: dstAuthPort(),
+      dstDefaultKleiKeySet: Boolean(settingsStatus.data?.dst_default_klei_key_set),
+      trVersion: trVersion(),
+      trPort: trPort(),
+      trFrpEnabled: trFrpEnabled(),
+      trEffectiveFrpConfig: trEffectiveFrpConfig(),
+      trMaxPlayers: trMaxPlayers(),
+      trWorldName: trWorldName(),
+      trWorldSize: trWorldSize(),
+      trPassword: trPassword(),
+      dspStartupMode: dspStartupMode(),
+      dspSaveName: dspSaveName(),
+      dspPort: dspPort(),
+      dspServerPassword: dspServerPassword(),
+      dspRemoteAccessPassword: dspRemoteAccessPassword(),
+      dspAutoPauseEnabled: dspAutoPauseEnabled(),
+      dspUps: dspUps(),
+      dspWineBin: dspWineBin(),
+    }),
+  )
   createEffect(() => {
     // Clear create-form errors when switching templates.
     selectedTemplate()
@@ -2143,126 +1365,51 @@ function App() {
     setDspRemoteAccessPasswordVisible(false)
   })
 
-  function focusEl(el: HTMLElement | undefined): boolean {
-    if (!el) return false
-    try {
-      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
-    } catch {
-      // ignore
-    }
-    try {
-      ;(el as any).focus?.()
-    } catch {
-      // ignore
-    }
-    return true
-  }
-
-  function focusDropdown(root: HTMLDivElement | undefined): boolean {
-    if (!root) return false
-    const btn = root.querySelector('button') as HTMLElement | null
-    return focusEl(btn ?? undefined)
-  }
-
   function focusFirstCreateError(errors: Record<string, string>) {
-    const template_id = createTemplateId()
-    const order: string[] =
-      template_id === 'demo:sleep'
-        ? ['seconds', 'display_name']
-        : template_id === 'minecraft:vanilla'
-          ? ['accept_eula', 'version', 'memory_mb', 'port', 'frp_config', 'display_name']
-          : template_id === 'minecraft:modrinth'
-            ? ['accept_eula', 'mrpack', 'memory_mb', 'port', 'frp_config', 'display_name']
-            : template_id === 'minecraft:import'
-              ? ['accept_eula', 'pack', 'memory_mb', 'port', 'frp_config', 'display_name']
-              : template_id === 'minecraft:curseforge'
-                ? ['accept_eula', 'curseforge', 'memory_mb', 'port', 'frp_config', 'display_name']
-              : template_id === 'dst:vanilla'
-                ? ['cluster_token', 'cluster_name', 'max_players', 'password', 'port', 'master_port', 'auth_port', 'display_name']
-              : template_id === 'terraria:vanilla'
-                ? ['version', 'max_players', 'world_name', 'port', 'world_size', 'password', 'frp_config', 'display_name']
-              : template_id === 'dsp:nebula'
-                ? ['startup_mode', 'save_name', 'port', 'server_password', 'remote_access_password', 'ups', 'wine_bin', 'display_name']
-                : ['display_name']
-
-    const needsAdvanced =
-      !createAdvanced() &&
-      (Boolean(errors.port) ||
-        Boolean(errors.master_port) ||
-        Boolean(errors.auth_port) ||
-        Boolean(errors.world_size) ||
-        Boolean(errors.password) ||
-        Boolean(errors.frp_config) ||
-        Boolean(errors.server_password) ||
-        Boolean(errors.remote_access_password) ||
-        Boolean(errors.auto_pause_enabled) ||
-        Boolean(errors.ups) ||
-        Boolean(errors.wine_bin))
-    if (needsAdvanced) setCreateAdvanced(true)
-
-    const run = () => {
-      for (const key of order) {
-        if (!errors[key]) continue
-
-        if (key === 'display_name' && focusEl(createInstanceNameEl)) return
-        if (key === 'seconds' && focusEl(createSleepSecondsEl)) return
-
-        if (
-          template_id === 'minecraft:vanilla' ||
-          template_id === 'minecraft:modrinth' ||
-          template_id === 'minecraft:import' ||
-          template_id === 'minecraft:curseforge'
-        ) {
-          if (key === 'accept_eula' && focusEl(createMcEulaEl)) return
-          if (key === 'mrpack' && focusEl(createMcMrpackEl)) return
-          if (key === 'pack' && focusEl(createMcImportPackEl)) return
-          if (key === 'curseforge' && focusEl(createMcCurseforgeEl)) return
-          if (key === 'port' && focusEl(createMcPortEl)) return
-          if (key === 'frp_config') {
-            if (mcFrpEnabled() && mcFrpMode() === 'node' && focusDropdown(createMcFrpNodeEl)) return
-            if (focusEl(createMcFrpConfigEl)) return
-          }
-          if (key === 'memory_mb' && focusEl(createMcMemoryEl)) return
-        }
-
-        if (template_id === 'terraria:vanilla') {
-          if (key === 'port' && focusEl(createTrPortEl)) return
-          if (key === 'world_size' && focusEl(createTrWorldSizeEl)) return
-          if (key === 'password' && focusEl(createTrPasswordEl)) return
-          if (key === 'frp_config') {
-            if (trFrpEnabled() && trFrpMode() === 'node' && focusDropdown(createTrFrpNodeEl)) return
-            if (focusEl(createTrFrpConfigEl)) return
-          }
-          if (key === 'world_name' && focusEl(createTrWorldNameEl)) return
-          if (key === 'max_players' && focusEl(createTrMaxPlayersEl)) return
-        }
-
-        if (template_id === 'dst:vanilla') {
-          if (key === 'cluster_token' && focusEl(createDstClusterTokenEl)) return
-          if (key === 'cluster_name' && focusEl(createDstClusterNameEl)) return
-          if (key === 'max_players' && focusEl(createDstMaxPlayersEl)) return
-          if (key === 'password' && focusEl(createDstPasswordEl)) return
-          if (key === 'port' && focusEl(createDstPortEl)) return
-          if (key === 'master_port' && focusEl(createDstMasterPortEl)) return
-          if (key === 'auth_port' && focusEl(createDstAuthPortEl)) return
-        }
-
-        if (template_id === 'dsp:nebula') {
-          if (key === 'startup_mode' && focusDropdown(createDspStartupModeEl)) return
-          if (key === 'save_name' && focusEl(createDspSaveNameEl)) return
-          if (key === 'port' && focusEl(createDspPortEl)) return
-          if (key === 'server_password' && focusEl(createDspServerPasswordEl)) return
-          if (key === 'remote_access_password' && focusEl(createDspRemoteAccessPasswordEl)) return
-          if (key === 'ups' && focusEl(createDspUpsEl)) return
-          if (key === 'wine_bin' && focusEl(createDspWineBinEl)) return
-        }
-      }
-    }
-
-    if (needsAdvanced) requestAnimationFrame(run)
-    else queueMicrotask(run)
+    focusFirstCreateErrorInForm({
+      errors,
+      templateId: createTemplateId(),
+      createAdvanced: createAdvanced(),
+      setCreateAdvanced,
+      refs: {
+        createInstanceNameEl,
+        createSleepSecondsEl,
+        createMcEulaEl,
+        createMcMrpackEl,
+        createMcImportPackEl,
+        createMcCurseforgeEl,
+        createMcPortEl,
+        createMcMemoryEl,
+        createMcFrpConfigEl,
+        createMcFrpNodeEl,
+        createTrPortEl,
+        createTrMaxPlayersEl,
+        createTrWorldNameEl,
+        createTrWorldSizeEl,
+        createTrPasswordEl,
+        createTrFrpConfigEl,
+        createTrFrpNodeEl,
+        createDstClusterTokenEl,
+        createDstClusterNameEl,
+        createDstMaxPlayersEl,
+        createDstPasswordEl,
+        createDstPortEl,
+        createDstMasterPortEl,
+        createDstAuthPortEl,
+        createDspStartupModeEl,
+        createDspSaveNameEl,
+        createDspPortEl,
+        createDspServerPasswordEl,
+        createDspRemoteAccessPasswordEl,
+        createDspUpsEl,
+        createDspWineBinEl,
+      },
+      mcFrpEnabled: mcFrpEnabled(),
+      mcFrpMode: mcFrpMode(),
+      trFrpEnabled: trFrpEnabled(),
+      trFrpMode: trFrpMode(),
+    })
   }
-
   function closeDspInitModal() {
     setShowDspInitModal(false)
     setPendingCreateAfterDspInit(null)
@@ -2592,57 +1739,32 @@ function App() {
   })
 
   function focusFirstEditError(errors: Record<string, string>) {
-    const template_id = editTemplateId()
-    if (!template_id) return
-
-    const order: string[] =
-      template_id === 'demo:sleep'
-        ? ['display_name', 'seconds']
-        : template_id === 'minecraft:vanilla'
-          ? ['display_name', 'version', 'memory_mb', 'port', 'frp_config']
-          : template_id === 'terraria:vanilla'
-            ? ['display_name', 'version', 'max_players', 'world_name', 'port', 'world_size', 'password', 'frp_config']
-            : ['display_name']
-
-    const needsAdvanced =
-      !editAdvanced() &&
-      (Boolean(errors.port) || Boolean(errors.world_size) || Boolean(errors.password) || Boolean(errors.frp_config))
-    if (needsAdvanced) setEditAdvanced(true)
-
-    const run = () => {
-      for (const key of order) {
-        if (!errors[key]) continue
-
-        if (key === 'display_name' && focusEl(editDisplayNameEl)) return
-        if (key === 'seconds' && focusEl(editSleepSecondsEl)) return
-
-        if (template_id === 'minecraft:vanilla') {
-          if (key === 'port' && focusEl(editMcPortEl)) return
-          if (key === 'frp_config') {
-            if (editMcFrpEnabled() && editMcFrpMode() === 'node' && focusDropdown(editMcFrpNodeEl)) return
-            if (focusEl(editMcFrpConfigEl)) return
-          }
-          if (key === 'memory_mb' && focusEl(editMcMemoryEl)) return
-        }
-
-        if (template_id === 'terraria:vanilla') {
-          if (key === 'port' && focusEl(editTrPortEl)) return
-          if (key === 'max_players' && focusEl(editTrMaxPlayersEl)) return
-          if (key === 'world_name' && focusEl(editTrWorldNameEl)) return
-          if (key === 'world_size' && focusEl(editTrWorldSizeEl)) return
-          if (key === 'password' && focusEl(editTrPasswordEl)) return
-          if (key === 'frp_config') {
-            if (editTrFrpEnabled() && editTrFrpMode() === 'node' && focusDropdown(editTrFrpNodeEl)) return
-            if (focusEl(editTrFrpConfigEl)) return
-          }
-        }
-      }
-    }
-
-    if (needsAdvanced) requestAnimationFrame(run)
-    else queueMicrotask(run)
+    focusFirstEditErrorInForm({
+      errors,
+      templateId: editTemplateId(),
+      editAdvanced: editAdvanced(),
+      setEditAdvanced,
+      refs: {
+        editDisplayNameEl,
+        editSleepSecondsEl,
+        editMcMemoryEl,
+        editMcPortEl,
+        editMcFrpConfigEl,
+        editMcFrpNodeEl,
+        editTrPortEl,
+        editTrMaxPlayersEl,
+        editTrWorldNameEl,
+        editTrWorldSizeEl,
+        editTrPasswordEl,
+        editTrFrpConfigEl,
+        editTrFrpNodeEl,
+      },
+      editMcFrpEnabled: editMcFrpEnabled(),
+      editMcFrpMode: editMcFrpMode(),
+      editTrFrpEnabled: editTrFrpEnabled(),
+      editTrFrpMode: editTrFrpMode(),
+    })
   }
-
   const trVersionOptions = createMemo(() => [
     { value: '1453', label: '1.4.5.3 (1453)', meta: 'latest' },
     { value: '1452', label: '1.4.5.2 (1452)' },
@@ -2815,10 +1937,6 @@ function App() {
   const [frpNodeConfig, setFrpNodeConfig] = createSignal('')
   const [frpNodeFieldErrors, setFrpNodeFieldErrors] = createSignal<Record<string, string>>({})
   const [frpNodeFormError, setFrpNodeFormError] = createSignal<string | null>(null)
-  let frpNodeNameEl: HTMLInputElement | undefined
-  let frpNodeServerAddrEl: HTMLInputElement | undefined
-  let frpNodeServerPortEl: HTMLInputElement | undefined
-  let frpNodeConfigEl: HTMLTextAreaElement | undefined
 
   function closeFrpNodeModal() {
     setShowFrpNodeModal(false)
@@ -2879,7 +1997,6 @@ function App() {
   const [createNodeFieldErrors, setCreateNodeFieldErrors] = createSignal<Record<string, string>>({})
   const [createNodeFormError, setCreateNodeFormError] = createSignal<string | null>(null)
   const [createNodeResult, setCreateNodeResult] = createSignal<NodeCreateResult | null>(null)
-  let createNodeNameEl: HTMLInputElement | undefined
 
   const createNodeComposeYaml = createMemo(() => {
     const r = createNodeResult()
@@ -2918,7 +2035,6 @@ function App() {
     setCreateNodeFormError(null)
     setCreateNodeResult(null)
     setShowCreateNodeModal(true)
-    requestAnimationFrame(() => createNodeNameEl?.focus())
   }
 
   function closeCreateNode() {
@@ -3590,2249 +2706,303 @@ function App() {
               </div>
 
               <div class="flex min-h-0 flex-1">
-              <Show when={tab() === 'instances'}>
-                <InstancesPage
-                  tabLabel="Instances"
-                  left={
-                    <div class="space-y-3">
-	                      <Field
-	                        label="Name (optional)"
-	                      >
-                        <Input
-                          ref={(el) => {
-                            createInstanceNameEl = el
-                          }}
-                          value={instanceName()}
-                          onInput={(e) => setInstanceName(e.currentTarget.value)}
-                          placeholder="e.g. survival-1"
-                          spellcheck={false}
-                        />
-                      </Field>
-
-                      <Field label="Template" required>
-                        <Dropdown
-                          label=""
-                          value={selectedTemplate()}
-                          options={templateOptions()}
-                          disabled={templates.isPending || templateOptions().length === 0}
-                          placeholder={templates.isPending ? 'Loading templates...' : 'No templates'}
-                          onChange={setSelectedTemplate}
-                        />
-                      </Field>
-
-	                      <Show when={selectedTemplate() === 'demo:sleep'}>
-	                        <Field
-	                          label="Seconds"
-	                          required
-	                          error={createFieldErrors().seconds}
-	                        >
-                          <Input
-                            ref={(el) => {
-                              createSleepSecondsEl = el
-                            }}
-                            type="number"
-                            value={sleepSeconds()}
-                            onInput={(e) => setSleepSeconds(e.currentTarget.value)}
-                            invalid={Boolean(createFieldErrors().seconds)}
-                          />
-                        </Field>
-                      </Show>
-
-                      <Show
-                        when={
-                          selectedTemplate() === CREATE_TEMPLATE_MINECRAFT ||
-                          Boolean(MINECRAFT_MODE_BY_TEMPLATE_ID[selectedTemplate()])
-                        }
-                      >
-                        <div class="space-y-3 border-t border-slate-200 pt-3 dark:border-slate-800">
-                          <div class="flex flex-wrap items-center justify-between gap-3">
-                            <div class="flex flex-wrap items-center gap-3">
-                              <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                                Minecraft
-                              </div>
-                              <Tabs
-                                value={mcCreateMode()}
-                                options={minecraftCreateModeOptions()}
-                                onChange={(mode) => {
-                                  setSelectedTemplate(CREATE_TEMPLATE_MINECRAFT)
-                                  setMcCreateMode(mode)
-                                }}
-                              />
-                            </div>
-                            <Button
-                              size="xs"
-                              variant={createAdvanced() ? 'secondary' : 'ghost'}
-                              onClick={() => setCreateAdvanced((v) => !v)}
-                              title="Show or hide advanced fields"
-                            >
-                              <span class="inline-flex items-center gap-2">
-                                {createAdvanced() ? 'Hide advanced' : 'Advanced'}
-                                <Show when={!createAdvanced() && createAdvancedDirty()}>
-                                  <span class="h-1.5 w-1.5 rounded-full bg-amber-500" aria-hidden="true" />
-                                </Show>
-                              </span>
-                            </Button>
-                          </div>
-
-                          <div class="rounded-2xl border border-slate-200 bg-white/70 p-3 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
-                            <label for="mc-eula" class="flex items-start gap-3 text-sm text-slate-800 dark:text-slate-300">
-                              <input
-                                ref={(el) => {
-                                  createMcEulaEl = el
-                                }}
-                                id="mc-eula"
-                                type="checkbox"
-                                class="mt-0.5 h-4 w-4 rounded border-slate-300 bg-white text-amber-600 focus-visible:ring-2 focus-visible:ring-amber-500/35 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-50 dark:border-slate-700 dark:bg-slate-950/60 dark:text-amber-400 dark:focus-visible:ring-amber-400/35 dark:focus-visible:ring-offset-slate-950"
-                                checked={mcEula()}
-                                onChange={(e) => setMcEula(e.currentTarget.checked)}
-                              />
-                              <span class="leading-tight">
-                                I accept the{' '}
-                                <Link href="https://aka.ms/MinecraftEULA" target="_blank" rel="noreferrer noopener">
-                                  Minecraft EULA
-                                </Link>
-                                <span class="mt-0.5 block text-xs text-slate-500 dark:text-slate-400">
-                                  Required to start server.
-                                </span>
-                              </span>
-                            </label>
-                            <Show when={createFieldErrors().accept_eula}>
-                              <div class="mt-2 text-[12px] text-rose-700 dark:text-rose-300">{createFieldErrors().accept_eula}</div>
-                            </Show>
-                          </div>
-
-                          <Show
-                            when={
-                              createTemplateId() === 'minecraft:curseforge' &&
-                              settingsStatus.data &&
-                              !settingsStatus.data.curseforge_api_key_set
-                            }
-                          >
-                            <Banner
-                              variant="warning"
-                              title="CurseForge API key not set"
-                              message="Set it in Settings to enable CurseForge installs."
-                              actions={
-                                <Show when={me()?.is_admin}>
-                                  <Button size="xs" variant="secondary" onClick={() => setTab('settings')}>
-                                    Open Settings
-                                  </Button>
-                                </Show>
-                              }
-                            />
-                          </Show>
-
-                          <Show when={createTemplateId() === 'minecraft:modrinth'}>
-                            <Field
-                              label={
-                                <LabelTip
-                                  label="Modpack (mrpack)"
-                                  content="Paste a Modrinth version link (recommended) or a direct .mrpack URL."
-                                />
-                              }
-                              required
-                              error={createFieldErrors().mrpack}
-                            >
-                              <Input
-                                ref={(el) => {
-                                  createMcMrpackEl = el
-                                }}
-                                value={mcMrpack()}
-                                onInput={(e) => setMcMrpack(e.currentTarget.value)}
-                                placeholder="https://modrinth.com/modpack/.../version/..."
-                                spellcheck={false}
-                                invalid={Boolean(createFieldErrors().mrpack)}
-                              />
-                            </Field>
-                          </Show>
-
-                          <Show when={createTemplateId() === 'minecraft:import'}>
-                            <Field
-                              label={
-                                <LabelTip
-                                  label="Server pack (zip/path/url)"
-                                  content="Paste a direct server pack .zip URL, or a path under /data (ALLOY_DATA_ROOT). The pack should be server-ready."
-                                />
-                              }
-                              required
-                              error={createFieldErrors().pack}
-                            >
-                              <Input
-                                ref={(el) => {
-                                  createMcImportPackEl = el
-                                }}
-                                value={mcImportPack()}
-                                onInput={(e) => setMcImportPack(e.currentTarget.value)}
-                                placeholder="uploads/pack.zip or https://example.com/pack.zip"
-                                spellcheck={false}
-                                invalid={Boolean(createFieldErrors().pack)}
-                              />
-                            </Field>
-                          </Show>
-
-                          <Show when={createTemplateId() === 'minecraft:curseforge'}>
-                            <Field
-                              label={
-                                <LabelTip
-                                  label="Modpack file"
-                                  content="Paste a CurseForge file URL (recommended), or modId:fileId. Alloy will prefer the author's server pack when available."
-                                />
-                              }
-                              required
-                              error={createFieldErrors().curseforge}
-                            >
-                              <Input
-                                ref={(el) => {
-                                  createMcCurseforgeEl = el
-                                }}
-                                value={mcCurseforge()}
-                                onInput={(e) => setMcCurseforge(e.currentTarget.value)}
-                                placeholder="https://www.curseforge.com/minecraft/modpacks/.../files/..."
-                                spellcheck={false}
-                                invalid={Boolean(createFieldErrors().curseforge)}
-                              />
-                            </Field>
-                          </Show>
-
-                          <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                            <Show when={createTemplateId() === 'minecraft:vanilla'}>
-                              <Field
-                                label={<LabelTip label="Version" content="Use Latest release unless you know you need a specific version." />}
-                                error={createFieldErrors().version}
-                              >
-                                <Dropdown
-                                  label=""
-                                  value={mcVersion()}
-                                  options={optionsWithCurrentValue(mcVersionOptions(), mcVersion())}
-                                  onChange={setMcVersion}
-                                />
-                              </Field>
-                            </Show>
-
-                            <Field
-                              class={createTemplateId() === 'minecraft:vanilla' ? '' : 'sm:col-span-2'}
-                              label={<LabelTip label="Memory (MiB)" content="Max heap size passed to Java (Xmx)." />}
-                              error={createFieldErrors().memory_mb}
-                            >
-                              <Input
-                                ref={(el) => {
-                                  createMcMemoryEl = el
-                                }}
-                                type="number"
-                                value={mcMemory()}
-                                onInput={(e) => setMcMemory(e.currentTarget.value)}
-                                placeholder="2048"
-                                invalid={Boolean(createFieldErrors().memory_mb)}
-                              />
-                            </Field>
-                          </div>
-
-                          <Show when={createAdvanced()}>
-                            <div class="space-y-3">
-                              <Field
-                                label={<LabelTip label="Port (optional)" content="Leave blank for auto-assign." />}
-                                error={createFieldErrors().port}
-                              >
-                                <Input
-                                  ref={(el) => {
-                                    createMcPortEl = el
-                                  }}
-                                  type="number"
-                                  value={mcPort()}
-                                  onInput={(e) => setMcPort(e.currentTarget.value)}
-                                  placeholder="25565"
-                                  invalid={Boolean(createFieldErrors().port)}
-                                />
-                              </Field>
-
-                              <Field
-                                label={<LabelTip label="Public (FRP)" content="Optional. Paste an FRP config to expose this instance (auto-detects INI/TOML/YAML/JSON)." />}
-                                error={createFieldErrors().frp_config}
-                              >
-                                <div class="space-y-2">
-                                  <label class="inline-flex items-center gap-2 text-[12px] text-slate-700 dark:text-slate-200">
-                                    <input
-                                      type="checkbox"
-                                      class="h-4 w-4 rounded border-slate-300 bg-white text-amber-600 focus:ring-amber-400 dark:border-slate-700 dark:bg-slate-950/60 dark:text-amber-400"
-                                      checked={mcFrpEnabled()}
-                                      onChange={(e) => setMcFrpEnabled(e.currentTarget.checked)}
-                                    />
-                                    <span>Enable</span>
-                                  </label>
-                                  <Show when={mcFrpEnabled()}>
-                                    <div class="space-y-2">
-                                      <div class="flex flex-wrap items-center justify-between gap-2">
-                                        <Tabs
-                                          value={mcFrpMode()}
-                                          options={[
-                                            { value: 'paste', label: 'Paste' },
-                                            { value: 'node', label: 'Node' },
-                                          ]}
-                                          onChange={(mode) => {
-                                            setMcFrpMode(mode)
-                                            if (mode === 'paste') setMcFrpNodeId('')
-                                            if (mode === 'node') setMcFrpConfig('')
-                                          }}
-                                        />
-                                        <Button size="xs" variant="secondary" onClick={() => setTab('frp')}>
-                                          Manage nodes
-                                        </Button>
-                                      </div>
-
-                                      <Show when={mcFrpMode() === 'node'}>
-                                        <div
-                                          ref={(el) => {
-                                            createMcFrpNodeEl = el
-                                          }}
-                                        >
-                                          <Dropdown
-                                            label=""
-                                            value={mcFrpNodeId()}
-                                            options={frpNodeDropdownOptions()}
-                                            placeholder="Select node…"
-                                            onChange={setMcFrpNodeId}
-                                          />
-                                        </div>
-                                        <div class="text-[11px] text-slate-500 dark:text-slate-400">
-                                          Uses the saved node config and patches <span class="font-mono">local_port</span> (and auto remote port if needed).
-                                        </div>
-                                      </Show>
-
-                                      <Show when={mcFrpMode() === 'paste'}>
-                                        <Textarea
-                                          ref={(el) => {
-                                            createMcFrpConfigEl = el
-                                          }}
-                                          value={mcFrpConfig()}
-                                          onInput={(e) => setMcFrpConfig(e.currentTarget.value)}
-                                          placeholder="Paste FRP config (auto: INI/TOML/YAML/JSON)"
-                                          spellcheck={false}
-                                          class="font-mono text-[11px]"
-                                          invalid={Boolean(createFieldErrors().frp_config)}
-                                        />
-                                      </Show>
-                                    </div>
-                                  </Show>
-                                </div>
-                              </Field>
-                            </div>
-                          </Show>
-                        </div>
-                      </Show>
-
-
-
-
-
-
-
-                      <Show when={selectedTemplate() === 'dst:vanilla'}>
-                        <div class="space-y-3 border-t border-slate-200 pt-3 dark:border-slate-800">
-                          <div class="flex items-center justify-between gap-3">
-                            <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                              Don't Starve Together
-                            </div>
-                            <Button
-                              size="xs"
-                              variant={createAdvanced() ? 'secondary' : 'ghost'}
-                              onClick={() => setCreateAdvanced((v) => !v)}
-                              title="Show or hide advanced fields"
-                            >
-                              <span class="inline-flex items-center gap-2">
-                                {createAdvanced() ? 'Hide advanced' : 'Advanced'}
-                                <Show when={!createAdvanced() && createAdvancedDirty()}>
-                                  <span class="h-1.5 w-1.5 rounded-full bg-amber-500" aria-hidden="true" />
-                                </Show>
-                              </span>
-                            </Button>
-                          </div>
-
-                          <Field
-                            label={
-                              <LabelTip
-                                label="Cluster token"
-                                content="Required. Paste your cluster_token.txt contents from Klei."
-                              />
-                            }
-                            required
-                            error={createFieldErrors().cluster_token}
-                          >
-                            <div class="flex flex-wrap items-center gap-2">
-                              <Input
-                                ref={(el) => {
-                                  createDstClusterTokenEl = el
-                                }}
-                                type={dstClusterTokenVisible() ? 'text' : 'password'}
-                                value={dstClusterToken()}
-                                onInput={(e) => setDstClusterToken(e.currentTarget.value)}
-                                placeholder="Paste token…"
-                                spellcheck={false}
-                                invalid={Boolean(createFieldErrors().cluster_token)}
-                                class="w-full flex-1 font-mono text-[11px]"
-                                rightIcon={
-                                  <VisibilityToggle
-                                    visible={dstClusterTokenVisible()}
-                                    labelWhenHidden="Show token"
-                                    labelWhenVisible="Hide token"
-                                    onToggle={() => setDstClusterTokenVisible((v) => !v)}
-                                  />
-                                }
-                              />
-                              <IconButton
-                                type="button"
-                                size="sm"
-                                variant="secondary"
-                                label="Copy token"
-                                disabled={!dstClusterToken().trim()}
-                                onClick={() => void safeCopy(dstClusterToken().trim())}
-                              >
-                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-                                  <path d="M5.75 2A2.75 2.75 0 003 4.75v9.5A2.75 2.75 0 005.75 17h1.5a.75.75 0 000-1.5h-1.5c-.69 0-1.25-.56-1.25-1.25v-9.5c0-.69.56-1.25 1.25-1.25h5.5c.69 0 1.25.56 1.25 1.25v1a.75.75 0 001.5 0v-1A2.75 2.75 0 0011.25 2h-5.5z" />
-                                  <path d="M8.75 6A2.75 2.75 0 006 8.75v6.5A2.75 2.75 0 008.75 18h5.5A2.75 2.75 0 0017 15.25v-6.5A2.75 2.75 0 0014.25 6h-5.5z" />
-                                </svg>
-                              </IconButton>
-                            </div>
-                          </Field>
-
-                          <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                            <Field label="Cluster name" error={createFieldErrors().cluster_name}>
-                              <Input
-                                ref={(el) => {
-                                  createDstClusterNameEl = el
-                                }}
-                                value={dstClusterName()}
-                                onInput={(e) => setDstClusterName(e.currentTarget.value)}
-                                placeholder="Alloy DST server"
-                                spellcheck={false}
-                                invalid={Boolean(createFieldErrors().cluster_name)}
-                              />
-                            </Field>
-
-                            <Field label={<LabelTip label="Max players" content="Maximum concurrent players allowed to join." />} error={createFieldErrors().max_players}>
-                              <Input
-                                ref={(el) => {
-                                  createDstMaxPlayersEl = el
-                                }}
-                                type="number"
-                                value={dstMaxPlayers()}
-                                onInput={(e) => setDstMaxPlayers(e.currentTarget.value)}
-                                placeholder="6"
-                                invalid={Boolean(createFieldErrors().max_players)}
-                              />
-                            </Field>
-                          </div>
-
-                          <Field label={<LabelTip label="Password (optional)" content="Optional cluster password for joining players." />} error={createFieldErrors().password}>
-                            <div class="flex flex-wrap items-center gap-2">
-                              <Input
-                                ref={(el) => {
-                                  createDstPasswordEl = el
-                                }}
-                                type={dstPasswordVisible() ? 'text' : 'password'}
-                                value={dstPassword()}
-                                onInput={(e) => setDstPassword(e.currentTarget.value)}
-                                placeholder="(none)"
-                                invalid={Boolean(createFieldErrors().password)}
-                                class="w-full flex-1"
-                                rightIcon={
-                                  <VisibilityToggle
-                                    visible={dstPasswordVisible()}
-                                    labelWhenHidden="Show password"
-                                    labelWhenVisible="Hide password"
-                                    onToggle={() => setDstPasswordVisible((v) => !v)}
-                                  />
-                                }
-                              />
-                              <IconButton
-                                type="button"
-                                size="sm"
-                                variant="secondary"
-                                label="Copy password"
-                                disabled={!dstPassword().trim()}
-                                onClick={() => void safeCopy(dstPassword().trim())}
-                              >
-                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-                                  <path d="M5.75 2A2.75 2.75 0 003 4.75v9.5A2.75 2.75 0 005.75 17h1.5a.75.75 0 000-1.5h-1.5c-.69 0-1.25-.56-1.25-1.25v-9.5c0-.69.56-1.25 1.25-1.25h5.5c.69 0 1.25.56 1.25 1.25v1a.75.75 0 001.5 0v-1A2.75 2.75 0 0011.25 2h-5.5z" />
-                                  <path d="M8.75 6A2.75 2.75 0 006 8.75v6.5A2.75 2.75 0 008.75 18h5.5A2.75 2.75 0 0017 15.25v-6.5A2.75 2.75 0 0014.25 6h-5.5z" />
-                                </svg>
-                              </IconButton>
-                            </div>
-                          </Field>
-
-                          <Show when={createAdvanced()}>
-                            <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                              <Field label={<LabelTip label="Port (UDP)" content="Client connection port. Use 0 to auto-assign." />} error={createFieldErrors().port}>
-                                <Input
-                                  ref={(el) => {
-                                    createDstPortEl = el
-                                  }}
-                                  type="number"
-                                  value={dstPort()}
-                                  onInput={(e) => setDstPort(e.currentTarget.value)}
-                                  placeholder="0"
-                                  invalid={Boolean(createFieldErrors().port)}
-                                />
-                              </Field>
-
-                              <Field
-                                label={<LabelTip label="Master (UDP)" content="Steam master server port. Use 0 to auto-assign." />}
-                                error={createFieldErrors().master_port}
-                              >
-                                <Input
-                                  ref={(el) => {
-                                    createDstMasterPortEl = el
-                                  }}
-                                  type="number"
-                                  value={dstMasterPort()}
-                                  onInput={(e) => setDstMasterPort(e.currentTarget.value)}
-                                  placeholder="0"
-                                  invalid={Boolean(createFieldErrors().master_port)}
-                                />
-                              </Field>
-
-                              <Field
-                                label={<LabelTip label="Auth (UDP)" content="Steam authentication port. Use 0 to auto-assign." />}
-                                error={createFieldErrors().auth_port}
-                              >
-                                <Input
-                                  ref={(el) => {
-                                    createDstAuthPortEl = el
-                                  }}
-                                  type="number"
-                                  value={dstAuthPort()}
-                                  onInput={(e) => setDstAuthPort(e.currentTarget.value)}
-                                  placeholder="0"
-                                  invalid={Boolean(createFieldErrors().auth_port)}
-                                />
-                              </Field>
-                            </div>
-                          </Show>
-                        </div>
-                      </Show>
-
-                      <Show when={selectedTemplate() === 'terraria:vanilla'}>
-                        <div class="space-y-3 border-t border-slate-200 pt-3 dark:border-slate-800">
-                          <div class="flex items-center justify-between gap-3">
-                            <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                              Terraria settings
-                            </div>
-                            <Button
-                              size="xs"
-                              variant={createAdvanced() ? 'secondary' : 'ghost'}
-                              onClick={() => setCreateAdvanced((v) => !v)}
-                              title="Show or hide advanced fields"
-                            >
-                              <span class="inline-flex items-center gap-2">
-                                {createAdvanced() ? 'Hide advanced' : 'Advanced'}
-                                <Show when={!createAdvanced() && createAdvancedDirty()}>
-                                  <span class="h-1.5 w-1.5 rounded-full bg-amber-500" aria-hidden="true" />
-                                </Show>
-                              </span>
-                            </Button>
-                          </div>
-
-	                          <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-		                            <Field
-		                              label={
-		                                <LabelTip
-		                                  label="Version"
-		                                  content="Package id (e.g. 1453). Stick to latest unless you need compatibility."
-		                                />
-		                              }
-		                              error={createFieldErrors().version}
-		                            >
-                              <div class="space-y-2">
-                                <Dropdown
-                                  label=""
-                                  value={trVersion()}
-                                  options={optionsWithCurrentValue(trVersionOptions(), trVersion())}
-                                  onChange={setTrVersion}
-                                />
-                              </div>
-		                            </Field>
-
-		                            <Field
-		                              label={<LabelTip label="Max players" content="Maximum concurrent players allowed to join." />}
-		                              error={createFieldErrors().max_players}
-		                            >
-                              <Input
-                                ref={(el) => {
-                                  createTrMaxPlayersEl = el
-                                }}
-                                type="number"
-                                value={trMaxPlayers()}
-                                onInput={(e) => setTrMaxPlayers(e.currentTarget.value)}
-                                invalid={Boolean(createFieldErrors().max_players)}
-                              />
-                            </Field>
-                          </div>
-
-	                          <Field
-	                            label={
-	                              <LabelTip
-	                                label="World name"
-	                                content="Changing it uses a different world file (existing worlds are not deleted)."
-	                              />
-	                            }
-	                            error={createFieldErrors().world_name}
-	                          >
-                            <Input
-                              ref={(el) => {
-                                createTrWorldNameEl = el
-                              }}
-                              value={trWorldName()}
-                              onInput={(e) => setTrWorldName(e.currentTarget.value)}
-                              invalid={Boolean(createFieldErrors().world_name)}
-                            />
-                          </Field>
-
-                          <Show when={createAdvanced()}>
-                            <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-	                              <Field
-	                                label={<LabelTip label="Port (optional)" content="Leave blank for auto-assign." />}
-	                                error={createFieldErrors().port}
-	                              >
-                                <Input
-                                  ref={(el) => {
-                                    createTrPortEl = el
-                                  }}
-                                  type="number"
-                                  value={trPort()}
-                                  onInput={(e) => setTrPort(e.currentTarget.value)}
-                                  placeholder="7777"
-                                  invalid={Boolean(createFieldErrors().port)}
-                                />
-                              </Field>
-
-		                              <Field
-		                                label={<LabelTip label="World size (1/2/3)" content="1=small, 2=medium, 3=large." />}
-		                                error={createFieldErrors().world_size}
-		                              >
-                                <Input
-                                  ref={(el) => {
-                                    createTrWorldSizeEl = el
-                                  }}
-                                  type="number"
-                                  value={trWorldSize()}
-                                  onInput={(e) => setTrWorldSize(e.currentTarget.value)}
-                                  invalid={Boolean(createFieldErrors().world_size)}
-                                />
-                              </Field>
-                            </div>
-
-		                            <Field
-		                              label={<LabelTip label="Password (optional)" content="Optional join password." />}
-		                              error={createFieldErrors().password}
-		                            >
-	                              <div class="flex flex-wrap items-center gap-2">
-	                              <Input
-	                              ref={(el) => {
-	                              createTrPasswordEl = el
-	                              }}
-	                              type={trPasswordVisible() ? 'text' : 'password'}
-	                              value={trPassword()}
-	                              onInput={(e) => setTrPassword(e.currentTarget.value)}
-	                              invalid={Boolean(createFieldErrors().password)}
-	                              class="w-full flex-1"
-	                                rightIcon={
-	                                  <VisibilityToggle
-	                                  visible={trPasswordVisible()}
-	                                  labelWhenHidden="Show password"
-	                                  labelWhenVisible="Hide password"
-	                                  onToggle={() => setTrPasswordVisible((v) => !v)}
-	                                />
-	                                }
-	                              />
-	                              <IconButton
-	                                  type="button"
-	                                  size="sm"
-	                                  variant="secondary"
-	                                  label="Copy password"
-	                                  disabled={!trPassword().trim()}
-	                                  onClick={() => void safeCopy(trPassword())}
-	                                >
-	                                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-	                                    <path d="M5.75 2A2.75 2.75 0 003 4.75v9.5A2.75 2.75 0 005.75 17h1.5a.75.75 0 000-1.5h-1.5c-.69 0-1.25-.56-1.25-1.25v-9.5c0-.69.56-1.25 1.25-1.25h5.5c.69 0 1.25.56 1.25 1.25v1a.75.75 0 001.5 0v-1A2.75 2.75 0 0011.25 2h-5.5z" />
-	                                    <path d="M8.75 6A2.75 2.75 0 006 8.75v6.5A2.75 2.75 0 008.75 18h5.5A2.75 2.75 0 0017 15.25v-6.5A2.75 2.75 0 0014.25 6h-5.5z" />
-	                                  </svg>
-	                                </IconButton>
-	                              </div>
-	                            </Field>
-
-	                            <Field
-	                              label={<LabelTip label="Public (FRP)" content="Optional. Paste an FRP config to expose this instance (auto-detects INI/TOML/YAML/JSON)." />}
-	                              error={createFieldErrors().frp_config}
-	                            >
-	                              <div class="space-y-2">
-	                                <label class="inline-flex items-center gap-2 text-[12px] text-slate-700 dark:text-slate-200">
-	                                  <input
-	                                    type="checkbox"
-	                                    class="h-4 w-4 rounded border-slate-300 bg-white text-amber-600 focus:ring-amber-400 dark:border-slate-700 dark:bg-slate-950/60 dark:text-amber-400"
-	                                    checked={trFrpEnabled()}
-	                                    onChange={(e) => setTrFrpEnabled(e.currentTarget.checked)}
-	                                  />
-	                                  <span>Enable</span>
-	                                </label>
-	                                <Show when={trFrpEnabled()}>
-	                                  <div class="space-y-2">
-	                                    <div class="flex flex-wrap items-center justify-between gap-2">
-	                                      <Tabs
-	                                        value={trFrpMode()}
-	                                        options={[
-	                                          { value: 'paste', label: 'Paste' },
-	                                          { value: 'node', label: 'Node' },
-	                                        ]}
-	                                        onChange={(mode) => {
-	                                          setTrFrpMode(mode)
-	                                          if (mode === 'paste') setTrFrpNodeId('')
-	                                          if (mode === 'node') setTrFrpConfig('')
-	                                        }}
-	                                      />
-	                                      <Button size="xs" variant="secondary" onClick={() => setTab('frp')}>
-	                                        Manage nodes
-	                                      </Button>
-	                                    </div>
-
-	                                    <Show when={trFrpMode() === 'node'}>
-	                                      <div
-	                                        ref={(el) => {
-	                                          createTrFrpNodeEl = el
-	                                        }}
-	                                      >
-	                                        <Dropdown
-	                                          label=""
-	                                          value={trFrpNodeId()}
-	                                          options={frpNodeDropdownOptions()}
-	                                          placeholder="Select node…"
-	                                          onChange={setTrFrpNodeId}
-	                                        />
-	                                      </div>
-	                                      <div class="text-[11px] text-slate-500 dark:text-slate-400">
-	                                        Uses the saved node config and patches <span class="font-mono">local_port</span> (and auto remote port if needed).
-	                                      </div>
-	                                    </Show>
-
-	                                    <Show when={trFrpMode() === 'paste'}>
-	                                      <Textarea
-	                                        ref={(el) => {
-	                                          createTrFrpConfigEl = el
-	                                        }}
-	                                        value={trFrpConfig()}
-	                                        onInput={(e) => setTrFrpConfig(e.currentTarget.value)}
-	                                        placeholder="Paste FRP config (auto: INI/TOML/YAML/JSON)"
-	                                        spellcheck={false}
-	                                        class="font-mono text-[11px]"
-	                                        invalid={Boolean(createFieldErrors().frp_config)}
-	                                      />
-	                                    </Show>
-	                                  </div>
-	                                </Show>
-	                              </div>
-	                            </Field>
-                          </Show>
-                        </div>
-                      </Show>
-
-                      <Show when={selectedTemplate() === 'dsp:nebula'}>
-                        <div class="space-y-3 border-t border-slate-200 pt-3 dark:border-slate-800">
-                          <div class="flex items-center justify-between gap-3">
-                            <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                              Dyson Sphere Program (Nebula)
-                            </div>
-                            <Button
-                              size="xs"
-                              variant={createAdvanced() ? 'secondary' : 'ghost'}
-                              onClick={() => setCreateAdvanced((v) => !v)}
-                              title="Show or hide advanced fields"
-                            >
-                              <span class="inline-flex items-center gap-2">
-                                {createAdvanced() ? 'Hide advanced' : 'Advanced'}
-                                <Show when={!createAdvanced() && createAdvancedDirty()}>
-                                  <span class="h-1.5 w-1.5 rounded-full bg-amber-500" aria-hidden="true" />
-                                </Show>
-                              </span>
-                            </Button>
-                          </div>
-
-                          <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                            <Field
-                              label={
-                                <LabelTip
-                                  label="Startup mode"
-                                  content="auto/load_latest/load/newgame_default/newgame_cfg. load requires Save name."
-                                />
-                              }
-                              error={createFieldErrors().startup_mode}
-                            >
-                              <div
-                                ref={(el) => {
-                                  createDspStartupModeEl = el
-                                }}
-                              >
-                                <Dropdown
-                                  label=""
-                                  value={dspStartupMode()}
-                                  options={[
-                                    { value: 'auto', label: 'Auto' },
-                                    { value: 'load_latest', label: 'Load latest' },
-                                    { value: 'load', label: 'Load specific save' },
-                                    { value: 'newgame_default', label: 'New game (default cfg)' },
-                                    { value: 'newgame_cfg', label: 'New game (Nebula cfg)' },
-                                  ]}
-                                  onChange={setDspStartupMode}
-                                />
-                              </div>
-                            </Field>
-
-                            <Field
-                              label={<LabelTip label="Save name (optional)" content="Required only when Startup mode = load. No .dsv suffix." />}
-                              required={dspStartupMode() === 'load'}
-                              error={createFieldErrors().save_name}
-                            >
-                              <Input
-                                ref={(el) => {
-                                  createDspSaveNameEl = el
-                                }}
-                                value={dspSaveName()}
-                                onInput={(e) => setDspSaveName(e.currentTarget.value)}
-                                placeholder="MyFactory"
-                                spellcheck={false}
-                                invalid={Boolean(createFieldErrors().save_name)}
-                              />
-                            </Field>
-                          </div>
-
-                          <Show when={createAdvanced()}>
-                            <div class="space-y-3">
-                              <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                                <Field
-                                  label={<LabelTip label="Port (optional)" content="TCP bind port. 0 or blank means auto-assign." />}
-                                  error={createFieldErrors().port}
-                                >
-                                  <Input
-                                    ref={(el) => {
-                                      createDspPortEl = el
-                                    }}
-                                    type="number"
-                                    value={dspPort()}
-                                    onInput={(e) => setDspPort(e.currentTarget.value)}
-                                    placeholder="8469"
-                                    invalid={Boolean(createFieldErrors().port)}
-                                  />
-                                </Field>
-
-                                <Field label={<LabelTip label="UPS" content="Simulation UPS. Range 1..240." />} error={createFieldErrors().ups}>
-                                  <Input
-                                    ref={(el) => {
-                                      createDspUpsEl = el
-                                    }}
-                                    type="number"
-                                    value={dspUps()}
-                                    onInput={(e) => setDspUps(e.currentTarget.value)}
-                                    placeholder="60"
-                                    invalid={Boolean(createFieldErrors().ups)}
-                                  />
-                                </Field>
-
-                                <Field label={<LabelTip label="Wine binary" content="Wine executable used to run DSPGAME.exe." />} error={createFieldErrors().wine_bin}>
-                                  <Input
-                                    ref={(el) => {
-                                      createDspWineBinEl = el
-                                    }}
-                                    value={dspWineBin()}
-                                    onInput={(e) => setDspWineBin(e.currentTarget.value)}
-                                    placeholder="wine64"
-                                    spellcheck={false}
-                                    invalid={Boolean(createFieldErrors().wine_bin)}
-                                    class="font-mono text-[11px]"
-                                  />
-                                </Field>
-                              </div>
-
-                              <Field
-                                label={<LabelTip label="Server password (optional)" content="Optional player join password." />}
-                                error={createFieldErrors().server_password}
-                              >
-                                <div class="flex flex-wrap items-center gap-2">
-                                  <Input
-                                    ref={(el) => {
-                                      createDspServerPasswordEl = el
-                                    }}
-                                    type={dspServerPasswordVisible() ? 'text' : 'password'}
-                                    value={dspServerPassword()}
-                                    onInput={(e) => setDspServerPassword(e.currentTarget.value)}
-                                    invalid={Boolean(createFieldErrors().server_password)}
-                                    class="w-full flex-1"
-                                    rightIcon={
-                                      <VisibilityToggle
-                                        visible={dspServerPasswordVisible()}
-                                        labelWhenHidden="Show password"
-                                        labelWhenVisible="Hide password"
-                                        onToggle={() => setDspServerPasswordVisible((v) => !v)}
-                                      />
-                                    }
-                                  />
-                                </div>
-                              </Field>
-
-                              <Field
-                                label={<LabelTip label="Remote password (optional)" content="Optional Nebula remote access password." />}
-                                error={createFieldErrors().remote_access_password}
-                              >
-                                <div class="flex flex-wrap items-center gap-2">
-                                  <Input
-                                    ref={(el) => {
-                                      createDspRemoteAccessPasswordEl = el
-                                    }}
-                                    type={dspRemoteAccessPasswordVisible() ? 'text' : 'password'}
-                                    value={dspRemoteAccessPassword()}
-                                    onInput={(e) => setDspRemoteAccessPassword(e.currentTarget.value)}
-                                    invalid={Boolean(createFieldErrors().remote_access_password)}
-                                    class="w-full flex-1"
-                                    rightIcon={
-                                      <VisibilityToggle
-                                        visible={dspRemoteAccessPasswordVisible()}
-                                        labelWhenHidden="Show password"
-                                        labelWhenVisible="Hide password"
-                                        onToggle={() => setDspRemoteAccessPasswordVisible((v) => !v)}
-                                      />
-                                    }
-                                  />
-                                </div>
-                              </Field>
-
-                              <Field
-                                label={<LabelTip label="Auto pause when empty" content="Pause simulation automatically when no players are connected." />}
-                                error={createFieldErrors().auto_pause_enabled}
-                              >
-                                <label class="inline-flex items-center gap-2 text-[12px] text-slate-700 dark:text-slate-200">
-                                  <input
-                                    type="checkbox"
-                                    class="h-4 w-4 rounded border-slate-300 bg-white text-amber-600 focus:ring-amber-400 dark:border-slate-700 dark:bg-slate-950/60 dark:text-amber-400"
-                                    checked={dspAutoPauseEnabled()}
-                                    onChange={(e) => setDspAutoPauseEnabled(e.currentTarget.checked)}
-                                  />
-                                  <span>Enable</span>
-                                </label>
-                              </Field>
-                            </div>
-                          </Show>
-                        </div>
-                      </Show>
-
-                      <div class="rounded-xl border border-slate-200 bg-white/60 p-3 dark:border-slate-800 dark:bg-slate-950/40">
-                        <div class="flex items-center justify-between gap-3">
-                          <div class="text-section-title">Preview</div>
-                          <div class="flex min-w-0 items-center justify-end gap-2">
-                            <Show when={createPreview().warnings.length > 0}>
-                              <Tooltip
-                                content={
-                                  <div class="space-y-1">
-                                    <For each={createPreview().warnings}>{(w) => <div class="whitespace-pre-wrap">{w}</div>}</For>
-                                  </div>
-                                }
-                              >
-                                <Badge variant="warning" class="cursor-help">
-                                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-3 w-3">
-                                    <path
-                                      fill-rule="evenodd"
-                                      d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.515 2.625H3.72c-1.345 0-2.188-1.458-1.515-2.625l6.28-10.875zM10 6.75a.75.75 0 00-.75.75v3.5a.75.75 0 001.5 0v-3.5A.75.75 0 0010 6.75zm0 7a.75.75 0 100-1.5.75.75 0 000 1.5z"
-                                      clip-rule="evenodd"
-                                    />
-                                  </svg>
-                                  {createPreview().warnings.length}
-                                </Badge>
-                              </Tooltip>
-                            </Show>
-                            <TemplateMark templateId={createPreview().template_id} class="h-8 w-8" />
-                          </div>
-                        </div>
-                        <div class="mt-2 space-y-1.5">
-                          <For each={createPreview().rows}>
-                            {(row) => (
-                              <div class="flex items-start justify-between gap-4 text-[12px]">
-                                <div class="text-slate-500 dark:text-slate-400">{row.label}</div>
-                                <div
-                                  class={`min-w-0 truncate font-mono text-[11px] ${
-                                    row.isSecret ? 'text-slate-400 dark:text-slate-500' : 'text-slate-700 dark:text-slate-200'
-                                  }`}
-                                  title={row.value}
-                                >
-                                  {row.value}
-                                </div>
-                              </div>
-                            )}
-                          </For>
-                        </div>
-                      </div>
-
-                      <div class="grid grid-cols-2 gap-2">
-	                        <Button
-	                          class="w-full"
-	                          size="md"
-	                          variant="primary"
-	                          leftIcon={
-	                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-	                              <path
-	                                fill-rule="evenodd"
-	                                d="M10 4.25a.75.75 0 01.75.75v4.25H15a.75.75 0 010 1.5h-4.25V15a.75.75 0 01-1.5 0v-4.25H5a.75.75 0 010-1.5h4.25V5a.75.75 0 01.75-.75z"
-	                                clip-rule="evenodd"
-	                              />
-	                            </svg>
-	                          }
-	                          loading={createInstance.isPending}
-	                          disabled={isReadOnly()}
-	                          title={isReadOnly() ? 'Read-only mode' : 'Create instance'}
-	                          onClick={async () => {
-	                            const template_id = createTemplateId()
-	                            const params: Record<string, string> = {}
-	                            const display_name = instanceName().trim() ? instanceName().trim() : null
-
-                            setCreateFormError(null)
-                            setCreateFieldErrors({})
-
-                            const localErrors: Record<string, string> = {}
-                            const mcFrpCfg = mcEffectiveFrpConfig().trim()
-                            const trFrpCfg = trEffectiveFrpConfig().trim()
-
-                            if (template_id === 'demo:sleep') {
-                              params.seconds = sleepSeconds()
-                            } else if (template_id === 'minecraft:vanilla') {
-                              if (!mcEula()) localErrors.accept_eula = 'You must accept the EULA to start a Minecraft server.'
-                              if (mcFrpEnabled() && !mcFrpCfg)
-                                localErrors.frp_config = mcFrpMode() === 'node' ? 'Select an FRP node.' : 'Paste FRP config.'
-                              params.accept_eula = 'true'
-                              const v = mcVersion().trim()
-                              params.version = v || 'latest_release'
-                              params.memory_mb = mcMemory() || '2048'
-                              if (mcPort().trim()) params.port = mcPort().trim()
-                              if (mcFrpEnabled() && mcFrpCfg) params.frp_config = mcFrpCfg
-                            } else if (template_id === 'minecraft:modrinth') {
-                              if (!mcEula()) localErrors.accept_eula = 'You must accept the EULA to start a Minecraft server.'
-                              if (!mcMrpack().trim()) localErrors.mrpack = 'Paste a Modrinth version link or a direct .mrpack URL.'
-                              if (mcFrpEnabled() && !mcFrpCfg)
-                                localErrors.frp_config = mcFrpMode() === 'node' ? 'Select an FRP node.' : 'Paste FRP config.'
-                              params.accept_eula = 'true'
-                              params.mrpack = mcMrpack().trim()
-                              params.memory_mb = mcMemory() || '2048'
-                              if (mcPort().trim()) params.port = mcPort().trim()
-                              if (mcFrpEnabled() && mcFrpCfg) params.frp_config = mcFrpCfg
-                            } else if (template_id === 'minecraft:import') {
-                              if (!mcEula()) localErrors.accept_eula = 'You must accept the EULA to start a Minecraft server.'
-                              if (!mcImportPack().trim()) localErrors.pack = 'Provide a server pack zip URL, or a path under /data.'
-                              if (mcFrpEnabled() && !mcFrpCfg)
-                                localErrors.frp_config = mcFrpMode() === 'node' ? 'Select an FRP node.' : 'Paste FRP config.'
-                              params.accept_eula = 'true'
-                              params.pack = mcImportPack().trim()
-                              params.memory_mb = mcMemory() || '2048'
-                              if (mcPort().trim()) params.port = mcPort().trim()
-                              if (mcFrpEnabled() && mcFrpCfg) params.frp_config = mcFrpCfg
-                            } else if (template_id === 'minecraft:curseforge') {
-                              if (!mcEula()) localErrors.accept_eula = 'You must accept the EULA to start a Minecraft server.'
-                              if (!mcCurseforge().trim()) localErrors.curseforge = 'Paste a CurseForge file URL, or modId:fileId.'
-                              if (mcFrpEnabled() && !mcFrpCfg)
-                                localErrors.frp_config = mcFrpMode() === 'node' ? 'Select an FRP node.' : 'Paste FRP config.'
-                              params.accept_eula = 'true'
-                              params.curseforge = mcCurseforge().trim()
-                              params.memory_mb = mcMemory() || '2048'
-                              if (mcPort().trim()) params.port = mcPort().trim()
-                              if (mcFrpEnabled() && mcFrpCfg) params.frp_config = mcFrpCfg
-                            } else if (template_id === 'terraria:vanilla') {
-                              const v = trVersion().trim()
-                              params.version = v || '1453'
-                              if (trPort().trim()) params.port = trPort().trim()
-                              params.max_players = trMaxPlayers().trim() || '8'
-                              params.world_name = trWorldName().trim() || 'world'
-                              params.world_size = trWorldSize().trim() || '1'
-                              if (trPassword().trim()) params.password = trPassword().trim()
-                              if (trFrpEnabled() && !trFrpCfg)
-                                localErrors.frp_config = trFrpMode() === 'node' ? 'Select an FRP node.' : 'Paste FRP config.'
-                              if (trFrpEnabled() && trFrpCfg) params.frp_config = trFrpCfg
-                            } else if (template_id === 'dst:vanilla') {
-                              params.cluster_token = dstClusterToken().trim()
-                              params.cluster_name = dstClusterName().trim() || 'Alloy DST server'
-                              params.max_players = dstMaxPlayers().trim() || '6'
-                              if (dstPassword().trim()) params.password = dstPassword().trim()
-                              const p = dstPort().trim()
-                              const mp = dstMasterPort().trim()
-                              const ap = dstAuthPort().trim()
-                              if (p) params.port = p
-                              if (mp) params.master_port = mp
-                              if (ap) params.auth_port = ap
-                            } else if (template_id === 'dsp:nebula') {
-                              const mode = dspStartupMode().trim() || 'auto'
-                              const save = dspSaveName().trim()
-                              if (mode === 'load' && !save) localErrors.save_name = 'Required when startup_mode=load.'
-                              params.startup_mode = mode
-                              if (save) params.save_name = save
-                              if (dspPort().trim()) params.port = dspPort().trim()
-                              if (dspServerPassword().trim()) params.server_password = dspServerPassword().trim()
-                              if (dspRemoteAccessPassword().trim()) params.remote_access_password = dspRemoteAccessPassword().trim()
-                              params.auto_pause_enabled = dspAutoPauseEnabled() ? 'true' : 'false'
-                              params.ups = dspUps().trim() || '60'
-                              params.wine_bin = dspWineBin().trim() || 'wine64'
-                            }
-
-                            if (Object.keys(localErrors).length > 0) {
-                              setCreateFieldErrors(localErrors)
-                              queueMicrotask(() => focusFirstCreateError(localErrors))
-                              return
-                            }
-
-                            if (template_id === 'dsp:nebula' && dspWarmNeedsInit()) {
-                              if (!hasSavedSteamcmdCreds()) {
-                                setPendingCreateAfterDspInit(null)
-                                setCreateFieldErrors({})
-                                setCreateFormError({ message: dspSteamcmdSettingsRequiredMessage() })
-                                pushToast('error', 'SteamCMD not configured', dspSteamcmdSettingsRequiredMessage())
-                                return
-                              }
-                              setPendingCreateAfterDspInit({ template_id, params: { ...params }, display_name })
-                              await runDspInitAndMaybeCreate()
-                              return
-                            }
-
-                            try {
-                              const out = await createInstance.mutateAsync({ template_id, params, display_name })
-                              pushToast('success', 'Instance created', display_name ?? undefined)
-                              await invalidateInstances()
-                              revealInstance(out.instance_id)
-                              setSelectedInstanceId(out.instance_id)
-                            } catch (e) {
-                              if (isAlloyApiError(e)) {
-                                const fieldErrors = e.data.field_errors ?? {}
-                                if (template_id === 'dsp:nebula' && dspSourceInitRequired(e.data.message, fieldErrors)) {
-                                  setDspWarmNeedsInit(true)
-                                  setCreateFieldErrors({})
-                                  setCreateFormError(null)
-                                  setWarmFieldErrors(fieldErrors)
-                                  setWarmFormError({ message: e.data.message, requestId: e.data.request_id })
-
-                                  if (!hasSavedSteamcmdCreds()) {
-                                    setPendingCreateAfterDspInit(null)
-                                    setWarmFieldErrors({})
-                                    setWarmFormError(null)
-                                    setCreateFormError({ message: dspSteamcmdSettingsRequiredMessage(), requestId: e.data.request_id })
-                                    pushToast('error', 'SteamCMD not configured', dspSteamcmdSettingsRequiredMessage(), e.data.request_id)
-                                  } else {
-                                    setPendingCreateAfterDspInit({ template_id, params: { ...params }, display_name })
-                                    await runDspInitAndMaybeCreate()
-                                  }
-                                  if (e.data.hint) pushToast('info', 'Hint', e.data.hint, e.data.request_id)
-                                  return
-                                }
-
-                                setCreateFieldErrors(fieldErrors)
-                                setCreateFormError({ message: e.data.message, requestId: e.data.request_id })
-                                if (e.data.hint) pushToast('info', 'Hint', e.data.hint, e.data.request_id)
-                                queueMicrotask(() => focusFirstCreateError(fieldErrors))
-                              } else {
-                                setCreateFormError({ message: friendlyErrorMessage(e) })
-                              }
-                            }
-                          }}
-                        >
-                          Create
-                        </Button>
-
-	                        <Button
-	                          class="w-full"
-	                          size="md"
-	                          variant="secondary"
-	                          leftIcon={
-	                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-	                              <path
-	                                fill-rule="evenodd"
-	                                d="M10 2.75a.75.75 0 01.75.75v6.69l2.22-2.22a.75.75 0 111.06 1.06l-3.5 3.5a.75.75 0 01-1.06 0l-3.5-3.5a.75.75 0 111.06-1.06l2.22 2.22V3.5a.75.75 0 01.75-.75zM3.5 13.25a.75.75 0 01.75.75v1.25c0 .69.56 1.25 1.25 1.25h9c.69 0 1.25-.56 1.25-1.25V14a.75.75 0 011.5 0v1.25A2.75 2.75 0 0114.5 18h-9a2.75 2.75 0 01-2.75-2.75V14a.75.75 0 01.75-.75z"
-	                                clip-rule="evenodd"
-	                              />
-	                            </svg>
-	                          }
-	                          loading={warmCache.isPending}
-                          disabled={
-                            isReadOnly() ||
-                            createInstance.isPending ||
-                            !['minecraft:vanilla', 'terraria:vanilla', 'dsp:nebula'].includes(createTemplateId())
-                          }
-                          title={isReadOnly() ? 'Read-only mode' : 'Only download required files (no start)'}
-	                          onClick={async () => {
-	                            const template_id = createTemplateId()
-	                            const params: Record<string, string> = {}
-                            setWarmFormError(null)
-                            setWarmFieldErrors({})
-	                            if (template_id === 'minecraft:vanilla') {
-	                              const v = mcVersion().trim()
-	                              params.version = v || 'latest_release'
-                            }
-                            if (template_id === 'terraria:vanilla') {
-                              const v = trVersion().trim()
-                              params.version = v || '1453'
-                            }
-                            if (template_id === 'dsp:nebula') {
-                              const guardCode = dspSteamGuardCode().trim()
-
-                              if (dspWarmNeedsInit() && !hasSavedSteamcmdCreds()) {
-                                setWarmFieldErrors({})
-                                setWarmFormError(null)
-                                pushToast('error', 'SteamCMD not configured', dspSteamcmdSettingsRequiredMessage())
-                                return
-                              }
-
-                              if (guardCode) params.steam_guard_code = guardCode
-                            }
-                            try {
-                              const out = await warmCache.mutateAsync({ template_id, params })
-                              if (template_id === 'dsp:nebula') {
-                                setDspWarmNeedsInit(false)
-                                setWarmFieldErrors({})
-                                setDspSteamGuardCode('')
-                              }
-                              pushToast('success', 'Cache warmed', out.message)
-                            } catch (e) {
-                              if (template_id === 'dsp:nebula' && isAlloyApiError(e)) {
-                                const fieldErrors = e.data.field_errors ?? {}
-                                const needsGuard = Boolean(fieldErrors.steam_guard_code)
-
-                                if (needsGuard) {
-                                  setWarmFieldErrors({ steam_guard_code: fieldErrors.steam_guard_code })
-                                  setWarmFormError({ message: e.data.message, requestId: e.data.request_id })
-                                  setShowDspInitModal(true)
-                                } else {
-                                  setWarmFieldErrors({})
-                                  setWarmFormError(null)
-                                  setShowDspInitModal(false)
-                                  if (dspSourceInitRequired(e.data.message, fieldErrors) || fieldErrors.steam_username || fieldErrors.steam_password) {
-                                    setDspWarmNeedsInit(true)
-                                    pushToast('error', 'SteamCMD not configured', dspSteamcmdSettingsRequiredMessage(), e.data.request_id)
-                                  }
-                                }
-                                if (e.data.hint) pushToast('info', 'Hint', e.data.hint, e.data.request_id)
-                                return
-                              }
-                              toastError('Warm cache failed', e)
-                            }
-                          }}
-                        >
-                          Warm
-                        </Button>
-                      </div>
-                      <Show when={warmCache.isPending}>
-                        <div class="mt-2 rounded-xl border border-slate-200 bg-white/60 px-3 py-2 text-[12px] text-slate-700 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-200">
-                          Downloading and preparing server files… This can take a while.
-                        </div>
-                      </Show>
-                      <Show when={createFormError()}>
-                        <div class="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-900 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-200">
-                          <div class="font-semibold">Create failed</div>
-                          <div class="mt-1 whitespace-pre-wrap break-words text-xs text-rose-800/90 dark:text-rose-200/90">{createFormError()!.message}</div>
-		                          <Show when={createFormError()!.requestId}>
-		                            <div class="mt-2 flex items-center justify-between gap-2">
-		                              <div class="text-[11px] text-rose-700/80 dark:text-rose-200/70 font-mono">req {createFormError()!.requestId}</div>
-		                              <IconButton
-		                                size="sm"
-		                                variant="danger"
-		                                label="Copy request id"
-		                                onClick={() => void safeCopy(createFormError()!.requestId ?? '')}
-		                              >
-		                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-		                                  <path d="M5.75 2A2.75 2.75 0 003 4.75v9.5A2.75 2.75 0 005.75 17h1.5a.75.75 0 000-1.5h-1.5c-.69 0-1.25-.56-1.25-1.25v-9.5c0-.69.56-1.25 1.25-1.25h5.5c.69 0 1.25.56 1.25 1.25v1a.75.75 0 001.5 0v-1A2.75 2.75 0 0011.25 2h-5.5z" />
-		                                  <path d="M8.75 6A2.75 2.75 0 006 8.75v6.5A2.75 2.75 0 008.75 18h5.5A2.75 2.75 0 0017 15.25v-6.5A2.75 2.75 0 0014.25 6h-5.5z" />
-		                                </svg>
-		                              </IconButton>
-		                            </div>
-		                          </Show>
-	                        </div>
-	                      </Show>
-                    </div>
-                  }
-                  right={
-                    <>
-                      <div class="flex flex-wrap items-center justify-between gap-3">
-                        <div class="min-w-0">
-                          <div class="text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">Instances</div>
-                          <div class="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400">
-                            <span>Updated {formatRelativeTime(instancesLastUpdatedAtUnixMs())}</span>
-                            <span class="text-slate-300 dark:text-slate-700">•</span>
-                            <span>
-                              Showing {filteredInstances().length}/{(instances.data ?? []).length}
-                            </span>
-                          </div>
-                        </div>
-                        <div class="flex flex-wrap items-center gap-2">
-	                            <Button
-	                              size="xs"
-	                              variant="primary"
-	                              leftIcon={
-	                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-	                                  <path
-	                                    fill-rule="evenodd"
-	                                    d="M10 4.25a.75.75 0 01.75.75v4.25H15a.75.75 0 010 1.5h-4.25V15a.75.75 0 01-1.5 0v-4.25H5a.75.75 0 010-1.5h4.25V5a.75.75 0 01.75-.75z"
-	                                    clip-rule="evenodd"
-	                                  />
-	                                </svg>
-	                              }
-	                              disabled={isReadOnly()}
-	                              title={isReadOnly() ? 'Read-only mode' : 'Create a new instance'}
-	                              onClick={() => {
-                                try {
-                                  createInstanceNameEl?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-                                } catch {
-                                  // ignore
-                                }
-                                queueMicrotask(() => createInstanceNameEl?.focus())
-                              }}
-                            >
-                              Create
-                            </Button>
-                        </div>
-                      </div>
-
-                      <div class="mt-3 flex flex-wrap items-center gap-2">
-                        <div class="w-full sm:w-40 lg:w-44">
-                          <Input
-                            value={instanceSearchInput()}
-                            onInput={(e) => setInstanceSearchInput(e.currentTarget.value)}
-                            placeholder="Search…"
-                            aria-label="Search instances"
-                            spellcheck={false}
-                            leftIcon={<Search class="h-4 w-4" strokeWidth={1.9} />}
-                            rightIcon={
-                              instanceSearchInput().length > 0 ? (
-                                <button
-                                  type="button"
-                                  class="rounded-md p-1 transition hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/30 dark:hover:bg-slate-900/60"
-                                  aria-label="Clear search"
-                                  title="Clear search"
-                                  onClick={() => {
-                                    setInstanceSearchInput('')
-                                    setInstanceSearch('')
-                                  }}
-                                >
-                                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-                                    <path
-                                      fill-rule="evenodd"
-                                      d="M4.47 4.47a.75.75 0 011.06 0L10 8.94l4.47-4.47a.75.75 0 111.06 1.06L11.06 10l4.47 4.47a.75.75 0 11-1.06 1.06L10 11.06l-4.47 4.47a.75.75 0 11-1.06-1.06L8.94 10 4.47 5.53a.75.75 0 010-1.06z"
-                                      clip-rule="evenodd"
-                                    />
-                                  </svg>
-                                </button>
-                              ) : undefined
-                            }
-                          />
-                        </div>
-                        <div class="w-full sm:w-36">
-                          <Dropdown
-                            label=""
-                            ariaLabel="Filter by status"
-                            title={instanceStatusFilter() === 'all' ? 'All statuses' : instanceStatusFilter()}
-                            leftIcon={
-                              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-                                <path
-                                  fill-rule="evenodd"
-                                  d="M10 2.25a.75.75 0 01.75.75v6a.75.75 0 01-1.5 0V3a.75.75 0 01.75-.75z"
-                                  clip-rule="evenodd"
-                                />
-                                <path
-                                  fill-rule="evenodd"
-                                  d="M6.22 4.97a.75.75 0 011.06.08.75.75 0 01-.08 1.06 4.75 4.75 0 105.6 0 .75.75 0 01-.08-1.06.75.75 0 011.06-.08 6.25 6.25 0 11-7.48 0z"
-                                  clip-rule="evenodd"
-                                />
-                              </svg>
-                            }
-                            value={instanceStatusFilter()}
-                            options={instanceStatusFilterOptions()}
-                            onChange={(v) => setInstanceStatusFilter(v as InstanceStatusFilter)}
-                          />
-                        </div>
-                        <div class="w-full sm:w-36 lg:w-40">
-                          <Dropdown
-                            label=""
-                            ariaLabel="Filter by template"
-                            title={instanceTemplateFilter() === 'all' ? 'All templates' : instanceTemplateFilter()}
-                            leftIcon={
-                              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-                                <path d="M10 2.25l6.5 3.75v7.5L10 17.25 3.5 13.5V6L10 2.25z" />
-                                <path d="M10 9.75L3.5 6 10 2.25 16.5 6 10 9.75z" opacity="0.35" />
-                                <path d="M10 9.75v7.5l6.5-3.75V6L10 9.75z" opacity="0.35" />
-                              </svg>
-                            }
-                            value={instanceTemplateFilter()}
-                            options={instanceTemplateFilterOptions()}
-                            onChange={setInstanceTemplateFilter}
-                          />
-                        </div>
-                      </div>
-
-                      <div class="mt-2 flex flex-wrap items-center gap-2">
-                        <div class="w-full sm:w-32">
-                          <Dropdown
-                            label=""
-                            ariaLabel="Sort instances"
-                            title="Sort"
-                            leftIcon={<ArrowUpDown class="h-4 w-4" strokeWidth={1.9} />}
-                            value={instanceSortKey()}
-                            options={instanceSortOptions()}
-                            onChange={(v) => setInstanceSortKey(v as InstanceSortKey)}
-                          />
-                        </div>
-                      </div>
-
-                      <Show when={instances.isError && instances.data == null && (instances.error as unknown)}>
-                        <ErrorState
-                          class="mt-4"
-                          title="Failed to load instances"
-                          error={instances.error}
-                          onRetry={() => void invalidateInstances()}
-                        />
-                      </Show>
-
-                      <Show when={instances.isError && instances.data != null}>
-                        <Banner
-                          class="mt-4"
-                          variant="warning"
-                          title="Refresh failed"
-                          message="Showing last known instance list."
-                          actions={
-                            <Button size="xs" variant="secondary" onClick={() => void invalidateInstances()}>
-                              Retry
-                            </Button>
-                          }
-                        />
-                      </Show>
-
-                      <Show when={!instances.isError || instances.data != null}>
-                        <Show
-                          when={instances.isPending}
-                          fallback={
-                            <Show
-                              when={filteredInstances().length > 0}
-                              fallback={
-                                <EmptyState
-                                  class="mt-4"
-                                  title={(instances.data ?? []).length === 0 ? 'No instances yet' : 'No matches'}
-                                  description={
-                                    (instances.data ?? []).length === 0
-                                      ? 'Create your first instance to get started.'
-                                      : 'Try adjusting search or filters.'
-                                  }
-                                  actions={
-                                    (instances.data ?? []).length === 0 ? (
-	                                      <Button
-	                                        variant="primary"
-	                                        size="md"
-	                                        leftIcon={
-	                                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-	                                            <path
-	                                              fill-rule="evenodd"
-	                                              d="M10 4.25a.75.75 0 01.75.75v4.25H15a.75.75 0 010 1.5h-4.25V15a.75.75 0 01-1.5 0v-4.25H5a.75.75 0 010-1.5h4.25V5a.75.75 0 01.75-.75z"
-	                                              clip-rule="evenodd"
-	                                            />
-	                                          </svg>
-	                                        }
-	                                        disabled={isReadOnly()}
-	                                        title={isReadOnly() ? 'Read-only mode' : 'Create a new instance'}
-	                                        onClick={() => {
-	                                          try {
-                                            createInstanceNameEl?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-                                          } catch {
-                                            // ignore
-                                          }
-                                          queueMicrotask(() => createInstanceNameEl?.focus())
-                                        }}
-                                      >
-                                        Create instance
-                                      </Button>
-                                    ) : undefined
-                                  }
-                                />
-                              }
-                            >
-                              <div class={`mt-4 grid gap-3 ${instanceCompact() ? 'sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4' : 'sm:grid-cols-2 2xl:grid-cols-3'}`}>
-                                <For each={filteredInstances()}>
-                          {(i) => (
-                              <div
-                                ref={(el) => instanceCardEls.set(i.config.instance_id, el)}
-                                class={`group relative overflow-hidden rounded-2xl border border-slate-200 bg-white/62 p-4 shadow-sm transition-all duration-150 hover:-translate-y-0.5 hover:bg-white/72 hover:shadow-md active:scale-[0.99] dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none dark:hover:bg-slate-950/60 ${
-                                  selectedInstanceId() === i.config.instance_id
-                                    ? 'ring-1 ring-amber-500/25'
-                                    : highlightInstanceId() === i.config.instance_id
-                                      ? 'ring-2 ring-emerald-400/25'
-                                      : 'ring-0 ring-transparent'
-                                }`}
-                              >
-                                <Show when={instanceCardBackdrop(i.config.template_id)}>
-                                  {(bg) => (
-                                    <>
-                                      <img
-                                        src={bg().src}
-                                        alt=""
-                                        aria-hidden="true"
-                                        class="pointer-events-none absolute inset-0 h-full w-full select-none object-cover opacity-[0.4] saturate-110 contrast-115 blur-[1.4px] transition-transform duration-300 group-hover:scale-[1.06] dark:opacity-[0.38]"
-                                        style={{ 'object-position': bg().position }}
-                                        loading="lazy"
-                                        decoding="async"
-                                      />
-                                      <div class="pointer-events-none absolute inset-0 rounded-2xl bg-gradient-to-r from-white/84 via-white/60 to-white/22 dark:from-slate-950/90 dark:via-slate-950/74 dark:to-slate-950/50" />
-                                      <div class="pointer-events-none absolute inset-0 rounded-2xl bg-gradient-to-b from-transparent to-white/10 dark:to-slate-950/18" />
-                                      <div class="pointer-events-none absolute inset-0 rounded-2xl bg-[radial-gradient(130%_92%_at_86%_56%,rgba(15,23,42,0)_32%,rgba(15,23,42,0.28)_100%)] dark:bg-[radial-gradient(130%_92%_at_86%_56%,rgba(2,6,23,0)_26%,rgba(2,6,23,0.55)_100%)]" />
-                                      <div class="pointer-events-none absolute inset-x-0 bottom-0 h-24 rounded-b-2xl bg-gradient-to-t from-white/72 via-white/56 to-transparent dark:from-slate-950/78 dark:via-slate-950/64 dark:to-transparent" />
-                                    </>
-                                  )}
-                                </Show>
-                              <div
-                                class="relative z-10 w-full cursor-pointer text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/35 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-50 dark:focus-visible:ring-amber-400/35 dark:focus-visible:ring-offset-slate-950"
-                                data-instance-card-focus="true"
-                                role="button"
-                                tabIndex={0}
-                                onClick={() => {
-                                  setSelectedInstanceId(i.config.instance_id)
-                                  setInstanceDetailTab('logs')
-                                  setShowInstanceModal(true)
-                                }}
-                                onKeyDown={(e) => {
-                                  if (e.key !== 'Enter' && e.key !== ' ') return
-                                  e.preventDefault()
-                                  setSelectedInstanceId(i.config.instance_id)
-                                  setInstanceDetailTab('logs')
-                                  setShowInstanceModal(true)
-                                }}
-                              >
-                                <div class="flex items-start justify-between gap-3">
-                                  <div class="min-w-0">
-                                    <div class="truncate font-mono text-sm font-semibold text-slate-900 dark:text-slate-100">
-                                      {instanceDisplayName(i)}
-                                    </div>
-	                                    <div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
-	                                      <button
-	                                        type="button"
-	                                        class="group inline-flex max-w-full cursor-pointer items-center gap-1 rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 font-mono text-[11px] text-slate-700 transition-all duration-150 hover:bg-white active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/35 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-50 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-200 dark:hover:bg-slate-900 dark:focus-visible:ring-amber-400/35 dark:focus-visible:ring-offset-slate-950"
-	                                        onClick={(e) => {
-	                                          e.preventDefault()
-	                                          e.stopPropagation()
-	                                          void safeCopy(i.config.instance_id)
-	                                          pushToast('success', 'Copied ID', shortId(i.config.instance_id))
-	                                        }}
-	                                        title="Copy instance id"
-	                                      >
-	                                        <span class="truncate">{shortId(i.config.instance_id)}</span>
-	                                        <svg
-	                                          xmlns="http://www.w3.org/2000/svg"
-	                                          viewBox="0 0 20 20"
-	                                          fill="currentColor"
-	                                          class="h-3 w-3 flex-none opacity-60 group-hover:opacity-100"
-	                                          aria-hidden="true"
-	                                        >
-	                                          <path d="M5.75 2A2.75 2.75 0 003 4.75v9.5A2.75 2.75 0 005.75 17h1.5a.75.75 0 000-1.5h-1.5c-.69 0-1.25-.56-1.25-1.25v-9.5c0-.69.56-1.25 1.25-1.25h5.5c.69 0 1.25.56 1.25 1.25v1a.75.75 0 001.5 0v-1A2.75 2.75 0 0011.25 2h-5.5z" />
-	                                          <path d="M8.75 6A2.75 2.75 0 006 8.75v6.5A2.75 2.75 0 008.75 18h5.5A2.75 2.75 0 0017 15.25v-6.5A2.75 2.75 0 0014.25 6h-5.5z" />
-	                                        </svg>
-	                                      </button>
-	                                      <Badge
-	                                        variant={
-	                                          i.status?.state === 'PROCESS_STATE_RUNNING'
-	                                            ? 'success'
-                                            : i.status?.state === 'PROCESS_STATE_FAILED'
-                                              ? 'danger'
-                                              : i.status?.state === 'PROCESS_STATE_STARTING' || i.status?.state === 'PROCESS_STATE_STOPPING'
-                                                ? 'warning'
-                                                : 'neutral'
-                                        }
-                                        title={i.status?.state ?? 'PROCESS_STATE_EXITED'}
-                                      >
-                                        {instanceStateLabel(i.status)}
-                                      </Badge>
-                                      <Show when={instanceStatusKeys()[i.config.instance_id]?.updated_at_unix_ms}>
-                                        {(t) => (
-                                          <Badge variant="neutral" title={new Date(t()).toLocaleString()}>
-                                            {formatRelativeTime(t())}
-                                          </Badge>
-                                        )}
-                                      </Show>
-                                      <Show when={instancePort(i)}>
-                                        {(p) => {
-	                                          const addr = `${connectHost()}:${p()}`
-	                                          return (
-	                                            <button
-	                                              type="button"
-	                                              class="group inline-flex max-w-full cursor-pointer items-center gap-1 rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 font-mono text-slate-700 transition-all duration-150 hover:bg-white active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/35 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-50 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-200 dark:hover:bg-slate-900 dark:focus-visible:ring-amber-400/35 dark:focus-visible:ring-offset-slate-950"
-	                                              title="Click to copy connection address"
-	                                              onClick={(e) => {
-	                                                e.preventDefault()
-                                                e.stopPropagation()
-                                                void safeCopy(addr)
-                                                pushToast('success', 'Copied address', addr)
-                                              }}
-                                            >
-                                              <span class="truncate">{addr}</span>
-                                              <svg
-                                                xmlns="http://www.w3.org/2000/svg"
-                                                viewBox="0 0 20 20"
-                                                fill="currentColor"
-                                                class="h-3 w-3 flex-none opacity-60 group-hover:opacity-100"
-                                                aria-hidden="true"
-                                              >
-                                                <path d="M5.75 2A2.75 2.75 0 003 4.75v9.5A2.75 2.75 0 005.75 17h1.5a.75.75 0 000-1.5h-1.5c-.69 0-1.25-.56-1.25-1.25v-9.5c0-.69.56-1.25 1.25-1.25h5.5c.69 0 1.25.56 1.25 1.25v1a.75.75 0 001.5 0v-1A2.75 2.75 0 0011.25 2h-5.5z" />
-                                                <path d="M8.75 6A2.75 2.75 0 006 8.75v6.5A2.75 2.75 0 008.75 18h5.5A2.75 2.75 0 0017 15.25v-6.5A2.75 2.75 0 0014.25 6h-5.5z" />
-                                              </svg>
-                                            </button>
-	                                          )
-                                        }}
-                                      </Show>
-                                    </div>
-                                    <Show when={i.status?.state === 'PROCESS_STATE_STARTING' ? i.status?.message?.trim() : null}>
-                                      {(msg) => <StartProgress templateId={i.config.template_id} message={msg()} />}
-                                    </Show>
-                                  </div>
-                                  <div class="mt-0.5 flex flex-none items-center gap-2">
-                                    <IconButton
-                                      type="button"
-                                      label={pinnedInstanceIds()[i.config.instance_id] ? 'Unpin instance' : 'Pin instance'}
-                                      variant="ghost"
-                                      onClick={(e) => {
-                                        e.preventDefault()
-                                        e.stopPropagation()
-                                        togglePinnedInstance(i.config.instance_id)
-                                      }}
-                                    >
-                                      <svg
-                                        xmlns="http://www.w3.org/2000/svg"
-                                        viewBox="0 0 20 20"
-                                        fill="currentColor"
-                                        class={`h-4 w-4 ${
-                                          pinnedInstanceIds()[i.config.instance_id]
-                                            ? 'text-amber-500'
-                                            : 'text-slate-400 dark:text-slate-500'
-                                        }`}
-                                        aria-hidden="true"
-                                      >
-                                        <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.539 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
-                                      </svg>
-                                    </IconButton>
-
-                                    <span
-                                      class={`mt-1 inline-flex h-2.5 w-2.5 flex-none rounded-full ${
-                                        i.status?.state === 'PROCESS_STATE_RUNNING'
-                                          ? 'bg-emerald-400'
-                                          : i.status?.state === 'PROCESS_STATE_STARTING'
-                                            ? 'bg-amber-400 animate-pulse'
-                                            : i.status?.state === 'PROCESS_STATE_STOPPING'
-                                              ? 'bg-amber-400 animate-pulse'
-                                              : i.status?.state === 'PROCESS_STATE_FAILED'
-                                                ? 'bg-rose-500'
-                                                : 'bg-slate-400'
-                                      }`}
-                                      title={i.status?.state ?? 'unknown'}
-                                    />
-                                  </div>
-                                </div>
-                              </div>
-
-                              <Show
-                                when={
-                                  i.status?.state === 'PROCESS_STATE_FAILED' &&
-                                  (i.status?.message != null || i.status?.exit_code != null)
-                                }
-                              >
-                                <div class="relative z-10 mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] text-rose-800 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-200">
-                                  <span class="font-semibold">Failed:</span>
-                                  <span class="ml-1">
-                                    <Show when={i.status?.exit_code != null}>
-                                      exit {i.status?.exit_code}
-                                    </Show>
-                                    <Show when={i.status?.message != null}>
-                                      <span class="ml-2">{statusMessageParts(i.status).text}</span>
-                                    </Show>
-                                  </span>
-                                  <Show when={statusMessageParts(i.status).hint}>
-                                    {(hint) => (
-                                      <div class="mt-1 text-[11px] text-rose-700/80 dark:text-rose-200/70">
-                                        {hint()}
-                                      </div>
-                                    )}
-                                  </Show>
-                                </div>
-                              </Show>
-
-                              <Show when={i.status?.resources}>
-                                {(r) => (
-                                  <div class="relative z-10 mt-3 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
-                                    <span class="rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 font-mono dark:border-slate-800 dark:bg-slate-950/40">
-                                      cpu {formatCpuPercent(r().cpu_percent_x100)}
-                                    </span>
-                                    <span class="rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 font-mono dark:border-slate-800 dark:bg-slate-950/40">
-                                      rss {formatBytes(parseU64(r().rss_bytes))}
-                                    </span>
-                                    <span class="rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 font-mono dark:border-slate-800 dark:bg-slate-950/40">
-                                      io {formatBytes(parseU64(r().read_bytes))}↓ {formatBytes(parseU64(r().write_bytes))}↑
-                                    </span>
-                                  </div>
-                                )}
-                              </Show>
-
-                              <div class="relative z-10 mt-3 flex flex-wrap items-center justify-between gap-2">
-                                <div class="flex flex-wrap items-center gap-2">
-                                  <Show
-                                    when={canStartInstance(i.status)}
-                                    fallback={
-	                                      <Button
-	                                        size="xs"
-	                                        variant="secondary"
-	                                        leftIcon={
-	                                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-	                                            <path d="M5.75 5.75A.75.75 0 016.5 5h7a.75.75 0 01.75.75v8.5a.75.75 0 01-.75.75h-7a.75.75 0 01-.75-.75v-8.5z" />
-	                                          </svg>
-	                                        }
-	                                        loading={instanceOpById()[i.config.instance_id] === 'stopping'}
-	                                        disabled={
-	                                          isReadOnly() ||
-	                                          instanceOpById()[i.config.instance_id] != null ||
-                                          isStopping(i.status)
-                                        }
-                                        title={isReadOnly() ? 'Read-only mode' : 'Stop instance'}
-                                        onClick={async () => {
-                                          try {
-                                            await runInstanceOp(i.config.instance_id, 'stopping', () =>
-                                              stopInstance.mutateAsync({ instance_id: i.config.instance_id, timeout_ms: 30_000 }),
-                                            )
-                                            await invalidateInstances()
-                                            pushToast('success', 'Stopped', instanceDisplayName(i as unknown as InstanceListItem))
-                                          } catch (e) {
-                                            toastError('Stop failed', e)
-                                          }
-                                        }}
-                                      >
-                                        Stop
-                                      </Button>
-                                    }
-                                  >
-	                                    <Button
-	                                      size="xs"
-	                                      variant="primary"
-	                                      leftIcon={
-	                                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-	                                          <path d="M4.5 3.25a.75.75 0 011.18-.62l10.5 7.25a.75.75 0 010 1.24l-10.5 7.25A.75.75 0 014.5 17.75V3.25z" />
-	                                        </svg>
-	                                      }
-	                                      loading={instanceOpById()[i.config.instance_id] === 'starting'}
-	                                      disabled={isReadOnly() || instanceOpById()[i.config.instance_id] != null}
-	                                      title={isReadOnly() ? 'Read-only mode' : 'Start instance'}
-                                      onClick={async () => {
-                                        try {
-                                          await runInstanceOp(i.config.instance_id, 'starting', () =>
-                                            startInstance.mutateAsync({ instance_id: i.config.instance_id }),
-                                          )
-                                          await invalidateInstances()
-                                          pushToast('success', 'Started', instanceDisplayName(i as unknown as InstanceListItem))
-                                        } catch (e) {
-                                          toastError('Start failed', e)
-                                        }
-                                      }}
-                                    >
-                                      Start
-                                    </Button>
-                                  </Show>
-
-                                  <Show when={i.status != null}>
-	                                    <Button
-	                                      size="xs"
-	                                      variant="secondary"
-	                                      leftIcon={
-	                                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-	                                          <path
-	                                            fill-rule="evenodd"
-	                                            d="M15.312 11.424a5.5 5.5 0 01-9.201 2.466.75.75 0 011.06-1.06 4 4 0 006.764-2.289H13a.75.75 0 010-1.5h2.75a.75.75 0 01.75.75V12.5a.75.75 0 01-1.5 0v-1.076zM4.688 8.576a5.5 5.5 0 019.201-2.466.75.75 0 11-1.06 1.06A4 4 0 006.065 9.46H7a.75.75 0 010 1.5H4.25a.75.75 0 01-.75-.75V7.5a.75.75 0 011.5 0v1.076z"
-	                                            clip-rule="evenodd"
-	                                          />
-	                                        </svg>
-	                                      }
-	                                      loading={instanceOpById()[i.config.instance_id] === 'restarting'}
-	                                      disabled={
-	                                        isReadOnly() ||
-	                                        instanceOpById()[i.config.instance_id] != null ||
-                                        isStopping(i.status)
-                                      }
-                                      title={isReadOnly() ? 'Read-only mode' : 'Restart instance'}
-                                      onClick={async () => {
-                                        try {
-                                          await runInstanceOp(i.config.instance_id, 'restarting', () =>
-                                            restartInstance.mutateAsync({ instance_id: i.config.instance_id, timeout_ms: 30_000 }),
-                                          )
-                                          await invalidateInstances()
-                                          pushToast('success', 'Restarted', instanceDisplayName(i as unknown as InstanceListItem))
-                                        } catch (e) {
-                                          toastError('Restart failed', e)
-                                        }
-                                      }}
-                                    >
-                                      Restart
-                                    </Button>
-                                  </Show>
-                                </div>
-
-	                                <div class="flex items-center gap-2">
-	                                  <div class="flex items-center gap-1.5 max-w-0 overflow-hidden opacity-0 transition-[max-width,opacity] duration-150 invisible group-hover:visible group-hover:max-w-[480px] group-hover:opacity-100 group-hover:overflow-visible group-focus-within:visible group-focus-within:max-w-[480px] group-focus-within:opacity-100 group-focus-within:overflow-visible">
-	                                  <IconButton
-	                                    type="button"
-	                                    label="Edit"
-	                                    title={
-	                                      isReadOnly()
-                                        ? 'Read-only mode'
-                                        : !canStartInstance(i.status)
-                                          ? 'Stop the instance before editing'
-                                          : 'Edit instance parameters'
-                                    }
-                                    variant="ghost"
-                                    disabled={isReadOnly() || !canStartInstance(i.status)}
-                                    onClick={() => openEditModal(i)}
-                                  >
-                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-                                      <path d="M13.586 3.586a2 2 0 112.828 2.828l-9.5 9.5a1 1 0 01-.39.242l-3.5 1.166a.5.5 0 01-.632-.632l1.166-3.5a1 1 0 01.242-.39l9.5-9.5z" />
-	                                    </svg>
-	                                  </IconButton>
-
-                                  <IconButton
-                                    type="button"
-                                    label="Files"
-                                    title="Open instance directory"
-                                    variant="ghost"
-                                    onClick={() => openInFiles(`instances/${i.config.instance_id}`)}
-                                  >
-                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-                                      <path d="M2 5.75A2.75 2.75 0 014.75 3h4.19a2.75 2.75 0 011.944.806l.56.56c.215.215.507.334.812.334h2.994A2.75 2.75 0 0118 7.45v6.8A2.75 2.75 0 0115.25 17H4.75A2.75 2.75 0 012 14.25v-8.5z" />
-                                    </svg>
-                                  </IconButton>
-
-                                  <Show when={i.config.template_id === 'minecraft:vanilla'}>
-                                    <IconButton
-                                      type="button"
-                                      label="Log"
-                                      title="Open latest.log"
-                                      variant="ghost"
-                                      onClick={() => openFileInFiles(`instances/${i.config.instance_id}/logs/latest.log`)}
-                                    >
-                                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-                                        <path
-                                          fill-rule="evenodd"
-                                          d="M3.25 4A2.75 2.75 0 016 1.25h5.586c.73 0 1.429.29 1.945.806l2.578 2.578c.516.516.805 1.214.805 1.944V16A2.75 2.75 0 0114.25 18.75H6A2.75 2.75 0 013.25 16V4zm8.5 1.25a.75.75 0 00-.75-.75H6A1.25 1.25 0 004.75 4v12c0 .69.56 1.25 1.25 1.25h8.25c.69 0 1.25-.56 1.25-1.25V7.5h-2.75a1 1 0 01-1-1V5.25z"
-                                          clip-rule="evenodd"
-                                        />
-                                      </svg>
-                                    </IconButton>
-                                  </Show>
-
-                                  <IconButton
-                                    type="button"
-                                    label="Delete"
-                                    title={
-                                      isReadOnly()
-                                        ? 'Read-only mode'
-                                        : !canStartInstance(i.status)
-                                          ? 'Stop the instance before deleting'
-                                          : 'Delete instance'
-                                    }
-                                    variant="danger"
-                                    disabled={isReadOnly() || !canStartInstance(i.status)}
-                                    onClick={() => setConfirmDeleteInstanceId(i.config.instance_id)}
-                                  >
-                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-                                      <path
-                                        fill-rule="evenodd"
-                                        d="M8.75 2.75A.75.75 0 019.5 2h1a.75.75 0 01.75.75V3h3.5a.75.75 0 010 1.5h-.918l-.764 10.694A2.75 2.75 0 0111.327 18H8.673a2.75 2.75 0 01-2.741-2.806L5.168 4.5H4.25a.75.75 0 010-1.5h3.5v-.25zm1.5.25v.25h-1.5V3h1.5z"
-                                        clip-rule="evenodd"
-                                      />
-                                    </svg>
-	                                  </IconButton>
-	                                  </div>
-	                                </div>
-	                              </div>
-	                            </div>
-	                          )}
-	                                </For>
-	                              </div>
-                            </Show>
-                          }
-                        >
-                          <div class={`mt-4 grid gap-3 ${instanceCompact() ? 'sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4' : 'sm:grid-cols-2 2xl:grid-cols-3'}`}>
-                            <For each={Array.from({ length: 6 })}>
-                              {() => <Skeleton class={instanceCompact() ? 'h-28' : 'h-40'} />}
-                            </For>
-                          </div>
-                        </Show>
-                      </Show>
-
-                      {/* Logs are shown in the terminal modal; keep the main view clean. */}
-                    </>
-                  }
-                />
-              </Show>
-
-              <Show when={tab() === 'downloads'}>
-                <div class="min-h-0 flex-1 overflow-auto p-4">
-                  <div class="mx-auto w-full max-w-3xl space-y-4">
-                    <div class="flex items-start justify-between gap-3">
-                      <div>
-                        <div class="text-sm font-semibold text-slate-900 dark:text-slate-100">Downloads</div>
-                        <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                          Steam-style download center: queue, library, installed state, and updates.
-                        </div>
-                      </div>
-                      <div class="flex items-center gap-2">
-                        <Badge variant={hasRunningDownloadJobs() ? 'warning' : 'neutral'}>
-                          {hasRunningDownloadJobs() ? 'Running' : 'Idle'}
-                        </Badge>
-                        <Show when={downloadQueuePaused()}>
-                          <Badge variant="warning">Queue paused</Badge>
-                        </Show>
-                      </div>
-                    </div>
-
-                    <div class="flex flex-wrap items-center gap-2">
-                      <Tabs
-                        value={downloadCenterView()}
-                        options={[
-                          { value: 'library', label: 'Library' },
-                          { value: 'queue', label: 'Downloads' },
-                          { value: 'installed', label: 'Installed' },
-                          { value: 'updates', label: 'Updates' },
-                        ]}
-                        onChange={setDownloadCenterView}
-                      />
-                    </div>
-
-                    <div class="rounded-2xl border border-amber-200 bg-amber-50/70 px-4 py-3 text-xs text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-200">
-                      If Create returns <span class="font-mono">HTTP 504</span>, it usually means the reverse proxy timed out while backend download is still running.
-                      Use this page to warm files first, then Create will be fast.
-                    </div>
-
-                    <Show when={downloadCenterView() === 'queue'}>
-                      <div class="rounded-2xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
-                      <div class="flex items-center justify-between gap-3">
-                        <div class="text-sm font-medium text-slate-900 dark:text-slate-100">Download Queue</div>
-                        <div class="flex items-center gap-2">
-                          <Badge variant={hasRunningDownloadJobs() ? 'warning' : 'neutral'}>
-                            {hasRunningDownloadJobs() ? 'Running' : 'Idle'}
-                          </Badge>
-                          <Button
-                            size="xs"
-                            variant="secondary"
-                            onClick={() => void toggleDownloadQueuePaused()}
-                          >
-                            {downloadQueuePaused() ? 'Resume queue' : 'Pause queue'}
-                          </Button>
-                          <Button
-                            size="xs"
-                            variant="secondary"
-                            disabled={hasRunningDownloadJobs() || downloadJobs().length === 0}
-                            onClick={() => void clearDownloadHistory()}
-                          >
-                            Clear history
-                          </Button>
-                        </div>
-                      </div>
-
-                      <Show
-                        when={downloadJobs().length > 0}
-                        fallback={<div class="mt-3 text-xs text-slate-500 dark:text-slate-400">No download jobs yet.</div>}
-                      >
-                        <div class="mt-3 space-y-3">
-                          <For each={downloadJobs()}>
-                            {(job) => {
-                              const progressMessage = () => downloadJobProgressMessage(job, downloadNowUnixMs())
-
-                              return (
-                                <div class="rounded-xl border border-slate-200 bg-white/60 px-3 py-3 dark:border-slate-800 dark:bg-slate-950/40">
-                                  <div class="flex flex-wrap items-center gap-2">
-                                    <div class="text-xs font-semibold text-slate-800 dark:text-slate-100">{downloadTargetLabel(job.target)}</div>
-                                    <Badge variant={downloadJobStatusVariant(job.state)}>{downloadJobStatusLabel(job.state)}</Badge>
-                                    <span class="rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 font-mono text-[11px] text-slate-600 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-300">
-                                      {job.version}
-                                    </span>
-                                    <span class="ml-auto font-mono text-[11px] text-slate-500">{formatRelativeTime(job.updatedAtUnixMs)}</span>
-                                  </div>
-
-                                  <Show
-                                    when={job.state === 'running'}
-                                    fallback={<div class="mt-2 text-xs text-slate-600 dark:text-slate-300">{job.message}</div>}
-                                  >
-                                    <DownloadProgress templateId={job.templateId} message={progressMessage()} />
-                                  </Show>
-
-                                  <div class="mt-2 flex flex-wrap items-center gap-2">
-                                    <Button size="xs" variant="secondary" onClick={() => setSelectedDownloadJobId(job.id)}>
-                                      Details
-                                    </Button>
-                                    <Button
-                                      size="xs"
-                                      variant="secondary"
-                                      disabled={job.state === 'running'}
-                                      onClick={() => void moveDownloadJob(job.id, -1)}
-                                    >
-                                      ↑
-                                    </Button>
-                                    <Button
-                                      size="xs"
-                                      variant="secondary"
-                                      disabled={job.state === 'running'}
-                                      onClick={() => void moveDownloadJob(job.id, 1)}
-                                    >
-                                      ↓
-                                    </Button>
-                                    <Show when={job.state === 'queued'}>
-                                      <Button size="xs" variant="secondary" onClick={() => void pauseDownloadJob(job.id)}>
-                                        Pause
-                                      </Button>
-                                    </Show>
-                                    <Show when={job.state === 'paused'}>
-                                      <Button size="xs" variant="secondary" onClick={() => void resumeDownloadJob(job.id)}>
-                                        Resume
-                                      </Button>
-                                    </Show>
-                                    <Show when={job.state === 'queued' || job.state === 'paused'}>
-                                      <Button size="xs" variant="danger" onClick={() => void cancelDownloadJob(job.id)}>
-                                        Cancel
-                                      </Button>
-                                    </Show>
-                                    <Show when={job.state === 'error' || job.state === 'success' || job.state === 'canceled'}>
-                                      <Button size="xs" variant="secondary" onClick={() => void retryDownloadJob(job.id)}>
-                                        Retry
-                                      </Button>
-                                    </Show>
-                                  </div>
-
-                                  <Show when={job.requestId}>
-                                    <div class="mt-2 font-mono text-[11px] text-slate-500 dark:text-slate-400">req {job.requestId}</div>
-                                  </Show>
-                                </div>
-                              )
-                            }}
-                          </For>
-                        </div>
-                      </Show>
-                      </div>
-                    </Show>
-
-                    <Show when={downloadCenterView() === 'queue' || downloadCenterView() === 'library'}>
-                    <div class="rounded-2xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
-                      <div class="flex items-center justify-between gap-3">
-                        <div class="text-sm font-medium text-slate-900 dark:text-slate-100">Minecraft (Vanilla)</div>
-                        <Badge variant="neutral">Template minecraft:vanilla</Badge>
-                      </div>
-                      <div class="mt-3 grid gap-2 sm:grid-cols-[1fr_auto] sm:items-end">
-                        <Field label="Version">
-                          <Dropdown
-                            label=""
-                            value={downloadMcVersion()}
-                            options={mcVersionOptions()}
-                            onChange={setDownloadMcVersion}
-                          />
-                        </Field>
-                        <Button
-                          size="sm"
-                          variant="primary"
-                          loading={downloadQueueEnqueue.isPending && downloadEnqueueTarget() === 'minecraft_vanilla'}
-                          disabled={isReadOnly()}
-                          onClick={() => void enqueueDownloadWarm('minecraft_vanilla')}
-                        >
-                          Download / Update
-                        </Button>
-                      </div>
-                      <Show when={downloadStatus().get('minecraft_vanilla')}>
-                        {(s) => (
-                          <div
-                            class={`mt-3 rounded-xl border px-3 py-2 text-xs ${
-                              s().ok
-                                ? 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/20 dark:text-emerald-200'
-                                : 'border-rose-200 bg-rose-50 text-rose-800 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-200'
-                            }`}
-                          >
-                            {s().message}
-                            <div class="mt-1 font-mono text-[11px] opacity-80">{formatRelativeTime(s().atUnixMs)}</div>
-                          </div>
-                        )}
-                      </Show>
-                    </div>
-                    </Show>
-
-                    <Show when={downloadCenterView() === 'installed'}>
-                      <div class="rounded-2xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
-                        <div class="text-sm font-medium text-slate-900 dark:text-slate-100">Installed</div>
-                        <div class="mt-3 space-y-2">
-                          <For each={downloadInstalledRows()}>
-                            {(row) => (
-                              <div class="rounded-xl border border-slate-200 bg-white/60 px-3 py-2 text-xs dark:border-slate-800 dark:bg-slate-950/40">
-                                <div class="flex flex-wrap items-center gap-2">
-                                  <div class="font-semibold text-slate-800 dark:text-slate-100">{downloadTargetLabel(row.target)}</div>
-                                  <Badge variant={row.installed ? 'success' : 'neutral'}>{row.installed ? 'Installed' : 'Missing'}</Badge>
-                                  <span class="rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 font-mono text-[11px] text-slate-600 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-300">
-                                    {row.installedVersion}
-                                  </span>
-                                </div>
-                                <div class="mt-1 text-slate-600 dark:text-slate-300">
-                                  size {formatBytes(row.sizeBytes)} · last used {formatRelativeTime(row.lastUsedUnixMs)}
-                                </div>
-                              </div>
-                            )}
-                          </For>
-                        </div>
-                      </div>
-                    </Show>
-
-                    <Show when={downloadCenterView() === 'updates'}>
-                      <div class="rounded-2xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
-                        <div class="text-sm font-medium text-slate-900 dark:text-slate-100">Available Updates</div>
-                        <div class="mt-3 space-y-2">
-                          <For each={downloadUpdateRows()}>
-                            {(row) => (
-                              <div class="rounded-xl border border-slate-200 bg-white/60 px-3 py-2 text-xs dark:border-slate-800 dark:bg-slate-950/40">
-                                <div class="flex flex-wrap items-center gap-2">
-                                  <div class="font-semibold text-slate-800 dark:text-slate-100">{downloadTargetLabel(row.target)}</div>
-                                  <Badge variant={row.updateAvailable ? 'warning' : 'success'}>
-                                    {row.updateAvailable ? 'Update available' : 'Up to date'}
-                                  </Badge>
-                                  <span class="rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 font-mono text-[11px] text-slate-600 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-300">
-                                    {row.installedVersion} → {row.latestVersion}
-                                  </span>
-                                  <Button
-                                    size="xs"
-                                    variant="secondary"
-                                    class="ml-auto"
-                                    disabled={isReadOnly() || !row.updateAvailable}
-                                    onClick={() => void enqueueDownloadWarm(row.target)}
-                                  >
-                                    {row.updateAvailable ? 'Queue update' : 'Up to date'}
-                                  </Button>
-                                </div>
-                              </div>
-                            )}
-                          </For>
-                        </div>
-                      </div>
-                    </Show>
-
-                    <Show when={downloadCenterView() === 'queue' || downloadCenterView() === 'library'}>
-                    <div class="rounded-2xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
-                      <div class="flex items-center justify-between gap-3">
-                        <div class="text-sm font-medium text-slate-900 dark:text-slate-100">Terraria (Vanilla)</div>
-                        <Badge variant="neutral">Template terraria:vanilla</Badge>
-                      </div>
-                      <div class="mt-3 grid gap-2 sm:grid-cols-[1fr_auto] sm:items-end">
-                        <Field label="Version">
-                          <Dropdown
-                            label=""
-                            value={downloadTrVersion()}
-                            options={trVersionOptions()}
-                            onChange={setDownloadTrVersion}
-                          />
-                        </Field>
-                        <Button
-                          size="sm"
-                          variant="primary"
-                          loading={downloadQueueEnqueue.isPending && downloadEnqueueTarget() === 'terraria_vanilla'}
-                          disabled={isReadOnly()}
-                          onClick={() => void enqueueDownloadWarm('terraria_vanilla')}
-                        >
-                          Download / Update
-                        </Button>
-                      </div>
-                      <Show when={downloadStatus().get('terraria_vanilla')}>
-                        {(s) => (
-                          <div
-                            class={`mt-3 rounded-xl border px-3 py-2 text-xs ${
-                              s().ok
-                                ? 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/20 dark:text-emerald-200'
-                                : 'border-rose-200 bg-rose-50 text-rose-800 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-200'
-                            }`}
-                          >
-                            {s().message}
-                            <div class="mt-1 font-mono text-[11px] opacity-80">{formatRelativeTime(s().atUnixMs)}</div>
-                          </div>
-                        )}
-                      </Show>
-                    </div>
-                    </Show>
-
-                    <Show when={downloadCenterView() === 'queue' || downloadCenterView() === 'library'}>
-                    <div class="rounded-2xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
-                      <div class="flex items-center justify-between gap-3">
-                        <div class="text-sm font-medium text-slate-900 dark:text-slate-100">DSP (Nebula)</div>
-                        <Badge variant={hasSavedSteamcmdCreds() ? 'success' : 'warning'}>
-                          {hasSavedSteamcmdCreds() ? 'SteamCMD ready' : 'SteamCMD required'}
-                        </Badge>
-                      </div>
-                      <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                        Uses SteamCMD credentials in Settings. Auto 2FA is supported when maFile/shared_secret is imported.
-                      </div>
-
-                      <Show when={!hasSavedSteamcmdCreds()}>
-                        <div class="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-200">
-                          SteamCMD credentials are missing.
-                          <Button size="xs" variant="secondary" class="ml-2" onClick={() => setTab('settings')}>
-                            Open Settings
-                          </Button>
-                        </div>
-                      </Show>
-
-                      <div class="mt-3 grid gap-2 sm:grid-cols-[1fr_auto] sm:items-end">
-                        <Field label="Steam Guard code (optional)">
-                          <Input
-                            value={downloadDspGuardCode()}
-                            onInput={(e) => setDownloadDspGuardCode(e.currentTarget.value)}
-                            placeholder="Only needed when Auto 2FA is unavailable"
-                            autocomplete="one-time-code"
-                            class="font-mono text-[11px]"
-                          />
-                        </Field>
-                        <Button
-                          size="sm"
-                          variant="primary"
-                          loading={downloadQueueEnqueue.isPending && downloadEnqueueTarget() === 'dsp_nebula'}
-                          disabled={isReadOnly()}
-                          onClick={() => void enqueueDownloadWarm('dsp_nebula')}
-                        >
-                          Download / Update
-                        </Button>
-                      </div>
-
-                      <Show when={downloadStatus().get('dsp_nebula')}>
-                        {(s) => (
-                          <div
-                            class={`mt-3 rounded-xl border px-3 py-2 text-xs ${
-                              s().ok
-                                ? 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/20 dark:text-emerald-200'
-                                : 'border-rose-200 bg-rose-50 text-rose-800 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-200'
-                            }`}
-                          >
-                            {s().message}
-                            <Show when={s().requestId}>
-                              <div class="mt-1 font-mono text-[11px] opacity-80">req {s().requestId}</div>
-                            </Show>
-                            <div class="mt-1 font-mono text-[11px] opacity-80">{formatRelativeTime(s().atUnixMs)}</div>
-                          </div>
-                        )}
-                      </Show>
-                    </div>
-                    </Show>
-
-                    <div class="rounded-2xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
-                      <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Cache entries</div>
-                      <Show
-                        when={(controlDiagnostics.data?.cache?.entries ?? []).length > 0}
-                        fallback={<div class="mt-2 text-xs text-slate-500 dark:text-slate-400">No cache entries yet.</div>}
-                      >
-                        <div class="mt-3 grid gap-2">
-                          <For each={(controlDiagnostics.data?.cache?.entries ?? []).slice(0, 8)}>
-                            {(e) => (
-                              <div class="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white/60 px-3 py-2 text-[11px] dark:border-slate-800 dark:bg-slate-950/40">
-                                <span class="font-mono text-slate-700 dark:text-slate-200">{e.key}</span>
-                                <span class="font-mono text-slate-500">{formatBytes(Number(e.size_bytes))}</span>
-                              </div>
-                            )}
-                          </For>
-                        </div>
-                      </Show>
-                    </div>
-                  </div>
-                </div>
-              </Show>
+              <InstancesTab
+          createAdvanced={createAdvanced}
+          createAdvancedDirty={createAdvancedDirty}
+          createFieldErrors={createFieldErrors}
+          createFormError={createFormError}
+          createInstance={createInstance}
+          createPreview={createPreview}
+          createTemplateId={createTemplateId}
+          dspAutoPauseEnabled={dspAutoPauseEnabled}
+          dspPort={dspPort}
+          dspRemoteAccessPassword={dspRemoteAccessPassword}
+          dspRemoteAccessPasswordVisible={dspRemoteAccessPasswordVisible}
+          dspSaveName={dspSaveName}
+          dspServerPassword={dspServerPassword}
+          dspServerPasswordVisible={dspServerPasswordVisible}
+          dspSourceInitRequired={dspSourceInitRequired}
+          dspStartupMode={dspStartupMode}
+          dspSteamGuardCode={dspSteamGuardCode}
+          dspSteamcmdSettingsRequiredMessage={dspSteamcmdSettingsRequiredMessage}
+          dspUps={dspUps}
+          dspWarmNeedsInit={dspWarmNeedsInit}
+          dspWineBin={dspWineBin}
+          dstAuthPort={dstAuthPort}
+          dstClusterName={dstClusterName}
+          dstClusterToken={dstClusterToken}
+          dstClusterTokenVisible={dstClusterTokenVisible}
+          dstMasterPort={dstMasterPort}
+          dstMaxPlayers={dstMaxPlayers}
+          dstPassword={dstPassword}
+          dstPasswordVisible={dstPasswordVisible}
+          dstPort={dstPort}
+          filteredInstances={filteredInstances}
+          focusFirstCreateError={focusFirstCreateError}
+          friendlyErrorMessage={friendlyErrorMessage}
+          frpNodeDropdownOptions={frpNodeDropdownOptions}
+          hasSavedSteamcmdCreds={hasSavedSteamcmdCreds}
+          highlightInstanceId={highlightInstanceId}
+          instanceCardEls={instanceCardEls}
+          instanceCompact={instanceCompact}
+          instanceDisplayName={instanceDisplayName}
+          instanceName={instanceName}
+          instanceOpById={instanceOpById}
+          instanceSearchInput={instanceSearchInput}
+          instanceSortKey={instanceSortKey}
+          instanceSortOptions={instanceSortOptions}
+          instanceStatusFilter={instanceStatusFilter}
+          instanceStatusFilterOptions={instanceStatusFilterOptions}
+          instanceStatusKeys={instanceStatusKeys}
+          instanceTemplateFilter={instanceTemplateFilter}
+          instanceTemplateFilterOptions={instanceTemplateFilterOptions}
+          instances={instances}
+          instancesLastUpdatedAtUnixMs={instancesLastUpdatedAtUnixMs}
+          invalidateInstances={invalidateInstances}
+          isReadOnly={isReadOnly}
+          mcCreateMode={mcCreateMode}
+          mcCurseforge={mcCurseforge}
+          mcEffectiveFrpConfig={mcEffectiveFrpConfig}
+          mcEula={mcEula}
+          mcFrpConfig={mcFrpConfig}
+          mcFrpEnabled={mcFrpEnabled}
+          mcFrpMode={mcFrpMode}
+          mcFrpNodeId={mcFrpNodeId}
+          mcImportPack={mcImportPack}
+          mcMemory={mcMemory}
+          mcMrpack={mcMrpack}
+          mcPort={mcPort}
+          mcVersion={mcVersion}
+          mcVersionOptions={mcVersionOptions}
+          me={me}
+          minecraftCreateModeOptions={minecraftCreateModeOptions}
+          openEditModal={openEditModal}
+          openFileInFiles={openFileInFiles}
+          openInFiles={openInFiles}
+          pinnedInstanceIds={pinnedInstanceIds}
+          pushToast={pushToast}
+          restartInstance={restartInstance}
+          revealInstance={revealInstance}
+          runDspInitAndMaybeCreate={runDspInitAndMaybeCreate}
+          runInstanceOp={runInstanceOp}
+          selectedInstanceId={selectedInstanceId}
+          selectedTemplate={selectedTemplate}
+          setConfirmDeleteInstanceId={setConfirmDeleteInstanceId}
+          setCreateAdvanced={setCreateAdvanced}
+          setCreateDspPortEl={(el: HTMLInputElement) => {
+            createDspPortEl = el
+          }}
+          setCreateDspRemoteAccessPasswordEl={(el: HTMLInputElement) => {
+            createDspRemoteAccessPasswordEl = el
+          }}
+          setCreateDspSaveNameEl={(el: HTMLInputElement) => {
+            createDspSaveNameEl = el
+          }}
+          setCreateDspServerPasswordEl={(el: HTMLInputElement) => {
+            createDspServerPasswordEl = el
+          }}
+          setCreateDspStartupModeEl={(el: HTMLDivElement) => {
+            createDspStartupModeEl = el
+          }}
+          setCreateDspUpsEl={(el: HTMLInputElement) => {
+            createDspUpsEl = el
+          }}
+          setCreateDspWineBinEl={(el: HTMLInputElement) => {
+            createDspWineBinEl = el
+          }}
+          setCreateDstAuthPortEl={(el: HTMLInputElement) => {
+            createDstAuthPortEl = el
+          }}
+          setCreateDstClusterNameEl={(el: HTMLInputElement) => {
+            createDstClusterNameEl = el
+          }}
+          setCreateDstClusterTokenEl={(el: HTMLInputElement) => {
+            createDstClusterTokenEl = el
+          }}
+          setCreateDstMasterPortEl={(el: HTMLInputElement) => {
+            createDstMasterPortEl = el
+          }}
+          setCreateDstMaxPlayersEl={(el: HTMLInputElement) => {
+            createDstMaxPlayersEl = el
+          }}
+          setCreateDstPasswordEl={(el: HTMLInputElement) => {
+            createDstPasswordEl = el
+          }}
+          setCreateDstPortEl={(el: HTMLInputElement) => {
+            createDstPortEl = el
+          }}
+          setCreateFieldErrors={setCreateFieldErrors}
+          setCreateFormError={setCreateFormError}
+          setCreateInstanceNameEl={(el: HTMLInputElement) => {
+            createInstanceNameEl = el
+          }}
+          setCreateMcCurseforgeEl={(el: HTMLInputElement) => {
+            createMcCurseforgeEl = el
+          }}
+          setCreateMcEulaEl={(el: HTMLInputElement) => {
+            createMcEulaEl = el
+          }}
+          setCreateMcFrpConfigEl={(el: HTMLTextAreaElement) => {
+            createMcFrpConfigEl = el
+          }}
+          setCreateMcFrpNodeEl={(el: HTMLDivElement) => {
+            createMcFrpNodeEl = el
+          }}
+          setCreateMcImportPackEl={(el: HTMLInputElement) => {
+            createMcImportPackEl = el
+          }}
+          setCreateMcMemoryEl={(el: HTMLInputElement) => {
+            createMcMemoryEl = el
+          }}
+          setCreateMcMrpackEl={(el: HTMLInputElement) => {
+            createMcMrpackEl = el
+          }}
+          setCreateMcPortEl={(el: HTMLInputElement) => {
+            createMcPortEl = el
+          }}
+          setCreateSleepSecondsEl={(el: HTMLInputElement) => {
+            createSleepSecondsEl = el
+          }}
+          setCreateTrFrpConfigEl={(el: HTMLTextAreaElement) => {
+            createTrFrpConfigEl = el
+          }}
+          setCreateTrFrpNodeEl={(el: HTMLDivElement) => {
+            createTrFrpNodeEl = el
+          }}
+          setCreateTrMaxPlayersEl={(el: HTMLInputElement) => {
+            createTrMaxPlayersEl = el
+          }}
+          setCreateTrPasswordEl={(el: HTMLInputElement) => {
+            createTrPasswordEl = el
+          }}
+          setCreateTrPortEl={(el: HTMLInputElement) => {
+            createTrPortEl = el
+          }}
+          setCreateTrWorldNameEl={(el: HTMLInputElement) => {
+            createTrWorldNameEl = el
+          }}
+          setCreateTrWorldSizeEl={(el: HTMLInputElement) => {
+            createTrWorldSizeEl = el
+          }}
+          setDspAutoPauseEnabled={setDspAutoPauseEnabled}
+          setDspPort={setDspPort}
+          setDspRemoteAccessPassword={setDspRemoteAccessPassword}
+          setDspRemoteAccessPasswordVisible={setDspRemoteAccessPasswordVisible}
+          setDspSaveName={setDspSaveName}
+          setDspServerPassword={setDspServerPassword}
+          setDspServerPasswordVisible={setDspServerPasswordVisible}
+          setDspStartupMode={setDspStartupMode}
+          setDspSteamGuardCode={setDspSteamGuardCode}
+          setDspUps={setDspUps}
+          setDspWarmNeedsInit={setDspWarmNeedsInit}
+          setDspWineBin={setDspWineBin}
+          setDstAuthPort={setDstAuthPort}
+          setDstClusterName={setDstClusterName}
+          setDstClusterToken={setDstClusterToken}
+          setDstClusterTokenVisible={setDstClusterTokenVisible}
+          setDstMasterPort={setDstMasterPort}
+          setDstMaxPlayers={setDstMaxPlayers}
+          setDstPassword={setDstPassword}
+          setDstPasswordVisible={setDstPasswordVisible}
+          setDstPort={setDstPort}
+          setInstanceDetailTab={setInstanceDetailTab}
+          setInstanceName={setInstanceName}
+          setInstanceSearch={setInstanceSearch}
+          setInstanceSearchInput={setInstanceSearchInput}
+          setInstanceSortKey={setInstanceSortKey}
+          setInstanceStatusFilter={setInstanceStatusFilter}
+          setInstanceTemplateFilter={setInstanceTemplateFilter}
+          setMcCreateMode={setMcCreateMode}
+          setMcCurseforge={setMcCurseforge}
+          setMcEula={setMcEula}
+          setMcFrpConfig={setMcFrpConfig}
+          setMcFrpEnabled={setMcFrpEnabled}
+          setMcFrpMode={setMcFrpMode}
+          setMcFrpNodeId={setMcFrpNodeId}
+          setMcImportPack={setMcImportPack}
+          setMcMemory={setMcMemory}
+          setMcMrpack={setMcMrpack}
+          setMcPort={setMcPort}
+          setMcVersion={setMcVersion}
+          setPendingCreateAfterDspInit={setPendingCreateAfterDspInit}
+          setSelectedInstanceId={setSelectedInstanceId}
+          setSelectedTemplate={setSelectedTemplate}
+          setShowDspInitModal={setShowDspInitModal}
+          setShowInstanceModal={setShowInstanceModal}
+          setSleepSeconds={setSleepSeconds}
+          setTab={setTab}
+          setTrFrpConfig={setTrFrpConfig}
+          setTrFrpEnabled={setTrFrpEnabled}
+          setTrFrpMode={setTrFrpMode}
+          setTrFrpNodeId={setTrFrpNodeId}
+          setTrMaxPlayers={setTrMaxPlayers}
+          setTrPassword={setTrPassword}
+          setTrPasswordVisible={setTrPasswordVisible}
+          setTrPort={setTrPort}
+          setTrVersion={setTrVersion}
+          setTrWorldName={setTrWorldName}
+          setTrWorldSize={setTrWorldSize}
+          setWarmFieldErrors={setWarmFieldErrors}
+          setWarmFormError={setWarmFormError}
+          settingsStatus={settingsStatus}
+          sleepSeconds={sleepSeconds}
+          startInstance={startInstance}
+          stopInstance={stopInstance}
+          tab={tab}
+          templateOptions={templateOptions}
+          templates={templates}
+          toastError={toastError}
+          togglePinnedInstance={togglePinnedInstance}
+          trEffectiveFrpConfig={trEffectiveFrpConfig}
+          trFrpConfig={trFrpConfig}
+          trFrpEnabled={trFrpEnabled}
+          trFrpMode={trFrpMode}
+          trFrpNodeId={trFrpNodeId}
+          trMaxPlayers={trMaxPlayers}
+          trPassword={trPassword}
+          trPasswordVisible={trPasswordVisible}
+          trPort={trPort}
+          trVersion={trVersion}
+          trVersionOptions={trVersionOptions}
+          trWorldName={trWorldName}
+          trWorldSize={trWorldSize}
+          warmCache={warmCache}
+              />
+              <DownloadsTab
+                tab={tab}
+                hasRunningDownloadJobs={hasRunningDownloadJobs}
+                downloadQueuePaused={downloadQueuePaused}
+                downloadJobs={downloadJobs}
+                downloadCenterView={downloadCenterView}
+                setDownloadCenterView={setDownloadCenterView}
+                toggleDownloadQueuePaused={toggleDownloadQueuePaused}
+                clearDownloadHistory={clearDownloadHistory}
+                moveDownloadJob={moveDownloadJob}
+                pauseDownloadJob={pauseDownloadJob}
+                resumeDownloadJob={resumeDownloadJob}
+                cancelDownloadJob={cancelDownloadJob}
+                retryDownloadJob={retryDownloadJob}
+                setSelectedDownloadJobId={setSelectedDownloadJobId}
+                enqueueDownloadWarm={enqueueDownloadWarm}
+                downloadInstalledRows={downloadInstalledRows}
+                downloadUpdateRows={downloadUpdateRows}
+                downloadNowUnixMs={downloadNowUnixMs}
+                isReadOnly={isReadOnly}
+                downloadEnqueueTarget={downloadEnqueueTarget}
+                downloadStatus={downloadStatus}
+                controlDiagnostics={controlDiagnostics}
+                downloadMcVersion={downloadMcVersion}
+                setDownloadMcVersion={setDownloadMcVersion}
+                mcVersionOptions={mcVersionOptions}
+                downloadTrVersion={downloadTrVersion}
+                setDownloadTrVersion={setDownloadTrVersion}
+                trVersionOptions={trVersionOptions}
+                downloadDspGuardCode={downloadDspGuardCode}
+                setDownloadDspGuardCode={setDownloadDspGuardCode}
+                hasSavedSteamcmdCreds={hasSavedSteamcmdCreds}
+                setTab={setTab}
+                downloadQueueEnqueue={downloadQueueEnqueue}
+              />
 
               <Show when={tab() === 'files'}>
                 <FileBrowser
@@ -5844,800 +3014,64 @@ function App() {
                 />
               </Show>
 
-              <Show when={tab() === 'frp'}>
-                <div class="min-h-0 flex-1 overflow-auto p-4">
-                  <div class="mx-auto w-full max-w-3xl space-y-4">
-                    <div class="flex items-start justify-between gap-3">
-                      <div>
-                        <div class="text-sm font-semibold text-slate-900 dark:text-slate-100">FRP nodes</div>
-                        <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                          Manage FRP servers (IP/port/allocatable ports/token) and reusable configs (INI/TOML/YAML/JSON).
-                        </div>
-                      </div>
-                      <div class="flex items-center gap-2">
-                        <Show when={frpNodes.isPending}>
-                          <Badge variant="neutral">Loading</Badge>
-                        </Show>
-                        <Button
-                          size="sm"
-                          variant="primary"
-                          disabled={!isAuthed() || isReadOnly()}
-                          title={!isAuthed() ? 'Sign in required' : isReadOnly() ? 'Read-only mode' : 'Add FRP node'}
-                          onClick={() => openCreateFrpNodeModal()}
-                        >
-                          New
-                        </Button>
-                      </div>
-                    </div>
-
-                    <Show when={isAuthed()} fallback={<EmptyState title="Sign in required" description="Sign in to manage FRP nodes." />}>
-                      <Show
-                        when={frpNodes.isError}
-                        fallback={
-                          <Show
-                            when={(frpNodes.data ?? []).length > 0}
-                            fallback={
-                              <EmptyState
-                                title="No FRP nodes"
-                                description="Add one FRP server profile and reuse it when creating Minecraft/Terraria instances."
-                                actions={
-                                  <Button variant="secondary" size="sm" onClick={() => openCreateFrpNodeModal()} disabled={isReadOnly()}>
-                                    Add node
-                                  </Button>
-                                }
-                              />
-                            }
-                          >
-                            <div class="space-y-3">
-                              <For each={(frpNodes.data ?? []) as unknown as FrpNodeDto[]}>
-                                {(n) => {
-                                  const endpoint = () =>
-                                    n.server_addr && n.server_port ? `${n.server_addr}:${n.server_port}` : parseFrpEndpoint(n.config)
-                                  const configFormat = () => detectFrpConfigFormat(n.config)
-                                  const latencyLabel = () => (n.latency_ms != null ? `${n.latency_ms} ms` : 'offline')
-                                  const latencyClass = () =>
-                                    n.latency_ms == null
-                                      ? 'text-rose-600 dark:text-rose-300'
-                                      : n.latency_ms > 300
-                                        ? 'text-amber-600 dark:text-amber-300'
-                                        : 'text-emerald-600 dark:text-emerald-300'
-
-                                  return (
-                                    <div class="rounded-2xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
-                                      <div class="flex flex-wrap items-start justify-between gap-3">
-                                        <div class="min-w-0">
-                                          <div class="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">{n.name}</div>
-                                          <div class="mt-1 space-y-0.5 text-[11px] text-slate-500 dark:text-slate-400">
-                                            <div>
-                                              Server: <span class="font-mono">{endpoint() ?? '—'}</span>
-                                            </div>
-                                            <div>
-                                              Latency: <span class={`font-mono ${latencyClass()}`}>{latencyLabel()}</span>
-                                            </div>
-                                            <Show when={(n.allocatable_ports ?? '').trim()}>
-                                              <div>
-                                                Alloc ports: <span class="font-mono">{n.allocatable_ports}</span>
-                                              </div>
-                                            </Show>
-                                            <div>
-                                              Token: <span class="font-mono">{(n.token ?? '').trim() ? '(set)' : '(none)'}</span>
-                                            </div>
-                                            <div>
-                                              Config: <span class="font-mono uppercase">{configFormat()}</span>
-                                            </div>
-                                          </div>
-                                        </div>
-                                        <div class="flex flex-wrap items-center gap-2">
-                                          <IconButton
-                                            size="sm"
-                                            variant="secondary"
-                                            label="Copy endpoint"
-                                            disabled={!endpoint()}
-                                            onClick={async () => {
-                                              const ep = endpoint()
-                                              if (!ep) return
-                                              await safeCopy(ep)
-                                              pushToast('success', 'Copied', ep)
-                                            }}
-                                          >
-                                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-                                              <path d="M5.75 2A2.75 2.75 0 003 4.75v9.5A2.75 2.75 0 005.75 17h1.5a.75.75 0 000-1.5h-1.5c-.69 0-1.25-.56-1.25-1.25v-9.5c0-.69.56-1.25 1.25-1.25h5.5c.69 0 1.25.56 1.25 1.25v1a.75.75 0 001.5 0v-1A2.75 2.75 0 0011.25 2h-5.5z" />
-                                              <path d="M8.75 6A2.75 2.75 0 006 8.75v6.5A2.75 2.75 0 008.75 18h5.5A2.75 2.75 0 0017 15.25v-6.5A2.75 2.75 0 0014.25 6h-5.5z" />
-                                            </svg>
-                                          </IconButton>
-                                          <Button size="sm" variant="secondary" onClick={() => openEditFrpNodeModal(n)}>
-                                            Edit
-                                          </Button>
-                                          <Button
-                                            size="sm"
-                                            variant="danger"
-                                            disabled={isReadOnly() || frpDeleteNode.isPending}
-                                            onClick={async () => {
-                                              if (!window.confirm(`Delete FRP node “${n.name}”?`)) return
-                                              try {
-                                                await frpDeleteNode.mutateAsync({ id: n.id })
-                                                pushToast('success', 'Deleted', n.name)
-                                                void invalidateFrpNodes()
-                                              } catch (e) {
-                                                toastError('Delete failed', e)
-                                              }
-                                            }}
-                                          >
-                                            Delete
-                                          </Button>
-                                        </div>
-                                      </div>
-                                      <div class="mt-3 text-[11px] text-slate-500 dark:text-slate-400">
-                                        Updated <span class="font-mono">{n.updated_at}</span>
-                                      </div>
-                                    </div>
-                                  )
-                                }}
-                              </For>
-                            </div>
-                          </Show>
-                        }
-                      >
-                        <ErrorState title="Failed to load FRP nodes" error={frpNodes.error} onRetry={() => void invalidateFrpNodes()} />
-                      </Show>
-                    </Show>
-                  </div>
-                </div>
-              </Show>
-
-              <Show when={tab() === 'settings'}>
-                <div class="min-h-0 flex-1 overflow-auto p-4">
-                  <div class="mx-auto w-full max-w-2xl space-y-4">
-                    <div class="flex items-start justify-between gap-3">
-                      <div>
-                        <div class="text-sm font-semibold text-slate-900 dark:text-slate-100">Settings</div>
-                        <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                          Configure shared secrets used by templates.
-                        </div>
-                      </div>
-                      <Show when={settingsStatus.isPending}>
-                        <Badge variant="neutral">Loading</Badge>
-                      </Show>
-                    </div>
-
-                    <Show
-                      when={me()?.is_admin}
-                      fallback={<EmptyState title="Forbidden" description="Administrator access required." />}
-                    >
-                      <div class="rounded-2xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
-                        <div class="flex items-center justify-between gap-3">
-                          <div class="text-sm font-medium text-slate-900 dark:text-slate-100">DST default Klei key</div>
-                          <Badge variant={settingsStatus.data?.dst_default_klei_key_set ? 'success' : 'warning'}>
-                            {settingsStatus.data?.dst_default_klei_key_set ? 'Configured' : 'Not set'}
-                          </Badge>
-                        </div>
-                        <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                          Used as the default <span class="font-mono">cluster_token</span> when creating DST instances (if left blank).
-                        </div>
-
-                        <div class="mt-3">
-                          <Input
-                            type={settingsDstKeyVisible() ? 'text' : 'password'}
-                            value={settingsDstKey()}
-                            onInput={(e) => setSettingsDstKey(e.currentTarget.value)}
-                            placeholder={settingsStatus.data?.dst_default_klei_key_set ? '(configured — paste to update, blank to clear)' : 'Paste key…'}
-                            spellcheck={false}
-                            class="w-full font-mono text-[11px]"
-                            rightIcon={
-                              <VisibilityToggle
-                                visible={settingsDstKeyVisible()}
-                                labelWhenHidden="Show key"
-                                labelWhenVisible="Hide key"
-                                onToggle={() => setSettingsDstKeyVisible((v) => !v)}
-                              />
-                            }
-                          />
-                        </div>
-
-                        <div class="mt-3 flex flex-wrap items-center gap-2">
-                          <Button
-                            size="sm"
-                            variant="primary"
-                            loading={setDstDefaultKleiKey.isPending}
-                            disabled={isReadOnly()}
-                            onClick={async () => {
-                              try {
-                                await setDstDefaultKleiKey.mutateAsync({ key: settingsDstKey() })
-                                setSettingsDstKey('')
-                                void queryClient.invalidateQueries({ queryKey: ['settings.status', null] })
-                                pushToast('success', 'Saved', 'DST default key updated')
-                              } catch (e) {
-                                toastError('Save failed', e)
-                              }
-                            }}
-                          >
-                            Save
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="secondary"
-                            disabled={isReadOnly()}
-                            onClick={async () => {
-                              try {
-                                await setDstDefaultKleiKey.mutateAsync({ key: '' })
-                                setSettingsDstKey('')
-                                void queryClient.invalidateQueries({ queryKey: ['settings.status', null] })
-                                pushToast('success', 'Cleared', 'DST default key cleared')
-                              } catch (e) {
-                                toastError('Clear failed', e)
-                              }
-                            }}
-                          >
-                            Clear
-                          </Button>
-                        </div>
-                      </div>
-
-                      <div class="rounded-2xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
-                        <div class="flex items-center justify-between gap-3">
-                          <div class="text-sm font-medium text-slate-900 dark:text-slate-100">CurseForge API key</div>
-                          <Badge variant={settingsStatus.data?.curseforge_api_key_set ? 'success' : 'warning'}>
-                            {settingsStatus.data?.curseforge_api_key_set ? 'Configured' : 'Not set'}
-                          </Badge>
-                        </div>
-                        <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                          Required for resolving CurseForge modpacks and downloading the author-provided server pack.
-                        </div>
-
-                        <div class="mt-3">
-                          <Input
-                            type={settingsCurseforgeKeyVisible() ? 'text' : 'password'}
-                            value={settingsCurseforgeKey()}
-                            onInput={(e) => setSettingsCurseforgeKey(e.currentTarget.value)}
-                            placeholder={settingsStatus.data?.curseforge_api_key_set ? '(configured — paste to update, blank to clear)' : 'Paste key…'}
-                            spellcheck={false}
-                            class="w-full font-mono text-[11px]"
-                            rightIcon={
-                              <VisibilityToggle
-                                visible={settingsCurseforgeKeyVisible()}
-                                labelWhenHidden="Show key"
-                                labelWhenVisible="Hide key"
-                                onToggle={() => setSettingsCurseforgeKeyVisible((v) => !v)}
-                              />
-                            }
-                          />
-                        </div>
-
-                        <div class="mt-3 flex flex-wrap items-center gap-2">
-                          <Button
-                            size="sm"
-                            variant="primary"
-                            loading={setCurseforgeApiKey.isPending}
-                            disabled={isReadOnly()}
-                            onClick={async () => {
-                              try {
-                                await setCurseforgeApiKey.mutateAsync({ key: settingsCurseforgeKey() })
-                                setSettingsCurseforgeKey('')
-                                void queryClient.invalidateQueries({ queryKey: ['settings.status', null] })
-                                pushToast('success', 'Saved', 'CurseForge API key updated')
-                              } catch (e) {
-                                toastError('Save failed', e)
-                              }
-                            }}
-                          >
-                            Save
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="secondary"
-                            disabled={isReadOnly()}
-                            onClick={async () => {
-                              try {
-                                await setCurseforgeApiKey.mutateAsync({ key: '' })
-                                setSettingsCurseforgeKey('')
-                                void queryClient.invalidateQueries({ queryKey: ['settings.status', null] })
-                                pushToast('success', 'Cleared', 'CurseForge API key cleared')
-                              } catch (e) {
-                                toastError('Clear failed', e)
-                              }
-                            }}
-                          >
-                            Clear
-                          </Button>
-                        </div>
-                      </div>
-
-                      <div class="rounded-2xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
-                        <div class="flex items-center justify-between gap-3">
-                          <div class="text-sm font-medium text-slate-900 dark:text-slate-100">SteamCMD credentials</div>
-                          <Badge variant={settingsStatus.data?.steamcmd_username_set && settingsStatus.data?.steamcmd_password_set ? 'success' : 'warning'}>
-                            {settingsStatus.data?.steamcmd_username_set && settingsStatus.data?.steamcmd_password_set ? 'Configured' : 'Not set'}
-                          </Badge>
-                        </div>
-                        <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                          Shared by SteamCMD-based templates. Supports `maFile` import and automatic Steam Guard (2FA).
-                        </div>
-                        <div class="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
-                          <Badge variant={settingsStatus.data?.steamcmd_shared_secret_set ? 'success' : 'neutral'}>
-                            {settingsStatus.data?.steamcmd_shared_secret_set ? 'Auto 2FA enabled' : 'Auto 2FA disabled'}
-                          </Badge>
-                          <Show when={settingsStatus.data?.steamcmd_account_name}>
-                            {(name) => (
-                              <Badge variant="neutral">
-                                Account {name()}
-                              </Badge>
-                            )}
-                          </Show>
-                        </div>
-
-                        <div class="mt-3 grid gap-2">
-                          <Input
-                            value={settingsSteamcmdUsername()}
-                            onInput={(e) => setSettingsSteamcmdUsername(e.currentTarget.value)}
-                            placeholder={
-                              settingsStatus.data?.steamcmd_username_set
-                                ? '(configured — paste to update, blank + clear to remove)'
-                                : 'Steam username…'
-                            }
-                            autocomplete="username"
-                            spellcheck={false}
-                            class="font-mono text-[11px]"
-                          />
-
-                          <Input
-                            type={settingsSteamcmdPasswordVisible() ? 'text' : 'password'}
-                            value={settingsSteamcmdPassword()}
-                            onInput={(e) => setSettingsSteamcmdPassword(e.currentTarget.value)}
-                            placeholder={
-                              settingsStatus.data?.steamcmd_password_set
-                                ? '(configured — paste to update, blank + clear to remove)'
-                                : 'Steam password…'
-                            }
-                            autocomplete="current-password"
-                            class="w-full font-mono text-[11px]"
-                            rightIcon={
-                              <VisibilityToggle
-                                visible={settingsSteamcmdPasswordVisible()}
-                                labelWhenHidden="Show password"
-                                labelWhenVisible="Hide password"
-                                onToggle={() => setSettingsSteamcmdPasswordVisible((v) => !v)}
-                              />
-                            }
-                          />
-
-                          <Input
-                            value={settingsSteamcmdGuardCode()}
-                            onInput={(e) => setSettingsSteamcmdGuardCode(e.currentTarget.value)}
-                            placeholder="Steam Guard code (optional, usually not needed with maFile)…"
-                            autocomplete="one-time-code"
-                            class="font-mono text-[11px]"
-                          />
-
-                          <Textarea
-                            value={settingsSteamcmdMaFile()}
-                            onInput={(e) => setSettingsSteamcmdMaFile(e.currentTarget.value)}
-                            placeholder="Paste Steam Desktop Authenticator maFile JSON here (optional)…"
-                            class="min-h-[96px] font-mono text-[11px]"
-                          />
-
-                          <div class="flex flex-wrap items-center gap-2">
-                            <input
-                              ref={(el) => {
-                                settingsSteamcmdMaFileInputEl = el
-                              }}
-                              type="file"
-                              accept=".json,application/json"
-                              class="hidden"
-                              onChange={async (e) => {
-                                const file = e.currentTarget.files?.[0]
-                                if (!file) return
-                                try {
-                                  const text = await file.text()
-                                  setSettingsSteamcmdMaFile(text)
-                                  pushToast('success', 'maFile imported', file.name)
-                                } catch {
-                                  pushToast('error', 'Import failed', 'Could not read maFile')
-                                } finally {
-                                  e.currentTarget.value = ''
-                                }
-                              }}
-                            />
-                            <Button
-                              size="xs"
-                              variant="secondary"
-                              type="button"
-                              onClick={() => settingsSteamcmdMaFileInputEl?.click()}
-                            >
-                              Import maFile
-                            </Button>
-                            <Show when={settingsSteamcmdMaFile().trim().length > 0}>
-                              <Button
-                                size="xs"
-                                variant="secondary"
-                                onClick={() => setSettingsSteamcmdMaFile('')}
-                              >
-                                Clear maFile
-                              </Button>
-                            </Show>
-                          </div>
-                        </div>
-
-                        <div class="mt-3 flex flex-wrap items-center gap-2">
-                          <Button
-                            size="sm"
-                            variant="primary"
-                            loading={setSteamcmdCredentials.isPending}
-                            disabled={isReadOnly()}
-                            onClick={async () => {
-                              const username = settingsSteamcmdUsername().trim()
-                              const password = settingsSteamcmdPassword()
-                              const steam_guard_code = settingsSteamcmdGuardCode().trim()
-                              const mafile_json = settingsSteamcmdMaFile().trim()
-                              if ((username && !password) || (!username && password)) {
-                                pushToast('error', 'Missing field', 'Enter both Steam username and password, or clear both.')
-                                return
-                              }
-                              try {
-                                await setSteamcmdCredentials.mutateAsync({
-                                  username,
-                                  password,
-                                  steam_guard_code: steam_guard_code || null,
-                                  shared_secret: null,
-                                  mafile_json: mafile_json || null,
-                                })
-                                setSettingsSteamcmdUsername('')
-                                setSettingsSteamcmdPassword('')
-                                setSettingsSteamcmdGuardCode('')
-                                setSettingsSteamcmdMaFile('')
-                                void queryClient.invalidateQueries({ queryKey: ['settings.status', null] })
-                                pushToast('success', 'Login successful', 'SteamCMD credentials verified and saved')
-                              } catch (e) {
-                                toastError('Login failed', e)
-                              }
-                            }}
-                          >
-                            Login
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="secondary"
-                            disabled={isReadOnly()}
-                            onClick={async () => {
-                              try {
-                                await setSteamcmdCredentials.mutateAsync({
-                                  username: '',
-                                  password: '',
-                                  steam_guard_code: null,
-                                  shared_secret: null,
-                                  mafile_json: null,
-                                })
-                                setSettingsSteamcmdUsername('')
-                                setSettingsSteamcmdPassword('')
-                                setSettingsSteamcmdGuardCode('')
-                                setSettingsSteamcmdMaFile('')
-                                void queryClient.invalidateQueries({ queryKey: ['settings.status', null] })
-                                pushToast('success', 'Cleared', 'SteamCMD credentials cleared')
-                              } catch (e) {
-                                toastError('Clear failed', e)
-                              }
-                            }}
-                          >
-                            Clear
-                          </Button>
-                        </div>
-                      </div>
-
-                      <div class="rounded-2xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
-                        <div class="flex flex-wrap items-start justify-between gap-3">
-                          <div class="min-w-0">
-                            <div class="text-sm font-medium text-slate-900 dark:text-slate-100">Updates</div>
-                            <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                              Current <span class="font-mono">{controlDiagnostics.data?.control_version ?? '—'}</span>
-                              <Show when={updateCheck.data?.latest}>
-                                {(latest) => (
-                                  <>
-                                    {' '}
-                                    · Latest{' '}
-                                    <a
-                                      href={latest().url}
-                                      target="_blank"
-                                      rel="noreferrer"
-                                      class="font-mono text-slate-900 underline decoration-slate-300 underline-offset-2 hover:decoration-slate-500 dark:text-slate-100 dark:decoration-slate-700 dark:hover:decoration-slate-500"
-                                    >
-                                      {latest().tag}
-                                    </a>
-                                  </>
-                                )}
-                              </Show>
-                            </div>
-                          </div>
-                          <div class="flex flex-wrap items-center gap-2">
-                            <Show when={updateCheck.isPending}>
-                              <Badge variant="neutral">Checking</Badge>
-                            </Show>
-                            <Show when={updateCheck.data && !updateCheck.isPending && !updateCheck.isError}>
-                              <Badge variant={updateCheck.data?.update_available ? 'warning' : 'success'}>
-                                {updateCheck.data?.update_available ? 'Update available' : 'Up to date'}
-                              </Badge>
-                            </Show>
-                          </div>
-                        </div>
-
-                        <Show when={updateCheck.data?.latest?.published_at}>
-                          {(publishedAt) => (
-                            <div class="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
-                              Published <span class="font-mono">{publishedAt()}</span>
-                            </div>
-                          )}
-                        </Show>
-
-                        <Show when={updateCheck.data?.latest?.body}>
-                          {(body) => (
-                            <pre class="mt-3 max-h-56 overflow-auto rounded-xl border border-slate-200 bg-slate-50 p-3 text-[11px] leading-relaxed text-slate-700 dark:border-slate-800 dark:bg-slate-900/40 dark:text-slate-200">
-                              {body()}
-                            </pre>
-                          )}
-                        </Show>
-
-                        <Show when={updateCheck.isError}>
-                          <ErrorState title="Failed to check updates" error={updateCheck.error} onRetry={() => updateCheck.refetch()} class="mt-3" />
-                        </Show>
-
-                        <div class="mt-3 flex flex-wrap items-center gap-2">
-                          <Button size="sm" variant="secondary" disabled={updateCheck.isPending} onClick={() => updateCheck.refetch()}>
-                            Check
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="primary"
-                            loading={triggerUpdate.isPending}
-                            disabled={
-                              isReadOnly() ||
-                              triggerUpdate.isPending ||
-                              updateCheck.isPending ||
-                              !updateCheck.data?.can_trigger_update ||
-                              !updateCheck.data?.update_available
-                            }
-                            title={
-                              isReadOnly()
-                                ? 'Read-only mode'
-                                : !updateCheck.data?.can_trigger_update
-                                  ? 'Updater not configured'
-                                  : !updateCheck.data?.update_available
-                                    ? 'Already up to date'
-                                    : 'Trigger update'
-                            }
-                            onClick={async () => {
-                              try {
-                                const out = await triggerUpdate.mutateAsync(null)
-                                pushToast('success', 'Update triggered', out.message || 'Watchtower update requested.')
-                                setTimeout(() => {
-                                  try {
-                                    window.location.reload()
-                                  } catch {
-                                    // ignore
-                                  }
-                                }, 3000)
-                              } catch (e) {
-                                toastError('Update failed', e)
-                              }
-                            }}
-                          >
-                            Update now
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="secondary"
-                            onClick={async () => {
-                              const cmd = 'docker compose pull && docker compose up -d'
-                              try {
-                                await safeCopy(cmd)
-                                pushToast('success', 'Copied', cmd)
-                              } catch (e) {
-                                toastError('Copy failed', e)
-                              }
-                            }}
-                          >
-                            Copy docker command
-                          </Button>
-                        </div>
-
-                        <div class="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3 font-mono text-[11px] text-slate-700 dark:border-slate-800 dark:bg-slate-900/40 dark:text-slate-200">
-                          docker compose pull && docker compose up -d
-                        </div>
-
-                        <Show when={updateCheck.data && !updateCheck.data.can_trigger_update}>
-                          <div class="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
-                            One-click update requires Watchtower HTTP API. Set{' '}
-                            <span class="font-mono">ALLOY_UPDATE_WATCHTOWER_URL</span> and{' '}
-                            <span class="font-mono">ALLOY_UPDATE_WATCHTOWER_TOKEN</span> on{' '}
-                            <span class="font-mono">alloy-control</span>.
-                          </div>
-                        </Show>
-                      </div>
-                    </Show>
-                  </div>
-                </div>
-              </Show>
-
-              <Show when={tab() === 'nodes'}>
-                <NodesPage
-                  tabLabel="Nodes"
-                  left={
-                    <div class="space-y-3">
-                      <div class="flex items-center justify-end gap-2">
-                        <Show when={me()?.is_admin}>
-                          <IconButton type="button" label="Add node" variant="secondary" onClick={() => openCreateNode()}>
-                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-                              <path
-                                fill-rule="evenodd"
-                                d="M10 3.25a.75.75 0 01.75.75v5.25H16a.75.75 0 010 1.5h-5.25V16a.75.75 0 01-1.5 0v-5.25H4a.75.75 0 010-1.5h5.25V4a.75.75 0 01.75-.75z"
-                                clip-rule="evenodd"
-                              />
-                            </svg>
-                          </IconButton>
-                        </Show>
-                      </div>
-                      <div class="flex flex-wrap items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400">
-                        <span>Updated {formatRelativeTime(nodesLastUpdatedAtUnixMs())}</span>
-                        <Show when={nodes.isPending}>
-                          <span class="inline-flex items-center gap-1">
-                            <span class="h-1.5 w-1.5 rounded-full bg-slate-500 animate-pulse" />
-                            loading
-                          </span>
-                        </Show>
-                        <Show when={nodes.isError}>
-                          <span class="inline-flex items-center gap-1">
-                            <span class="h-1.5 w-1.5 rounded-full bg-rose-500" />
-                            error
-                          </span>
-                        </Show>
-                      </div>
-
-                      <Show when={nodes.isError} fallback={<></>}>
-                        <ErrorState title="Failed to load nodes" error={nodes.error} onRetry={() => void invalidateNodes()} />
-                      </Show>
-
-                      <Show when={!nodes.isError}>
-                        <Show when={nodes.isPending} fallback={<></>}>
-                          <div class="rounded-xl border border-slate-200 bg-white/60 p-3 dark:border-slate-800 dark:bg-slate-950/40">
-                            <Skeleton lines={6} />
-                          </div>
-                        </Show>
-
-                        <Show
-                          when={!nodes.isPending && (nodes.data ?? []).length > 0}
-                          fallback={
-                            <Show when={!nodes.isPending}>
-                              <EmptyState title="No nodes" description="No nodes registered yet." />
-                            </Show>
-                          }
-                        >
-                          <div class="max-h-96 overflow-auto rounded-xl border border-slate-200 bg-white/60 p-1 dark:border-slate-800 dark:bg-slate-950/40">
-                            <For each={nodes.data ?? []}>
-                              {(n) => (
-                                <button
-                                  type="button"
-                                  class={`w-full rounded-lg px-2 py-2 text-left transition-colors hover:bg-slate-100 dark:hover:bg-slate-900 ${
-                                    selectedNodeId() === n.id ? 'bg-slate-100 dark:bg-slate-900' : ''
-                                  }`}
-                                  onClick={() => setSelectedNodeId(n.id)}
-                                >
-                                  <div class="flex items-center justify-between gap-2">
-                                    <div class="min-w-0">
-                                      <div class="truncate text-sm font-medium text-slate-900 dark:text-slate-100">{n.name}</div>
-                                      <div class="mt-0.5 truncate font-mono text-[11px] text-slate-500">{n.endpoint}</div>
-                                    </div>
-                                    <span
-                                      class={`h-2 w-2 rounded-full ${
-                                        n.last_error ? 'bg-rose-500' : n.last_seen_at ? 'bg-emerald-400' : 'bg-slate-500'
-                                      }`}
-                                    />
-                                  </div>
-                                </button>
-                              )}
-                            </For>
-                          </div>
-                        </Show>
-                      </Show>
-                    </div>
-                  }
-                  right={
-                    <>
-                      <div class="flex flex-wrap items-center justify-between gap-2">
-                        <div class="text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">Details</div>
-                      </div>
-
-                      <div class="mt-3 rounded-xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
-                        <Show
-                          when={nodes.isError}
-                          fallback={
-                            <Show
-                              when={(nodes.data ?? []).length > 0}
-                              fallback={<EmptyState title="No nodes" description="There are no nodes to show." />}
-                            >
-                              <Show
-                                when={selectedNode()}
-                                fallback={<EmptyState title="Select a node" description="Pick a node from the left to view details." />}
-                              >
-                                {(n) => (
-                                  <div>
-                                    <div class="flex items-center justify-between gap-3">
-                                      <div class="min-w-0">
-                                        <div class="truncate text-sm font-medium text-slate-900 dark:text-slate-100">{n().name}</div>
-                                        <div class="mt-0.5 truncate font-mono text-[11px] text-slate-500">{n().endpoint}</div>
-                                      </div>
-                                      <Show when={me()?.is_admin}>
-                                        <button
-                                          type="button"
-                                          disabled={setNodeEnabled.isPending}
-                                          class="group inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/60 px-2 py-1.5 text-[11px] text-slate-700 shadow-sm hover:bg-white disabled:opacity-50 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-300 dark:shadow-none dark:hover:bg-slate-900"
-                                          onClick={async () => {
-                                            const id = n().id
-                                            const current =
-                                              Object.prototype.hasOwnProperty.call(nodeEnabledOverride(), id)
-                                                ? nodeEnabledOverride()[id]
-                                                : n().enabled
-                                            const next = !current
-                                            setNodeEnabledOverride({ ...nodeEnabledOverride(), [id]: next })
-                                            try {
-                                              await setNodeEnabled.mutateAsync({ node_id: id, enabled: next })
-                                              void invalidateNodes()
-                                            } catch {
-                                              setNodeEnabledOverride({ ...nodeEnabledOverride(), [id]: current })
-                                            }
-                                          }}
-                                        >
-                                          <span class="text-slate-500 dark:text-slate-500">Enabled</span>
-                                          <span
-                                            class={`relative inline-flex h-5 w-9 items-center rounded-full border transition-colors ${
-                                              (Object.prototype.hasOwnProperty.call(nodeEnabledOverride(), n().id)
-                                                ? nodeEnabledOverride()[n().id]
-                                                : n().enabled)
-                                                ? 'border-emerald-200 bg-emerald-100 dark:border-emerald-900/40 dark:bg-emerald-950/20'
-                                                : 'border-slate-300 bg-slate-200 dark:border-slate-700 dark:bg-slate-900/40'
-                                            }`}
-                                          >
-                                            <span
-                                              class={`inline-block h-4 w-4 transform rounded-full bg-slate-100 shadow transition-transform ${
-                                                (Object.prototype.hasOwnProperty.call(nodeEnabledOverride(), n().id)
-                                                  ? nodeEnabledOverride()[n().id]
-                                                  : n().enabled)
-                                                  ? 'translate-x-4'
-                                                  : 'translate-x-1'
-                                              }`}
-                                            />
-                                          </span>
-                                        </button>
-                                      </Show>
-                                    </div>
-
-                                    <div class="mt-4 grid grid-cols-2 gap-3 text-xs">
-                                      <div>
-                                        <div class="text-[11px] text-slate-500">Status</div>
-                                        <div class="mt-1 text-slate-700 dark:text-slate-200">{n().last_error ? 'Error' : n().last_seen_at ? 'Healthy' : 'Unknown'}</div>
-                                      </div>
-                                      <div>
-                                        <div class="text-[11px] text-slate-500">Agent</div>
-                                        <div class="mt-1 text-slate-700 dark:text-slate-200">{n().agent_version ?? '-'}</div>
-                                      </div>
-                                      <div class="col-span-2">
-                                        <div class="text-[11px] text-slate-500">Last seen</div>
-                                        <div class="mt-1 font-mono text-[11px] text-slate-700 dark:text-slate-200">{n().last_seen_at ?? '-'}</div>
-                                      </div>
-                                      <div class="col-span-2">
-                                        <div class="text-[11px] text-slate-500">Last error</div>
-                                        <div class="mt-1 font-mono text-[11px] text-rose-700 dark:text-rose-300">{n().last_error ?? '-'}</div>
-                                      </div>
-                                    </div>
-                                  </div>
-                                )}
-                              </Show>
-                            </Show>
-                          }
-                        >
-                          <ErrorState title="Failed to load nodes" error={nodes.error} onRetry={() => void invalidateNodes()} />
-                        </Show>
-                      </div>
-                    </>
-                  }
-                />
-              </Show>
+              <FrpTab
+                tab={tab}
+                frpNodes={frpNodes}
+                isAuthed={isAuthed}
+                isReadOnly={isReadOnly}
+                openCreateFrpNodeModal={openCreateFrpNodeModal}
+                openEditFrpNodeModal={openEditFrpNodeModal}
+                frpDeleteNode={frpDeleteNode}
+                invalidateFrpNodes={invalidateFrpNodes}
+                pushToast={pushToast}
+                toastError={toastError}
+              />
+              <SettingsTab
+                tab={tab}
+                settingsStatus={settingsStatus}
+                me={me}
+                settingsDstKeyVisible={settingsDstKeyVisible}
+                settingsDstKey={settingsDstKey}
+                setSettingsDstKey={setSettingsDstKey}
+                setSettingsDstKeyVisible={setSettingsDstKeyVisible}
+                setDstDefaultKleiKey={setDstDefaultKleiKey}
+                isReadOnly={isReadOnly}
+                pushToast={pushToast}
+                toastError={toastError}
+                settingsCurseforgeKeyVisible={settingsCurseforgeKeyVisible}
+                settingsCurseforgeKey={settingsCurseforgeKey}
+                setSettingsCurseforgeKey={setSettingsCurseforgeKey}
+                setSettingsCurseforgeKeyVisible={setSettingsCurseforgeKeyVisible}
+                setCurseforgeApiKey={setCurseforgeApiKey}
+                settingsSteamcmdUsername={settingsSteamcmdUsername}
+                setSettingsSteamcmdUsername={setSettingsSteamcmdUsername}
+                settingsSteamcmdPasswordVisible={settingsSteamcmdPasswordVisible}
+                settingsSteamcmdPassword={settingsSteamcmdPassword}
+                setSettingsSteamcmdPassword={setSettingsSteamcmdPassword}
+                setSettingsSteamcmdPasswordVisible={setSettingsSteamcmdPasswordVisible}
+                settingsSteamcmdGuardCode={settingsSteamcmdGuardCode}
+                setSettingsSteamcmdGuardCode={setSettingsSteamcmdGuardCode}
+                settingsSteamcmdMaFile={settingsSteamcmdMaFile}
+                setSettingsSteamcmdMaFile={setSettingsSteamcmdMaFile}
+                setSteamcmdCredentials={setSteamcmdCredentials}
+                updateCheck={updateCheck}
+                triggerUpdate={triggerUpdate}
+                controlDiagnostics={controlDiagnostics}
+              />
+              <NodesTab
+                tab={tab}
+                me={me}
+                openCreateNode={openCreateNode}
+                nodesLastUpdatedAtUnixMs={nodesLastUpdatedAtUnixMs}
+                nodes={nodes}
+                invalidateNodes={invalidateNodes}
+                selectedNodeId={selectedNodeId}
+                setSelectedNodeId={setSelectedNodeId}
+                selectedNode={selectedNode}
+                setNodeEnabled={setNodeEnabled}
+                nodeEnabledOverride={nodeEnabledOverride}
+                setNodeEnabledOverride={setNodeEnabledOverride}
+              />
               </div>
             </div>
           </main>
@@ -6649,2164 +3083,270 @@ function App() {
         {/* Legacy UI below the new console layout was accidentally left in place.
             Keep return() to the new layout + modals only. */}
 
-        <Modal
-          open={Boolean(selectedDownloadJobId())}
-          onClose={() => setSelectedDownloadJobId(null)}
-          title="Download Task"
-          description="Task details, latest failure reason, and quick copy actions."
-          size="md"
-          footer={
-            <div class="flex gap-3">
-              <Button variant="secondary" class="flex-1" onClick={() => setSelectedDownloadJobId(null)}>
-                Close
-              </Button>
-              <Show when={selectedDownloadJob()}>
-                {(job) => (
-                  <Button variant="primary" class="flex-1" onClick={() => void copyDownloadJobDetails(job())}>
-                    Copy JSON
-                  </Button>
-                )}
-              </Show>
-            </div>
-          }
-        >
-          <Show
-            when={selectedDownloadJob()}
-            fallback={<div class="rounded-xl border border-slate-200 bg-white/70 px-3 py-2 text-xs text-slate-500 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-300">This task is no longer in queue history.</div>}
-          >
-            {(job) => {
-              const latestFailure = () => latestDownloadFailureByTarget().get(job().target)
-              const latestFailureText = () => (latestFailure()?.message ?? '').trim()
-              return (
-                <div class="space-y-3">
-                  <div class="rounded-xl border border-slate-200 bg-white/70 px-3 py-2 text-xs dark:border-slate-800 dark:bg-slate-950/40">
-                    <div class="flex flex-wrap items-center gap-2">
-                      <div class="font-semibold text-slate-800 dark:text-slate-100">{downloadTargetLabel(job().target)}</div>
-                      <Badge variant={downloadJobStatusVariant(job().state)}>{downloadJobStatusLabel(job().state)}</Badge>
-                      <span class="rounded-full border border-slate-200 bg-white/70 px-2 py-0.5 font-mono text-[11px] text-slate-600 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-300">
-                        {job().version}
-                      </span>
-                    </div>
-                    <div class="mt-2 space-y-1 font-mono text-[11px] text-slate-600 dark:text-slate-300">
-                      <div>id {job().id}</div>
-                      <Show when={job().requestId}>
-                        <div>req {job().requestId}</div>
-                      </Show>
-                    </div>
-                    <div class="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
-                      started {formatDateTime(job().startedAtUnixMs)} · updated {formatDateTime(job().updatedAtUnixMs)}
-                    </div>
-                  </div>
-
-                  <div class="rounded-xl border border-slate-200 bg-white/70 px-3 py-2 text-xs dark:border-slate-800 dark:bg-slate-950/40">
-                    <div class="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Message</div>
-                    <div class="mt-1 whitespace-pre-wrap break-words text-slate-700 dark:text-slate-200">{job().message || '—'}</div>
-                  </div>
-
-                  <div class="rounded-xl border border-rose-200 bg-rose-50/70 px-3 py-2 text-xs text-rose-900 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-200">
-                    <div class="flex items-center justify-between gap-2">
-                      <div class="text-[11px] font-semibold uppercase tracking-wide">Latest failure reason</div>
-                      <Button size="xs" variant="secondary" onClick={() => void copyDownloadFailureReason(job())}>
-                        Copy
-                      </Button>
-                    </div>
-                    <div class="mt-1 whitespace-pre-wrap break-words font-mono text-[11px]">
-                      {latestFailureText() || 'No failure recorded yet for this target.'}
-                    </div>
-                  </div>
-                </div>
-              )
-            }}
-          </Show>
-        </Modal>
-
-        <Modal
-          open={showDspInitModal()}
-          onClose={() => closeDspInitModal()}
-          title="Steam Guard required"
-          description="SteamCMD credentials come from Settings. Enter the latest Steam Guard code and retry."
-          size="md"
-          initialFocus={() => dspSteamGuardCodeEl}
-          footer={
-            <div class="flex gap-3">
-              <Button variant="secondary" class="flex-1" onClick={() => closeDspInitModal()}>
-                Cancel
-              </Button>
-              <Button
-                variant="primary"
-                class="flex-1"
-                type="submit"
-                form="alloy-dsp-init"
-                loading={warmCache.isPending || createInstance.isPending}
-              >
-                {pendingCreateAfterDspInit() ? 'Retry & Create' : 'Retry'}
-              </Button>
-            </div>
-          }
-        >
-          <form
-            id="alloy-dsp-init"
-            class="grid gap-3"
-            onSubmit={async (e) => {
-              e.preventDefault()
-              await runDspInitAndMaybeCreate()
-            }}
-          >
-            <Field label="Steam Guard code" required error={warmFieldErrors().steam_guard_code}>
-              <Input
-                ref={(el) => {
-                  dspSteamGuardCodeEl = el
-                }}
-                value={dspSteamGuardCode()}
-                onInput={(e) => setDspSteamGuardCode(e.currentTarget.value)}
-                placeholder="12345"
-                invalid={Boolean(warmFieldErrors().steam_guard_code)}
-              />
-            </Field>
-
-            <Show when={warmFormError()}>
-              <div class="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-900 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-200">
-                <div class="font-semibold">Initialization failed</div>
-                <div class="mt-1 whitespace-pre-wrap break-words text-xs text-rose-800/90 dark:text-rose-200/90">{warmFormError()!.message}</div>
-                <Show when={warmFormError()!.requestId}>
-                  <div class="mt-2 text-[11px] text-rose-700/80 dark:text-rose-200/70 font-mono">req {warmFormError()!.requestId}</div>
-                </Show>
-              </div>
-            </Show>
-          </form>
-        </Modal>
-
-        <Modal
-          open={showLoginModal() && !me()}
-          onClose={() => setShowLoginModal(false)}
-          title="Sign in"
-          description="Enter your credentials to access the control plane."
-          size="sm"
-          initialFocus={() => loginUsernameEl}
-          footer={
-            <div class="flex gap-3">
-              <Button variant="secondary" class="flex-1" onClick={() => setShowLoginModal(false)}>
-                Cancel
-              </Button>
-              <Button variant="primary" class="flex-1" type="submit" form="alloy-login" loading={authLoading()}>
-                Sign in
-              </Button>
-            </div>
-          }
-        >
-          <form
-            id="alloy-login"
-            class="grid gap-4"
-            onSubmit={async (e) => {
-              e.preventDefault()
-              try {
-                setAuthError(null)
-                setAuthLoading(true)
-                await login({ username: loginUser(), password: loginPass() })
-                await refreshSession()
-                setShowLoginModal(false)
-              } catch (err) {
-                setAuthError(err instanceof Error ? err.message : 'login failed')
-              } finally {
-                setAuthLoading(false)
-              }
-            }}
-          >
-            <Field label="Username" required>
-              <Input
-                ref={(el) => {
-                  loginUsernameEl = el
-                }}
-                value={loginUser()}
-                onInput={(ev) => setLoginUser(ev.currentTarget.value)}
-                autocomplete="username"
-              />
-            </Field>
-            <Field label="Password" required>
-              <Input
-                type="password"
-                value={loginPass()}
-                onInput={(ev) => setLoginPass(ev.currentTarget.value)}
-                autocomplete="current-password"
-              />
-            </Field>
-
-            <Show when={authError()}>
-              {(msg) => (
-                <div class="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-[12px] text-rose-800 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-200">
-                  {msg()}
-                </div>
-              )}
-            </Show>
-          </form>
-        </Modal>
-
-        <Modal
-          open={showCreateNodeModal()}
-          onClose={() => closeCreateNode()}
-          title="Add node"
-          description="Creates a one-time token and a docker-compose snippet for an agent to connect back."
-          size="lg"
-          footer={
-            <Show
-              when={createNodeResult()}
-              fallback={
-                <div class="flex gap-3">
-                  <Button variant="secondary" class="flex-1" onClick={() => closeCreateNode()}>
-                    Cancel
-                  </Button>
-                  <Button
-                    variant="primary"
-                    class="flex-1"
-                    type="submit"
-                    form="alloy-create-node"
-                    loading={createNode.isPending}
-                    disabled={!createNodeName().trim()}
-                  >
-                    Create
-                  </Button>
-                </div>
-              }
-            >
-              <div class="flex gap-3">
-                <Button variant="secondary" class="flex-1" onClick={() => closeCreateNode()}>
-                  Close
-                </Button>
-              </div>
-            </Show>
-          }
-        >
-          <Show
-            when={createNodeResult()}
-            fallback={
-              <form
-                id="alloy-create-node"
-                class="grid gap-4"
-                onSubmit={async (e) => {
-                  e.preventDefault()
-                  setCreateNodeFieldErrors({})
-                  setCreateNodeFormError(null)
-                  try {
-                    const out = await createNode.mutateAsync({ name: createNodeName().trim() })
-                    setCreateNodeResult(out as any)
-                    pushToast('success', 'Node created', (out as any).node?.name ?? '')
-                    await invalidateNodes()
-                    if ((out as any).node?.id) setSelectedNodeId((out as any).node.id)
-                  } catch (err) {
-                    if (isAlloyApiError(err)) {
-                      setCreateNodeFieldErrors(err.data.field_errors ?? {})
-                      setCreateNodeFormError(err.data.message)
-                      return
-                    }
-                    setCreateNodeFormError(err instanceof Error ? err.message : 'create failed')
-                  }
-                }}
-              >
-                <Field label="Name" required error={createNodeFieldErrors().name}>
-                  <Input
-                    ref={(el) => {
-                      createNodeNameEl = el
-                    }}
-                    value={createNodeName()}
-                    onInput={(e) => setCreateNodeName(e.currentTarget.value)}
-                    placeholder="e.g. node-1"
-                    spellcheck={false}
-                    invalid={Boolean(createNodeFieldErrors().name)}
-                  />
-                </Field>
-
-                <Field label={<LabelTip label="Control WS URL" content="The agent connects to this websocket endpoint (usually your panel URL)." />}>
-                  <Input
-                    value={createNodeControlWsUrl()}
-                    onInput={(e) => setCreateNodeControlWsUrl(e.currentTarget.value)}
-                    placeholder={defaultControlWsUrl()}
-                    spellcheck={false}
-                  />
-                </Field>
-
-                <Show when={createNodeFormError()}>
-                  {(msg) => (
-                    <div class="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-[12px] text-rose-800 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-200">
-                      {msg()}
-                    </div>
-                  )}
-                </Show>
-              </form>
-            }
-          >
-            {(r) => (
-              <div class="space-y-4">
-                <div class="rounded-2xl border border-slate-200 bg-white/60 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
-                  <div class="flex items-center justify-between gap-3">
-                    <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Token</div>
-                    <IconButton
-                      type="button"
-                      label="Copy token"
-                      variant="secondary"
-                      onClick={() => {
-                        void safeCopy(r().connect_token)
-                        pushToast('success', 'Copied', 'Token copied.')
-                      }}
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-                        <path d="M5.75 2A2.75 2.75 0 003 4.75v9.5A2.75 2.75 0 005.75 17h1.5a.75.75 0 000-1.5h-1.5c-.69 0-1.25-.56-1.25-1.25v-9.5c0-.69.56-1.25 1.25-1.25h5.5c.69 0 1.25.56 1.25 1.25v1a.75.75 0 001.5 0v-1A2.75 2.75 0 0011.25 2h-5.5z" />
-                        <path d="M8.75 6A2.75 2.75 0 006 8.75v6.5A2.75 2.75 0 008.75 18h5.5A2.75 2.75 0 0017 15.25v-6.5A2.75 2.75 0 0014.25 6h-5.5z" />
-                      </svg>
-                    </IconButton>
-                  </div>
-                  <Input value={r().connect_token} readOnly class="mt-2 font-mono text-[11px]" />
-                  <div class="mt-2 text-[11px] text-slate-500 dark:text-slate-400">Save it now — it’s only shown once.</div>
-                </div>
-
-                <div class="rounded-2xl border border-slate-200 bg-white/60 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
-                  <div class="flex items-center justify-between gap-3">
-                    <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">docker-compose.yml</div>
-                    <IconButton
-                      type="button"
-                      label="Copy compose"
-                      variant="secondary"
-                      onClick={() => {
-                        void safeCopy(createNodeComposeYaml())
-                        pushToast('success', 'Copied', 'Compose copied.')
-                      }}
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-                        <path d="M5.75 2A2.75 2.75 0 003 4.75v9.5A2.75 2.75 0 005.75 17h1.5a.75.75 0 000-1.5h-1.5c-.69 0-1.25-.56-1.25-1.25v-9.5c0-.69.56-1.25 1.25-1.25h5.5c.69 0 1.25.56 1.25 1.25v1a.75.75 0 001.5 0v-1A2.75 2.75 0 0011.25 2h-5.5z" />
-                        <path d="M8.75 6A2.75 2.75 0 006 8.75v6.5A2.75 2.75 0 008.75 18h5.5A2.75 2.75 0 0017 15.25v-6.5A2.75 2.75 0 0014.25 6h-5.5z" />
-                      </svg>
-                    </IconButton>
-                  </div>
-
-                  <div class="mt-3">
-                    <Field label={<LabelTip label="Control WS URL" content="If your agent can’t reach the panel, update this URL and copy again." />}>
-                      <Input
-                        value={createNodeControlWsUrl()}
-                        onInput={(e) => setCreateNodeControlWsUrl(e.currentTarget.value)}
-                        placeholder={defaultControlWsUrl()}
-                        spellcheck={false}
-                      />
-                    </Field>
-                  </div>
-
-                  <Textarea value={createNodeComposeYaml()} readOnly class="mt-3 font-mono text-[11px]" />
-                </div>
-              </div>
-            )}
-          </Show>
-        </Modal>
-
-        <Modal
-          open={showFrpNodeModal()}
-          onClose={() => closeFrpNodeModal()}
-          title={editingFrpNodeId() ? 'Edit FRP node' : 'Add FRP node'}
-          description="Store FRP server info and optional config. Config format is auto-detected (INI/TOML/YAML/JSON)."
-          size="lg"
-          initialFocus={() => frpNodeNameEl}
-          footer={
-            <div class="flex gap-3">
-              <Button variant="secondary" class="flex-1" onClick={() => closeFrpNodeModal()}>
-                Cancel
-              </Button>
-              <Button
-                variant="primary"
-                class="flex-1"
-                type="submit"
-                form="alloy-frp-node"
-                loading={frpCreateNode.isPending || frpUpdateNode.isPending}
-                disabled={isReadOnly() || !frpNodeCanSave()}
-              >
-                Save
-              </Button>
-            </div>
-          }
-        >
-          <form
-            id="alloy-frp-node"
-            class="grid gap-4"
-            onSubmit={async (e) => {
-              e.preventDefault()
-              setFrpNodeFieldErrors({})
-              setFrpNodeFormError(null)
-              try {
-                const id = editingFrpNodeId()
-                const parsedPort = Number.parseInt(frpNodeServerPort().trim(), 10)
-                const input = {
-                  name: frpNodeName().trim(),
-                  server_addr: frpNodeServerAddr().trim() || null,
-                  server_port: Number.isFinite(parsedPort) && parsedPort > 0 && parsedPort <= 65535 ? parsedPort : null,
-                  allocatable_ports: frpNodeAllocatablePorts().trim() || null,
-                  token: frpNodeToken().trim() || null,
-                  config: frpNodeConfig(),
-                }
-                if (!id) {
-                  const out = await frpCreateNode.mutateAsync(input)
-                  pushToast('success', 'Saved', out.name)
-                } else {
-                  const out = await frpUpdateNode.mutateAsync({ id, ...input })
-                  pushToast('success', 'Saved', out.name)
-                }
-                closeFrpNodeModal()
-                void invalidateFrpNodes()
-              } catch (err) {
-                if (isAlloyApiError(err)) {
-                  setFrpNodeFieldErrors(err.data.field_errors ?? {})
-                  setFrpNodeFormError(err.data.message)
-                  queueMicrotask(() => {
-                    if (err.data.field_errors?.name) focusEl(frpNodeNameEl)
-                    else if (err.data.field_errors?.server_addr) focusEl(frpNodeServerAddrEl)
-                    else if (err.data.field_errors?.server_port) focusEl(frpNodeServerPortEl)
-                    else if (err.data.field_errors?.config) focusEl(frpNodeConfigEl)
-                  })
-                  return
-                }
-                setFrpNodeFormError(err instanceof Error ? err.message : 'save failed')
-              }
-            }}
-          >
-            <Field label="Name" required error={frpNodeFieldErrors().name}>
-              <Input
-                ref={(el) => {
-                  frpNodeNameEl = el
-                }}
-                value={frpNodeName()}
-                onInput={(e) => setFrpNodeName(e.currentTarget.value)}
-                placeholder="e.g. my-frp"
-                spellcheck={false}
-                invalid={Boolean(frpNodeFieldErrors().name)}
-              />
-            </Field>
-
-            <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <Field label="FRP Server" required error={frpNodeFieldErrors().server_addr}>
-                <Input
-                  ref={(el) => {
-                    frpNodeServerAddrEl = el
-                  }}
-                  value={frpNodeServerAddr()}
-                  onInput={(e) => setFrpNodeServerAddr(e.currentTarget.value)}
-                  placeholder="e.g. 1.2.3.4 or frp.example.com"
-                  spellcheck={false}
-                  invalid={Boolean(frpNodeFieldErrors().server_addr)}
-                />
-              </Field>
-
-              <Field label="Server port" required error={frpNodeFieldErrors().server_port}>
-                <Input
-                  ref={(el) => {
-                    frpNodeServerPortEl = el
-                  }}
-                  type="number"
-                  value={frpNodeServerPort()}
-                  onInput={(e) => setFrpNodeServerPort(e.currentTarget.value)}
-                  placeholder="7000"
-                  invalid={Boolean(frpNodeFieldErrors().server_port)}
-                />
-              </Field>
-            </div>
-
-            <Field
-              label={<LabelTip label="Allocatable ports" content="Optional. For example: 20000-20100,21000. Used when remote_port is auto." />}
-              error={frpNodeFieldErrors().allocatable_ports}
-            >
-              <Input
-                value={frpNodeAllocatablePorts()}
-                onInput={(e) => setFrpNodeAllocatablePorts(e.currentTarget.value)}
-                placeholder="20000-20100,21000"
-                spellcheck={false}
-                class="font-mono text-[11px]"
-                invalid={Boolean(frpNodeFieldErrors().allocatable_ports)}
-              />
-            </Field>
-
-            <Field label="Token (optional)" error={frpNodeFieldErrors().token}>
-              <Input
-                type={frpNodeTokenVisible() ? 'text' : 'password'}
-                value={frpNodeToken()}
-                onInput={(e) => setFrpNodeToken(e.currentTarget.value)}
-                placeholder="FRP token"
-                spellcheck={false}
-                class="font-mono text-[11px]"
-                invalid={Boolean(frpNodeFieldErrors().token)}
-                rightIcon={
-                  <VisibilityToggle
-                    visible={frpNodeTokenVisible()}
-                    labelWhenHidden="Show token"
-                    labelWhenVisible="Hide token"
-                    onToggle={() => setFrpNodeTokenVisible((v) => !v)}
-                  />
-                }
-              />
-            </Field>
-
-            <Field
-              label={<LabelTip label="Config (optional)" content="Auto-detected: INI/TOML/YAML/JSON. If empty, Alloy generates a config from server fields above." />}
-              error={frpNodeFieldErrors().config}
-            >
-              <Textarea
-                ref={(el) => {
-                  frpNodeConfigEl = el
-                }}
-                value={frpNodeConfig()}
-                onInput={(e) => setFrpNodeConfig(e.currentTarget.value)}
-                placeholder="Paste FRP config (INI/TOML/YAML/JSON)"
-                spellcheck={false}
-                class="font-mono text-[11px]"
-                invalid={Boolean(frpNodeFieldErrors().config)}
-              />
-              <div class="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
-                Detected format: <span class="font-mono uppercase">{frpNodeDetectedFormat()}</span>
-              </div>
-            </Field>
-
-            <Show when={frpNodeFormError()}>
-              {(msg) => (
-                <div class="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-[12px] text-rose-800 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-200">
-                  {msg()}
-                </div>
-              )}
-            </Show>
-          </form>
-        </Modal>
-
-        <Modal
-          open={confirmDeleteInstanceId() != null}
-          onClose={() => setConfirmDeleteInstanceId(null)}
-          title="Delete instance"
-          description="This permanently deletes the instance directory under /data."
-          size="sm"
-          footer={
-            <div class="flex gap-3">
-              <Button variant="secondary" class="flex-1" onClick={() => setConfirmDeleteInstanceId(null)}>
-                Cancel
-              </Button>
-              <Button
-                variant="danger"
-                class="flex-1"
-                disabled={
-                  deleteInstance.isPending ||
-                  confirmDeleteText().trim() !== (confirmDeleteInstanceId() ?? '') ||
-                  !confirmDeleteInstanceId()
-                }
-                loading={deleteInstance.isPending}
-                onClick={async () => {
-                  const id = confirmDeleteInstanceId()
-                  if (!id) return
-                  try {
-                    await deleteInstance.mutateAsync({ instance_id: id })
-                    if (selectedInstanceId() === id) setSelectedInstanceId(null)
-                    pushToast('success', 'Deleted', id)
-                    setConfirmDeleteInstanceId(null)
-                    await invalidateInstances()
-                  } catch (e) {
-                    toastError('Delete failed', e)
-                  }
-                }}
-              >
-                Delete
-              </Button>
-            </div>
-          }
-        >
-          <div class="space-y-4">
-            <div class="rounded-2xl border border-slate-200 bg-white/60 p-4 text-[12px] text-slate-700 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-200">
-              <div class="flex items-center justify-between gap-3">
-                <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Delete preview</div>
-                <Show when={instanceDeletePreview.isPending}>
-                  <span class="text-[11px] text-slate-400">loading…</span>
-                </Show>
-                <Show when={instanceDeletePreview.isError}>
-                  <span class="text-[11px] text-rose-600 dark:text-rose-300">failed</span>
-                </Show>
-                <Show when={!instanceDeletePreview.isPending && !instanceDeletePreview.isError}>
-                  <span class="text-[11px] text-slate-500 dark:text-slate-400">ok</span>
-                </Show>
-              </div>
-
-              <Show when={instanceDeletePreview.data}>
-                {(d) => (
-                  <div class="mt-3 space-y-2">
-                    <div class="flex items-center justify-between gap-3">
-                      <div class="text-slate-500 dark:text-slate-400">Path</div>
-                      <div class="min-w-0 truncate font-mono text-[11px]" title={d().path}>
-                        {d().path}
-                      </div>
-                    </div>
-                    <div class="flex items-center justify-between gap-3">
-                      <div class="text-slate-500 dark:text-slate-400">Estimated size</div>
-                      <div class="font-mono text-[11px]">{formatBytes(Number(d().size_bytes))}</div>
-                    </div>
-                  </div>
-                )}
-              </Show>
-
-              <Show when={instanceDeletePreview.isError}>
-                <div class="mt-3 text-[11px] text-rose-700/80 dark:text-rose-200/70">
-                  Preview unavailable. You can still delete after confirmation.
-                </div>
-              </Show>
-            </div>
-
-            <Field
-              label="Type the instance id to confirm"
-              required
-              description="Tip: copy/paste the id to avoid typos."
-              error={
-                confirmDeleteText().trim().length > 0 && confirmDeleteText().trim() !== (confirmDeleteInstanceId() ?? '')
-                  ? 'Does not match.'
-                  : undefined
-              }
-            >
-              <Input
-                value={confirmDeleteText()}
-                onInput={(e) => setConfirmDeleteText(e.currentTarget.value)}
-                placeholder={confirmDeleteInstanceId() ?? ''}
-                invalid={confirmDeleteText().trim().length > 0 && confirmDeleteText().trim() !== (confirmDeleteInstanceId() ?? '')}
-              />
-            </Field>
-          </div>
-        </Modal>
-
-        <Modal
-          open={editingInstanceId() != null && editBase() != null}
-          onClose={() => closeEditModal()}
-          title="Edit instance"
-          size="lg"
-        >
-          <div class="px-6 py-6">
-                <div class="flex items-start gap-3">
-                  <div class="mt-0.5 flex h-9 w-9 items-center justify-center rounded-full bg-amber-500/10 text-amber-700 dark:bg-amber-500/15 dark:text-amber-200">
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-5 w-5">
-                      <path d="M5.433 13.69A4.5 4.5 0 0110 6.5h.25a.75.75 0 000-1.5H10a6 6 0 00-5.9 4.91.75.75 0 00.58.88.75.75 0 00.88-.58 4.5 4.5 0 01-.127 3.5z" />
-                      <path d="M14.567 6.31A4.5 4.5 0 0110 13.5h-.25a.75.75 0 000 1.5H10a6 6 0 005.9-4.91.75.75 0 00-.58-.88.75.75 0 00-.88.58 4.5 4.5 0 01.127-3.5z" />
-                    </svg>
-                  </div>
-                  <div class="min-w-0">
-                    <h3 class="text-base font-semibold text-slate-900 dark:text-slate-100">Edit instance</h3>
-                    <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                      <span class="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[12px] text-slate-700 dark:bg-slate-800 dark:text-slate-200">
-                        {editBase()!.instance_id}
-                      </span>
-                      <span class="mx-2 text-slate-300 dark:text-slate-700">/</span>
-                      <span class="font-mono text-[12px] text-slate-600 dark:text-slate-300">{editBase()!.template_id}</span>
-                    </p>
-                  </div>
-                  <div class="ml-auto flex items-center gap-2">
-                    <span
-                      class={`rounded-full border px-2 py-1 text-[11px] font-semibold tracking-wide ${
-                        editHasChanges()
-                          ? 'border-amber-300 bg-amber-500/10 text-amber-800 dark:border-amber-500/30 dark:text-amber-200'
-                          : 'border-slate-200 bg-white/60 text-slate-500 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-400'
-                      }`}
-                    >
-                      {editHasChanges() ? `${editChangedKeys().length} change(s)` : 'No changes'}
-                    </span>
-                  </div>
-                </div>
-
-                <div class="mt-4 rounded-xl border border-slate-200 bg-slate-50/60 p-3 text-[12px] text-slate-700 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-200">
-                  <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Notes</div>
-                  <ul class="mt-2 space-y-1 text-[12px] text-slate-600 dark:text-slate-300">
-                    <li>Changes apply on next start.</li>
-                    <li>Stop the instance before editing (required).</li>
-                  </ul>
-                  <Show when={editRisk().length > 0}>
-                    <div class="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-200">
-                      <div class="text-xs font-semibold uppercase tracking-wider text-amber-700/80 dark:text-amber-200/80">Risk</div>
-                      <ul class="mt-1 space-y-1">
-                        <For each={editRisk()}>{(r) => <li>{r}</li>}</For>
-                      </ul>
-                    </div>
-                  </Show>
-                </div>
-
-                <div class="mt-5 space-y-3">
-                  <Field label="Display name (optional)" error={editFieldErrors().display_name}>
-                    <Input
-                      ref={(el) => {
-                        editDisplayNameEl = el
-                      }}
-                      value={editDisplayName()}
-                      onInput={(e) => setEditDisplayName(e.currentTarget.value)}
-                      placeholder="e.g. friends-survival"
-                      invalid={Boolean(editFieldErrors().display_name)}
-                      spellcheck={false}
-                    />
-                  </Field>
-
-                  <Show when={editTemplateId() === 'demo:sleep'}>
-                    <Field label="Seconds" required error={editFieldErrors().seconds}>
-                      <Input
-                        ref={(el) => {
-                          editSleepSecondsEl = el
-                        }}
-                        type="number"
-                        value={editSleepSeconds()}
-                        onInput={(e) => setEditSleepSeconds(e.currentTarget.value)}
-                        invalid={Boolean(editFieldErrors().seconds)}
-                      />
-                    </Field>
-                  </Show>
-
-                  <Show when={editTemplateId() === 'minecraft:vanilla'}>
-                    <div class="space-y-3 rounded-xl border border-slate-200 bg-white/60 p-3 dark:border-slate-800 dark:bg-slate-950/40">
-                      <div class="flex items-center justify-between gap-3">
-                        <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Minecraft</div>
-                        <div class="flex items-center gap-2">
-                          <span class="rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 text-[11px] font-mono text-slate-600 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-300">
-                            EULA accepted
-                          </span>
-                          <Button
-                            size="xs"
-                            variant={editAdvanced() ? 'secondary' : 'ghost'}
-                            onClick={() => setEditAdvanced((v) => !v)}
-                            title="Show or hide advanced fields"
-                          >
-                            <span class="inline-flex items-center gap-2">
-                              {editAdvanced() ? 'Hide advanced' : 'Advanced'}
-                              <Show when={!editAdvanced() && editAdvancedDirty()}>
-                                <span class="h-1.5 w-1.5 rounded-full bg-amber-500" aria-hidden="true" />
-                              </Show>
-                            </span>
-                          </Button>
-                        </div>
-                      </div>
-
-		                      <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-		                        <Field
-		                          label={
-		                            <LabelTip
-		                              label="Version"
-		                              content="Changing version may trigger downloads and compatibility issues."
-		                            />
-		                          }
-		                          error={editFieldErrors().version}
-		                        >
-                              <div class="space-y-2">
-                                <Dropdown
-                                  label=""
-                                  value={editMcVersion()}
-                                  options={optionsWithCurrentValue(mcVersionOptions(), editMcVersion())}
-                                  onChange={setEditMcVersion}
-                                />
-                              </div>
-	                        </Field>
-
-	                        <Field
-	                          label={
-	                            <LabelTip
-	                              label="Memory (MB)"
-	                              content="Sets JVM heap size. Too low can crash; too high can starve the host."
-	                            />
-	                          }
-	                          error={editFieldErrors().memory_mb}
-	                        >
-                          <Input
-                            ref={(el) => {
-                              editMcMemoryEl = el
-                            }}
-                            type="number"
-                            value={editMcMemory()}
-                            onInput={(e) => setEditMcMemory(e.currentTarget.value)}
-                            placeholder="2048"
-                            invalid={Boolean(editFieldErrors().memory_mb)}
-                          />
-                        </Field>
-                      </div>
-
-	                      <Show when={editAdvanced()}>
-	                        <div class="space-y-3">
-	                          <Field
-	                            label={
-	                              <LabelTip
-	                                label="Port (0 = auto)"
-	                                content="Applied on next start. Use 0 to auto-assign a free port."
-	                              />
-	                            }
-	                            error={editFieldErrors().port}
-	                          >
-                              <Input
-                                ref={(el) => {
-                                  editMcPortEl = el
-                                }}
-                                type="number"
-                                value={editMcPort()}
-                                onInput={(e) => setEditMcPort(e.currentTarget.value)}
-                                placeholder="0 for auto"
-                                invalid={Boolean(editFieldErrors().port)}
-                              />
-                            </Field>
-
-	                          <Field
-	                            label={<LabelTip label="Public (FRP)" content="Optional. Paste an FRP config to expose this instance (auto-detects INI/TOML/YAML/JSON)." />}
-	                            error={editFieldErrors().frp_config}
-	                          >
-	                            <div class="space-y-2">
-	                              <label class="inline-flex items-center gap-2 text-[12px] text-slate-700 dark:text-slate-200">
-	                                <input
-	                                  type="checkbox"
-	                                  class="h-4 w-4 rounded border-slate-300 bg-white text-amber-600 focus:ring-amber-400 dark:border-slate-700 dark:bg-slate-950/60 dark:text-amber-400"
-	                                  checked={editMcFrpEnabled()}
-	                                  onChange={(e) => {
-	                                    setEditMcFrpEnabled(e.currentTarget.checked)
-	                                    if (!e.currentTarget.checked) {
-	                                      setEditMcFrpConfig('')
-	                                      setEditMcFrpMode('paste')
-	                                      setEditMcFrpNodeId('')
-	                                    }
-	                                  }}
-	                                />
-	                                <span>Enable</span>
-	                              </label>
-	                              <Show when={editMcFrpEnabled()}>
-	                                <div class="space-y-2">
-	                                  <div class="flex flex-wrap items-center justify-between gap-2">
-	                                    <Tabs
-	                                      value={editMcFrpMode()}
-	                                      options={[
-	                                        { value: 'paste', label: 'Paste' },
-	                                        { value: 'node', label: 'Node' },
-	                                      ]}
-	                                      onChange={(mode) => {
-	                                        setEditMcFrpMode(mode)
-	                                        if (mode === 'paste') setEditMcFrpNodeId('')
-	                                        if (mode === 'node') setEditMcFrpConfig('')
-	                                      }}
-	                                    />
-	                                    <Button size="xs" variant="secondary" onClick={() => setTab('frp')}>
-	                                      Manage nodes
-	                                    </Button>
-	                                  </div>
-
-	                                  <Show when={editMcFrpMode() === 'node'}>
-	                                    <div
-	                                      ref={(el) => {
-	                                        editMcFrpNodeEl = el
-	                                      }}
-	                                    >
-	                                      <Dropdown
-	                                        label=""
-	                                        value={editMcFrpNodeId()}
-	                                        options={frpNodeDropdownOptions()}
-	                                        placeholder="Select node…"
-	                                        onChange={setEditMcFrpNodeId}
-	                                      />
-	                                    </div>
-	                                    <div class="text-[11px] text-slate-500 dark:text-slate-400">
-	                                      If you don’t select a node, the existing config (if any) stays unchanged.
-	                                    </div>
-	                                  </Show>
-
-	                                  <Show when={editMcFrpMode() === 'paste'}>
-	                                    <Textarea
-	                                      ref={(el) => {
-	                                        editMcFrpConfigEl = el
-	                                      }}
-	                                      value={editMcFrpConfig()}
-	                                      onInput={(e) => setEditMcFrpConfig(e.currentTarget.value)}
-	                                      placeholder="Paste FRP config to set/replace (auto: INI/TOML/YAML/JSON)"
-	                                      spellcheck={false}
-	                                      class="font-mono text-[11px]"
-	                                      invalid={Boolean(editFieldErrors().frp_config)}
-	                                    />
-	                                  </Show>
-	                                </div>
-	                              </Show>
-	                            </div>
-	                          </Field>
-	                        </div>
-                      </Show>
-                    </div>
-                  </Show>
-
-                  <Show when={editTemplateId() === 'terraria:vanilla'}>
-                    <div class="space-y-3 rounded-xl border border-slate-200 bg-white/60 p-3 dark:border-slate-800 dark:bg-slate-950/40">
-                      <div class="flex items-center justify-between gap-3">
-                        <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Terraria</div>
-                        <Button
-                          size="xs"
-                          variant={editAdvanced() ? 'secondary' : 'ghost'}
-                          onClick={() => setEditAdvanced((v) => !v)}
-                          title="Show or hide advanced fields"
-                        >
-                          <span class="inline-flex items-center gap-2">
-                            {editAdvanced() ? 'Hide advanced' : 'Advanced'}
-                            <Show when={!editAdvanced() && editAdvancedDirty()}>
-                              <span class="h-1.5 w-1.5 rounded-full bg-amber-500" aria-hidden="true" />
-                            </Show>
-                          </span>
-                        </Button>
-                      </div>
-
-	                      <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-		                        <Field
-		                          label={
-		                            <LabelTip
-		                              label="Version"
-		                              content="Package id (e.g. 1453). Changing version may require re-download and can affect world compatibility."
-		                            />
-		                          }
-		                          error={editFieldErrors().version}
-		                        >
-                            <div class="space-y-2">
-                              <Dropdown
-                                label=""
-                                value={editTrVersion()}
-                                options={optionsWithCurrentValue(trVersionOptions(), editTrVersion())}
-                                onChange={setEditTrVersion}
-                              />
-                            </div>
-	                        </Field>
-
-	                        <Field
-	                          label={<LabelTip label="Max players" content="Maximum concurrent players allowed to join." />}
-	                          error={editFieldErrors().max_players}
-	                        >
-                          <Input
-                            ref={(el) => {
-                              editTrMaxPlayersEl = el
-                            }}
-                            type="number"
-                            value={editTrMaxPlayers()}
-                            onInput={(e) => setEditTrMaxPlayers(e.currentTarget.value)}
-                            placeholder="8"
-                            invalid={Boolean(editFieldErrors().max_players)}
-                          />
-                        </Field>
-                      </div>
-
-	                      <Field
-	                        label={
-	                          <LabelTip
-	                            label="World name"
-	                            content="Changing world name will use a different world file (existing worlds are not deleted)."
-	                          />
-	                        }
-	                        error={editFieldErrors().world_name}
-	                      >
-                        <Input
-                          ref={(el) => {
-                            editTrWorldNameEl = el
-                          }}
-                          value={editTrWorldName()}
-                          onInput={(e) => setEditTrWorldName(e.currentTarget.value)}
-                          placeholder="world"
-                          invalid={Boolean(editFieldErrors().world_name)}
-                        />
-                      </Field>
-
-	                      <Show when={editAdvanced()}>
-	                        <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-	                          <Field
-	                            label={
-	                              <LabelTip
-	                                label="Port (0 = auto)"
-	                                content="Applied on next start. Use 0 to auto-assign a free port."
-	                              />
-	                            }
-	                            error={editFieldErrors().port}
-	                          >
-                            <Input
-                              ref={(el) => {
-                                editTrPortEl = el
-                              }}
-                              type="number"
-                              value={editTrPort()}
-                              onInput={(e) => setEditTrPort(e.currentTarget.value)}
-                              placeholder="0 for auto"
-                              invalid={Boolean(editFieldErrors().port)}
-                            />
-                          </Field>
-
-	                          <Field
-	                            label={<LabelTip label="World size (1/2/3)" content="1=small, 2=medium, 3=large." />}
-	                            error={editFieldErrors().world_size}
-	                          >
-                            <Input
-                              ref={(el) => {
-                                editTrWorldSizeEl = el
-                              }}
-                              type="number"
-                              value={editTrWorldSize()}
-                              onInput={(e) => setEditTrWorldSize(e.currentTarget.value)}
-                              placeholder="1"
-                              invalid={Boolean(editFieldErrors().world_size)}
-                            />
-                          </Field>
-                        </div>
-
-	                        <Field
-	                          label={<LabelTip label="Password (optional)" content="Leave blank to keep existing; set a value to change." />}
-	                          error={editFieldErrors().password}
-	                        >
-	                          <div class="flex flex-wrap items-center gap-2">
-	                          <Input
-	                          ref={(el) => {
-	                          editTrPasswordEl = el
-	                          }}
-	                          type={editTrPasswordVisible() ? 'text' : 'password'}
-	                          value={editTrPassword()}
-	                          onInput={(e) => setEditTrPassword(e.currentTarget.value)}
-	                          placeholder="(leave blank to keep)"
-	                          invalid={Boolean(editFieldErrors().password)}
-	                          class="w-full flex-1"
-	                            rightIcon={
-	                              <VisibilityToggle
-	                              visible={editTrPasswordVisible()}
-	                              labelWhenHidden="Show password"
-	                              labelWhenVisible="Hide password"
-	                              onToggle={() => setEditTrPasswordVisible((v) => !v)}
-	                            />
-	                            }
-	                          />
-	                          <IconButton
-	                              type="button"
-	                              size="sm"
-	                              variant="secondary"
-	                              label="Copy password"
-	                              disabled={!editTrPassword().trim()}
-	                              onClick={() => void safeCopy(editTrPassword())}
-	                            >
-	                              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-	                                <path d="M5.75 2A2.75 2.75 0 003 4.75v9.5A2.75 2.75 0 005.75 17h1.5a.75.75 0 000-1.5h-1.5c-.69 0-1.25-.56-1.25-1.25v-9.5c0-.69.56-1.25 1.25-1.25h5.5c.69 0 1.25.56 1.25 1.25v1a.75.75 0 001.5 0v-1A2.75 2.75 0 0011.25 2h-5.5z" />
-	                                <path d="M8.75 6A2.75 2.75 0 006 8.75v6.5A2.75 2.75 0 008.75 18h5.5A2.75 2.75 0 0017 15.25v-6.5A2.75 2.75 0 0014.25 6h-5.5z" />
-	                              </svg>
-	                            </IconButton>
-	                          </div>
-	                        </Field>
-
-	                        <Field
-	                          label={<LabelTip label="Public (FRP)" content="Optional. Paste an FRP config to expose this instance (auto-detects INI/TOML/YAML/JSON)." />}
-	                          error={editFieldErrors().frp_config}
-	                        >
-	                          <div class="space-y-2">
-	                            <label class="inline-flex items-center gap-2 text-[12px] text-slate-700 dark:text-slate-200">
-	                              <input
-	                                type="checkbox"
-	                                class="h-4 w-4 rounded border-slate-300 bg-white text-amber-600 focus:ring-amber-400 dark:border-slate-700 dark:bg-slate-950/60 dark:text-amber-400"
-	                                checked={editTrFrpEnabled()}
-	                                onChange={(e) => {
-	                                  setEditTrFrpEnabled(e.currentTarget.checked)
-	                                  if (!e.currentTarget.checked) {
-	                                    setEditTrFrpConfig('')
-	                                    setEditTrFrpMode('paste')
-	                                    setEditTrFrpNodeId('')
-	                                  }
-	                                }}
-	                              />
-	                              <span>Enable</span>
-	                            </label>
-	                            <Show when={editTrFrpEnabled()}>
-	                              <div class="space-y-2">
-	                                <div class="flex flex-wrap items-center justify-between gap-2">
-	                                  <Tabs
-	                                    value={editTrFrpMode()}
-	                                    options={[
-	                                      { value: 'paste', label: 'Paste' },
-	                                      { value: 'node', label: 'Node' },
-	                                    ]}
-	                                    onChange={(mode) => {
-	                                      setEditTrFrpMode(mode)
-	                                      if (mode === 'paste') setEditTrFrpNodeId('')
-	                                      if (mode === 'node') setEditTrFrpConfig('')
-	                                    }}
-	                                  />
-	                                  <Button size="xs" variant="secondary" onClick={() => setTab('frp')}>
-	                                    Manage nodes
-	                                  </Button>
-	                                </div>
-
-	                                <Show when={editTrFrpMode() === 'node'}>
-	                                  <div
-	                                    ref={(el) => {
-	                                      editTrFrpNodeEl = el
-	                                    }}
-	                                  >
-	                                    <Dropdown
-	                                      label=""
-	                                      value={editTrFrpNodeId()}
-	                                      options={frpNodeDropdownOptions()}
-	                                      placeholder="Select node…"
-	                                      onChange={setEditTrFrpNodeId}
-	                                    />
-	                                  </div>
-	                                  <div class="text-[11px] text-slate-500 dark:text-slate-400">
-	                                    If you don’t select a node, the existing config (if any) stays unchanged.
-	                                  </div>
-	                                </Show>
-
-	                                <Show when={editTrFrpMode() === 'paste'}>
-	                                  <Textarea
-	                                    ref={(el) => {
-	                                      editTrFrpConfigEl = el
-	                                    }}
-	                                    value={editTrFrpConfig()}
-	                                    onInput={(e) => setEditTrFrpConfig(e.currentTarget.value)}
-	                                    placeholder="Paste FRP config to set/replace (auto: INI/TOML/YAML/JSON)"
-	                                    spellcheck={false}
-	                                    class="font-mono text-[11px]"
-	                                    invalid={Boolean(editFieldErrors().frp_config)}
-	                                  />
-	                                </Show>
-	                              </div>
-	                            </Show>
-	                          </div>
-	                        </Field>
-                      </Show>
-                    </div>
-                  </Show>
-
-                  <Show when={editFormError()}>
-                    <div class="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-200">
-                      <div class="font-semibold">Update failed</div>
-                      <div class="mt-1">{editFormError()!.message}</div>
-	                      <Show when={editFormError()!.requestId}>
-	                        <div class="mt-2 flex items-center justify-between gap-2">
-	                          <div class="text-[11px] text-rose-700/80 dark:text-rose-200/70 font-mono">req {editFormError()!.requestId}</div>
-	                          <IconButton
-	                            size="sm"
-	                            variant="danger"
-	                            label="Copy request id"
-	                            onClick={() => safeCopy(editFormError()!.requestId ?? '')}
-	                          >
-	                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-	                              <path d="M5.75 2A2.75 2.75 0 003 4.75v9.5A2.75 2.75 0 005.75 17h1.5a.75.75 0 000-1.5h-1.5c-.69 0-1.25-.56-1.25-1.25v-9.5c0-.69.56-1.25 1.25-1.25h5.5c.69 0 1.25.56 1.25 1.25v1a.75.75 0 001.5 0v-1A2.75 2.75 0 0011.25 2h-5.5z" />
-	                              <path d="M8.75 6A2.75 2.75 0 006 8.75v6.5A2.75 2.75 0 008.75 18h5.5A2.75 2.75 0 0017 15.25v-6.5A2.75 2.75 0 0014.25 6h-5.5z" />
-	                            </svg>
-	                          </IconButton>
-	                        </div>
-	                      </Show>
-                    </div>
-                  </Show>
-                </div>
-
-                <div class="mt-6 flex gap-3">
-                  <Button type="button" variant="secondary" size="md" class="flex-1" onClick={() => closeEditModal()}>
-                    Cancel
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="primary"
-                    size="md"
-                    class="flex-1"
-                    loading={updateInstance.isPending}
-                    disabled={!editHasChanges() || editOutgoingParams() == null}
-                    onClick={async () => {
-                      const base = editBase()
-                      const params = editOutgoingParams()
-                      if (!base || !params) return
-
-                      setEditFormError(null)
-                      setEditFieldErrors({})
-                      const localErrors: Record<string, string> = {}
-
-                      if (base.template_id === 'minecraft:vanilla') {
-                        const existing = (base.params.frp_config ?? '').trim()
-                        const nextCfg =
-                          editMcFrpMode() === 'node'
-                            ? frpNodeConfigById(editMcFrpNodeId()) ?? ''
-                            : editMcFrpConfig().trim()
-                        if (editMcFrpEnabled() && !existing && !nextCfg)
-                          localErrors.frp_config = editMcFrpMode() === 'node' ? 'Select an FRP node.' : 'Paste FRP config.'
-                      }
-
-                      if (base.template_id === 'terraria:vanilla') {
-                        const existing = (base.params.frp_config ?? '').trim()
-                        const nextCfg =
-                          editTrFrpMode() === 'node'
-                            ? frpNodeConfigById(editTrFrpNodeId()) ?? ''
-                            : editTrFrpConfig().trim()
-                        if (editTrFrpEnabled() && !existing && !nextCfg)
-                          localErrors.frp_config = editTrFrpMode() === 'node' ? 'Select an FRP node.' : 'Paste FRP config.'
-                      }
-
-                      if (Object.keys(localErrors).length > 0) {
-                        setEditFieldErrors(localErrors)
-                        queueMicrotask(() => focusFirstEditError(localErrors))
-                        return
-                      }
-
-                      try {
-                        await updateInstance.mutateAsync({
-                          instance_id: base.instance_id,
-                          params,
-                          display_name: editDisplayName().trim() ? editDisplayName().trim() : null,
-                        })
-                        pushToast('success', 'Updated', 'Instance parameters saved.')
-                        closeEditModal()
-                        await invalidateInstances()
-                        revealInstance(base.instance_id)
-                      } catch (err) {
-                        if (isAlloyApiError(err)) {
-                          setEditFormError({ message: err.data.message, requestId: err.data.request_id })
-                          setEditFieldErrors(err.data.field_errors ?? {})
-                          queueMicrotask(() => focusFirstEditError(err.data.field_errors ?? {}))
-                        } else {
-                          setEditFormError({ message: friendlyErrorMessage(err) })
-                        }
-                      }
-                    }}
-                  >
-                    Save changes
-                  </Button>
-                </div>
-          </div>
-        </Modal>
-
-        <Modal
-          open={showDiagnosticsModal()}
-          onClose={() => setShowDiagnosticsModal(false)}
-          title="Diagnostics"
-          description={
-            controlDiagnostics.data?.request_id
-              ? `req ${controlDiagnostics.data.request_id}`
-              : controlDiagnostics.isPending
-                ? 'loading…'
-                : undefined
-          }
-          size="xl"
-          footer={
-            <div class="flex flex-wrap justify-end gap-2">
-              <IconButton
-                type="button"
-                label="Refresh"
-                title="Refresh diagnostics"
-                variant="secondary"
-                disabled={controlDiagnostics.isPending}
-                onClick={() => void queryClient.invalidateQueries({ queryKey: ['control.diagnostics', null] })}
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-                  <path
-                    fill-rule="evenodd"
-                    d="M15.312 11.424a5.5 5.5 0 01-9.201 2.466.75.75 0 00-1.06 1.06 7 7 0 0011.698-3.132.75.75 0 00-1.437-.394z"
-                    clip-rule="evenodd"
-                  />
-                  <path
-                    fill-rule="evenodd"
-                    d="M4.688 8.576a5.5 5.5 0 019.201-2.466.75.75 0 001.06-1.06A7 7 0 003.25 8.182a.75.75 0 001.438.394z"
-                    clip-rule="evenodd"
-                  />
-                </svg>
-              </IconButton>
-              <Button
-                size="sm"
-                variant="secondary"
-                disabled={!controlDiagnostics.data}
-                onClick={async () => {
-                  if (!controlDiagnostics.data) return
-                  await safeCopy(JSON.stringify(controlDiagnostics.data, null, 2))
-                  pushToast('success', 'Copied', 'Diagnostics copied to clipboard.')
-                }}
-              >
-                Copy
-              </Button>
-              <Button
-                size="sm"
-                variant="secondary"
-                disabled={!controlDiagnostics.data}
-                onClick={() => {
-                  if (!controlDiagnostics.data) return
-                  downloadJson(`alloy-control-diagnostics.json`, { type: 'alloy-control-diagnostics', ...controlDiagnostics.data })
-                }}
-              >
-                Download
-              </Button>
-              <Button size="sm" variant="secondary" onClick={() => setShowDiagnosticsModal(false)}>
-                Close
-              </Button>
-            </div>
-          }
-        >
-          <div class="space-y-4">
-                <Show when={controlDiagnostics.isPending}>
-                  <div class="grid gap-3 sm:grid-cols-2">
-                    <div class="h-28 animate-pulse rounded-2xl bg-slate-200 dark:bg-slate-800" />
-                    <div class="h-28 animate-pulse rounded-2xl bg-slate-200 dark:bg-slate-800" />
-                  </div>
-                </Show>
-
-                <Show when={controlDiagnostics.isError}>
-                  <ErrorState
-                    title="Failed to load diagnostics"
-                    error={controlDiagnostics.error}
-                    onRetry={() => void queryClient.invalidateQueries({ queryKey: ['control.diagnostics', null] })}
-                  />
-                </Show>
-
-                <Show when={controlDiagnostics.data}>
-                  {(d) => (
-                    <div class="grid gap-4 lg:grid-cols-3">
-                      <div class="space-y-4 lg:col-span-2">
-                        <div class="rounded-2xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
-                          <div class="flex flex-wrap items-center justify-between gap-2">
-                            <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Control</div>
-                            <div class="flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
-                              <span class="rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 font-mono dark:border-slate-800 dark:bg-slate-950/40">
-                                v{d().control_version}
-                              </span>
-                              <span
-                                class={`rounded-full border px-2 py-0.5 font-mono ${
-                                  d().read_only
-                                    ? 'border-amber-300 bg-amber-500/10 text-amber-800 dark:border-amber-500/30 dark:text-amber-200'
-                                    : 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/20 dark:text-emerald-200'
-                                }`}
-                              >
-                                {d().read_only ? 'read-only' : 'writable'}
-                              </span>
-                              <span class="rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 font-mono dark:border-slate-800 dark:bg-slate-950/40">
-                                fs-write {d().fs.write_enabled ? 'on' : 'off'}
-                              </span>
-                            </div>
-                          </div>
-                          <div class="mt-3 text-[12px] text-slate-600 dark:text-slate-300">
-                            fetched {new Date(Number(d().fetched_at_unix_ms)).toLocaleString()}
-                          </div>
-                        </div>
-
-                        <div class="rounded-2xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
-                          <div class="flex items-center justify-between">
-                            <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Agent</div>
-                            <span
-                              class={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${
-                                d().agent.ok
-                                  ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/20 dark:text-emerald-200'
-                                  : 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-200'
-                              }`}
-                            >
-                              {d().agent.ok ? 'connected' : 'offline'}
-                            </span>
-                          </div>
-
-                          <div class="mt-3 space-y-2 text-[12px] text-slate-600 dark:text-slate-300">
-                            <div class="flex items-center justify-between gap-3">
-                              <div class="text-slate-500 dark:text-slate-400">Endpoint</div>
-                              <div class="min-w-0 truncate font-mono text-[11px]" title={d().agent.endpoint}>
-                                {d().agent.endpoint}
-                              </div>
-                            </div>
-                            <Show when={d().agent.agent_version}>
-                              <div class="flex items-center justify-between gap-3">
-                                <div class="text-slate-500 dark:text-slate-400">Version</div>
-                                <div class="font-mono text-[11px]">{d().agent.agent_version}</div>
-                              </div>
-                            </Show>
-                            <Show when={d().agent.data_root}>
-                              <div class="flex items-center justify-between gap-3">
-                                <div class="text-slate-500 dark:text-slate-400">Data root</div>
-                                <div class="min-w-0 truncate font-mono text-[11px]" title={d().agent.data_root ?? ''}>
-                                  {d().agent.data_root}
-                                </div>
-                              </div>
-                            </Show>
-                            <Show when={d().agent.data_root_free_bytes}>
-                              <div class="flex items-center justify-between gap-3">
-                                <div class="text-slate-500 dark:text-slate-400">Free space</div>
-                                <div class="font-mono text-[11px]">{formatBytes(Number(d().agent.data_root_free_bytes))}</div>
-                              </div>
-                            </Show>
-                            <Show when={d().agent.error}>
-                              <div class="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-[12px] text-rose-800 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-200">
-                                {d().agent.error}
-                              </div>
-                            </Show>
-                          </div>
-                        </div>
-
-                        <div class="rounded-2xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
-                          <div class="flex items-center justify-between gap-3">
-                            <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Cache</div>
-                            <Button
-                              size="xs"
-                              variant="danger"
-                              loading={clearCache.isPending}
-                              onClick={async () => {
-                                const keys = Object.entries(cacheSelection())
-                                  .filter(([, v]) => v)
-                                  .map(([k]) => k)
-                                if (!keys.length) {
-                                  pushToast('info', 'No selection', 'Select caches to clear first.')
-                                  return
-                                }
-                                try {
-                                  const out = await clearCache.mutateAsync({ keys })
-                                  pushToast('success', 'Cache cleared', `Freed ${formatBytes(Number(out.freed_bytes))}`)
-                                  await queryClient.invalidateQueries({ queryKey: ['control.diagnostics', null] })
-                                  await queryClient.invalidateQueries({ queryKey: ['process.cacheStats', null] })
-                                } catch (e) {
-                                  toastError('Clear cache failed', e)
-                                }
-                              }}
-                            >
-                              Clear selected
-                            </Button>
-                          </div>
-
-                          <div class="mt-3 space-y-2">
-                            <For each={d().cache.entries}>
-                              {(e) => (
-                                <div class="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white/60 px-3 py-2 dark:border-slate-800 dark:bg-slate-950/40">
-                                  <label class="flex items-center gap-2 text-[12px] text-slate-700 dark:text-slate-200">
-                                    <input
-                                      type="checkbox"
-                                      class="h-4 w-4 rounded border-slate-300 bg-white text-rose-600 focus:ring-rose-400 dark:border-slate-700 dark:bg-slate-950/60 dark:text-rose-400"
-                                      checked={cacheSelection()[e.key] ?? false}
-                                      onChange={(ev) =>
-                                        setCacheSelection((prev) => ({ ...prev, [e.key]: ev.currentTarget.checked }))
-                                      }
-                                    />
-                                    <span class="font-mono text-[11px]">{e.key}</span>
-                                  </label>
-                                  <div class="flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
-                                    <span class="rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 font-mono dark:border-slate-800 dark:bg-slate-950/40">
-                                      {formatBytes(Number(e.size_bytes))}
-                                    </span>
-                                    <span
-                                      class="rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 font-mono dark:border-slate-800 dark:bg-slate-950/40"
-                                      title={new Date(Number(e.last_used_unix_ms)).toLocaleString()}
-                                    >
-                                      {formatRelativeTime(Number(e.last_used_unix_ms))}
-                                    </span>
-                                  </div>
-                                </div>
-                              )}
-                            </For>
-                            <div class="text-[11px] text-slate-500 dark:text-slate-400">
-                              Clearing cache removes downloaded jars/zips. Next start will re-download.
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div class="space-y-4">
-                        <div class="rounded-2xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
-                          <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Agent log (tail)</div>
-                          <Show
-                            when={(d().agent_log_lines ?? []).length > 0}
-                            fallback={<div class="mt-3 text-[12px] text-slate-500">(no log data)</div>}
-                          >
-                            <pre class="mt-3 max-h-64 overflow-auto rounded-xl bg-slate-950 px-3 py-2 text-[11px] leading-relaxed text-slate-100">
-                              <For each={d().agent_log_lines}>{(l) => <div class="whitespace-pre-wrap">{l}</div>}</For>
-                            </pre>
-                          </Show>
-                          <Show when={d().agent_log_path}>
-                            <div class="mt-2 flex items-center justify-between gap-2 text-[11px] text-slate-500 dark:text-slate-400">
-                              <span class="truncate font-mono">{d().agent_log_path}</span>
-                              <Button size="xs" variant="secondary" onClick={() => safeCopy(d().agent_log_path ?? '')}>
-                                Copy
-                              </Button>
-                            </div>
-                          </Show>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </Show>
-              </div>
-        </Modal>
-
-	        <Modal
-	          open={showInstanceModal() && selectedInstanceId() != null}
-	          onClose={() => setShowInstanceModal(false)}
-	          title={selectedInstanceDisplayName() ?? 'Instance details'}
-	          size="xl"
-	        >
-          <Show when={selectedInstance()} fallback={<div class="text-sm text-slate-500">No instance selected.</div>}>
-	            {(inst) => {
-	              const id = () => inst().config.instance_id
-	              const status = () => inst().status ?? null
-	              const displayName = () => instanceDisplayName(inst() as unknown as InstanceListItem)
-	              const uiName = () => selectedInstanceDisplayName() ?? displayName()
-	              const params = () => (inst().config.params as Record<string, unknown> | null | undefined) ?? null
-	              const version = () => {
-	                const v = params()?.version
-	                return typeof v === 'string' && v.trim() ? v : null
-	              }
-              const port = () => instancePort(inst() as unknown as { config: { template_id: string; params: unknown } })
-              const connectInfo = () => {
-                const p = port()
-                return p ? `${connectHost()}:${p}` : null
-              }
-              const frpEndpoint = () => {
-                const raw = params()?.frp_config
-                if (typeof raw !== 'string') return null
-                return parseFrpEndpoint(raw)
-              }
-
-              const [revealedSecrets, setRevealedSecrets] = createSignal<Record<string, boolean>>({})
-
-              const statusVariant = () => {
-                const s = status()?.state
-                if (s === 'PROCESS_STATE_RUNNING') return 'success' as const
-                if (s === 'PROCESS_STATE_FAILED') return 'danger' as const
-                if (s === 'PROCESS_STATE_STARTING' || s === 'PROCESS_STATE_STOPPING') return 'warning' as const
-                return 'neutral' as const
-              }
-
-              async function copyConnect() {
-                const c = connectInfo()
-                if (!c) return
-                await safeCopy(c)
-                pushToast('success', 'Copied', c)
-              }
-
-              async function copyFrp() {
-                const c = frpEndpoint()
-                if (!c) return
-                await safeCopy(c)
-                pushToast('success', 'Copied', c)
-              }
-
-              async function downloadDiagnostics() {
-                const instValue = inst()
-                try {
-                  const cfg = {
-                    ...instValue.config,
-                    params: { ...(instValue.config.params as Record<string, string>) },
-                  }
-                  for (const [k, v] of Object.entries(cfg.params)) {
-                    if (isSecretParamKey(k)) {
-                      if (typeof v === 'string' && v) cfg.params[k] = '<redacted>'
-                    }
-                  }
-
-                  const diag = await instanceDiagnostics.mutateAsync({
-                    instance_id: instValue.config.instance_id,
-                    max_lines: 600,
-                    limit_bytes: 512 * 1024,
-                  })
-
-                  const payload = {
-                    type: 'alloy-instance-diagnostics',
-                    ...diag,
-                    config: cfg,
-                    status: instValue.status ?? null,
-                    process_logs_tail: processLogLines().map((l) => l.text),
-                  }
-
-                  downloadJson(`alloy-${instValue.config.instance_id}-diagnostics.json`, payload)
-                  pushToast('success', 'Downloaded', 'Diagnostics report saved.')
-                } catch (e) {
-                  toastError('Diagnostics failed', e)
-                }
-              }
-
-              async function copyDiagnostics() {
-                const instValue = inst()
-                try {
-                  const cfg = {
-                    ...instValue.config,
-                    params: { ...(instValue.config.params as Record<string, string>) },
-                  }
-                  for (const [k, v] of Object.entries(cfg.params)) {
-                    if (isSecretParamKey(k)) {
-                      if (typeof v === 'string' && v) cfg.params[k] = '<redacted>'
-                    }
-                  }
-                  const payload = {
-                    instance_id: instValue.config.instance_id,
-                    template_id: instValue.config.template_id,
-                    config: cfg,
-                    status: instValue.status ?? null,
-                    process_logs_tail: processLogLines().map((l) => l.text),
-                  }
-                  await safeCopy(JSON.stringify(payload, null, 2))
-                  pushToast('success', 'Copied', 'Diagnostics JSON copied.')
-                } catch (e) {
-                  toastError('Copy failed', e)
-                }
-              }
-
-              return (
-                <div class="space-y-4">
-                  <div
-                    class="-mx-5 -mt-4 border-b border-slate-200 bg-white/60 px-5 py-3 dark:border-slate-800 dark:bg-slate-950/50"
-                  >
-                    <div class="flex flex-wrap items-center justify-between gap-3">
-                      <div class="min-w-0">
-	                        <div class="mt-1 flex flex-wrap items-center gap-2">
-	                          <Badge variant={statusVariant()} title={status()?.state ?? 'PROCESS_STATE_EXITED'}>
-	                            {instanceStateLabel(status())}
-	                          </Badge>
-	                          <Show when={version()}>{(v) => <Badge variant="neutral">v{v()}</Badge>}</Show>
-                          <Show when={connectInfo()}>
-                            {(c) => (
-                              <button
-                                type="button"
-                                class="group inline-flex max-w-full cursor-pointer items-center gap-1 rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 font-mono text-[11px] text-slate-700 transition-all duration-150 hover:bg-white active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/35 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-50 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-200 dark:hover:bg-slate-900 dark:focus-visible:ring-amber-400/35 dark:focus-visible:ring-offset-slate-950"
-                                onClick={() => void copyConnect()}
-                                title="Copy connection info"
-                              >
-                                <span class="truncate">{c()}</span>
-                                <svg
-                                  xmlns="http://www.w3.org/2000/svg"
-                                  viewBox="0 0 20 20"
-                                  fill="currentColor"
-                                  class="h-3 w-3 flex-none opacity-60 group-hover:opacity-100"
-                                  aria-hidden="true"
-                                >
-                                  <path d="M5.75 2A2.75 2.75 0 003 4.75v9.5A2.75 2.75 0 005.75 17h1.5a.75.75 0 000-1.5h-1.5c-.69 0-1.25-.56-1.25-1.25v-9.5c0-.69.56-1.25 1.25-1.25h5.5c.69 0 1.25.56 1.25 1.25v1a.75.75 0 001.5 0v-1A2.75 2.75 0 0011.25 2h-5.5z" />
-                                  <path d="M8.75 6A2.75 2.75 0 006 8.75v6.5A2.75 2.75 0 008.75 18h5.5A2.75 2.75 0 0017 15.25v-6.5A2.75 2.75 0 0014.25 6h-5.5z" />
-                                </svg>
-                              </button>
-                            )}
-                          </Show>
-                          <Show when={frpEndpoint()}>
-                            {(c) => (
-                              <button
-                                type="button"
-                                class="group inline-flex max-w-full cursor-pointer items-center gap-1 rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 font-mono text-[11px] text-slate-700 transition-all duration-150 hover:bg-white active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/35 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-50 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-200 dark:hover:bg-slate-900 dark:focus-visible:ring-amber-400/35 dark:focus-visible:ring-offset-slate-950"
-                                onClick={() => void copyFrp()}
-                                title="Copy public endpoint (FRP)"
-                              >
-                                <span class="truncate">FRP {c()}</span>
-                                <svg
-                                  xmlns="http://www.w3.org/2000/svg"
-                                  viewBox="0 0 20 20"
-                                  fill="currentColor"
-                                  class="h-3 w-3 flex-none opacity-60 group-hover:opacity-100"
-                                  aria-hidden="true"
-                                >
-                                  <path d="M5.75 2A2.75 2.75 0 003 4.75v9.5A2.75 2.75 0 005.75 17h1.5a.75.75 0 000-1.5h-1.5c-.69 0-1.25-.56-1.25-1.25v-9.5c0-.69.56-1.25 1.25-1.25h5.5c.69 0 1.25.56 1.25 1.25v1a.75.75 0 001.5 0v-1A2.75 2.75 0 0011.25 2h-5.5z" />
-                                  <path d="M8.75 6A2.75 2.75 0 006 8.75v6.5A2.75 2.75 0 008.75 18h5.5A2.75 2.75 0 0017 15.25v-6.5A2.75 2.75 0 0014.25 6h-5.5z" />
-                                </svg>
-                              </button>
-                            )}
-                          </Show>
-                        </div>
-
-                        <Show when={status()?.state === 'PROCESS_STATE_STARTING' ? status()?.message?.trim() : null}>
-                          {(msg) => <StartProgress templateId={inst().config.template_id} message={msg()} />}
-                        </Show>
-                      </div>
-
-                      <div class="flex flex-wrap items-center justify-end gap-2">
-                        <Show
-                          when={canStartInstance(status())}
-                          fallback={
-	                            <Button
-	                              size="xs"
-	                              variant="secondary"
-	                              leftIcon={
-	                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-	                                  <path d="M5.75 5.75A.75.75 0 016.5 5h7a.75.75 0 01.75.75v8.5a.75.75 0 01-.75.75h-7a.75.75 0 01-.75-.75v-8.5z" />
-	                                </svg>
-	                              }
-	                              loading={instanceOpById()[id()] === 'stopping'}
-	                              disabled={isReadOnly() || instanceOpById()[id()] != null || isStopping(status())}
-	                              title={isReadOnly() ? 'Read-only mode' : 'Stop instance'}
-	                            onClick={async () => {
-	                              try {
-	                                await runInstanceOp(id(), 'stopping', () =>
-	                                  stopInstance.mutateAsync({ instance_id: id(), timeout_ms: 30_000 }),
-	                                )
-	                                await invalidateInstances()
-	                                pushToast('success', 'Stopped', uiName())
-	                              } catch (e) {
-	                                toastError('Stop failed', e)
-	                              }
-	                            }}
-	                          >
-                              Stop
-                            </Button>
-                          }
-                        >
-	                          <Button
-	                            size="xs"
-	                            variant="primary"
-	                            leftIcon={
-	                              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-	                                <path d="M4.5 3.25a.75.75 0 011.18-.62l10.5 7.25a.75.75 0 010 1.24l-10.5 7.25A.75.75 0 014.5 17.75V3.25z" />
-	                              </svg>
-	                            }
-	                            loading={instanceOpById()[id()] === 'starting'}
-	                            disabled={isReadOnly() || instanceOpById()[id()] != null}
-	                            title={isReadOnly() ? 'Read-only mode' : 'Start instance'}
-	                            onClick={async () => {
-	                              try {
-	                                await runInstanceOp(id(), 'starting', () => startInstance.mutateAsync({ instance_id: id() }))
-	                                await invalidateInstances()
-	                                pushToast('success', 'Started', uiName())
-	                              } catch (e) {
-	                                toastError('Start failed', e)
-	                              }
-	                            }}
-	                          >
-                            Start
-                          </Button>
-                        </Show>
-
-                        <Show when={status() != null}>
-	                          <IconButton
-	                            type="button"
-	                            label="Restart"
-	                            title={isReadOnly() ? 'Read-only mode' : 'Restart instance'}
-	                            variant="secondary"
-	                            disabled={isReadOnly() || instanceOpById()[id()] != null}
-	                            onClick={async () => {
-	                              try {
-	                                await runInstanceOp(id(), 'restarting', () =>
-	                                  restartInstance.mutateAsync({ instance_id: id(), timeout_ms: 30_000 }),
-	                                )
-	                                await invalidateInstances()
-	                                pushToast('success', 'Restarted', uiName())
-	                              } catch (e) {
-	                                toastError('Restart failed', e)
-	                              }
-	                            }}
-	                          >
-	                            <Show
-	                              when={instanceOpById()[id()] === 'restarting'}
-	                              fallback={
-	                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-	                                  <path
-	                                    fill-rule="evenodd"
-	                                    d="M15.312 11.424a5.5 5.5 0 01-9.201 2.466.75.75 0 011.06-1.06 4 4 0 006.764-2.289H13a.75.75 0 010-1.5h2.75a.75.75 0 01.75.75V12.5a.75.75 0 01-1.5 0v-1.076zM4.688 8.576a5.5 5.5 0 019.201-2.466.75.75 0 11-1.06 1.06A4 4 0 006.065 9.46H7a.75.75 0 010 1.5H4.25a.75.75 0 01-.75-.75V7.5a.75.75 0 011.5 0v1.076z"
-	                                    clip-rule="evenodd"
-	                                  />
-	                                </svg>
-	                              }
-	                            >
-	                              <svg
-	                                class="h-4 w-4 animate-spin"
-	                                viewBox="0 0 24 24"
-	                                fill="none"
-	                                xmlns="http://www.w3.org/2000/svg"
-	                                role="status"
-	                                aria-label="Restarting"
-	                              >
-	                                <path d="M12 3a9 9 0 1 0 9 9" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" class="opacity-25" />
-	                                <path
-	                                  d="M21 12a9 9 0 0 0-9-9"
-	                                  stroke="currentColor"
-	                                  stroke-width="2.5"
-	                                  stroke-linecap="round"
-	                                  class="origin-center"
-	                                />
-	                              </svg>
-	                            </Show>
-	                          </IconButton>
-                        </Show>
-
-	                        <IconButton
-	                          type="button"
-	                          label="Report"
-	                          title="Download diagnostics report"
-	                          variant="secondary"
-	                          disabled={instanceDiagnostics.isPending || selectedInstance() == null}
-	                          onClick={() => void downloadDiagnostics()}
-	                        >
-	                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-	                            <path
-	                              fill-rule="evenodd"
-	                              d="M3.75 3A1.75 1.75 0 002 4.75v10.5C2 16.216 2.784 17 3.75 17h8.5A1.75 1.75 0 0014 15.25V7.5a.75.75 0 00-.22-.53l-3.75-3.75A.75.75 0 009.5 3H3.75zm6.5 1.56L12.44 6.75h-1.69a.5.5 0 01-.5-.5V4.56z"
-	                              clip-rule="evenodd"
-	                            />
-	                          </svg>
-	                        </IconButton>
-	                        <IconButton
-	                          type="button"
-	                          label="Copy"
-	                          title="Copy diagnostics JSON"
-	                          variant="secondary"
-	                          disabled={selectedInstance() == null}
-	                          onClick={() => void copyDiagnostics()}
-	                        >
-	                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-	                            <path d="M5.75 2A2.75 2.75 0 003 4.75v9.5A2.75 2.75 0 005.75 17h1.5a.75.75 0 000-1.5h-1.5c-.69 0-1.25-.56-1.25-1.25v-9.5c0-.69.56-1.25 1.25-1.25h5.5c.69 0 1.25.56 1.25 1.25v1a.75.75 0 001.5 0v-1A2.75 2.75 0 0011.25 2h-5.5z" />
-	                            <path d="M8.75 6A2.75 2.75 0 006 8.75v6.5A2.75 2.75 0 008.75 18h5.5A2.75 2.75 0 0017 15.25v-6.5A2.75 2.75 0 0014.25 6h-5.5z" />
-	                          </svg>
-	                        </IconButton>
-
-	                        <IconButton
-	                          type="button"
-	                          label="Edit"
-	                          title={
-	                            isReadOnly()
-	                              ? 'Read-only mode'
-	                              : !canStartInstance(status())
-	                                ? 'Stop the instance before editing'
-	                                : 'Edit instance'
-	                          }
-	                          variant="secondary"
-	                          disabled={isReadOnly() || !canStartInstance(status())}
-	                          onClick={() => {
-	                            setShowInstanceModal(false)
-	                            openEditModal(inst())
-	                          }}
-	                        >
-	                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-	                            <path d="M13.586 3.586a2 2 0 112.828 2.828l-9.5 9.5a1 1 0 01-.39.242l-3.5 1.166a.5.5 0 01-.632-.632l1.166-3.5a1 1 0 01.242-.39l9.5-9.5z" />
-	                          </svg>
-	                        </IconButton>
-	                        <IconButton
-	                          type="button"
-	                          label="Delete"
-	                          title={
-	                            isReadOnly()
-	                              ? 'Read-only mode'
-	                              : !canStartInstance(status())
-	                                ? 'Stop the instance before deleting'
-	                                : 'Delete instance'
-	                          }
-	                          variant="danger"
-	                          disabled={isReadOnly() || !canStartInstance(status())}
-	                          onClick={() => {
-	                            setShowInstanceModal(false)
-	                            setConfirmDeleteInstanceId(id())
-	                          }}
-	                        >
-	                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-	                            <path
-	                              fill-rule="evenodd"
-	                              d="M8.75 2.75A.75.75 0 019.5 2h1a.75.75 0 01.75.75V3h3.5a.75.75 0 010 1.5h-.918l-.764 10.694A2.75 2.75 0 0111.327 18H8.673a2.75 2.75 0 01-2.741-2.806L5.168 4.5H4.25a.75.75 0 010-1.5h3.5v-.25zm1.5.25v.25h-1.5V3h1.5z"
-	                              clip-rule="evenodd"
-	                            />
-	                          </svg>
-	                        </IconButton>
-
-                        <IconButton type="button" label="Close" variant="ghost" onClick={() => setShowInstanceModal(false)}>
-                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-                            <path
-                              fill-rule="evenodd"
-                              d="M4.47 4.47a.75.75 0 011.06 0L10 8.94l4.47-4.47a.75.75 0 111.06 1.06L11.06 10l4.47 4.47a.75.75 0 11-1.06 1.06L10 11.06l-4.47 4.47a.75.75 0 11-1.06-1.06L8.94 10 4.47 5.53a.75.75 0 010-1.06z"
-                              clip-rule="evenodd"
-                            />
-                          </svg>
-                        </IconButton>
-                      </div>
-                    </div>
-
-                    <div class="mt-3 flex flex-wrap items-center justify-between gap-3">
-                      <Tabs
-                        value={instanceDetailTab()}
-                        options={[
-                          { value: 'overview', label: 'Overview' },
-                          { value: 'logs', label: 'Logs' },
-                          { value: 'files', label: 'Files' },
-                          { value: 'config', label: 'Config' },
-                        ]}
-                        onChange={setInstanceDetailTab}
-                      />
-                    </div>
-                  </div>
-
-                  <Show when={instanceDetailTab() === 'overview'}>
-                    <div class="space-y-4">
-                      <div class="grid gap-4 lg:grid-cols-2">
-                        <div class="rounded-2xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
-                          <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Status</div>
-                          <div class="mt-3 space-y-2 text-[12px] text-slate-600 dark:text-slate-300">
-                            <div class="flex items-center justify-between gap-3">
-                              <div class="text-slate-500 dark:text-slate-400">State</div>
-                              <div class="font-mono text-[11px]">{status()?.state ?? 'PROCESS_STATE_EXITED'}</div>
-                            </div>
-                            <Show when={status()?.pid != null}>
-                              <div class="flex items-center justify-between gap-3">
-                                <div class="text-slate-500 dark:text-slate-400">PID</div>
-                                <div class="font-mono text-[11px]">{status()?.pid}</div>
-                              </div>
-                            </Show>
-                            <Show when={status()?.exit_code != null}>
-                              <div class="flex items-center justify-between gap-3">
-                                <div class="text-slate-500 dark:text-slate-400">Exit</div>
-                                <div class="font-mono text-[11px]">{status()?.exit_code}</div>
-                              </div>
-                            </Show>
-                          </div>
-
-                          <Show when={status()?.message != null}>
-                            <div class="mt-3 rounded-xl border border-slate-200 bg-white/60 p-3 text-[12px] text-slate-700 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-200">
-                              <div class="font-semibold">Message</div>
-                              <div class="mt-1 font-mono text-[11px] whitespace-pre-wrap">{selectedInstanceMessage() ?? ''}</div>
-                              <Show when={statusMessageParts(status()).hint}>
-                                {(hint) => (
-                                  <div class="mt-2 text-[11px] text-slate-500 dark:text-slate-400">{hint()}</div>
-                                )}
-                              </Show>
-                            </div>
-                          </Show>
-                        </div>
-
-                        <div class="rounded-2xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
-                          <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Resources</div>
-                          <Show
-                            when={status()?.resources}
-                            fallback={<div class="mt-3 text-[12px] text-slate-500">(no resource data)</div>}
-                          >
-                            {(r) => (
-                              <div class="mt-3 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
-                                <span class="rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 font-mono dark:border-slate-800 dark:bg-slate-950/40">
-                                  cpu {formatCpuPercent(r().cpu_percent_x100)}
-                                </span>
-                                <span class="rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 font-mono dark:border-slate-800 dark:bg-slate-950/40">
-                                  rss {formatBytes(parseU64(r().rss_bytes))}
-                                </span>
-                                <span class="rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 font-mono dark:border-slate-800 dark:bg-slate-950/40">
-                                  io {formatBytes(parseU64(r().read_bytes))}↓ {formatBytes(parseU64(r().write_bytes))}↑
-                                </span>
-                              </div>
-                            )}
-                          </Show>
-                        </div>
-                      </div>
-
-                      <Show
-                        when={
-                          inst().config.template_id === 'minecraft:vanilla' ||
-                          inst().config.template_id === 'minecraft:modrinth' ||
-                          inst().config.template_id === 'minecraft:import' ||
-                          inst().config.template_id === 'minecraft:curseforge' ||
-                          inst().config.template_id === 'terraria:vanilla' ||
-                          inst().config.template_id === 'dst:vanilla' ||
-                          inst().config.template_id === 'dsp:nebula'
-                        }
-                      >
-                        <div class="rounded-2xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
-                          <div class="flex items-center justify-between gap-3">
-                            <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Save</div>
-                            <Show
-                              when={canStartInstance(status())}
-                              fallback={<Badge variant="warning">Stop to import</Badge>}
-                            >
-                              <Badge variant="neutral">Import from URL</Badge>
-                            </Show>
-                          </div>
-
-                          <div class="mt-2 text-[12px] text-slate-600 dark:text-slate-300">
-                            <Show
-                              when={inst().config.template_id === 'terraria:vanilla'}
-                              fallback={
-                                <Show
-                                  when={inst().config.template_id === 'dst:vanilla'}
-                                  fallback={
-                                    <Show
-                                      when={inst().config.template_id === 'dsp:nebula'}
-                                      fallback={<span>Paste a world .zip URL (must contain a single Minecraft world).</span>}
-                                    >
-                                      <span>Paste a .zip URL containing at least one DSP save (.dsv).</span>
-                                    </Show>
-                                  }
-                                >
-                                  <span>Paste a .zip URL containing a single DST cluster (Cluster_1/).</span>
-                                </Show>
-                              }
-                            >
-                              <span>Paste a .zip (recommended) or direct .wld URL.</span>
-                            </Show>
-                          </div>
-
-                          <div class="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
-                            <Input
-                              value={importSaveUrl()}
-                              onInput={(e) => setImportSaveUrl(e.currentTarget.value)}
-                              placeholder="https://..."
-                              spellcheck={false}
-                              class="flex-1"
-                              leftIcon={
-                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-                                  <path
-                                    fill-rule="evenodd"
-                                    d="M12.5 2.75a.75.75 0 01.75.75v2h1a3.25 3.25 0 013.25 3.25v5a3.25 3.25 0 01-3.25 3.25h-5A3.25 3.25 0 017 13.75v-1a.75.75 0 011.5 0v1c0 .966.784 1.75 1.75 1.75h5A1.75 1.75 0 0017 13.75v-5A1.75 1.75 0 0015.25 7h-1v2a.75.75 0 11-1.5 0V3.5a.75.75 0 01.75-.75z"
-                                    clip-rule="evenodd"
-                                  />
-                                  <path
-                                    fill-rule="evenodd"
-                                    d="M3.25 5.5A2.75 2.75 0 016 2.75h4A2.75 2.75 0 0112.75 5.5v8.5A2.75 2.75 0 0110 16.75H6A2.75 2.75 0 013.25 14V5.5zM6 4.25c-.69 0-1.25.56-1.25 1.25V14c0 .69.56 1.25 1.25 1.25h4c.69 0 1.25-.56 1.25-1.25V5.5c0-.69-.56-1.25-1.25-1.25H6z"
-                                    clip-rule="evenodd"
-                                  />
-                                </svg>
-                              }
-                            />
-                            <Button
-                              variant="secondary"
-                              disabled={isReadOnly() || !canStartInstance(status()) || importSaveFromUrl.isPending || !importSaveUrl().trim()}
-                              loading={importSaveFromUrl.isPending}
-                              onClick={async () => {
-                                const url = importSaveUrl().trim()
-                                if (!url) return
-                                try {
-                                  const out = await importSaveFromUrl.mutateAsync({ instance_id: id(), url })
-                                  pushToast('success', 'Imported', out.message || out.installed_path)
-                                  setImportSaveUrl('')
-                                } catch (e) {
-                                  toastError('Import failed', e)
-                                }
-                              }}
-                            >
-                              Import
-                            </Button>
-                          </div>
-
-                          <div class="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
-                            The instance must be stopped. Old save is backed up automatically.
-                          </div>
-                        </div>
-                      </Show>
-                    </div>
-                  </Show>
-
-                  <Show when={instanceDetailTab() === 'logs'}>
-                    <Show when={processLogsTail.isError}>
-                      <ErrorState error={processLogsTail.error} title="Failed to load logs" onRetry={() => processLogsTail.refetch()} />
-                    </Show>
-                    <LogViewer
-                      title="Process logs"
-                      lines={processLogLines()}
-                      loading={processLogsTail.isPending}
-                      error={processLogsTail.isError ? processLogsTail.error : undefined}
-                      minimal={true}
-                      live={processLogLive()}
-                      onLiveChange={setProcessLogLive}
-                      onClear={() => setProcessLogLines([])}
-                      storageKey={`alloy.processlog.${id()}`}
-                      class="mt-3"
-                    />
-                  </Show>
-
-                  <Show when={instanceDetailTab() === 'files'}>
-                    <div class="rounded-2xl border border-slate-200 bg-white/70 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
-	                      <FileBrowser
-	                        enabled={isAuthed() && showInstanceModal() && instanceDetailTab() === 'files'}
-	                        title="Files"
-	                        rootPath={`instances/${id()}`}
-	                        rootLabel={uiName()}
-	                      />
-                    </div>
-                  </Show>
-
-                  <Show when={instanceDetailTab() === 'config'}>
-                    <div class="rounded-2xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
-                      <div class="flex flex-wrap items-center justify-between gap-2">
-                        <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Parameters</div>
-                        <div class="text-[11px] text-slate-500 dark:text-slate-400">
-                          Edits require the instance to be stopped.
-                        </div>
-                      </div>
-
-                      <div class="mt-3 overflow-hidden rounded-xl border border-slate-200 dark:border-slate-800">
-                        <div class="grid grid-cols-[160px_1fr_auto] gap-0 border-b border-slate-200 bg-slate-50 px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-400">
-                          <div>Key</div>
-                          <div>Value</div>
-                          <div class="text-right">Actions</div>
-                        </div>
-                        <div class="divide-y divide-slate-200 dark:divide-slate-800">
-                          <For
-                            each={Object.entries(params() ?? {}).sort(([a], [b]) => a.localeCompare(b))}
-                          >
-                            {([k, v]) => (
-                              <div class="grid grid-cols-[160px_1fr_auto] gap-3 px-3 py-2 text-[12px] text-slate-700 dark:text-slate-200">
-                                <div class="truncate font-mono text-[11px] text-slate-500 dark:text-slate-400" title={k}>
-                                  {k}
-                                </div>
-                                <div class="min-w-0 font-mono text-[11px]">
-                                  <Show
-                                    when={
-                                      isSecretParamKey(k)
-                                    }
-                                    fallback={<span class="whitespace-pre-wrap break-words">{String(v ?? '')}</span>}
-                                  >
-                                    <Show
-                                      when={revealedSecrets()[k]}
-                                      fallback={<span class="text-slate-500 dark:text-slate-400">••••••</span>}
-                                    >
-                                      <span class="whitespace-pre-wrap break-words">{String(v ?? '')}</span>
-                                    </Show>
-                                  </Show>
-                                </div>
-                                <div class="flex items-center justify-end gap-2">
-                                  <Show
-                                    when={
-                                      isSecretParamKey(k)
-                                    }
-                                  >
-                                    <Button
-                                      size="xs"
-                                      variant="secondary"
-                                      onClick={() => setRevealedSecrets((prev) => ({ ...prev, [k]: !(prev[k] ?? false) }))}
-                                    >
-                                      {revealedSecrets()[k] ? 'Hide' : 'Show'}
-                                    </Button>
-                                  </Show>
-                                  <Button
-                                    size="xs"
-                                    variant="secondary"
-                                    onClick={() => safeCopy(String(v ?? ''))}
-                                    disabled={String(v ?? '').length === 0}
-                                    title="Copy value"
-                                  >
-                                    Copy
-                                  </Button>
-                                </div>
-                              </div>
-                            )}
-                          </For>
-                        </div>
-                      </div>
-                    </div>
-                  </Show>
-                </div>
-              )
-            }}
-          </Show>
-        </Modal>
-
-        <Portal>
-          <div class="pointer-events-none fixed bottom-4 right-4 z-[9999] flex w-[360px] flex-col gap-2">
-            <For each={toasts()}>
-              {(t) => (
-                <div
-                  class={`pointer-events-auto overflow-hidden rounded-2xl border bg-white/80 shadow-2xl shadow-slate-900/10 backdrop-blur transition-all duration-150 animate-in fade-in zoom-in-95 dark:bg-slate-950/80 ${
-                    t.variant === 'success'
-                      ? 'border-emerald-200 dark:border-emerald-900/40'
-                      : t.variant === 'error'
-                        ? 'border-rose-200 dark:border-rose-900/40'
-                        : 'border-slate-200 dark:border-slate-800'
-                  }`}
-                >
-                  <div class="p-3">
-                    <div class="flex items-start justify-between gap-3">
-                      <div class="min-w-0">
-                        <div
-                          class={`text-sm font-semibold ${
-                            t.variant === 'success'
-                              ? 'text-emerald-900 dark:text-emerald-200'
-                              : t.variant === 'error'
-                                ? 'text-rose-900 dark:text-rose-200'
-                                : 'text-slate-900 dark:text-slate-100'
-                          }`}
-                        >
-                          {t.title}
-                        </div>
-                        <Show when={t.message}>
-                          <div class="mt-1 text-[12px] text-slate-600 dark:text-slate-300">{t.message}</div>
-                        </Show>
-                      </div>
-                      <button
-                        type="button"
-                        class="rounded-lg border border-slate-200 bg-white/70 px-2 py-1 text-[11px] font-medium text-slate-700 hover:bg-white dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:hover:bg-slate-900"
-                        onClick={() => setToasts((prev) => prev.filter((x) => x.id !== t.id))}
-                      >
-                        Close
-                      </button>
-                    </div>
-
-                    <Show when={t.requestId}>
-                      <div class="mt-2 flex items-center justify-between gap-2">
-                        <div class="truncate font-mono text-[11px] text-slate-500 dark:text-slate-400">req {t.requestId}</div>
-                        <button
-                          type="button"
-                          class="rounded-lg border border-slate-200 bg-white/70 px-2 py-1 text-[11px] font-medium text-slate-700 hover:bg-white dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:hover:bg-slate-900"
-                          onClick={() => safeCopy(t.requestId ?? '')}
-                        >
-                          COPY
-                        </button>
-                      </div>
-                    </Show>
-                  </div>
-                </div>
-              )}
-            </For>
-          </div>
-        </Portal>
+        <DownloadTaskModal
+          selectedDownloadJobId={selectedDownloadJobId}
+          setSelectedDownloadJobId={setSelectedDownloadJobId}
+          selectedDownloadJob={selectedDownloadJob}
+          latestDownloadFailureByTarget={latestDownloadFailureByTarget}
+          copyDownloadJobDetails={copyDownloadJobDetails}
+          copyDownloadFailureReason={copyDownloadFailureReason}
+        />
+
+        <DspInitModal
+          showDspInitModal={showDspInitModal}
+          closeDspInitModal={closeDspInitModal}
+          warmCache={warmCache}
+          createInstance={createInstance}
+          pendingCreateAfterDspInit={pendingCreateAfterDspInit}
+          runDspInitAndMaybeCreate={runDspInitAndMaybeCreate}
+          warmFieldErrors={warmFieldErrors}
+          dspSteamGuardCode={dspSteamGuardCode}
+          setDspSteamGuardCode={setDspSteamGuardCode}
+          warmFormError={warmFormError}
+        />
+
+        <LoginModal
+          showLoginModal={showLoginModal}
+          me={me}
+          setShowLoginModal={setShowLoginModal}
+          authLoading={authLoading}
+          authError={authError}
+          setAuthError={setAuthError}
+          setAuthLoading={setAuthLoading}
+          loginUser={loginUser}
+          setLoginUser={setLoginUser}
+          loginPass={loginPass}
+          setLoginPass={setLoginPass}
+          refreshSession={refreshSession}
+          setLoginUsernameEl={(el: HTMLInputElement) => {
+            loginUsernameEl = el
+          }}
+        />
+
+
+        <AddNodeModal
+          showCreateNodeModal={showCreateNodeModal}
+          closeCreateNode={closeCreateNode}
+          createNodeResult={createNodeResult}
+          createNode={createNode}
+          createNodeName={createNodeName}
+          setCreateNodeName={setCreateNodeName}
+          createNodeFieldErrors={createNodeFieldErrors}
+          setCreateNodeFieldErrors={setCreateNodeFieldErrors}
+          createNodeFormError={createNodeFormError}
+          setCreateNodeFormError={setCreateNodeFormError}
+          createNodeControlWsUrl={createNodeControlWsUrl}
+          setCreateNodeControlWsUrl={setCreateNodeControlWsUrl}
+          setCreateNodeResult={setCreateNodeResult}
+          pushToast={pushToast}
+          invalidateNodes={invalidateNodes}
+          setSelectedNodeId={setSelectedNodeId}
+          createNodeComposeYaml={createNodeComposeYaml}
+        />
+
+        <FrpNodeModal
+          showFrpNodeModal={showFrpNodeModal}
+          closeFrpNodeModal={closeFrpNodeModal}
+          editingFrpNodeId={editingFrpNodeId}
+          frpCreateNode={frpCreateNode}
+          frpUpdateNode={frpUpdateNode}
+          isReadOnly={isReadOnly}
+          frpNodeCanSave={frpNodeCanSave}
+          frpNodeFieldErrors={frpNodeFieldErrors}
+          setFrpNodeFieldErrors={setFrpNodeFieldErrors}
+          frpNodeFormError={frpNodeFormError}
+          setFrpNodeFormError={setFrpNodeFormError}
+          frpNodeName={frpNodeName}
+          setFrpNodeName={setFrpNodeName}
+          frpNodeServerAddr={frpNodeServerAddr}
+          setFrpNodeServerAddr={setFrpNodeServerAddr}
+          frpNodeServerPort={frpNodeServerPort}
+          setFrpNodeServerPort={setFrpNodeServerPort}
+          frpNodeAllocatablePorts={frpNodeAllocatablePorts}
+          setFrpNodeAllocatablePorts={setFrpNodeAllocatablePorts}
+          frpNodeToken={frpNodeToken}
+          setFrpNodeToken={setFrpNodeToken}
+          frpNodeTokenVisible={frpNodeTokenVisible}
+          setFrpNodeTokenVisible={setFrpNodeTokenVisible}
+          frpNodeConfig={frpNodeConfig}
+          setFrpNodeConfig={setFrpNodeConfig}
+          frpNodeDetectedFormat={frpNodeDetectedFormat}
+          invalidateFrpNodes={invalidateFrpNodes}
+          pushToast={pushToast}
+        />
+
+        <DeleteInstanceModal
+          confirmDeleteInstanceId={confirmDeleteInstanceId}
+          setConfirmDeleteInstanceId={setConfirmDeleteInstanceId}
+          deleteInstance={deleteInstance}
+          confirmDeleteText={confirmDeleteText}
+          selectedInstanceId={selectedInstanceId}
+          setSelectedInstanceId={setSelectedInstanceId}
+          pushToast={pushToast}
+          invalidateInstances={invalidateInstances}
+          toastError={toastError}
+          instanceDeletePreview={instanceDeletePreview}
+          setConfirmDeleteText={setConfirmDeleteText}
+        />
+
+
+        <EditInstanceModal
+          editingInstanceId={editingInstanceId}
+          editBase={editBase}
+          closeEditModal={closeEditModal}
+          setEditDisplayNameEl={(el: HTMLInputElement) => {
+            editDisplayNameEl = el
+          }}
+          setEditSleepSecondsEl={(el: HTMLInputElement) => {
+            editSleepSecondsEl = el
+          }}
+          setEditMcMemoryEl={(el: HTMLInputElement) => {
+            editMcMemoryEl = el
+          }}
+          setEditMcPortEl={(el: HTMLInputElement) => {
+            editMcPortEl = el
+          }}
+          setEditMcFrpNodeEl={(el: HTMLDivElement) => {
+            editMcFrpNodeEl = el
+          }}
+          setEditMcFrpConfigEl={(el: HTMLTextAreaElement) => {
+            editMcFrpConfigEl = el
+          }}
+          setEditTrMaxPlayersEl={(el: HTMLInputElement) => {
+            editTrMaxPlayersEl = el
+          }}
+          setEditTrWorldNameEl={(el: HTMLInputElement) => {
+            editTrWorldNameEl = el
+          }}
+          setEditTrPortEl={(el: HTMLInputElement) => {
+            editTrPortEl = el
+          }}
+          setEditTrWorldSizeEl={(el: HTMLInputElement) => {
+            editTrWorldSizeEl = el
+          }}
+          setEditTrPasswordEl={(el: HTMLInputElement) => {
+            editTrPasswordEl = el
+          }}
+          setEditTrFrpNodeEl={(el: HTMLDivElement) => {
+            editTrFrpNodeEl = el
+          }}
+          setEditTrFrpConfigEl={(el: HTMLTextAreaElement) => {
+            editTrFrpConfigEl = el
+          }}
+          setEditDisplayName={setEditDisplayName}
+          editDisplayName={editDisplayName}
+          editTemplateId={editTemplateId}
+          editSleepSeconds={editSleepSeconds}
+          setEditSleepSeconds={setEditSleepSeconds}
+          editFieldErrors={editFieldErrors}
+          editFormError={editFormError}
+          setEditFieldErrors={setEditFieldErrors}
+          setEditFormError={setEditFormError}
+          updateInstance={updateInstance}
+          editOutgoingParams={editOutgoingParams}
+          invalidateInstances={invalidateInstances}
+          revealInstance={revealInstance}
+          pushToast={pushToast}
+          focusFirstEditError={focusFirstEditError}
+          friendlyErrorMessage={friendlyErrorMessage}
+          editAdvanced={editAdvanced}
+          setEditAdvanced={setEditAdvanced}
+          editAdvancedDirty={editAdvancedDirty}
+          editHasChanges={editHasChanges}
+          editChangedKeys={editChangedKeys}
+          editRisk={editRisk}
+          safeCopy={safeCopy}
+          setTab={setTab}
+          editMcVersion={editMcVersion}
+          setEditMcVersion={setEditMcVersion}
+          mcVersionOptions={mcVersionOptions}
+          optionsWithCurrentValue={optionsWithCurrentValue}
+          editMcMemory={editMcMemory}
+          setEditMcMemory={setEditMcMemory}
+          editMcPort={editMcPort}
+          setEditMcPort={setEditMcPort}
+          editMcFrpEnabled={editMcFrpEnabled}
+          setEditMcFrpEnabled={setEditMcFrpEnabled}
+          setEditMcFrpMode={setEditMcFrpMode}
+          setEditMcFrpNodeId={setEditMcFrpNodeId}
+          editMcFrpMode={editMcFrpMode}
+          editMcFrpNodeId={editMcFrpNodeId}
+          frpNodeDropdownOptions={frpNodeDropdownOptions}
+          editMcFrpConfig={editMcFrpConfig}
+          setEditMcFrpConfig={setEditMcFrpConfig}
+          editTrVersion={editTrVersion}
+          setEditTrVersion={setEditTrVersion}
+          trVersionOptions={trVersionOptions}
+          editTrMaxPlayers={editTrMaxPlayers}
+          setEditTrMaxPlayers={setEditTrMaxPlayers}
+          editTrWorldName={editTrWorldName}
+          setEditTrWorldName={setEditTrWorldName}
+          editTrPort={editTrPort}
+          setEditTrPort={setEditTrPort}
+          editTrWorldSize={editTrWorldSize}
+          setEditTrWorldSize={setEditTrWorldSize}
+          editTrPasswordVisible={editTrPasswordVisible}
+          setEditTrPasswordVisible={setEditTrPasswordVisible}
+          editTrPassword={editTrPassword}
+          setEditTrPassword={setEditTrPassword}
+          editTrFrpEnabled={editTrFrpEnabled}
+          setEditTrFrpEnabled={setEditTrFrpEnabled}
+          setEditTrFrpMode={setEditTrFrpMode}
+          setEditTrFrpNodeId={setEditTrFrpNodeId}
+          editTrFrpMode={editTrFrpMode}
+          editTrFrpNodeId={editTrFrpNodeId}
+          editTrFrpConfig={editTrFrpConfig}
+          setEditTrFrpConfig={setEditTrFrpConfig}
+          frpNodeConfigById={frpNodeConfigById}
+        />
+
+        <ControlDiagnosticsModal
+          showDiagnosticsModal={showDiagnosticsModal}
+          setShowDiagnosticsModal={setShowDiagnosticsModal}
+          controlDiagnostics={controlDiagnostics}
+          pushToast={pushToast}
+          clearCache={clearCache}
+          cacheSelection={cacheSelection}
+          setCacheSelection={setCacheSelection}
+          toastError={toastError}
+        />
+
+
+
+        <InstanceDetailsModal
+          showInstanceModal={showInstanceModal}
+          selectedInstanceId={selectedInstanceId}
+          setShowInstanceModal={setShowInstanceModal}
+          selectedInstanceDisplayName={selectedInstanceDisplayName}
+          selectedInstance={selectedInstance}
+          instanceDisplayName={instanceDisplayName}
+          pushToast={pushToast}
+          instanceDiagnostics={instanceDiagnostics}
+          processLogLines={processLogLines}
+          toastError={toastError}
+          instanceOpById={instanceOpById}
+          isReadOnly={isReadOnly}
+          runInstanceOp={runInstanceOp}
+          stopInstance={stopInstance}
+          invalidateInstances={invalidateInstances}
+          startInstance={startInstance}
+          restartInstance={restartInstance}
+          openEditModal={openEditModal}
+          setConfirmDeleteInstanceId={setConfirmDeleteInstanceId}
+          instanceDetailTab={instanceDetailTab}
+          setInstanceDetailTab={setInstanceDetailTab}
+          selectedInstanceMessage={selectedInstanceMessage}
+          importSaveUrl={importSaveUrl}
+          setImportSaveUrl={setImportSaveUrl}
+          importSaveFromUrl={importSaveFromUrl}
+          processLogsTail={processLogsTail}
+          processLogLive={processLogLive}
+          setProcessLogLive={setProcessLogLive}
+          setProcessLogLines={setProcessLogLines}
+          isAuthed={isAuthed}
+        />
+
+        <ToastPortal toasts={toasts} setToasts={setToasts} />
 
     </div>
   )
