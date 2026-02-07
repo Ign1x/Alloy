@@ -1679,46 +1679,6 @@ function App() {
     }
   }
 
-  const downloadLastSuccessVersionByTarget = createMemo(() => {
-    const out = new Map<DownloadTarget, string>()
-    for (const job of downloadJobs()) {
-      if (job.state !== 'success') continue
-      if (!out.has(job.target)) out.set(job.target, job.version)
-    }
-    return out
-  })
-
-  const downloadCacheByKey = createMemo(() => {
-    const map = new Map<string, { key: string; path: string; size_bytes: string; last_used_unix_ms: string }>()
-    for (const entry of controlDiagnostics.data?.cache?.entries ?? []) {
-      map.set(entry.key, entry as { key: string; path: string; size_bytes: string; last_used_unix_ms: string })
-    }
-    return map
-  })
-
-  const downloadInstalledRows = createMemo(() => {
-    const targets: DownloadTarget[] = ['minecraft_vanilla', 'terraria_vanilla', 'dsp_nebula']
-    return targets.map((target) => {
-      const templateId =
-        target === 'minecraft_vanilla'
-          ? 'minecraft:vanilla'
-          : target === 'terraria_vanilla'
-            ? 'terraria:vanilla'
-            : 'dsp:nebula'
-      const cache = downloadCacheByKey().get(templateId)
-      const installed = Number(cache?.size_bytes ?? '0') > 0
-      const installedVersion = downloadLastSuccessVersionByTarget().get(target) ?? (installed ? 'cached' : 'not installed')
-      return {
-        target,
-        templateId,
-        installed,
-        installedVersion,
-        sizeBytes: Number(cache?.size_bytes ?? '0'),
-        lastUsedUnixMs: Number(cache?.last_used_unix_ms ?? '0'),
-      }
-    })
-  })
-
   function focusFirstEditError(errors: Record<string, string>) {
     focusFirstEditErrorInForm({
       errors,
@@ -2965,12 +2925,14 @@ function App() {
                 retryDownloadJob={retryDownloadJob}
                 setSelectedDownloadJobId={setSelectedDownloadJobId}
                 enqueueDownloadWarm={enqueueDownloadWarm}
-                downloadInstalledRows={downloadInstalledRows}
                 downloadNowUnixMs={downloadNowUnixMs}
                 isReadOnly={isReadOnly}
                 downloadEnqueueTarget={downloadEnqueueTarget}
                 downloadStatus={downloadStatus}
                 controlDiagnostics={controlDiagnostics}
+                clearCache={clearCache}
+                pushToast={pushToast}
+                toastError={toastError}
                 downloadMcVersion={downloadMcVersion}
                 setDownloadMcVersion={setDownloadMcVersion}
                 mcVersionOptions={mcVersionOptions}

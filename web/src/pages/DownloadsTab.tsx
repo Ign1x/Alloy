@@ -4,6 +4,7 @@ import type { DownloadCenterView, DownloadJob, DownloadTarget } from '../app/typ
 import { downloadJobProgressMessage, downloadJobStatusLabel, downloadJobStatusVariant, downloadTargetLabel } from '../app/helpers/downloads'
 import { formatBytes, formatRelativeTime } from '../app/helpers/format'
 import { DownloadProgress } from '../app/primitives/DownloadProgress'
+import { queryClient } from '../rspc'
 import { Badge } from '../components/ui/Badge'
 import { Button } from '../components/ui/Button'
 import { EmptyState } from '../components/ui/EmptyState'
@@ -17,13 +18,15 @@ export type DownloadsTabProps = {
   [key: string]: unknown
 }
 
-type InstalledRow = {
-  target: DownloadTarget
-  templateId: string
-  installed: boolean
-  installedVersion: string
+type CacheEntryRow = { key: string; path: string; size_bytes: string; last_used_unix_ms: string }
+
+type CachedVersionRow = {
+  version: string
+  key: string
+  path: string
   sizeBytes: number
   lastUsedUnixMs: number
+  meta?: string
 }
 
 type DownloadStatus = {
@@ -202,8 +205,8 @@ function VersionManager(props: {
   title: string
   subtitle: string
   templateId: string
-  target: DownloadTarget
-  installed: () => InstalledRow | null
+  aggregateCacheKey: string
+  cachedVersions: () => CachedVersionRow[]
   status: () => DownloadStatus | null
   options: () => VersionOption[]
   search: () => string
@@ -213,8 +216,22 @@ function VersionManager(props: {
   onInstall: () => void
   installPending: () => boolean
   installDisabled: () => boolean
-  recents: () => string[]
+  deleteDisabled: () => boolean
+  deletingKey: () => string | null
+  onDeleteCacheKey: (key: string, label: string) => void
 }) {
+  const cachedByVersion = createMemo(() => {
+    const map = new Map<string, CachedVersionRow>()
+    for (const row of props.cachedVersions()) map.set(row.version, row)
+    return map
+  })
+
+  const labelByValue = createMemo(() => {
+    const map = new Map<string, string>()
+    for (const opt of props.options()) map.set(opt.value, opt.label)
+    return map
+  })
+
   const filtered = createMemo(() => {
     const q = props.search().trim().toLowerCase()
     const opts = props.options()
@@ -222,36 +239,45 @@ function VersionManager(props: {
     return opts.filter((o) => o.label.toLowerCase().includes(q) || o.value.toLowerCase().includes(q))
   })
 
-  const installedLabel = createMemo(() => {
-    const row = props.installed()
-    if (!row || !row.installed) return 'Not cached'
-    return row.installedVersion
+  const cachedTotalBytes = createMemo(() => props.cachedVersions().reduce((sum, row) => sum + row.sizeBytes, 0))
+
+  const cachedSummary = createMemo(() => {
+    const cached = props.cachedVersions()
+    if (cached.length === 0) return 'Not cached'
+    const last = cached[0]
+    const lastLabel = labelByValue().get(last.version) ?? last.version
+    return `${cached.length} cached · ${formatBytes(cachedTotalBytes())} · last ${lastLabel}`
   })
 
-  const selectionMatchesInstalled = createMemo(() => {
-    const row = props.installed()
-    if (!row || !row.installed) return false
-    const v = row.installedVersion
-    if (!v || v === 'cached') return false
-    return v === props.value()
+  const selectedLabel = createMemo(() => labelByValue().get(props.value()) ?? props.value())
+  const selectedCache = createMemo(() => cachedByVersion().get(props.value()) ?? null)
+  const selectedCachedMessage = createMemo(() => {
+    const row = selectedCache()
+    if (!row) return null
+    const parts = [`${formatBytes(row.sizeBytes)}`, formatRelativeTime(row.lastUsedUnixMs)]
+    if (row.meta) parts.unshift(row.meta)
+    return parts.filter(Boolean).join(' · ')
   })
 
   return (
     <div class="space-y-4">
       <div class="flex flex-wrap items-start justify-between gap-3">
-        <div class="min-w-0">
-          <div class="text-lg font-semibold tracking-tight text-slate-900 dark:text-slate-100">{props.title}</div>
-          <div class="mt-1 text-[12px] text-slate-600 dark:text-slate-400">{props.subtitle}</div>
+        <div class="flex min-w-0 items-start gap-3">
+          <TemplateMark templateId={props.templateId} class="mt-0.5 h-9 w-9" />
+          <div class="min-w-0">
+            <div class="text-lg font-semibold tracking-tight text-slate-900 dark:text-slate-100">{props.title}</div>
+            <div class="mt-1 text-[12px] text-slate-600 dark:text-slate-400">{props.subtitle}</div>
+          </div>
         </div>
         <div class="flex flex-wrap items-center gap-2">
-          <Badge variant={props.installed()?.installed ? 'success' : 'neutral'}>{props.installed()?.installed ? 'Cached' : 'Missing'}</Badge>
+          <Badge variant={props.cachedVersions().length > 0 ? 'success' : 'neutral'}>{props.cachedVersions().length > 0 ? 'Cached' : 'Missing'}</Badge>
           <span class="rounded-full border border-slate-200 bg-white px-2 py-0.5 font-mono text-[11px] text-slate-700 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200">
-            {installedLabel()}
+            {cachedSummary()}
           </span>
         </div>
       </div>
 
-      <div class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+      <div class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_380px]">
         <section class={SURFACE}>
           <div class="border-b border-slate-200 px-4 py-3 dark:border-slate-800">
             <div class="flex flex-wrap items-center justify-between gap-3">
@@ -278,12 +304,7 @@ function VersionManager(props: {
                 <For each={filtered()}>
                   {(opt) => {
                     const selected = () => opt.value === props.value()
-                    const isInstalled = () => {
-                      const row = props.installed()
-                      if (!row || !row.installed) return false
-                      if (!row.installedVersion || row.installedVersion === 'cached') return false
-                      return row.installedVersion === opt.value
-                    }
+                    const cached = () => cachedByVersion().get(opt.value) ?? null
 
                     return (
                       <button
@@ -297,17 +318,34 @@ function VersionManager(props: {
                       >
                         <div class="min-w-0">
                           <div class="truncate text-sm font-medium">{opt.label}</div>
-                          <Show when={opt.meta}>
-                            <div class={`mt-0.5 text-[11px] ${selected() ? 'text-white/75 dark:text-slate-700' : 'text-slate-500 dark:text-slate-400'}`}>
-                              {opt.meta}
+                          <Show when={opt.meta || cached()}>
+                            <div
+                              class={`mt-0.5 flex flex-wrap items-center gap-2 text-[11px] ${
+                                selected() ? 'text-white/75 dark:text-slate-700' : 'text-slate-500 dark:text-slate-400'
+                              }`}
+                            >
+                              <Show when={opt.meta}>
+                                <span>{opt.meta}</span>
+                              </Show>
+                              <Show when={opt.meta && cached()}>
+                                <span>·</span>
+                              </Show>
+                              <Show when={cached()}>
+                                {(c) => (
+                                  <span>
+                                    cached {formatBytes((c() as CachedVersionRow).sizeBytes)} ·{' '}
+                                    {formatRelativeTime((c() as CachedVersionRow).lastUsedUnixMs)}
+                                  </span>
+                                )}
+                              </Show>
                             </div>
                           </Show>
                         </div>
                         <div class="flex flex-none items-center gap-2">
-                          <Show when={isInstalled()}>
-                            <StatusPill ok>installed</StatusPill>
+                          <Show when={cached()}>
+                            <StatusPill ok>cached</StatusPill>
                           </Show>
-                          <Show when={selected() && !isInstalled()}>
+                          <Show when={selected() && !cached()}>
                             <span class={`text-[11px] ${selected() ? 'text-white/85 dark:text-slate-700' : 'text-slate-500 dark:text-slate-400'}`}>selected</span>
                           </Show>
                         </div>
@@ -322,47 +360,103 @@ function VersionManager(props: {
 
         <section class={SURFACE}>
           <div class="border-b border-slate-200 px-4 py-4 dark:border-slate-800">
-            <div class="text-sm font-semibold text-slate-900 dark:text-slate-100">Install</div>
+            <div class="text-sm font-semibold text-slate-900 dark:text-slate-100">Manage</div>
             <div class="mt-1 text-[12px] text-slate-600 dark:text-slate-400">
-              Select a version on the left, then install (cache) the server bundle on this node.
+              Cache multiple versions side-by-side. Instances can reference any cached version.
             </div>
           </div>
           <div class="space-y-4 p-4">
             <div class="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-900/20">
               <div class="text-[11px] font-medium text-slate-600 dark:text-slate-400">Selected</div>
-              <div class="mt-1 font-mono text-[12px] text-slate-900 dark:text-slate-100">{props.value()}</div>
-              <Show when={selectionMatchesInstalled()}>
-                <div class="mt-2 text-[12px] text-emerald-700 dark:text-emerald-300">Already cached.</div>
+              <div class="mt-1 truncate font-mono text-[12px] text-slate-900 dark:text-slate-100" title={selectedLabel()}>
+                {selectedLabel()}
+              </div>
+              <Show when={selectedCache()}>
+                <div class="mt-2 text-[12px] text-emerald-700 dark:text-emerald-300">{selectedCachedMessage()}</div>
               </Show>
             </div>
 
-            <Button
-              size="sm"
-              variant="primary"
-              leftIcon={<Download class="h-4 w-4" aria-hidden="true" />}
-              loading={props.installPending()}
-              disabled={props.installDisabled()}
-              onClick={props.onInstall}
-            >
-              {selectionMatchesInstalled() ? 'Reinstall' : 'Install'}
-            </Button>
+            <div class="flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                variant="primary"
+                leftIcon={<Download class="h-4 w-4" aria-hidden="true" />}
+                loading={props.installPending()}
+                disabled={props.installDisabled()}
+                onClick={props.onInstall}
+              >
+                Cache version
+              </Button>
 
-            <Show when={props.recents().length > 0}>
+              <Show when={selectedCache()}>
+                {(row) => (
+                  <Button
+                    size="sm"
+                    variant="danger"
+                    leftIcon={<Trash2 class="h-4 w-4" aria-hidden="true" />}
+                    loading={props.deletingKey() === (row() as CachedVersionRow).key}
+                    disabled={props.deleteDisabled()}
+                    onClick={() => props.onDeleteCacheKey((row() as CachedVersionRow).key, `${props.title} ${selectedLabel()}`)}
+                  >
+                    Delete
+                  </Button>
+                )}
+              </Show>
+            </div>
+
+            <Show when={props.cachedVersions().length > 0}>
               <div>
-                <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Recent</div>
-                <div class="mt-2 flex flex-wrap gap-2">
-                  <For each={props.recents()}>
-                    {(v) => (
-                      <button
-                        type="button"
-                        class="rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-mono text-slate-700 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900/30"
-                        onClick={() => props.onSelect(v)}
-                        title="Select version"
-                      >
-                        {v}
-                      </button>
-                    )}
-                  </For>
+                <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Cached versions</div>
+                <div class="mt-2 overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-800">
+                  <div class="divide-y divide-slate-200 dark:divide-slate-800">
+                    <For each={props.cachedVersions()}>
+                      {(row) => (
+                        <div class="flex flex-wrap items-center justify-between gap-3 px-3 py-2 hover:bg-slate-50 dark:hover:bg-slate-900/20">
+                          <button
+                            type="button"
+                            class="min-w-0 text-left"
+                            onClick={() => props.onSelect(row.version)}
+                            title="Select version"
+                          >
+                            <div class="truncate font-mono text-[12px] text-slate-900 dark:text-slate-100">
+                              {labelByValue().get(row.version) ?? row.version}
+                            </div>
+                            <div class="mt-0.5 flex flex-wrap items-center gap-2 font-mono text-[11px] text-slate-500 dark:text-slate-400">
+                              <Show when={row.meta}>
+                                <span>{row.meta}</span>
+                              </Show>
+                              <span>{formatBytes(row.sizeBytes)}</span>
+                              <span>·</span>
+                              <span title={new Date(row.lastUsedUnixMs).toLocaleString()}>{formatRelativeTime(row.lastUsedUnixMs)}</span>
+                            </div>
+                          </button>
+                          <Button
+                            size="xs"
+                            variant="danger"
+                            leftIcon={<Trash2 class="h-4 w-4" aria-hidden="true" />}
+                            loading={props.deletingKey() === row.key}
+                            disabled={props.deleteDisabled()}
+                            onClick={() => props.onDeleteCacheKey(row.key, `${props.title} ${labelByValue().get(row.version) ?? row.version}`)}
+                          >
+                            Delete
+                          </Button>
+                        </div>
+                      )}
+                    </For>
+                  </div>
+                </div>
+
+                <div class="mt-3">
+                  <Button
+                    size="xs"
+                    variant="danger"
+                    leftIcon={<Trash2 class="h-4 w-4" aria-hidden="true" />}
+                    loading={props.deletingKey() === props.aggregateCacheKey}
+                    disabled={props.deleteDisabled()}
+                    onClick={() => props.onDeleteCacheKey(props.aggregateCacheKey, `${props.title} (all cached versions)`)}
+                  >
+                    Delete all cached
+                  </Button>
                 </div>
               </div>
             </Show>
@@ -408,12 +502,14 @@ export default function DownloadsTab(props: DownloadsTabProps) {
     retryDownloadJob,
     setSelectedDownloadJobId,
     enqueueDownloadWarm,
-    downloadInstalledRows,
     downloadNowUnixMs,
     isReadOnly,
     downloadEnqueueTarget,
     downloadStatus,
     controlDiagnostics,
+    clearCache,
+    pushToast,
+    toastError,
     downloadMcVersion,
     setDownloadMcVersion,
     mcVersionOptions,
@@ -429,13 +525,6 @@ export default function DownloadsTab(props: DownloadsTabProps) {
 
   const view = downloadCenterView as () => DownloadCenterView
   const setView = setDownloadCenterView as (v: DownloadCenterView) => void
-
-  const installedByTarget = createMemo(() => {
-    const map = new Map<DownloadTarget, InstalledRow>()
-    for (const row of (downloadInstalledRows() as InstalledRow[]) ?? []) map.set(row.target, row)
-    return map
-  })
-  const installed = (target: DownloadTarget) => installedByTarget().get(target) ?? null
 
   const statusByTarget = createMemo(() => {
     const raw = downloadStatus() as Map<DownloadTarget, DownloadStatus>
@@ -457,25 +546,81 @@ export default function DownloadsTab(props: DownloadsTabProps) {
     history: historyJobs().length,
   }))
 
-  function recentsFor(target: DownloadTarget): string[] {
-    const done = jobs()
-      .filter((j) => j.target === target && j.state === 'success')
-      .slice()
-      .sort((a, b) => b.updatedAtUnixMs - a.updatedAtUnixMs)
-    const out: string[] = []
-    const seen = new Set<string>()
-    for (const job of done) {
-      const v = job.version
-      if (!v || seen.has(v)) continue
-      seen.add(v)
-      out.push(v)
-      if (out.length >= 8) break
-    }
-    return out
+  const cacheEntries = createMemo(() => (controlDiagnostics.data?.cache?.entries ?? []) as CacheEntryRow[])
+  const cacheTotalBytes = createMemo(() => cacheEntries().reduce((sum, e) => sum + Number(e.size_bytes ?? 0), 0))
+
+  function parseMinecraftCacheKey(key: string): { version: string; sha1: string } | null {
+    if (!key.startsWith('minecraft:vanilla@')) return null
+    const rest = key.slice('minecraft:vanilla@'.length)
+    const idx = rest.lastIndexOf('#')
+    if (idx <= 0) return null
+    const version = rest.slice(0, idx)
+    const sha1 = rest.slice(idx + 1)
+    if (!sha1 || sha1.length !== 40) return null
+    return { version, sha1 }
   }
 
-  const cacheEntries = createMemo(() => (controlDiagnostics.data?.cache?.entries ?? []) as Array<{ key: string; path: string; size_bytes: string; last_used_unix_ms: string }>)
-  const cacheTotalBytes = createMemo(() => cacheEntries().reduce((sum, e) => sum + Number(e.size_bytes ?? 0), 0))
+  const mcCachedVersions = createMemo(() => {
+    const out: CachedVersionRow[] = []
+    for (const e of cacheEntries()) {
+      const parsed = parseMinecraftCacheKey(e.key)
+      if (!parsed) continue
+      out.push({
+        version: parsed.version,
+        key: e.key,
+        path: e.path,
+        sizeBytes: Number(e.size_bytes ?? 0),
+        lastUsedUnixMs: Number(e.last_used_unix_ms ?? 0),
+        meta: `sha1 ${parsed.sha1.slice(0, 8)}`,
+      })
+    }
+    out.sort((a, b) => b.lastUsedUnixMs - a.lastUsedUnixMs || a.version.localeCompare(b.version))
+    return out
+  })
+
+  const trCachedVersions = createMemo(() => {
+    const out: CachedVersionRow[] = []
+    for (const e of cacheEntries()) {
+      if (!e.key.startsWith('terraria:vanilla@')) continue
+      const version = e.key.slice('terraria:vanilla@'.length)
+      if (!version) continue
+      out.push({
+        version,
+        key: e.key,
+        path: e.path,
+        sizeBytes: Number(e.size_bytes ?? 0),
+        lastUsedUnixMs: Number(e.last_used_unix_ms ?? 0),
+      })
+    }
+    out.sort((a, b) => b.lastUsedUnixMs - a.lastUsedUnixMs || a.version.localeCompare(b.version))
+    return out
+  })
+
+  const dspSourceCache = createMemo(() => cacheEntries().find((e) => e.key === 'dsp:nebula@source') ?? null)
+  const dspSourceBytes = createMemo(() => Number(dspSourceCache()?.size_bytes ?? 0))
+  const dspSourceLastUsed = createMemo(() => Number(dspSourceCache()?.last_used_unix_ms ?? 0))
+  const dspCached = createMemo(() => dspSourceBytes() > 0)
+
+  const [deletingKey, setDeletingKey] = createSignal<string | null>(null)
+  const deleteDisabled = createMemo(() => isReadOnly() || Boolean(clearCache.isPending) || Boolean(deletingKey()))
+
+  async function deleteCacheKey(key: string, label: string) {
+    if (isReadOnly()) return
+    const ok = window.confirm(`Delete cached data for ${label}?\n\nThis only removes downloaded server files on this node.`)
+    if (!ok) return
+    try {
+      setDeletingKey(key)
+      const out = await clearCache.mutateAsync({ keys: [key] })
+      pushToast('success', 'Deleted', `Freed ${formatBytes(Number(out.freed_bytes))}`)
+      await queryClient.invalidateQueries({ queryKey: ['control.diagnostics', null] })
+      await queryClient.invalidateQueries({ queryKey: ['process.cacheStats', null] })
+    } catch (e) {
+      toastError('Delete failed', e)
+    } finally {
+      setDeletingKey(null)
+    }
+  }
+
   const [cacheSearch, setCacheSearch] = createSignal('')
   const filteredCache = createMemo(() => {
     const q = cacheSearch().trim().toLowerCase()
@@ -524,7 +669,11 @@ export default function DownloadsTab(props: DownloadsTabProps) {
               onSelect={setView}
               icon={<TemplateMark templateId="minecraft:vanilla" class="h-7 w-7" />}
               label="Minecraft"
-              meta={installed('minecraft_vanilla')?.installed ? `cached ${installed('minecraft_vanilla')!.installedVersion}` : 'Not cached'}
+              meta={
+                mcCachedVersions().length > 0
+                  ? `${mcCachedVersions().length} cached · last ${mcCachedVersions()[0]?.version ?? ''}`.trim()
+                  : 'Not cached'
+              }
             />
             <NavItem
               value="terraria"
@@ -532,7 +681,11 @@ export default function DownloadsTab(props: DownloadsTabProps) {
               onSelect={setView}
               icon={<TemplateMark templateId="terraria:vanilla" class="h-7 w-7" />}
               label="Terraria"
-              meta={installed('terraria_vanilla')?.installed ? `cached ${installed('terraria_vanilla')!.installedVersion}` : 'Not cached'}
+              meta={
+                trCachedVersions().length > 0
+                  ? `${trCachedVersions().length} cached · last ${trCachedVersions()[0]?.version ?? ''}`.trim()
+                  : 'Not cached'
+              }
             />
             <NavItem
               value="dsp"
@@ -540,7 +693,13 @@ export default function DownloadsTab(props: DownloadsTabProps) {
               onSelect={setView}
               icon={<TemplateMark templateId="dsp:nebula" class="h-7 w-7" />}
               label="DSP (Nebula)"
-              meta={hasSavedSteamcmdCreds() ? 'SteamCMD configured' : 'SteamCMD required'}
+              meta={
+                hasSavedSteamcmdCreds()
+                  ? dspCached()
+                    ? `cached ${formatBytes(dspSourceBytes())}`
+                    : 'SteamCMD configured'
+                  : 'SteamCMD required'
+              }
             />
 
             <NavItem
@@ -657,8 +816,8 @@ export default function DownloadsTab(props: DownloadsTabProps) {
                 title="Minecraft"
                 subtitle="Minecraft server bundles are version-managed (not “updated”). Cache the version you plan to use."
                 templateId="minecraft:vanilla"
-                target="minecraft_vanilla"
-                installed={() => installed('minecraft_vanilla')}
+                aggregateCacheKey="minecraft:vanilla"
+                cachedVersions={mcCachedVersions}
                 status={() => status('minecraft_vanilla')}
                 options={() => (mcVersionOptions() as VersionOption[]) ?? []}
                 search={mcSearch}
@@ -668,7 +827,9 @@ export default function DownloadsTab(props: DownloadsTabProps) {
                 onInstall={() => void enqueueDownloadWarm('minecraft_vanilla')}
                 installPending={() => installPending() && installTarget() === 'minecraft_vanilla'}
                 installDisabled={() => isReadOnly()}
-                recents={() => recentsFor('minecraft_vanilla')}
+                deleteDisabled={deleteDisabled}
+                deletingKey={deletingKey}
+                onDeleteCacheKey={(key, label) => void deleteCacheKey(key, label)}
               />
             </Show>
 
@@ -677,8 +838,8 @@ export default function DownloadsTab(props: DownloadsTabProps) {
                 title="Terraria"
                 subtitle="Terraria server bundles are version-managed. Choose a build number and cache it."
                 templateId="terraria:vanilla"
-                target="terraria_vanilla"
-                installed={() => installed('terraria_vanilla')}
+                aggregateCacheKey="terraria:vanilla"
+                cachedVersions={trCachedVersions}
                 status={() => status('terraria_vanilla')}
                 options={() => (trVersionOptions() as VersionOption[]) ?? []}
                 search={trSearch}
@@ -688,7 +849,9 @@ export default function DownloadsTab(props: DownloadsTabProps) {
                 onInstall={() => void enqueueDownloadWarm('terraria_vanilla')}
                 installPending={() => installPending() && installTarget() === 'terraria_vanilla'}
                 installDisabled={() => isReadOnly()}
-                recents={() => recentsFor('terraria_vanilla')}
+                deleteDisabled={deleteDisabled}
+                deletingKey={deletingKey}
+                onDeleteCacheKey={(key, label) => void deleteCacheKey(key, label)}
               />
             </Show>
 
@@ -705,9 +868,7 @@ export default function DownloadsTab(props: DownloadsTabProps) {
                     <Badge variant={hasSavedSteamcmdCreds() ? 'success' : 'warning'}>
                       {hasSavedSteamcmdCreds() ? 'SteamCMD ready' : 'SteamCMD required'}
                     </Badge>
-                    <Badge variant={installed('dsp_nebula')?.installed ? 'success' : 'neutral'}>
-                      {installed('dsp_nebula')?.installed ? 'Cached' : 'Missing'}
-                    </Badge>
+                    <Badge variant={dspCached() ? 'success' : 'neutral'}>{dspCached() ? 'Cached' : 'Missing'}</Badge>
                   </div>
                 </div>
 
@@ -780,6 +941,42 @@ export default function DownloadsTab(props: DownloadsTabProps) {
                     </div>
                   </Section>
                 </div>
+
+                <Section
+                  title="Storage"
+                  description="Deletes only downloaded DSP server files. Instance saves live inside each instance directory."
+                >
+                  <div class="space-y-3">
+                    <div class="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-900/20">
+                      <div class="flex flex-wrap items-center justify-between gap-2">
+                        <div class="text-sm font-medium text-slate-900 dark:text-slate-100">Source root</div>
+                        <StatusPill ok={dspCached()}>{dspCached() ? 'cached' : 'missing'}</StatusPill>
+                      </div>
+                      <div
+                        class="mt-2 truncate font-mono text-[11px] text-slate-600 dark:text-slate-400"
+                        title={dspSourceCache()?.path ?? ''}
+                      >
+                        {dspSourceCache()?.path ?? 'unknown'}
+                      </div>
+                      <div class="mt-2 flex flex-wrap items-center gap-2 font-mono text-[11px] text-slate-500 dark:text-slate-400">
+                        <span>{formatBytes(dspSourceBytes())}</span>
+                        <span>·</span>
+                        <span title={new Date(dspSourceLastUsed()).toLocaleString()}>{formatRelativeTime(dspSourceLastUsed())}</span>
+                      </div>
+                    </div>
+
+                    <Button
+                      size="sm"
+                      variant="danger"
+                      leftIcon={<Trash2 class="h-4 w-4" aria-hidden="true" />}
+                      loading={deletingKey() === 'dsp:nebula@source'}
+                      disabled={deleteDisabled()}
+                      onClick={() => void deleteCacheKey('dsp:nebula@source', 'DSP server files')}
+                    >
+                      Delete server files
+                    </Button>
+                  </div>
+                </Section>
               </div>
             </Show>
 
@@ -832,9 +1029,24 @@ export default function DownloadsTab(props: DownloadsTabProps) {
                                   {e.path}
                                 </div>
                               </div>
-                              <div class="flex flex-none flex-col items-end gap-1 font-mono text-[11px] text-slate-500 dark:text-slate-400">
-                                <div>{formatBytes(Number(e.size_bytes))}</div>
-                                <div title={e.last_used_unix_ms}>{formatRelativeTime(Number(e.last_used_unix_ms))}</div>
+                              <div class="flex flex-none items-center gap-2">
+                                <div class="flex flex-col items-end gap-1 font-mono text-[11px] text-slate-500 dark:text-slate-400">
+                                  <div>{formatBytes(Number(e.size_bytes))}</div>
+                                  <div title={e.last_used_unix_ms}>{formatRelativeTime(Number(e.last_used_unix_ms))}</div>
+                                </div>
+                                <IconButton
+                                  label="Delete cache entry"
+                                  variant="danger"
+                                  disabled={deleteDisabled()}
+                                  onClick={() => void deleteCacheKey(e.key, e.key)}
+                                >
+                                  <Show
+                                    when={deletingKey() === e.key}
+                                    fallback={<Trash2 class="h-4 w-4" aria-hidden="true" />}
+                                  >
+                                    <RotateCw class="h-4 w-4 animate-spin" aria-hidden="true" />
+                                  </Show>
+                                </IconButton>
                               </div>
                             </div>
                           </div>
