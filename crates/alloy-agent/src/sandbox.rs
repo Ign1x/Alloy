@@ -471,8 +471,13 @@ fn docker_image() -> String {
         .unwrap_or_else(|| "ghcr.io/ign1x/alloy-agent:latest".to_string())
 }
 
-fn host_mount_path(path: &Path) -> PathBuf {
-    std::fs::canonicalize(path).unwrap_or_else(|_| normalize_path(path))
+fn host_mount_path(path: &Path) -> Option<PathBuf> {
+    let normalized = normalize_path(path);
+    if let Ok(mountinfo) = std::fs::read_to_string("/proc/self/mountinfo") {
+        return resolve_host_mount_path_from_mountinfo(&mountinfo, &normalized);
+    }
+
+    Some(std::fs::canonicalize(&normalized).unwrap_or(normalized))
 }
 
 fn mountpoint_prefix_matches(target: &str, mount_point: &str) -> bool {
@@ -485,6 +490,74 @@ fn mountpoint_prefix_matches(target: &str, mount_point: &str) -> bool {
     target
         .strip_prefix(mount_point)
         .is_some_and(|rest| rest.starts_with('/'))
+}
+
+fn mount_path_from_mountinfo(mount_root: &str, mount_point: &str, target: &str) -> Option<PathBuf> {
+    if !mountpoint_prefix_matches(target, mount_point) {
+        return None;
+    }
+
+    let suffix = if target == mount_point {
+        ""
+    } else if mount_point == "/" {
+        target.strip_prefix('/')?
+    } else {
+        target.strip_prefix(mount_point)?.strip_prefix('/')?
+    };
+
+    let mut out = PathBuf::from(mount_root);
+    if !suffix.is_empty() {
+        out.push(suffix);
+    }
+    Some(out)
+}
+
+fn resolve_host_mount_path_from_mountinfo(mountinfo: &str, path: &Path) -> Option<PathBuf> {
+    let target = normalize_path(path).to_string_lossy().to_string();
+    let mut best: Option<(usize, String, String, String)> = None;
+
+    for line in mountinfo.lines() {
+        let Some((left, right)) = line.split_once(" - ") else {
+            continue;
+        };
+        let left_fields: Vec<&str> = left.split_whitespace().collect();
+        if left_fields.len() < 5 {
+            continue;
+        }
+        let right_fields: Vec<&str> = right.split_whitespace().collect();
+        if right_fields.is_empty() {
+            continue;
+        }
+
+        let mount_root = left_fields[3];
+        let mount_point = left_fields[4];
+        let fs_type = right_fields[0];
+
+        if !mountpoint_prefix_matches(&target, mount_point) {
+            continue;
+        }
+
+        let rank = mount_point.len();
+        if best
+            .as_ref()
+            .map(|(best_rank, _, _, _)| rank > *best_rank)
+            .unwrap_or(true)
+        {
+            best = Some((
+                rank,
+                mount_root.to_string(),
+                mount_point.to_string(),
+                fs_type.to_string(),
+            ));
+        }
+    }
+
+    let (_, mount_root, mount_point, fs_type) = best?;
+    if fs_type == "overlay" {
+        return None;
+    }
+
+    mount_path_from_mountinfo(&mount_root, &mount_point, &target)
 }
 
 fn extract_docker_volume_from_mount_root(mount_root: &str) -> Option<String> {
@@ -518,7 +591,11 @@ fn detect_docker_data_volume_from_mountinfo(mountinfo: &str, data_root: &Path) -
             continue;
         };
         let rank = mount_point.len();
-        if best.as_ref().map(|(best_rank, _)| rank > *best_rank).unwrap_or(true) {
+        if best
+            .as_ref()
+            .map(|(best_rank, _)| rank > *best_rank)
+            .unwrap_or(true)
+        {
             best = Some((rank, volume_name));
         }
     }
@@ -699,7 +776,8 @@ fn build_docker_args(
         .map(|v| v.trim().to_string())
         .filter(|v| !v.is_empty());
 
-    let docker_data_volume = detect_docker_data_volume(&data_root).or(configured_docker_data_volume);
+    let docker_data_volume =
+        detect_docker_data_volume(&data_root).or(configured_docker_data_volume);
 
     ensure_docker_ready(&image, docker_data_volume.as_deref())?;
 
@@ -711,23 +789,31 @@ fn build_docker_args(
         ));
     }
 
-    let mut rw_paths = BTreeSet::<PathBuf>::new();
-    rw_paths.insert(host_mount_path(instance_dir));
-    rw_paths.insert(host_mount_path(cwd));
+    let mut requested_rw_paths = BTreeSet::<PathBuf>::new();
+    requested_rw_paths.insert(normalize_path(instance_dir));
+    requested_rw_paths.insert(normalize_path(cwd));
     for p in extra_rw_paths {
-        rw_paths.insert(host_mount_path(p));
+        requested_rw_paths.insert(normalize_path(p));
     }
     if docker_data_volume.is_none() {
-        rw_paths.insert(host_mount_path(&data_root));
+        requested_rw_paths.insert(data_root.clone());
+    }
+
+    let mut rw_paths = BTreeSet::<PathBuf>::new();
+    for raw_path in requested_rw_paths {
+        if docker_data_volume.is_some() && raw_path.starts_with(&data_root) {
+            continue;
+        }
+        if !raw_path.exists() {
+            continue;
+        }
+        let Some(host_path) = host_mount_path(&raw_path) else {
+            continue;
+        };
+        rw_paths.insert(host_path);
     }
 
     for p in rw_paths {
-        if docker_data_volume.is_some() && p.starts_with(&data_root) {
-            continue;
-        }
-        if !p.exists() {
-            continue;
-        }
         let p = p.display().to_string();
         out.push("--mount".to_string());
         out.push(format!("type=bind,source={p},target={p}"));
@@ -777,17 +863,15 @@ fn sanitize_cgroup_name(raw: &str) -> String {
 mod tests {
     use super::{
         detect_docker_data_volume_from_mountinfo, extract_docker_volume_from_mount_root,
-        mountpoint_prefix_matches,
+        mount_path_from_mountinfo, mountpoint_prefix_matches,
+        resolve_host_mount_path_from_mountinfo,
     };
     use std::path::Path;
 
     #[test]
     fn mountpoint_prefix_matching_works() {
         assert!(mountpoint_prefix_matches("/data", "/data"));
-        assert!(mountpoint_prefix_matches(
-            "/data/instances/abc",
-            "/data"
-        ));
+        assert!(mountpoint_prefix_matches("/data/instances/abc", "/data"));
         assert!(!mountpoint_prefix_matches("/database", "/data"));
     }
 
@@ -820,6 +904,40 @@ mod tests {
             Path::new("/data/instances/23cb6f2a-2bb7-4af4-a4cf-4d54c7fa95c7"),
         );
         assert_eq!(got, Some("alloy_alloy-agent-data".to_string()));
+    }
+
+    #[test]
+    fn mount_path_from_mountinfo_handles_root_and_subpaths() {
+        assert_eq!(
+            mount_path_from_mountinfo("/", "/", "/tmp/work"),
+            Some(Path::new("/tmp/work").to_path_buf())
+        );
+        assert_eq!(
+            mount_path_from_mountinfo("/@/home/ign1x/Code/Alloy", "/app", "/app/crates"),
+            Some(Path::new("/@/home/ign1x/Code/Alloy/crates").to_path_buf())
+        );
+    }
+
+    #[test]
+    fn resolve_host_mount_path_skips_overlay_only_paths() {
+        let mountinfo = r#"
+100 90 0:59 / / rw,relatime - overlay overlay rw,lowerdir=/layers
+"#;
+        let got = resolve_host_mount_path_from_mountinfo(mountinfo, Path::new("/app"));
+        assert_eq!(got, None);
+    }
+
+    #[test]
+    fn resolve_host_mount_path_maps_bind_mount_subpaths() {
+        let mountinfo = r#"
+100 90 0:59 / / rw,relatime - overlay overlay rw,lowerdir=/layers
+101 100 0:27 /@/home/ign1x/Code/Alloy /app rw,relatime - btrfs /dev/sdb3 rw
+"#;
+        let got = resolve_host_mount_path_from_mountinfo(mountinfo, Path::new("/app/crates"));
+        assert_eq!(
+            got,
+            Some(Path::new("/@/home/ign1x/Code/Alloy/crates").to_path_buf())
+        );
     }
 }
 

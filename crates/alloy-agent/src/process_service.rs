@@ -3,7 +3,8 @@ use std::{collections::BTreeMap, time::Duration};
 use alloy_proto::agent_v1::process_service_server::{ProcessService, ProcessServiceServer};
 use alloy_proto::agent_v1::{
     CacheEntry, ClearCacheRequest, ClearCacheResponse, GetCacheStatsRequest, GetCacheStatsResponse,
-    GetStatusRequest, GetStatusResponse, ListProcessesRequest, ListProcessesResponse,
+    GetStatusRequest, GetStatusResponse, GetWarmTemplateProgressRequest,
+    GetWarmTemplateProgressResponse, ListProcessesRequest, ListProcessesResponse,
     ListTemplatesRequest, ListTemplatesResponse, ProcessResources, ProcessState, ProcessStatus,
     ProcessTemplate, StartFromTemplateRequest, StartFromTemplateResponse, StopProcessRequest,
     StopProcessResponse, TailLogsRequest, TailLogsResponse, WarmTemplateCacheRequest,
@@ -12,7 +13,7 @@ use alloy_proto::agent_v1::{
 use tonic::{Request, Response, Status};
 
 use crate::process_manager::ProcessManager;
-use crate::{dsp, dsp_source_init, minecraft_download, terraria_download};
+use crate::{minecraft_download, terraria_download};
 
 #[derive(Debug, Clone)]
 pub struct ProcessApi {
@@ -97,128 +98,57 @@ impl ProcessService for ProcessApi {
     ) -> Result<Response<WarmTemplateCacheResponse>, Status> {
         let req = request.into_inner();
         let params: BTreeMap<String, String> = req.params.into_iter().collect();
+        let progress_id = req.progress_id.trim().to_string();
+
+        let progress_set = !progress_id.is_empty();
+        let report_progress = |stage: &str,
+                               downloaded_bytes: Option<u64>,
+                               total_bytes: Option<u64>,
+                               speed_bytes_per_sec: Option<u64>,
+                               message: String,
+                               done: Option<bool>| {
+            if !progress_set {
+                return;
+            }
+            crate::download_progress::update(
+                &progress_id,
+                crate::download_progress::UpdateArgs {
+                    stage: Some(stage.to_string()),
+                    downloaded_bytes,
+                    total_bytes,
+                    speed_bytes_per_sec,
+                    message: Some(message),
+                    done,
+                },
+            );
+        };
 
         let message = match req.template_id.as_str() {
-            "steamcmd:auth" => {
-                let steam_username = params
-                    .get("steam_username")
-                    .map(|v| v.trim())
-                    .unwrap_or_default();
-                let steam_password = params
-                    .get("steam_password")
-                    .map(String::as_str)
-                    .unwrap_or_default();
-                let steam_guard_code = params
-                    .get("steam_guard_code")
-                    .map(|v| v.trim())
-                    .filter(|v| !v.is_empty());
-
-                let mut field_errors = BTreeMap::<String, String>::new();
-                if steam_username.is_empty() {
-                    field_errors.insert(
-                        "steam_username".to_string(),
-                        "Steam username is required.".to_string(),
-                    );
-                }
-                if steam_password.is_empty() {
-                    field_errors.insert(
-                        "steam_password".to_string(),
-                        "Steam password is required.".to_string(),
-                    );
-                }
-
-                if !field_errors.is_empty() {
-                    return Err(Status::invalid_argument(crate::error_payload::encode(
-                        "invalid_param",
-                        "SteamCMD credentials are required for login verification.",
-                        Some(field_errors),
-                        Some("Enter username and password, then retry Login.".to_string()),
-                    )));
-                }
-
-                dsp_source_init::verify_steamcmd_login(
-                    steam_username,
-                    steam_password,
-                    steam_guard_code,
-                )
-                .await
-                .map_err(|e| {
-                    let detail = format!("{e:#}");
-                    let detail_l = detail.to_ascii_lowercase();
-                    let mut field_errors = BTreeMap::<String, String>::new();
-
-                    let (message, hint) = if detail_l.contains("steam guard")
-                        || detail_l.contains("two-factor")
-                        || detail_l.contains("2fa")
-                    {
-                        field_errors.insert(
-                            "steam_guard_code".to_string(),
-                            "Steam Guard code is required or invalid.".to_string(),
-                        );
-                        (
-                            "Steam Guard verification is required.",
-                            Some("Enter the latest Steam Guard code and retry Login.".to_string()),
-                        )
-                    } else if detail_l.contains("invalid password")
-                        || detail_l.contains("login failure")
-                        || detail_l.contains("incorrect login")
-                        || detail_l.contains("account logon denied")
-                    {
-                        field_errors.insert(
-                            "steam_password".to_string(),
-                            "Steam username or password is incorrect.".to_string(),
-                        );
-                        (
-                            "SteamCMD login failed: invalid credentials.",
-                            Some("Check Steam username/password and retry Login.".to_string()),
-                        )
-                    } else if detail_l.contains("rate limit")
-                        || detail_l.contains("too many")
-                    {
-                        (
-                            "Steam login is temporarily rate-limited.",
-                            Some("Wait a moment, then retry Login.".to_string()),
-                        )
-                    } else if detail_l.contains("timed out")
-                        || detail_l.contains("dns")
-                        || detail_l.contains("resolve")
-                        || detail_l.contains("network")
-                        || detail_l.contains("connection")
-                    {
-                        (
-                            "SteamCMD login failed due to a network issue.",
-                            Some("Check network connectivity and retry Login.".to_string()),
-                        )
-                    } else {
-                        (
-                            "SteamCMD login verification failed.",
-                            Some("Retry Login. If it still fails, check agent logs with request id.".to_string()),
-                        )
-                    };
-
-                    Status::invalid_argument(crate::error_payload::encode(
-                        "invalid_param",
-                        message,
-                        if field_errors.is_empty() {
-                            None
-                        } else {
-                            Some(field_errors)
-                        },
-                        hint,
-                    ))
-                })?;
-
-                "steamcmd login verified".to_string()
-            }
             "minecraft:vanilla" => {
                 let version = params
                     .get("version")
                     .map(|s| s.trim())
                     .filter(|s| !s.is_empty())
                     .unwrap_or("latest_release");
+
+                if progress_set {
+                    crate::download_progress::start(
+                        &progress_id,
+                        "resolve",
+                        format!("resolving minecraft version {version}..."),
+                        None,
+                    );
+                }
+
                 let resolved = minecraft_download::resolve_server_jar(version)
                     .await
                     .map_err(|e| {
+                        if progress_set {
+                            crate::download_progress::fail(
+                                &progress_id,
+                                format!("failed to resolve minecraft server jar: {e}"),
+                            );
+                        }
                         Status::invalid_argument(crate::error_payload::encode(
                             "download_failed",
                             format!("failed to resolve minecraft server jar: {e}"),
@@ -229,9 +159,47 @@ impl ProcessService for ProcessApi {
                             ),
                         ))
                     })?;
-                let jar_path = minecraft_download::ensure_server_jar(&resolved)
+
+                report_progress(
+                    "download",
+                    Some(0),
+                    Some(resolved.size),
+                    Some(0),
+                    format!("downloading minecraft {}...", resolved.version_id),
+                    Some(false),
+                );
+
+                let mut last_downloaded = 0u64;
+                let mut last_total = resolved.size;
+                let mut last_speed = 0u64;
+                let jar_path = minecraft_download::ensure_server_jar_with_progress(
+                    &resolved,
+                    Some(|downloaded: u64, total: u64, speed: u64| {
+                        last_downloaded = downloaded;
+                        last_total = total.max(resolved.size);
+                        last_speed = speed;
+                        report_progress(
+                            "download",
+                            Some(downloaded),
+                            Some(total.max(resolved.size)),
+                            Some(speed),
+                            format!(
+                                "downloading minecraft {} ({downloaded}/{})",
+                                resolved.version_id,
+                                total.max(resolved.size)
+                            ),
+                            Some(false),
+                        );
+                    }),
+                )
                     .await
                     .map_err(|e| {
+                        if progress_set {
+                            crate::download_progress::fail(
+                                &progress_id,
+                                format!("failed to download minecraft server jar: {e}"),
+                            );
+                        }
                         Status::internal(crate::error_payload::encode(
                             "download_failed",
                             format!("failed to download minecraft server jar: {e}"),
@@ -239,6 +207,26 @@ impl ProcessService for ProcessApi {
                             Some("Try again; if it persists, clear cache and retry.".to_string()),
                         ))
                     })?;
+
+                report_progress(
+                    "verify",
+                    Some(last_downloaded.max(resolved.size)),
+                    Some(last_total.max(resolved.size)),
+                    Some(last_speed),
+                    format!("verifying minecraft {} integrity...", resolved.version_id),
+                    Some(false),
+                );
+
+                if progress_set {
+                    crate::download_progress::finish(
+                        &progress_id,
+                        format!("minecraft {} ready", resolved.version_id),
+                        last_downloaded.max(resolved.size),
+                        last_total.max(resolved.size),
+                        last_speed,
+                    );
+                }
+
                 format!(
                     "minecraft cache warmed: version={} sha1={} path={}",
                     resolved.version_id,
@@ -252,7 +240,23 @@ impl ProcessService for ProcessApi {
                     .map(|s| s.trim())
                     .filter(|s| !s.is_empty())
                     .unwrap_or("1453");
+
+                if progress_set {
+                    crate::download_progress::start(
+                        &progress_id,
+                        "resolve",
+                        format!("resolving terraria version {version}..."),
+                        None,
+                    );
+                }
+
                 let resolved = terraria_download::resolve_server_zip(version).map_err(|e| {
+                    if progress_set {
+                        crate::download_progress::fail(
+                            &progress_id,
+                            format!("failed to resolve terraria server zip: {e}"),
+                        );
+                    }
                     Status::invalid_argument(crate::error_payload::encode(
                         "download_failed",
                         format!("failed to resolve terraria server zip: {e}"),
@@ -260,9 +264,47 @@ impl ProcessService for ProcessApi {
                         Some("Check network connectivity, then try again.".to_string()),
                     ))
                 })?;
-                let zip_path = terraria_download::ensure_server_zip(&resolved)
+
+                report_progress(
+                    "download",
+                    Some(0),
+                    Some(0),
+                    Some(0),
+                    format!("downloading terraria {}...", resolved.version_id),
+                    Some(false),
+                );
+
+                let mut last_downloaded = 0u64;
+                let mut last_total = 0u64;
+                let mut last_speed = 0u64;
+                let zip_path = terraria_download::ensure_server_zip_with_progress(
+                    &resolved,
+                    Some(|downloaded: u64, total: u64, speed: u64| {
+                        last_downloaded = downloaded;
+                        last_total = total.max(downloaded);
+                        last_speed = speed;
+                        report_progress(
+                            "download",
+                            Some(downloaded),
+                            Some(total.max(downloaded)),
+                            Some(speed),
+                            format!(
+                                "downloading terraria {} ({downloaded}/{})",
+                                resolved.version_id,
+                                total.max(downloaded)
+                            ),
+                            Some(false),
+                        );
+                    }),
+                )
                     .await
                     .map_err(|e| {
+                        if progress_set {
+                            crate::download_progress::fail(
+                                &progress_id,
+                                format!("failed to download terraria server zip: {e}"),
+                            );
+                        }
                         Status::internal(crate::error_payload::encode(
                             "download_failed",
                             format!("failed to download terraria server zip: {e}"),
@@ -270,9 +312,25 @@ impl ProcessService for ProcessApi {
                             Some("Try again; if it persists, clear cache and retry.".to_string()),
                         ))
                     })?;
+
+                report_progress(
+                    "extract",
+                    Some(last_downloaded),
+                    Some(last_total.max(last_downloaded)),
+                    Some(last_speed),
+                    format!("extracting terraria {} files...", resolved.version_id),
+                    Some(false),
+                );
+
                 let extracted =
                     terraria_download::extract_linux_x64_to_cache(&zip_path, &resolved.version_id)
                         .map_err(|e| {
+                            if progress_set {
+                                crate::download_progress::fail(
+                                    &progress_id,
+                                    format!("failed to extract terraria server: {e}"),
+                                );
+                            }
                             Status::internal(crate::error_payload::encode(
                                 "download_failed",
                                 format!("failed to extract terraria server: {e}"),
@@ -280,6 +338,17 @@ impl ProcessService for ProcessApi {
                                 Some("Clear cache and retry extraction.".to_string()),
                             ))
                         })?;
+
+                if progress_set {
+                    crate::download_progress::finish(
+                        &progress_id,
+                        format!("terraria {} ready", resolved.version_id),
+                        last_downloaded,
+                        last_total.max(last_downloaded),
+                        last_speed,
+                    );
+                }
+
                 format!(
                     "terraria cache warmed: version={} zip_path={} server_root={}",
                     resolved.version_id,
@@ -287,168 +356,75 @@ impl ProcessService for ProcessApi {
                     extracted.server_root.display()
                 )
             }
-            "dsp:nebula" => {
-                let source_root = dsp::default_source_root();
-                let source_errors = dsp::source_layout_errors(&source_root);
-
-                let init_result = if source_errors.is_empty() {
-                    None
-                } else {
-                    let steam_username = params
-                        .get("steam_username")
-                        .map(|v| v.trim())
-                        .unwrap_or_default();
-                    let steam_password = params
-                        .get("steam_password")
-                        .map(String::as_str)
-                        .unwrap_or_default();
-                    let steam_guard_code = params
-                        .get("steam_guard_code")
-                        .map(|v| v.trim())
-                        .filter(|v| !v.is_empty());
-
-                    let mut field_errors = BTreeMap::<String, String>::new();
-                    if steam_username.is_empty() {
-                        field_errors.insert(
-                            "steam_username".to_string(),
-                            "Steam username is required to initialize DSP source files.".to_string(),
-                        );
-                    }
-                    if steam_password.is_empty() {
-                        field_errors.insert(
-                            "steam_password".to_string(),
-                            "Steam password is required to initialize DSP source files.".to_string(),
-                        );
-                    }
-
-                    if !field_errors.is_empty() {
-                        return Err(Status::invalid_argument(crate::error_payload::encode(
-                            "invalid_param",
-                            format!(
-                                "dsp source files are not initialized at {}",
-                                source_root.display()
-                            ),
-                            Some(field_errors),
-                            Some(
-                                "In Create Instance → DSP, click Warm once and provide Steam credentials to initialize the default source root.".to_string(),
-                            ),
-                        )));
-                    }
-
-                    Some(
-                        dsp_source_init::init_default_source(
-                            steam_username,
-                            steam_password,
-                            steam_guard_code,
-                        )
-                        .await
-                        .map_err(|e| {
-                            let detail = format!("{e:#}");
-                            let detail_l = detail.to_ascii_lowercase();
-                            let mut field_errors = BTreeMap::<String, String>::new();
-                            let hint = if detail_l.contains("steam guard")
-                                || detail_l.contains("two-factor")
-                                || detail_l.contains("2fa")
-                            {
-                                field_errors.insert(
-                                    "steam_guard_code".to_string(),
-                                    "Steam Guard code is required or invalid.".to_string(),
-                                );
-                                Some(
-                                    "Enter the latest Steam Guard code and retry Warm."
-                                        .to_string(),
-                                )
-                            } else if detail_l.contains("invalid password")
-                                || detail_l.contains("login failure")
-                                || detail_l.contains("password") && detail_l.contains("incorrect")
-                            {
-                                field_errors.insert(
-                                    "steam_password".to_string(),
-                                    "Steam password appears invalid.".to_string(),
-                                );
-                                Some(
-                                    "Check SteamCMD credentials in Settings, then retry."
-                                        .to_string(),
-                                )
-                            } else if detail_l.contains("rate limit")
-                                || detail_l.contains("too many")
-                            {
-                                Some(
-                                    "Steam login may be rate-limited. Wait a moment and retry."
-                                        .to_string(),
-                                )
-                            } else {
-                                Some(
-                                    "Check Steam credentials, Steam Guard, and network access, then retry Warm."
-                                        .to_string(),
-                                )
-                            };
-
-                            Status::internal(crate::error_payload::encode(
-                                "download_failed",
-                                format!(
-                                    "failed to initialize DSP source files\n\nDetails:\n{}",
-                                    detail
-                                ),
-                                if field_errors.is_empty() {
-                                    None
-                                } else {
-                                    Some(field_errors)
-                                },
-                                hint,
-                            ))
-                        })?,
-                    )
-                };
-
-                let tr = dsp::validate_nebula_params(&params).map_err(|e| {
-                    Status::invalid_argument(crate::error_payload::encode(
-                        "invalid_param",
-                        format!("invalid dsp params: {e}"),
-                        None,
-                        Some("Fix the highlighted fields, then try again.".to_string()),
-                    ))
-                })?;
-
-                let marker = dsp::data_root().join("cache").join("dsp");
-                tokio::fs::create_dir_all(&marker).await.map_err(|e| {
-                    Status::internal(crate::error_payload::encode(
-                        "spawn_failed",
-                        format!("failed to prepare dsp cache marker dir: {e}"),
-                        None,
-                        Some("Check ALLOY_DATA_ROOT permissions, then retry.".to_string()),
-                    ))
-                })?;
-
-                if let Some(init) = init_result {
-                    let installed = if init.installed_packages.is_empty() {
-                        "none (already present)".to_string()
-                    } else {
-                        init.installed_packages.join(",")
-                    };
-                    format!(
-                        "dsp source initialized: root={} installed={} startup_mode={} cache={}",
-                        init.source_root.display(),
-                        installed,
-                        tr.startup_mode.as_str(),
-                        marker.display()
-                    )
-                } else {
-                    format!(
-                        "dsp cache check passed: server_root={} startup_mode={} cache={}",
-                        tr.server_root.display(),
-                        tr.startup_mode.as_str(),
-                        marker.display()
-                    )
+            "demo:sleep" => {
+                if progress_set {
+                    crate::download_progress::start(
+                        &progress_id,
+                        "ready",
+                        "no cache needed for demo:sleep",
+                        Some(0),
+                    );
+                    crate::download_progress::finish(
+                        &progress_id,
+                        "no cache needed for demo:sleep",
+                        0,
+                        0,
+                        0,
+                    );
                 }
+                "no cache needed for demo:sleep".to_string()
             }
-            "demo:sleep" => "no cache needed for demo:sleep".to_string(),
             _ => return Err(Status::invalid_argument("unknown template_id")),
         };
 
         Ok(Response::new(WarmTemplateCacheResponse {
             ok: true,
             message,
+        }))
+    }
+
+    async fn get_warm_template_progress(
+        &self,
+        request: Request<GetWarmTemplateProgressRequest>,
+    ) -> Result<Response<GetWarmTemplateProgressResponse>, Status> {
+        let req = request.into_inner();
+        let progress_id = req.progress_id.trim();
+        if progress_id.is_empty() {
+            return Ok(Response::new(GetWarmTemplateProgressResponse {
+                found: false,
+                stage: String::new(),
+                downloaded_bytes: 0,
+                total_bytes: 0,
+                speed_bytes_per_sec: 0,
+                message: String::new(),
+                done: false,
+                updated_at_unix_ms: 0,
+            }));
+        }
+
+        let snapshot = crate::download_progress::get(progress_id);
+        let Some(snapshot) = snapshot else {
+            return Ok(Response::new(GetWarmTemplateProgressResponse {
+                found: false,
+                stage: String::new(),
+                downloaded_bytes: 0,
+                total_bytes: 0,
+                speed_bytes_per_sec: 0,
+                message: String::new(),
+                done: false,
+                updated_at_unix_ms: 0,
+            }));
+        };
+
+        Ok(Response::new(GetWarmTemplateProgressResponse {
+            found: true,
+            stage: snapshot.stage,
+            downloaded_bytes: snapshot.downloaded_bytes,
+            total_bytes: snapshot.total_bytes,
+            speed_bytes_per_sec: snapshot.speed_bytes_per_sec,
+            message: snapshot.message,
+            done: snapshot.done,
+            updated_at_unix_ms: snapshot.updated_at_unix_ms,
         }))
     }
 
@@ -558,7 +534,8 @@ impl ProcessService for ProcessApi {
                         continue;
                     }
 
-                    let version = read_minecraft_version_id(&path).unwrap_or_else(|| "unknown".to_string());
+                    let version =
+                        read_minecraft_version_id(&path).unwrap_or_else(|| "unknown".to_string());
                     let (size, _) = dir_stats(&path);
                     let last_used = read_last_used_marker(&path).max(modified_unix_ms(&jar));
                     let key = format!("minecraft:vanilla@{version}#{sha1}");
@@ -568,7 +545,12 @@ impl ProcessService for ProcessApi {
             mc_entries.sort_by(|a, b| b.3.cmp(&a.3).then_with(|| a.0.cmp(&b.0)));
             let mc_size = mc_entries.iter().map(|e| e.2).sum::<u64>();
             let mc_last = mc_entries.iter().map(|e| e.3).max().unwrap_or(0);
-            out.push(("minecraft:vanilla".to_string(), mc_root.clone(), mc_size, mc_last));
+            out.push((
+                "minecraft:vanilla".to_string(),
+                mc_root.clone(),
+                mc_size,
+                mc_last,
+            ));
             out.extend(mc_entries);
 
             // Terraria: per-version entries (key includes version).
@@ -600,22 +582,13 @@ impl ProcessService for ProcessApi {
             tr_entries.sort_by(|a, b| b.3.cmp(&a.3).then_with(|| a.0.cmp(&b.0)));
             let tr_size = tr_entries.iter().map(|e| e.2).sum::<u64>();
             let tr_last = tr_entries.iter().map(|e| e.3).max().unwrap_or(0);
-            out.push(("terraria:vanilla".to_string(), tr_root.clone(), tr_size, tr_last));
-            out.extend(tr_entries);
-
-            // DSP: source files and cache marker dir.
-            let dsp_source = dsp::default_source_root();
-            let (dsp_source_size, dsp_source_last) = dir_stats(&dsp_source);
             out.push((
-                "dsp:nebula@source".to_string(),
-                dsp_source,
-                dsp_source_size,
-                dsp_source_last,
+                "terraria:vanilla".to_string(),
+                tr_root.clone(),
+                tr_size,
+                tr_last,
             ));
-
-            let dsp_cache = dsp::data_root().join("cache").join("dsp");
-            let (dsp_size, dsp_last) = dir_stats(&dsp_cache);
-            out.push(("dsp:nebula".to_string(), dsp_cache, dsp_size, dsp_last));
+            out.extend(tr_entries);
 
             out
         })
@@ -644,9 +617,6 @@ impl ProcessService for ProcessApi {
             if key == "terraria:vanilla" || key.starts_with("terraria:vanilla@") {
                 return Some("terraria:vanilla");
             }
-            if key == "dsp:nebula" || key == "dsp:nebula@source" {
-                return Some("dsp:nebula");
-            }
             None
         }
 
@@ -659,7 +629,6 @@ impl ProcessService for ProcessApi {
             vec![
                 "minecraft:vanilla".to_string(),
                 "terraria:vanilla".to_string(),
-                "dsp:nebula".to_string(),
             ]
         } else {
             req.keys
@@ -683,7 +652,9 @@ impl ProcessService for ProcessApi {
 
         for key in &keys {
             let Some(template_id) = template_id_for_cache_key(key) else {
-                return Err(Status::invalid_argument(format!("unknown cache key: {key}")));
+                return Err(Status::invalid_argument(format!(
+                    "unknown cache key: {key}"
+                )));
             };
             if running.contains(template_id) {
                 return Err(Status::failed_precondition(format!(
@@ -699,9 +670,9 @@ impl ProcessService for ProcessApi {
             let dir = if key == "minecraft:vanilla" {
                 minecraft_download::cache_dir()
             } else if let Some(rest) = key.strip_prefix("minecraft:vanilla@") {
-                let (_, sha1) = rest
-                    .split_once('#')
-                    .ok_or_else(|| Status::invalid_argument(format!("invalid minecraft cache key: {key}")))?;
+                let (_, sha1) = rest.split_once('#').ok_or_else(|| {
+                    Status::invalid_argument(format!("invalid minecraft cache key: {key}"))
+                })?;
                 if !validate_sha1_hex(sha1) {
                     return Err(Status::invalid_argument(format!(
                         "invalid minecraft cache sha1: {sha1}"
@@ -717,12 +688,10 @@ impl ProcessService for ProcessApi {
                     )));
                 }
                 terraria_download::cache_dir().join(version)
-            } else if key == "dsp:nebula@source" {
-                dsp::default_source_root()
-            } else if key == "dsp:nebula" {
-                dsp::data_root().join("cache").join("dsp")
             } else {
-                return Err(Status::invalid_argument(format!("unknown cache key: {key}")));
+                return Err(Status::invalid_argument(format!(
+                    "unknown cache key: {key}"
+                )));
             };
 
             let (size_bytes, last_used_unix_ms) = tokio::task::spawn_blocking({

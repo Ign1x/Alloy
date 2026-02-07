@@ -1,10 +1,10 @@
 use alloy_proto::agent_v1::{
     ClearCacheRequest, CreateInstanceRequest, DeleteInstancePreviewRequest, DeleteInstanceRequest,
     GetCacheStatsRequest, GetCapabilitiesRequest, GetInstanceRequest, GetStatusRequest,
-    HealthCheckRequest, ListDirRequest, ListInstancesRequest, ListProcessesRequest,
-    ListTemplatesRequest, ReadFileRequest, StartFromTemplateRequest, StartInstanceRequest,
-    StopInstanceRequest, StopProcessRequest, TailFileRequest, TailLogsRequest,
-    UpdateInstanceRequest, WarmTemplateCacheRequest,
+    GetWarmTemplateProgressRequest, HealthCheckRequest, ListDirRequest, ListInstancesRequest,
+    ListProcessesRequest, ListTemplatesRequest, ReadFileRequest, StartFromTemplateRequest,
+    StartInstanceRequest, StopInstanceRequest, StopProcessRequest, TailFileRequest,
+    TailLogsRequest, UpdateInstanceRequest, WarmTemplateCacheRequest,
 };
 use rspc::{Procedure, ProcedureError, ResolverError, Router};
 
@@ -259,12 +259,45 @@ fn normalize_optional_allocatable_ports(value: &str) -> Result<Option<String>, (
         return Ok(None);
     }
 
-    let out = expanded
-        .into_iter()
-        .map(|p| p.to_string())
-        .collect::<Vec<_>>()
-        .join(",");
+    let out = compact_allocatable_ports(expanded.into_iter());
     Ok(Some(out))
+}
+
+fn compact_allocatable_ports(ports: impl IntoIterator<Item = u16>) -> String {
+    let mut out = Vec::<String>::new();
+    let mut start: Option<u16> = None;
+    let mut prev: u16 = 0;
+
+    for port in ports {
+        match start {
+            None => {
+                start = Some(port);
+                prev = port;
+            }
+            Some(lo) if port == prev.saturating_add(1) => {
+                prev = port;
+            }
+            Some(lo) => {
+                if lo == prev {
+                    out.push(lo.to_string());
+                } else {
+                    out.push(format!("{lo}-{prev}"));
+                }
+                start = Some(port);
+                prev = port;
+            }
+        }
+    }
+
+    if let Some(lo) = start {
+        if lo == prev {
+            out.push(lo.to_string());
+        } else {
+            out.push(format!("{lo}-{prev}"));
+        }
+    }
+
+    out.join(",")
 }
 
 fn parse_frp_endpoint_from_text(config: &str) -> Option<(String, u16)> {
@@ -406,7 +439,11 @@ async fn probe_frp_tcp_latency_ms(server_addr: &str, server_port: u16) -> Option
     .ok()?
     .ok()?;
     drop(conn);
-    let ms = start.elapsed().as_millis();
+    let elapsed = start.elapsed();
+    let mut ms = elapsed.as_millis();
+    if ms == 0 && !elapsed.is_zero() {
+        ms = 1;
+    }
     Some(ms.min(u128::from(u32::MAX)) as u32)
 }
 
@@ -936,6 +973,12 @@ pub struct DownloadQueueJobDto {
     pub started_at_unix_ms: Option<String>,
     pub updated_at_unix_ms: String,
     pub finished_at_unix_ms: Option<String>,
+    pub progress_stage: Option<String>,
+    pub progress_downloaded_bytes: Option<String>,
+    pub progress_total_bytes: Option<String>,
+    pub progress_speed_bytes_per_sec: Option<String>,
+    pub progress_percent_x100: Option<u32>,
+    pub progress_eta_sec: Option<u32>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, Type)]
@@ -1381,6 +1424,7 @@ async fn verify_steamcmd_login_via_agent(
             WarmTemplateCacheRequest {
                 template_id: "steamcmd:auth".to_string(),
                 params: verify_params.into_iter().collect(),
+                progress_id: String::new(),
             },
         )
         .await
@@ -1469,7 +1513,6 @@ fn normalize_download_target(raw: &str) -> Option<&'static str> {
     match raw.trim() {
         "minecraft_vanilla" => Some("minecraft_vanilla"),
         "terraria_vanilla" => Some("terraria_vanilla"),
-        "dsp_nebula" => Some("dsp_nebula"),
         _ => None,
     }
 }
@@ -1478,7 +1521,6 @@ fn expected_template_id_for_target(target: &str) -> Option<&'static str> {
     match target {
         "minecraft_vanilla" => Some("minecraft:vanilla"),
         "terraria_vanilla" => Some("terraria:vanilla"),
-        "dsp_nebula" => Some("dsp:nebula"),
         _ => None,
     }
 }
@@ -1487,7 +1529,6 @@ fn normalize_download_template_id(raw: &str) -> Option<&'static str> {
     match raw.trim() {
         "minecraft:vanilla" => Some("minecraft:vanilla"),
         "terraria:vanilla" => Some("terraria:vanilla"),
-        "dsp:nebula" => Some("dsp:nebula"),
         _ => None,
     }
 }
@@ -1560,7 +1601,62 @@ fn dt_to_unix_ms(dt: chrono::DateTime<chrono::FixedOffset>) -> String {
     dt.timestamp_millis().to_string()
 }
 
-fn map_download_job_model(model: alloy_db::entities::download_jobs::Model) -> DownloadQueueJobDto {
+#[derive(Debug, Clone)]
+struct DownloadProgressSnapshot {
+    stage: String,
+    downloaded_bytes: u64,
+    total_bytes: u64,
+    speed_bytes_per_sec: u64,
+}
+
+fn download_progress_id(id: &sea_orm::prelude::Uuid, attempt_count: i32) -> String {
+    format!("{}:{}", id, attempt_count.max(0))
+}
+
+fn progress_percent_x100(downloaded_bytes: u64, total_bytes: u64) -> Option<u32> {
+    if total_bytes == 0 {
+        return None;
+    }
+    let pct = downloaded_bytes
+        .saturating_mul(10_000)
+        .checked_div(total_bytes)
+        .unwrap_or(0)
+        .min(10_000);
+    Some(pct as u32)
+}
+
+fn progress_eta_sec(downloaded_bytes: u64, total_bytes: u64, speed_bytes_per_sec: u64) -> Option<u32> {
+    if speed_bytes_per_sec == 0 || total_bytes <= downloaded_bytes {
+        return None;
+    }
+    let left = total_bytes.saturating_sub(downloaded_bytes);
+    let eta = left.saturating_add(speed_bytes_per_sec.saturating_sub(1)) / speed_bytes_per_sec;
+    Some(eta.min(u32::MAX as u64) as u32)
+}
+
+fn map_download_job_model(
+    model: alloy_db::entities::download_jobs::Model,
+    progress: Option<&DownloadProgressSnapshot>,
+) -> DownloadQueueJobDto {
+    let progress_stage = progress
+        .and_then(|p| {
+            let s = p.stage.trim();
+            if s.is_empty() {
+                None
+            } else {
+                Some(s.to_string())
+            }
+        });
+    let progress_downloaded_bytes = progress.map(|p| p.downloaded_bytes.to_string());
+    let progress_total_bytes = progress.map(|p| p.total_bytes.to_string());
+    let progress_speed_bytes_per_sec = progress.map(|p| p.speed_bytes_per_sec.to_string());
+    let progress_percent_x100 = progress.and_then(|p| {
+        progress_percent_x100(p.downloaded_bytes, p.total_bytes)
+    });
+    let progress_eta_sec = progress.and_then(|p| {
+        progress_eta_sec(p.downloaded_bytes, p.total_bytes, p.speed_bytes_per_sec)
+    });
+
     DownloadQueueJobDto {
         id: model.id.to_string(),
         target: model.target,
@@ -1576,6 +1672,12 @@ fn map_download_job_model(model: alloy_db::entities::download_jobs::Model) -> Do
         started_at_unix_ms: model.started_at.map(dt_to_unix_ms),
         updated_at_unix_ms: dt_to_unix_ms(model.updated_at),
         finished_at_unix_ms: model.finished_at.map(dt_to_unix_ms),
+        progress_stage,
+        progress_downloaded_bytes,
+        progress_total_bytes,
+        progress_speed_bytes_per_sec,
+        progress_percent_x100,
+        progress_eta_sec,
     }
 }
 
@@ -1600,6 +1702,7 @@ async fn download_queue_set_paused(
 
 async fn download_queue_snapshot(
     db: &alloy_db::sea_orm::DatabaseConnection,
+    agent_hub: &crate::agent_tunnel::AgentHub,
 ) -> Result<DownloadQueueOutput, sea_orm::DbErr> {
     use alloy_db::entities::download_jobs;
     use sea_orm::{EntityTrait, QueryOrder};
@@ -1628,9 +1731,53 @@ async fn download_queue_snapshot(
         rows.truncate(80);
     }
 
+    let mut progress_by_id = HashMap::<String, DownloadProgressSnapshot>::new();
+    let running_jobs: Vec<_> = rows
+        .iter()
+        .filter(|r| r.state == DOWNLOAD_STATE_RUNNING)
+        .collect();
+    if !running_jobs.is_empty() {
+        let transport = AgentTransport::new(agent_hub.clone());
+        for row in running_jobs {
+            let pid = download_progress_id(&row.id, row.attempt_count);
+            let resp = transport
+                .call::<_, alloy_proto::agent_v1::GetWarmTemplateProgressResponse>(
+                    "/alloy.agent.v1.ProcessService/GetWarmTemplateProgress",
+                    GetWarmTemplateProgressRequest {
+                        progress_id: pid.clone(),
+                    },
+                )
+                .await;
+
+            let Ok(progress) = resp else {
+                continue;
+            };
+            if !progress.found {
+                continue;
+            }
+
+            progress_by_id.insert(
+                pid,
+                DownloadProgressSnapshot {
+                    stage: progress.stage,
+                    downloaded_bytes: progress.downloaded_bytes,
+                    total_bytes: progress.total_bytes,
+                    speed_bytes_per_sec: progress.speed_bytes_per_sec,
+                },
+            );
+        }
+    }
+
     Ok(DownloadQueueOutput {
         queue_paused,
-        jobs: rows.into_iter().map(map_download_job_model).collect(),
+        jobs: rows
+            .into_iter()
+            .map(|row| {
+                let key = download_progress_id(&row.id, row.attempt_count);
+                let progress = progress_by_id.get(&key);
+                map_download_job_model(row, progress)
+            })
+            .collect(),
     })
 }
 
@@ -1740,56 +1887,10 @@ fn compact_download_error_message(raw: &str) -> String {
 }
 
 async fn prepare_warm_params(
-    db: &alloy_db::sea_orm::DatabaseConnection,
-    template_id: &str,
-    mut params: std::collections::BTreeMap<String, String>,
+    _db: &alloy_db::sea_orm::DatabaseConnection,
+    _template_id: &str,
+    params: std::collections::BTreeMap<String, String>,
 ) -> Result<std::collections::BTreeMap<String, String>, String> {
-    if template_id != "dsp:nebula" {
-        return Ok(params);
-    }
-
-    let current_user = params.get("steam_username").map(|s| s.trim()).unwrap_or("");
-    if current_user.is_empty()
-        && let Some(v) = setting_get(db, SETTING_STEAMCMD_USERNAME)
-            .await
-            .map_err(|e| format!("db error: {e}"))?
-    {
-        let v = v.trim().to_string();
-        if !v.is_empty() {
-            params.insert("steam_username".to_string(), v);
-        }
-    }
-
-    let current_pass = params.get("steam_password").map(|s| s.trim()).unwrap_or("");
-    if current_pass.is_empty()
-        && let Some(v) = setting_get(db, SETTING_STEAMCMD_PASSWORD)
-            .await
-            .map_err(|e| format!("db error: {e}"))?
-    {
-        if !v.trim().is_empty() {
-            params.insert("steam_password".to_string(), v);
-        }
-    }
-
-    let current_guard = params
-        .get("steam_guard_code")
-        .map(|s| s.trim())
-        .unwrap_or("");
-    if current_guard.is_empty()
-        && let Some(secret) = setting_get(db, SETTING_STEAMCMD_SHARED_SECRET)
-            .await
-            .map_err(|e| format!("db error: {e}"))?
-    {
-        let secret = secret.trim().to_string();
-        if !secret.is_empty() {
-            let candidates = generate_steam_guard_candidates(&secret)
-                .map_err(|e| format!("stored Steam shared_secret is invalid: {e}"))?;
-            if let Some(code) = candidates.first() {
-                params.insert("steam_guard_code".to_string(), code.clone());
-            }
-        }
-    }
-
     Ok(params)
 }
 
@@ -1838,14 +1939,14 @@ async fn run_next_download_queue_job(runtime: &DownloadQueueRuntime) -> Result<b
     };
 
     let now: sea_orm::prelude::DateTimeWithTimeZone = chrono::Utc::now().into();
-    let mut running: download_jobs::ActiveModel = row.clone().into();
-    running.state = Set(DOWNLOAD_STATE_RUNNING.to_string());
-    running.message = Set("starting download…".to_string());
-    running.request_id = Set(None);
-    running.started_at = Set(Some(now));
-    running.finished_at = Set(None);
-    running.updated_at = Set(now);
-    running.attempt_count = Set(row.attempt_count.saturating_add(1));
+                let mut running: download_jobs::ActiveModel = row.clone().into();
+                running.state = Set(DOWNLOAD_STATE_RUNNING.to_string());
+                running.message = Set("resolving download target…".to_string());
+                running.request_id = Set(None);
+                running.started_at = Set(Some(now));
+                running.finished_at = Set(None);
+                running.updated_at = Set(now);
+                running.attempt_count = Set(row.attempt_count.saturating_add(1));
     let running = running
         .update(&*runtime.db)
         .await
@@ -1859,17 +1960,18 @@ async fn run_next_download_queue_job(runtime: &DownloadQueueRuntime) -> Result<b
         .call::<_, alloy_proto::agent_v1::WarmTemplateCacheResponse>(
             "/alloy.agent.v1.ProcessService/WarmTemplateCache",
             WarmTemplateCacheRequest {
+                progress_id: download_progress_id(&running.id, running.attempt_count),
                 template_id: running.template_id.clone(),
                 params: params.into_iter().collect(),
             },
         )
         .await
     {
-        Ok(resp) => {
+        Ok(_resp) => {
             let now: sea_orm::prelude::DateTimeWithTimeZone = chrono::Utc::now().into();
             let mut done: download_jobs::ActiveModel = running.into();
             done.state = Set(DOWNLOAD_STATE_SUCCESS.to_string());
-            done.message = Set(resp.message);
+            done.message = Set("download completed".to_string());
             done.request_id = Set(None);
             done.updated_at = Set(now);
             done.finished_at = Set(Some(now));
@@ -1886,6 +1988,28 @@ async fn run_next_download_queue_job(runtime: &DownloadQueueRuntime) -> Result<b
             } else {
                 format!("process.warm_template_cache: {}", status.message())
             };
+
+            if let Ok(progress) = transport
+                .call::<_, alloy_proto::agent_v1::GetWarmTemplateProgressResponse>(
+                    "/alloy.agent.v1.ProcessService/GetWarmTemplateProgress",
+                    GetWarmTemplateProgressRequest {
+                        progress_id: download_progress_id(&running.id, running.attempt_count),
+                    },
+                )
+                .await
+                && progress.found
+                && !progress.message.trim().is_empty()
+            {
+                tracing::warn!(
+                    job_id = %running.id,
+                    progress_stage = %progress.stage,
+                    progress_downloaded = progress.downloaded_bytes,
+                    progress_total = progress.total_bytes,
+                    progress_message = %progress.message,
+                    "download queue job failed with tracked progress"
+                );
+            }
+
             let now: sea_orm::prelude::DateTimeWithTimeZone = chrono::Utc::now().into();
             let mut failed: download_jobs::ActiveModel = running.into();
             failed.state = Set(DOWNLOAD_STATE_ERROR.to_string());
@@ -2323,6 +2447,7 @@ pub fn router() -> Router<Ctx> {
                             WarmTemplateCacheRequest {
                                 template_id: template_id.clone(),
                                 params: params.clone().into_iter().collect(),
+                                progress_id: String::new(),
                             },
                         )
                         .await
@@ -2437,7 +2562,7 @@ pub fn router() -> Router<Ctx> {
         .procedure(
             "downloadQueue",
             Procedure::builder::<ApiError>().query(|ctx: Ctx, _: ()| async move {
-                download_queue_snapshot(&*ctx.db)
+                download_queue_snapshot(&*ctx.db, &ctx.agent_hub)
                     .await
                     .map_err(|e| api_error(&ctx, "db_error", format!("db error: {e}")))
             }),

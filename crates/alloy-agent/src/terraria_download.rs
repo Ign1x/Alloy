@@ -10,8 +10,92 @@ use std::{
 };
 
 use anyhow::Context;
+use futures_util::StreamExt;
 use reqwest::Url;
 use tokio::sync::Mutex;
+
+use crate::minecraft_download::DownloadReport;
+
+fn download_chunk_threshold(total_bytes: u64) -> u64 {
+    if total_bytes >= 2 * 1024 * 1024 * 1024 {
+        8 * 1024 * 1024
+    } else if total_bytes >= 512 * 1024 * 1024 {
+        4 * 1024 * 1024
+    } else {
+        1024 * 1024
+    }
+}
+
+async fn download_zip_with_progress<F>(
+    url: Url,
+    expected_size: Option<u64>,
+    mut on_progress: F,
+) -> anyhow::Result<(Vec<u8>, DownloadReport)>
+where
+    F: FnMut(u64, u64, u64) + Send,
+{
+    let resp = http_client()
+        .get(url)
+        .send()
+        .await
+        .context("download terraria server zip")?
+        .error_for_status()
+        .context("download terraria server zip (status)")?;
+
+    let total_bytes = expected_size.or(resp.content_length()).unwrap_or(0);
+    let threshold = download_chunk_threshold(total_bytes.max(1));
+    let mut stream = resp.bytes_stream();
+    let mut out: Vec<u8> = Vec::new();
+    let reserve_cap = total_bytes.min(512 * 1024 * 1024) as usize;
+    if reserve_cap > 0 {
+        out.reserve(reserve_cap);
+    }
+
+    let started_at = std::time::Instant::now();
+    let mut last_emit_bytes = 0u64;
+    let mut last_emit_at = started_at;
+    let mut downloaded_bytes = 0u64;
+
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.context("read terraria server zip body chunk")?;
+        downloaded_bytes = downloaded_bytes.saturating_add(chunk.len() as u64);
+        out.extend_from_slice(&chunk);
+
+        let now = std::time::Instant::now();
+        let should_emit = downloaded_bytes.saturating_sub(last_emit_bytes) >= threshold
+            || now.duration_since(last_emit_at) >= Duration::from_millis(300);
+        if should_emit {
+            let elapsed = now.duration_since(started_at).as_secs_f64();
+            let speed = if elapsed > 0.0 {
+                (downloaded_bytes as f64 / elapsed).round() as u64
+            } else {
+                0
+            };
+            let total = total_bytes.max(downloaded_bytes);
+            on_progress(downloaded_bytes, total, speed);
+            last_emit_bytes = downloaded_bytes;
+            last_emit_at = now;
+        }
+    }
+
+    let elapsed = started_at.elapsed().as_secs_f64();
+    let speed = if elapsed > 0.0 {
+        (downloaded_bytes as f64 / elapsed).round() as u64
+    } else {
+        0
+    };
+    let total = total_bytes.max(downloaded_bytes);
+    on_progress(downloaded_bytes, total, speed);
+
+    Ok((
+        out,
+        DownloadReport {
+            downloaded_bytes,
+            total_bytes: total,
+            speed_bytes_per_sec: speed,
+        },
+    ))
+}
 
 pub struct ResolvedServerZip {
     pub version_id: String,
@@ -80,12 +164,26 @@ pub fn resolve_server_zip(version: &str) -> anyhow::Result<ResolvedServerZip> {
 }
 
 pub async fn ensure_server_zip(resolved: &ResolvedServerZip) -> anyhow::Result<PathBuf> {
+    ensure_server_zip_with_progress(resolved, None::<fn(u64, u64, u64)>).await
+}
+
+pub async fn ensure_server_zip_with_progress<F>(
+    resolved: &ResolvedServerZip,
+    mut on_progress: Option<F>,
+) -> anyhow::Result<PathBuf>
+where
+    F: FnMut(u64, u64, u64) + Send,
+{
     let zip_path = cache_dir()
         .join(&resolved.version_id)
         .join(format!("terraria-server-{}.zip", resolved.version_id));
     if zip_path.exists() {
         if let Some(dir) = zip_path.parent() {
             mark_last_used(dir);
+        }
+        let size = std::fs::metadata(&zip_path).map(|m| m.len()).unwrap_or(0);
+        if let Some(cb) = on_progress.as_mut() {
+            cb(size, size, 0);
         }
         return Ok(zip_path);
     }
@@ -97,6 +195,10 @@ pub async fn ensure_server_zip(resolved: &ResolvedServerZip) -> anyhow::Result<P
         if let Some(dir) = zip_path.parent() {
             mark_last_used(dir);
         }
+        let size = std::fs::metadata(&zip_path).map(|m| m.len()).unwrap_or(0);
+        if let Some(cb) = on_progress.as_mut() {
+            cb(size, size, 0);
+        }
         return Ok(zip_path);
     }
 
@@ -105,20 +207,26 @@ pub async fn ensure_server_zip(resolved: &ResolvedServerZip) -> anyhow::Result<P
     let url = Url::parse(&resolved.zip_url)?;
     let mut last_err: Option<anyhow::Error> = None;
     let mut bytes: Option<Vec<u8>> = None;
+    let mut last_report = DownloadReport {
+        downloaded_bytes: 0,
+        total_bytes: 0,
+        speed_bytes_per_sec: 0,
+    };
     for attempt in 1..=3_u32 {
         let res: anyhow::Result<Vec<u8>> = (async {
-            let resp = http_client()
-                .get(url.clone())
-                .send()
-                .await
-                .context("download terraria server zip")?
-                .error_for_status()
-                .context("download terraria server zip (status)")?;
-            let b = resp
-                .bytes()
-                .await
-                .context("read terraria server zip body")?;
-            Ok(b.to_vec())
+            let (bytes, report) = download_zip_with_progress(url.clone(), None, |downloaded, total, speed| {
+                last_report = DownloadReport {
+                    downloaded_bytes: downloaded,
+                    total_bytes: total,
+                    speed_bytes_per_sec: speed,
+                };
+                if let Some(cb) = on_progress.as_mut() {
+                    cb(downloaded, total, speed);
+                }
+            })
+            .await?;
+            last_report = report;
+            Ok(bytes)
         })
         .await;
 
@@ -150,6 +258,15 @@ pub async fn ensure_server_zip(resolved: &ResolvedServerZip) -> anyhow::Result<P
     f.write_all(&bytes)?;
     f.sync_all()?;
     fs::rename(tmp_path, &zip_path)?;
+
+    if let Some(cb) = on_progress.as_mut() {
+        cb(
+            last_report.downloaded_bytes,
+            last_report.total_bytes.max(last_report.downloaded_bytes),
+            last_report.speed_bytes_per_sec,
+        );
+    }
+
     if let Some(dir) = zip_path.parent() {
         mark_last_used(dir);
     }

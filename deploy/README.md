@@ -16,7 +16,7 @@ Alloy supports two agent transport modes:
 Default host ports (via compose):
 - web: `http://localhost:3000`
 - control: `http://localhost:8080`
-- games: depends on instance `port` (e.g. Minecraft `25565`, Terraria `7777`, DSP Nebula `8469`)
+- games: depends on instance `port` (e.g. Minecraft `25565`, Terraria `7777`)
 
 ## Quick start
 
@@ -199,48 +199,6 @@ curl -fsS -X POST -H 'content-type: application/json' \
   --data '{"template_id":"terraria:vanilla","params":{"version":"1453","port":"7777","max_players":"8","world_name":"world","world_size":"1"}}' \
   http://localhost:8080/rspc/process.start
 ```
-
-## Dyson Sphere Program (Nebula)
-
-Template id: `dsp:nebula`
-
-This template launches DSP dedicated multiplayer via Nebula headless mode.
-
-Prerequisites:
-- `alloy-agent` runtime needs Wine (included in `deploy/agent.Dockerfile`).
-- DSP source root is fixed at `/data/uploads/dsp/server`.
-  - If missing, click **Warm** once in the panel and provide Steam credentials.
-  - Warm will install DSP + BepInEx + Nebula into that default root.
-
-Key params:
-- `port` (default auto): TCP listen port (Nebula default is `8469`)
-- `startup_mode`: `auto` | `load_latest` | `load` | `newgame_default` | `newgame_cfg`
-- `save_name` (required when `startup_mode=load`)
-- `server_password` (optional)
-- `remote_access_password` (optional)
-- `auto_pause_enabled` (default `false`)
-- `ups` (default `60`)
-
-Initialize source files once (rspc warm):
-
-```bash
-curl -fsS -X POST -H 'content-type: application/json' \
-  --data '{"template_id":"dsp:nebula","params":{"steam_username":"<steam-user>","steam_password":"<steam-pass>","steam_guard_code":"<optional-code>"}}' \
-  http://localhost:8080/rspc/process.warmCache
-```
-
-Start (rspc):
-
-```bash
-curl -fsS -X POST -H 'content-type: application/json' \
-  --data '{"template_id":"dsp:nebula","params":{"port":"8469","startup_mode":"auto","ups":"60"}}' \
-  http://localhost:8080/rspc/process.start
-```
-
-Notes:
-- Players must use the same Nebula/DSP mod stack as the server.
-- `startup_mode=auto` loads latest save when present; otherwise starts `-newgame-default`.
-- Save files are stored under instance wine prefix, e.g. `instances/<id>/wineprefix/.../Dyson Sphere Program/Save`.
 
 ## Troubleshooting (common)
 

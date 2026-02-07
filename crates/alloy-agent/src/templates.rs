@@ -542,90 +542,6 @@ pub fn list_templates() -> Vec<ProcessTemplate> {
             graceful_stdin: Some("exit\n".to_string()),
         },
         ProcessTemplate {
-            template_id: "dsp:nebula".to_string(),
-            display_name: "Dyson Sphere Program: Nebula".to_string(),
-            // Placeholder; spawn spec is prepared by the dsp module.
-            command: "sh".to_string(),
-            args: vec![],
-            params: vec![
-                param_int(
-                    "port",
-                    "Port",
-                    false,
-                    "0",
-                    0,
-                    65535,
-                    "8469 (leave blank for auto)",
-                    "TCP port to bind. Use 0 or leave blank to auto-assign a free port.",
-                ),
-                param_string(
-                    "startup_mode",
-                    "Startup mode",
-                    false,
-                    "auto",
-                    vec![
-                        "auto",
-                        "load_latest",
-                        "load",
-                        "newgame_default",
-                        "newgame_cfg",
-                    ],
-                    "auto",
-                    "How to start the server save flow. load requires save_name.",
-                ),
-                param_string(
-                    "save_name",
-                    "Save name",
-                    false,
-                    "",
-                    Vec::new(),
-                    "MyFactory",
-                    "Used only when startup_mode=load. Do not include .dsv.",
-                ),
-                param_secret(
-                    "server_password",
-                    "Server password",
-                    false,
-                    "",
-                    "Optional join password for players.",
-                ),
-                param_secret(
-                    "remote_access_password",
-                    "Remote access password",
-                    false,
-                    "",
-                    "Optional password for Nebula remote server commands.",
-                ),
-                param_bool(
-                    "auto_pause_enabled",
-                    "Auto pause when empty",
-                    false,
-                    false,
-                    "If true, server auto-pauses when no players are connected.",
-                ),
-                param_int(
-                    "ups",
-                    "UPS",
-                    false,
-                    "60",
-                    1,
-                    240,
-                    "60",
-                    "Simulation UPS passed as -ups (1..240).",
-                ),
-                param_string(
-                    "wine_bin",
-                    "Wine binary",
-                    false,
-                    "wine64",
-                    Vec::new(),
-                    "wine64",
-                    "Wine executable used to run DSPGAME.exe (default wine64).",
-                ),
-            ],
-            graceful_stdin: None,
-        },
-        ProcessTemplate {
             template_id: "dst:vanilla".to_string(),
             display_name: "Don't Starve Together".to_string(),
             command: "./dontstarve_dedicated_server_nullrenderer".to_string(),
@@ -778,10 +694,6 @@ pub fn apply_params(
 
     if t.template_id == "dst:vanilla" {
         let _ = crate::dst::validate_vanilla_params(params)?;
-    }
-
-    if t.template_id == "dsp:nebula" {
-        let _ = crate::dsp::validate_nebula_params(params)?;
     }
 
     Ok(t)

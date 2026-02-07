@@ -10,10 +10,11 @@ use tracing::{Instrument, info_span};
 use alloy_proto::agent_v1::{
     ClearCacheRequest, CreateInstanceRequest, DeleteInstancePreviewRequest, DeleteInstanceRequest,
     GetCacheStatsRequest, GetCapabilitiesRequest, GetInstanceRequest, GetStatusRequest,
-    HealthCheckRequest, ImportSaveFromUrlRequest, ListDirRequest, ListInstancesRequest,
-    ListProcessesRequest, ListTemplatesRequest, MkdirRequest, ReadFileRequest, RenameRequest,
-    StartFromTemplateRequest, StartInstanceRequest, StopInstanceRequest, StopProcessRequest,
-    TailFileRequest, TailLogsRequest, UpdateInstanceRequest, WarmTemplateCacheRequest,
+    GetWarmTemplateProgressRequest, HealthCheckRequest, ImportSaveFromUrlRequest,
+    ListDirRequest, ListInstancesRequest, ListProcessesRequest, ListTemplatesRequest,
+    MkdirRequest, ReadFileRequest, RenameRequest, StartFromTemplateRequest,
+    StartInstanceRequest, StopInstanceRequest, StopProcessRequest, TailFileRequest,
+    TailLogsRequest, UpdateInstanceRequest, WarmTemplateCacheRequest,
     WriteFileRequest, agent_health_service_server::AgentHealthService,
     filesystem_service_server::FilesystemService, instance_service_server::InstanceService,
     logs_service_server::LogsService, process_service_server::ProcessService,
@@ -151,6 +152,15 @@ impl AgentRpc {
                 let resp = self
                     .process
                     .warm_template_cache(Request::new(req))
+                    .await?
+                    .into_inner();
+                Ok(resp.encode_to_vec())
+            }
+            "/alloy.agent.v1.ProcessService/GetWarmTemplateProgress" => {
+                let req: GetWarmTemplateProgressRequest = self.decode_req(payload)?;
+                let resp = self
+                    .process
+                    .get_warm_template_progress(Request::new(req))
                     .await?
                     .into_inner();
                 Ok(resp.encode_to_vec())

@@ -11,6 +11,7 @@ service ProcessService {
   rpc ListTemplates(ListTemplatesRequest) returns (ListTemplatesResponse);
   rpc StartFromTemplate(StartFromTemplateRequest) returns (StartFromTemplateResponse);
   rpc WarmTemplateCache(WarmTemplateCacheRequest) returns (WarmTemplateCacheResponse);
+  rpc GetWarmTemplateProgress(GetWarmTemplateProgressRequest) returns (GetWarmTemplateProgressResponse);
   rpc GetCacheStats(GetCacheStatsRequest) returns (GetCacheStatsResponse);
   rpc ClearCache(ClearCacheRequest) returns (ClearCacheResponse);
   rpc Stop(StopProcessRequest) returns (StopProcessResponse);
@@ -100,11 +101,28 @@ message StartFromTemplateResponse {
 message WarmTemplateCacheRequest {
   string template_id = 1;
   map<string, string> params = 2;
+  // Optional ID used by control to poll live warm/download progress.
+  string progress_id = 3;
 }
 
 message WarmTemplateCacheResponse {
   bool ok = 1;
   string message = 2;
+}
+
+message GetWarmTemplateProgressRequest {
+  string progress_id = 1;
+}
+
+message GetWarmTemplateProgressResponse {
+  bool found = 1;
+  string stage = 2;
+  uint64 downloaded_bytes = 3;
+  uint64 total_bytes = 4;
+  uint64 speed_bytes_per_sec = 5;
+  string message = 6;
+  bool done = 7;
+  uint64 updated_at_unix_ms = 8;
 }
 
 message CacheEntry {

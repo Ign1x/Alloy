@@ -201,8 +201,7 @@ async fn cleanup_orphan_processes() {
 async fn cleanup_orphan_processes() {}
 
 mod control_tunnel;
-mod dsp;
-mod dsp_source_init;
+mod download_progress;
 mod dst;
 mod dst_download;
 mod error_payload;
@@ -218,6 +217,7 @@ mod minecraft_launch;
 mod minecraft_modrinth;
 mod port_alloc;
 mod process_manager;
+mod process_manager_support;
 mod process_service;
 mod sandbox;
 mod templates;

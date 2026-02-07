@@ -1,7 +1,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap, VecDeque},
     path::{Path, PathBuf},
-    sync::{Arc, OnceLock},
+    sync::Arc,
     time::Duration,
 };
 
@@ -15,7 +15,6 @@ use tokio::{
     sync::mpsc,
 };
 
-use crate::dsp;
 use crate::dst;
 use crate::dst_download;
 use crate::minecraft;
@@ -29,196 +28,22 @@ use crate::sandbox;
 use crate::templates;
 use crate::terraria;
 use crate::terraria_download;
-
-const DEFAULT_LOG_MAX_LINES: usize = 1000;
-const DEFAULT_LOG_FILE_MAX_BYTES: u64 = 10 * 1024 * 1024; // 10 MiB
-const DEFAULT_LOG_FILE_MAX_FILES: usize = 3;
-
-fn env_usize(name: &str) -> Option<usize> {
-    std::env::var(name)
-        .ok()
-        .and_then(|v| v.parse::<usize>().ok())
-}
-
-fn env_u64(name: &str) -> Option<u64> {
-    std::env::var(name).ok().and_then(|v| v.parse::<u64>().ok())
-}
-
-fn log_max_lines() -> usize {
-    env_usize("ALLOY_LOG_MAX_LINES")
-        .map(|v| v.clamp(100, 50_000))
-        .unwrap_or(DEFAULT_LOG_MAX_LINES)
-}
-
-fn log_file_limits() -> (u64, usize) {
-    let max_bytes = env_u64("ALLOY_LOG_FILE_MAX_BYTES")
-        .map(|v| v.clamp(256 * 1024, 1024 * 1024 * 1024))
-        .unwrap_or(DEFAULT_LOG_FILE_MAX_BYTES);
-    let max_files = env_usize("ALLOY_LOG_FILE_MAX_FILES")
-        .map(|v| v.clamp(1, 20))
-        .unwrap_or(DEFAULT_LOG_FILE_MAX_FILES);
-    (max_bytes, max_files)
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum RestartPolicy {
-    Off,
-    Always,
-    OnFailure,
-}
-
-#[derive(Clone, Copy, Debug)]
-struct RestartConfig {
-    policy: RestartPolicy,
-    max_retries: u32,
-    backoff_ms: u64,
-    backoff_max_ms: u64,
-}
-
-fn format_error_chain(err: &anyhow::Error) -> String {
-    let mut parts = Vec::<String>::new();
-    for cause in err.chain() {
-        let s = cause.to_string();
-        if s.is_empty() {
-            continue;
-        }
-        if parts.last() == Some(&s) {
-            continue;
-        }
-        parts.push(s);
-    }
-    if parts.is_empty() {
-        "unknown error".to_string()
-    } else {
-        parts.join(": ")
-    }
-}
-
-fn parse_restart_config(params: &BTreeMap<String, String>) -> RestartConfig {
-    let policy = match params
-        .get("restart_policy")
-        .map(|s| s.trim().to_ascii_lowercase())
-        .as_deref()
-    {
-        Some("always") => RestartPolicy::Always,
-        Some("on-failure") | Some("on_failure") | Some("onfailure") => RestartPolicy::OnFailure,
-        _ => RestartPolicy::Off,
-    };
-
-    let max_retries = params
-        .get("restart_max_retries")
-        .and_then(|v| v.parse::<u32>().ok())
-        .unwrap_or(10)
-        .clamp(0, 1000);
-    let backoff_ms = params
-        .get("restart_backoff_ms")
-        .and_then(|v| v.parse::<u64>().ok())
-        .unwrap_or(1000)
-        .clamp(100, 10 * 60 * 1000);
-    let backoff_max_ms = params
-        .get("restart_backoff_max_ms")
-        .and_then(|v| v.parse::<u64>().ok())
-        .unwrap_or(30_000)
-        .clamp(backoff_ms, 60 * 60 * 1000);
-
-    RestartConfig {
-        policy,
-        max_retries,
-        backoff_ms,
-        backoff_max_ms,
-    }
-}
-
-fn compute_backoff_ms(cfg: RestartConfig, attempt: u32) -> u64 {
-    // attempt is 1-based.
-    let pow = attempt.saturating_sub(1).min(30);
-    let mult = 1u64.checked_shl(pow).unwrap_or(u64::MAX);
-    cfg.backoff_ms.saturating_mul(mult).min(cfg.backoff_max_ms)
-}
-
-fn early_exit_threshold() -> Duration {
-    Duration::from_millis(
-        env_u64("ALLOY_EARLY_EXIT_MS")
-            .map(|v| v.clamp(500, 60_000))
-            .unwrap_or(5000),
-    )
-}
-
-fn port_probe_timeout() -> Duration {
-    Duration::from_millis(
-        env_u64("ALLOY_PORT_PROBE_TIMEOUT_MS")
-            .map(|v| v.clamp(1000, 10 * 60 * 1000))
-            .unwrap_or(90_000),
-    )
-}
-
-fn resource_sample_interval() -> Duration {
-    Duration::from_millis(
-        env_u64("ALLOY_RESOURCE_SAMPLE_INTERVAL_MS")
-            .map(|v| v.clamp(250, 60_000))
-            .unwrap_or(2000),
-    )
-}
-
-#[cfg(target_os = "linux")]
-fn ticks_per_sec() -> u64 {
-    static TICKS: OnceLock<u64> = OnceLock::new();
-    *TICKS.get_or_init(|| unsafe {
-        let v = libc::sysconf(libc::_SC_CLK_TCK);
-        if v <= 0 { 100 } else { v as u64 }
-    })
-}
-
-#[cfg(not(target_os = "linux"))]
-fn ticks_per_sec() -> u64 {
-    100
-}
-
-#[cfg(target_os = "linux")]
-fn page_size() -> u64 {
-    static PAGE: OnceLock<u64> = OnceLock::new();
-    *PAGE.get_or_init(|| unsafe {
-        let v = libc::sysconf(libc::_SC_PAGESIZE);
-        if v <= 0 { 4096 } else { v as u64 }
-    })
-}
-
-#[cfg(not(target_os = "linux"))]
-fn page_size() -> u64 {
-    4096
-}
-
-#[cfg(target_os = "linux")]
-async fn read_proc_cpu_ticks(pid: u32) -> Option<u64> {
-    let stat_path = format!("/proc/{pid}/stat");
-    let s = tokio::fs::read_to_string(stat_path).await.ok()?;
-    let end = s.rfind(')')?;
-    let rest = s.get((end + 2)..)?;
-    let parts: Vec<&str> = rest.split_whitespace().collect();
-    let utime: u64 = parts.get(11)?.parse().ok()?;
-    let stime: u64 = parts.get(12)?.parse().ok()?;
-    Some(utime.saturating_add(stime))
-}
-
-#[cfg(not(target_os = "linux"))]
-async fn read_proc_cpu_ticks(_pid: u32) -> Option<u64> {
-    None
-}
-
-#[cfg(target_os = "linux")]
-async fn read_proc_rss_bytes(pid: u32) -> Option<u64> {
-    let statm_path = format!("/proc/{pid}/statm");
-    let s = tokio::fs::read_to_string(statm_path).await.ok()?;
-    let mut it = s.split_whitespace();
-    let _size_pages = it.next()?;
-    let resident_pages: u64 = it.next()?.parse().ok()?;
-    Some(resident_pages.saturating_mul(page_size()))
-}
-
-#[cfg(not(target_os = "linux"))]
-async fn read_proc_rss_bytes(_pid: u32) -> Option<u64> {
-    None
-}
+use crate::process_manager_support::{
+    RestartConfig,
+    RestartPolicy,
+    compute_backoff_ms,
+    early_exit_threshold,
+    env_u64,
+    format_error_chain,
+    log_file_limits,
+    log_max_lines,
+    parse_restart_config,
+    port_probe_timeout,
+    read_proc_cpu_ticks,
+    read_proc_rss_bytes,
+    resource_sample_interval,
+    ticks_per_sec,
+};
 
 #[cfg(target_os = "linux")]
 async fn read_proc_io_bytes(pid: u32) -> Option<(u64, u64)> {
@@ -449,7 +274,10 @@ mod tests {
             .unwrap_or_default()
             .as_nanos();
         let mut dir = std::env::temp_dir();
-        dir.push(format!("alloy-agent-{test_name}-{}-{n}-{ts}", std::process::id()));
+        dir.push(format!(
+            "alloy-agent-{test_name}-{}-{n}-{ts}",
+            std::process::id()
+        ));
         dir
     }
 
@@ -1630,7 +1458,6 @@ impl ProcessManager {
             || t.template_id == "minecraft:import"
             || t.template_id == "minecraft:curseforge"
             || t.template_id == "dst:vanilla"
-            || t.template_id == "dsp:nebula"
             || t.template_id == "terraria:vanilla"
         {
             minecraft::instance_dir(&id.0)
@@ -4466,434 +4293,6 @@ impl ProcessManager {
                 });
             }
 
-            if t.template_id == "dsp:nebula" {
-                ensure_min_free_space(&dsp::data_root()).map_err(|e| {
-                    crate::error_payload::anyhow(
-                        "insufficient_disk",
-                        e.to_string(),
-                        None,
-                        Some("Free up disk space under ALLOY_DATA_ROOT and try again.".to_string()),
-                    )
-                })?;
-
-                let tr = dsp::validate_nebula_params(&params)?;
-
-                let tr_port = port_alloc::allocate_tcp_port(tr.port).map_err(|e| {
-                    let mut fields = BTreeMap::new();
-                    fields.insert("port".to_string(), e.to_string());
-                    crate::error_payload::anyhow(
-                        "invalid_param",
-                        "invalid port",
-                        Some(fields),
-                        Some(
-                            "Pick another port, or leave it blank (0) to auto-assign a free port."
-                                .to_string(),
-                        ),
-                    )
-                })?;
-
-                params.insert("port".to_string(), tr_port.to_string());
-                let restart = parse_restart_config(&params);
-
-                let dir = dsp::instance_dir(&id.0);
-                let prepared = dsp::prepare_nebula_launch(
-                    &dir,
-                    &dsp::NebulaParams {
-                        port: tr_port,
-                        ..tr
-                    },
-                    tr_port,
-                )
-                .map_err(|e| {
-                    crate::error_payload::anyhow(
-                        "spawn_failed",
-                        format!("failed to prepare dsp nebula server launch: {e}"),
-                        None,
-                        Some(
-                            "Ensure server_root contains DSPGAME.exe + BepInEx + Nebula, and wine is installed."
-                                .to_string(),
-                        ),
-                    )
-                })?;
-
-                let exec_path = prepared.launcher_script;
-                let exec = exec_path.display().to_string();
-                let raw_args = Vec::<String>::new();
-                let (mut cmd, sandbox_launch) = prepare_instance_command(
-                    &id.0,
-                    &t.template_id,
-                    &params,
-                    &dir,
-                    &dir,
-                    &exec,
-                    &raw_args,
-                    &[],
-                )?;
-
-                let started_at_unix_ms = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_millis() as u64;
-
-                let mut run = RunInfo {
-                    process_id: id.0.clone(),
-                    template_id: t.template_id.clone(),
-                    started_at_unix_ms,
-                    agent_version: env!("CARGO_PKG_VERSION").to_string(),
-                    pid: None,
-                    pgid: None,
-                    container_name: sandbox_launch.container_name().map(ToOwned::to_owned),
-                    container_id: None,
-                    exec: sandbox_launch.exec.clone(),
-                    args: sandbox_launch.args.clone(),
-                    cwd: sandbox_launch.cwd.display().to_string(),
-                    params: redact_params(params.clone()),
-                    env: collect_safe_env(),
-                };
-                let _ = write_run_json(&dir, &run).await;
-
-                sink.emit(format!("[alloy-agent] sandbox: {}", sandbox_launch.summary()))
-                    .await;
-                for warning in sandbox_launch.warnings() {
-                    sink.emit(format!("[alloy-agent] sandbox warning: {warning}"))
-                        .await;
-                }
-
-                sink.emit(format!(
-                    "[alloy-agent] dsp exec: {} (cwd {}) startup_mode={} port={} wine={}",
-                    sandbox_launch.exec,
-                    sandbox_launch.cwd.display(),
-                    prepared.effective_startup_mode.as_str(),
-                    tr_port,
-                    prepared.wine_bin,
-                ))
-                .await;
-
-                set_entry_message(
-                    &self.inner,
-                    &id.0,
-                    Some(format!("spawning dsp nebula server (port {})...", tr_port)),
-                )
-                .await;
-
-                let mut child = cmd
-                    .spawn()
-                    .with_context(|| {
-                        format!(
-                            "spawn dsp nebula server: exec={} (cwd {})",
-                            exec_path.display(),
-                            dir.display(),
-                        )
-                    })
-                    .map_err(|e| {
-                        crate::error_payload::anyhow(
-                            "spawn_failed",
-                            e.to_string(),
-                            None,
-                            Some(
-                                "Ensure wine is installed and server_root is valid."
-                                    .to_string(),
-                            ),
-                        )
-                    })?;
-                let started = tokio::time::Instant::now();
-                let pid_u32 = child.id();
-                let pgid = pid_u32.map(|p| p as i32);
-
-                if let Some(pid) = pid_u32
-                    && let Some(warn) = sandbox_launch.attach_pid(pid)
-                {
-                    sink.emit(format!("[alloy-agent] sandbox warning: {warn}"))
-                        .await;
-                }
-
-                run.pid = pid_u32;
-                run.pgid = pgid;
-                refresh_docker_container_metadata(&id.0, &mut run).await;
-                let _ = write_run_json(&dir, &run).await;
-
-                let stdin = child.stdin.take();
-                let stdout = child.stdout.take();
-                let stderr = child.stderr.take();
-
-                if let Some(out) = stdout {
-                    let sink = sink.clone();
-                    tokio::spawn(async move {
-                        let mut lines = BufReader::new(out).lines();
-                        while let Ok(Some(line)) = lines.next_line().await {
-                            sink.emit(format!("[stdout] {line}")).await;
-                        }
-                    });
-                }
-                if let Some(err) = stderr {
-                    let sink = sink.clone();
-                    tokio::spawn(async move {
-                        let mut lines = BufReader::new(err).lines();
-                        while let Ok(Some(line)) = lines.next_line().await {
-                            sink.emit(format!("[stderr] {line}")).await;
-                        }
-                    });
-                }
-
-                {
-                    let mut inner = self.inner.lock().await;
-                    inner.insert(
-                        id.0.clone(),
-                        ProcessEntry {
-                            template_id: ProcessTemplateId(t.template_id.clone()),
-                            state: ProcessState::Starting,
-                            pid: pid_u32,
-                            resources: None,
-                            exit_code: None,
-                            message: Some(format!("waiting for port {}...", tr_port)),
-                            restart,
-                            restart_attempts: reused_restart_attempts,
-                            stdin,
-                            graceful_stdin: t.graceful_stdin.clone(),
-                            pgid,
-                            logs: logs.clone(),
-                            log_file_tx: Some(log_tx.clone()),
-                        },
-                    );
-                }
-
-                if let Some(pid) = pid_u32 {
-                    self.spawn_resource_sampler(id.0.clone(), pid);
-                }
-
-                let manager = self.clone();
-                let inner = self.inner.clone();
-                let id_str = id.0.clone();
-
-                let probe_sink = sink.clone();
-                let port = tr_port;
-                let frp_config = params
-                    .get("frp_config")
-                    .map(|v| v.trim())
-                    .filter(|v| !v.is_empty())
-                    .map(|v| v.to_string());
-                let frp_instance_dir = dir.clone();
-                tokio::spawn({
-                    let inner = inner.clone();
-                    let id_str = id_str.clone();
-                    let frp_config = frp_config.clone();
-                    let frp_instance_dir = frp_instance_dir.clone();
-                    async move {
-                        let timeout = port_probe_timeout();
-                        let ok = wait_for_local_tcp_port(port, timeout).await;
-
-                        let (pgid, should_kill) = {
-                            let mut map = inner.lock().await;
-                            let Some(e) = map.get_mut(&id_str) else {
-                                return;
-                            };
-                            if e.pid != pid_u32 || !matches!(e.state, ProcessState::Starting) {
-                                return;
-                            }
-
-                            if ok {
-                                e.state = ProcessState::Running;
-                                e.message = None;
-                                (e.pgid, false)
-                            } else {
-                                e.state = ProcessState::Failed;
-                                e.message = Some(format!(
-                                    "port {} did not open within {}ms",
-                                    port,
-                                    timeout.as_millis()
-                                ));
-                                (e.pgid, true)
-                            }
-                        };
-
-                        if ok {
-                            if let (Some(cfg), Some(pgid)) = (frp_config.clone(), pgid) {
-                                if let Err(e) = start_frpc_sidecar(
-                                    probe_sink.clone(),
-                                    frp_instance_dir.clone(),
-                                    pgid,
-                                    port,
-                                    cfg,
-                                )
-                                .await
-                                {
-                                    probe_sink
-                                        .emit(format!("[alloy-agent] frpc start failed: {e}"))
-                                        .await;
-                                }
-                            }
-                            probe_sink
-                                .emit(format!(
-                                    "[alloy-agent] dsp nebula port {} is accepting connections",
-                                    port
-                                ))
-                                .await;
-                        } else {
-                            probe_sink
-                                .emit(format!(
-                                    "[alloy-agent] dsp nebula port {} did not open in time",
-                                    port
-                                ))
-                                .await;
-                            if should_kill && let Some(pgid) = pgid {
-                                #[cfg(unix)]
-                                unsafe {
-                                    libc::kill(-pgid, libc::SIGTERM);
-                                }
-                            }
-                        }
-                    }
-                });
-
-                let process_pgid = pgid;
-                let wait_sink = sink.clone();
-                let template_id = t.template_id.clone();
-                let params_for_restart = params.clone();
-                tokio::spawn(async move {
-                    let res = child.wait().await;
-                    #[cfg(unix)]
-                    if let Some(pgid) = process_pgid {
-                        unsafe {
-                            libc::kill(-pgid, libc::SIGTERM);
-                        }
-                        tokio::time::sleep(Duration::from_millis(500)).await;
-                        let alive = unsafe { libc::kill(-pgid, 0) == 0 };
-                        if alive {
-                            unsafe {
-                                libc::kill(-pgid, libc::SIGKILL);
-                            }
-                        }
-                    }
-                    let runtime = started.elapsed();
-
-                    let mut restart_after: Option<Duration> = None;
-                    let mut restart_attempt = 0u32;
-
-                    let (final_state, exit_code) = {
-                        let mut map = inner.lock().await;
-                        let Some(e) = map.get_mut(&id_str) else {
-                            return;
-                        };
-
-                        e.stdin = None;
-                        let stopping = matches!(e.state, ProcessState::Stopping);
-
-                        match res {
-                            Ok(status) => {
-                                e.exit_code = status.code();
-
-                                if stopping {
-                                    e.state = ProcessState::Exited;
-                                    e.message = Some("stopped".to_string());
-                                } else if runtime < early_exit_threshold() {
-                                    e.state = ProcessState::Failed;
-                                    e.message = Some(format!(
-                                        "exited too quickly ({}ms)",
-                                        runtime.as_millis()
-                                    ));
-                                } else if status.success() {
-                                    e.state = ProcessState::Exited;
-                                    e.message = Some("exited".to_string());
-                                } else {
-                                    e.state = ProcessState::Failed;
-                                    e.message = Some(format!(
-                                        "exited with code {}",
-                                        status.code().unwrap_or_default()
-                                    ));
-                                }
-                            }
-                            Err(err) => {
-                                e.state = ProcessState::Failed;
-                                e.message = Some(format!("wait failed: {err}"));
-                            }
-                        }
-
-                        if !stopping {
-                            let is_failure = matches!(e.state, ProcessState::Failed)
-                                || e.exit_code.is_some_and(|c| c != 0);
-                            let should_restart = match e.restart.policy {
-                                RestartPolicy::Off => false,
-                                RestartPolicy::Always => true,
-                                RestartPolicy::OnFailure => is_failure,
-                            };
-
-                            if should_restart && e.restart_attempts < e.restart.max_retries {
-                                e.restart_attempts = e.restart_attempts.saturating_add(1);
-                                let delay_ms = compute_backoff_ms(e.restart, e.restart_attempts);
-                                restart_after = Some(Duration::from_millis(delay_ms));
-                                restart_attempt = e.restart_attempts;
-                                e.message = Some(format!(
-                                    "restarting in {}ms (attempt {}/{})",
-                                    delay_ms, restart_attempt, e.restart.max_retries
-                                ));
-                            }
-                        }
-
-                        (e.state, e.exit_code)
-                    };
-
-                    wait_sink
-                        .emit(format!(
-                            "[alloy-agent] process exited: state={:?} exit_code={:?} runtime_ms={}",
-                            final_state,
-                            exit_code,
-                            runtime.as_millis()
-                        ))
-                        .await;
-
-                    if let Some(delay) = restart_after {
-                        wait_sink
-                            .emit(format!(
-                                "[alloy-agent] auto-restart scheduled in {}ms (attempt {})",
-                                delay.as_millis(),
-                                restart_attempt
-                            ))
-                            .await;
-                        let handle = tokio::runtime::Handle::current();
-                        let wait_sink = wait_sink.clone();
-                        tokio::task::spawn_blocking(move || {
-                            std::thread::sleep(delay);
-                            let res = handle.block_on(manager.start_from_template_with_process_id(
-                                &id_str,
-                                &template_id,
-                                params_for_restart,
-                            ));
-                            match res {
-                                Ok(st) if matches!(st.state, ProcessState::Failed) => {
-                                    let msg = st
-                                        .message
-                                        .filter(|s| !s.trim().is_empty())
-                                        .unwrap_or_else(|| "unknown error".to_string());
-                                    handle.block_on(wait_sink.emit(format!(
-                                        "[alloy-agent] auto-restart failed: {msg}"
-                                    )));
-                                }
-                                Ok(_) => {
-                                    handle.block_on(wait_sink.emit(
-                                        "[alloy-agent] auto-restart triggered".to_string(),
-                                    ));
-                                }
-                                Err(err) => {
-                                    handle.block_on(wait_sink.emit(format!(
-                                        "[alloy-agent] auto-restart failed: {err}"
-                                    )));
-                                }
-                            }
-                        });
-                    }
-                });
-
-                return Ok(ProcessStatus {
-                    id: id.clone(),
-                    template_id: ProcessTemplateId(t.template_id.clone()),
-                    state: ProcessState::Starting,
-                    pid: pid_u32,
-                    exit_code: None,
-                    message: Some(format!("waiting for port {}...", tr_port)),
-                    resources: None,
-                });
-            }
-
             let exec = t.command.clone();
             let raw_args = t.args.clone();
             let restart = parse_restart_config(&params);
@@ -5411,7 +4810,6 @@ impl ProcessManager {
                 "saving players",
             ],
             "terraria:vanilla" => &["saving world", "world saved"],
-            "dsp:nebula" => &["save game", "game saved", "autosave"],
             _ => &[],
         };
 

@@ -88,14 +88,11 @@ RUN set -eux; \
     if [ "$arch" = "amd64" ]; then dpkg --add-architecture i386; fi; \
     apt-get update; \
     # Keep native curl for agent/runtime tools.
-    pkgs="ca-certificates libcurl4 libcurl3-gnutls libgcc-s1 libicu72 libssl3 libstdc++6 zlib1g tar bubblewrap"; \
-    # DSP Nebula dedicated server runs under Wine.
-    pkgs="$pkgs wine64"; \
+    pkgs="ca-certificates libcurl4 libcurl3-gnutls libgcc-s1 libicu72 libssl3 libstdc++6 zlib1g tar bubblewrap xvfb xauth"; \
     # SteamCMD (used by DST) ships 32-bit binaries and only works on amd64.
     if [ "$arch" = "amd64" ]; then \
       # SteamCMD commonly needs: 32-bit glibc loader + libstdc++ + zlib + tinfo/ncurses.
       # DST itself also needs 32-bit libcurl-gnutls.so.4.
-      # We don't require wine32 here (DSP uses wine64), and wine32 may be unavailable in some Debian mirrors.
       pkgs="$pkgs libc6-i386 lib32gcc-s1 lib32stdc++6 lib32z1 lib32tinfo6 libcurl3-gnutls:i386"; \
     fi; \
     apt-get install -y --no-install-recommends $pkgs; \
