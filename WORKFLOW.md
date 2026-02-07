@@ -175,7 +175,6 @@ Definition of Done (must be true):
 TODO:
 - [ ] Add FRP client sidecar (frpc) per instance (custom pasted config)
 - [ ] Optional: manage FRP servers (frps) from the panel
-- [x] Add DSP Nebula dedicated template + docs (Wine headless)
 
 ### Phase 5.2 - Worlds / saves
 TODO:
