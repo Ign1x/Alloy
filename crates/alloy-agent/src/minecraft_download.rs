@@ -4,6 +4,7 @@ use std::{
     collections::HashMap,
     fs,
     io::Write,
+    path::Path,
     path::PathBuf,
     sync::{Arc, OnceLock},
     time::Duration,
@@ -139,6 +140,41 @@ fn mark_last_used(entry_dir: &std::path::Path) {
     let _ = std::fs::write(path, format!("{now_ms}\n"));
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+struct MinecraftJarMeta {
+    version_id: String,
+    sha1: String,
+    size_bytes: u64,
+    java_major: u32,
+    updated_at_unix_ms: u64,
+}
+
+fn write_meta_best_effort(entry_dir: &Path, resolved: &ResolvedServerJar) {
+    let meta = MinecraftJarMeta {
+        version_id: resolved.version_id.clone(),
+        sha1: resolved.sha1.clone(),
+        size_bytes: resolved.size,
+        java_major: resolved.java_major,
+        updated_at_unix_ms: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64,
+    };
+
+    let path = entry_dir.join("meta.json");
+    let tmp = entry_dir.join("meta.json.tmp");
+    let Ok(json) = serde_json::to_vec_pretty(&meta) else {
+        return;
+    };
+    if fs::write(&tmp, json).is_err() {
+        let _ = fs::remove_file(&tmp);
+        return;
+    }
+    if fs::rename(&tmp, &path).is_err() {
+        let _ = fs::remove_file(&tmp);
+    }
+}
+
 fn download_locks() -> &'static std::sync::Mutex<HashMap<String, Arc<Mutex<()>>>> {
     static LOCKS: OnceLock<std::sync::Mutex<HashMap<String, Arc<Mutex<()>>>>> = OnceLock::new();
     LOCKS.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
@@ -168,6 +204,7 @@ pub async fn ensure_server_jar(resolved: &ResolvedServerJar) -> anyhow::Result<P
     if jar_path.exists() {
         if let Some(dir) = jar_path.parent() {
             mark_last_used(dir);
+            write_meta_best_effort(dir, resolved);
         }
         return Ok(jar_path);
     }
@@ -178,6 +215,7 @@ pub async fn ensure_server_jar(resolved: &ResolvedServerJar) -> anyhow::Result<P
     if jar_path.exists() {
         if let Some(dir) = jar_path.parent() {
             mark_last_used(dir);
+            write_meta_best_effort(dir, resolved);
         }
         return Ok(jar_path);
     }
@@ -248,6 +286,7 @@ pub async fn ensure_server_jar(resolved: &ResolvedServerJar) -> anyhow::Result<P
     fs::rename(tmp_path, &jar_path)?;
     if let Some(dir) = jar_path.parent() {
         mark_last_used(dir);
+        write_meta_best_effort(dir, resolved);
     }
     Ok(jar_path)
 }

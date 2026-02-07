@@ -456,6 +456,38 @@ impl ProcessService for ProcessApi {
         &self,
         _request: Request<GetCacheStatsRequest>,
     ) -> Result<Response<GetCacheStatsResponse>, Status> {
+        #[derive(Debug, Clone, serde::Deserialize)]
+        struct MinecraftJarMeta {
+            version_id: Option<String>,
+        }
+
+        fn read_last_used_marker(dir: &std::path::Path) -> u64 {
+            let p = dir.join(".last_used");
+            let raw = std::fs::read_to_string(p).unwrap_or_default();
+            raw.trim().parse::<u64>().unwrap_or(0)
+        }
+
+        fn read_minecraft_version_id(entry_dir: &std::path::Path) -> Option<String> {
+            let p = entry_dir.join("meta.json");
+            let bytes = std::fs::read(p).ok()?;
+            let meta: MinecraftJarMeta = serde_json::from_slice(&bytes).ok()?;
+            meta.version_id
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty())
+        }
+
+        fn modified_unix_ms(path: &std::path::Path) -> u64 {
+            let meta = match std::fs::symlink_metadata(path) {
+                Ok(m) => m,
+                Err(_) => return 0,
+            };
+            meta.modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0)
+        }
+
         fn dir_stats(path: &std::path::Path) -> (u64, u64) {
             fn walk(p: &std::path::Path, size: &mut u64, last_ms: &mut u64) {
                 let meta = match std::fs::symlink_metadata(p) {
@@ -503,29 +535,89 @@ impl ProcessService for ProcessApi {
         }
 
         let entries = tokio::task::spawn_blocking(|| {
-            let (mc_size, mc_last) = dir_stats(&minecraft_download::cache_dir());
-            let (tr_size, tr_last) = dir_stats(&terraria_download::cache_dir());
-            let (dsp_size, dsp_last) = dir_stats(&dsp::data_root().join("cache").join("dsp"));
-            vec![
-                (
-                    "minecraft:vanilla".to_string(),
-                    minecraft_download::cache_dir(),
-                    mc_size,
-                    mc_last,
-                ),
-                (
-                    "terraria:vanilla".to_string(),
-                    terraria_download::cache_dir(),
-                    tr_size,
-                    tr_last,
-                ),
-                (
-                    "dsp:nebula".to_string(),
-                    dsp::data_root().join("cache").join("dsp"),
-                    dsp_size,
-                    dsp_last,
-                ),
-            ]
+            let mut out: Vec<(String, std::path::PathBuf, u64, u64)> = Vec::new();
+
+            // Minecraft: per-JAR entries (key includes version + sha1).
+            let mc_root = minecraft_download::cache_dir();
+            let mut mc_entries: Vec<(String, std::path::PathBuf, u64, u64)> = Vec::new();
+            if let Ok(rd) = std::fs::read_dir(&mc_root) {
+                for entry in rd.flatten() {
+                    let path = entry.path();
+                    let Ok(ft) = entry.file_type() else {
+                        continue;
+                    };
+                    if !ft.is_dir() {
+                        continue;
+                    }
+                    let sha1 = entry.file_name().to_string_lossy().to_string();
+                    if sha1.len() != 40 || !sha1.chars().all(|c| c.is_ascii_hexdigit()) {
+                        continue;
+                    }
+                    let jar = path.join("server.jar");
+                    if !jar.is_file() {
+                        continue;
+                    }
+
+                    let version = read_minecraft_version_id(&path).unwrap_or_else(|| "unknown".to_string());
+                    let (size, _) = dir_stats(&path);
+                    let last_used = read_last_used_marker(&path).max(modified_unix_ms(&jar));
+                    let key = format!("minecraft:vanilla@{version}#{sha1}");
+                    mc_entries.push((key, path, size, last_used));
+                }
+            }
+            mc_entries.sort_by(|a, b| b.3.cmp(&a.3).then_with(|| a.0.cmp(&b.0)));
+            let mc_size = mc_entries.iter().map(|e| e.2).sum::<u64>();
+            let mc_last = mc_entries.iter().map(|e| e.3).max().unwrap_or(0);
+            out.push(("minecraft:vanilla".to_string(), mc_root.clone(), mc_size, mc_last));
+            out.extend(mc_entries);
+
+            // Terraria: per-version entries (key includes version).
+            let tr_root = terraria_download::cache_dir();
+            let mut tr_entries: Vec<(String, std::path::PathBuf, u64, u64)> = Vec::new();
+            if let Ok(rd) = std::fs::read_dir(&tr_root) {
+                for entry in rd.flatten() {
+                    let path = entry.path();
+                    let Ok(ft) = entry.file_type() else {
+                        continue;
+                    };
+                    if !ft.is_dir() {
+                        continue;
+                    }
+                    let version = entry.file_name().to_string_lossy().to_string();
+                    if version.is_empty() {
+                        continue;
+                    }
+                    if !version.chars().all(|c| c.is_ascii_digit()) {
+                        continue;
+                    }
+
+                    let (size, last_modified) = dir_stats(&path);
+                    let last_used = read_last_used_marker(&path).max(last_modified);
+                    let key = format!("terraria:vanilla@{version}");
+                    tr_entries.push((key, path, size, last_used));
+                }
+            }
+            tr_entries.sort_by(|a, b| b.3.cmp(&a.3).then_with(|| a.0.cmp(&b.0)));
+            let tr_size = tr_entries.iter().map(|e| e.2).sum::<u64>();
+            let tr_last = tr_entries.iter().map(|e| e.3).max().unwrap_or(0);
+            out.push(("terraria:vanilla".to_string(), tr_root.clone(), tr_size, tr_last));
+            out.extend(tr_entries);
+
+            // DSP: source files and cache marker dir.
+            let dsp_source = dsp::default_source_root();
+            let (dsp_source_size, dsp_source_last) = dir_stats(&dsp_source);
+            out.push((
+                "dsp:nebula@source".to_string(),
+                dsp_source,
+                dsp_source_size,
+                dsp_source_last,
+            ));
+
+            let dsp_cache = dsp::data_root().join("cache").join("dsp");
+            let (dsp_size, dsp_last) = dir_stats(&dsp_cache);
+            out.push(("dsp:nebula".to_string(), dsp_cache, dsp_size, dsp_last));
+
+            out
         })
         .await
         .map_err(|e| Status::internal(format!("cache stats task failed: {e}")))?
