@@ -3,7 +3,7 @@ export type UiTab = 'instances' | 'downloads' | 'files' | 'nodes' | 'frp' | 'set
 export type MinecraftCreateMode = 'vanilla' | 'modrinth' | 'import' | 'curseforge'
 export type FrpConfigMode = 'paste' | 'node'
 export type DownloadTarget = 'minecraft_vanilla' | 'terraria_vanilla' | 'dsp_nebula'
-export type DownloadCenterView = 'library' | 'queue' | 'installed' | 'updates'
+export type DownloadCenterView = 'tasks' | 'minecraft' | 'terraria' | 'dsp' | 'cache'
 export type DownloadJobState = 'queued' | 'running' | 'paused' | 'success' | 'error' | 'canceled'
 export type DownloadJob = {
   id: string
@@ -28,7 +28,7 @@ export type Toast = {
 }
 
 export const DSP_DEFAULT_SOURCE_ROOT = '/data/uploads/dsp/server'
-export const DOWNLOAD_VIEW_STORAGE_KEY = 'alloy.download.view.v1'
+export const DOWNLOAD_VIEW_STORAGE_KEY = 'alloy.download.view.v2'
 export const CREATE_TEMPLATE_MINECRAFT = '__minecraft__'
 
 export const MINECRAFT_TEMPLATE_ID_BY_MODE: Record<MinecraftCreateMode, string> = {

@@ -1126,11 +1126,11 @@ function App() {
   const [downloadCenterView, setDownloadCenterView] = createSignal<DownloadCenterView>((() => {
     try {
       const v = localStorage.getItem(DOWNLOAD_VIEW_STORAGE_KEY)
-      if (v === 'library' || v === 'queue' || v === 'installed' || v === 'updates') return v
+      if (v === 'tasks' || v === 'minecraft' || v === 'terraria' || v === 'dsp' || v === 'cache') return v
     } catch {
       // ignore
     }
-    return 'queue'
+    return 'tasks'
   })())
   const [downloadEnqueueTarget, setDownloadEnqueueTarget] = createSignal<DownloadTarget | null>(null)
   const [downloadNowUnixMs, setDownloadNowUnixMs] = createSignal(Date.now())
@@ -1656,7 +1656,6 @@ function App() {
       if (target === 'dsp_nebula') {
         setDownloadDspGuardCode('')
       }
-      setDownloadCenterView('queue')
       pushToast('info', 'Added to queue', `${downloadTargetLabel(target)} · ${req.version}`)
       await invalidateDownloadQueue()
     } catch (e) {
@@ -1716,24 +1715,6 @@ function App() {
         installedVersion,
         sizeBytes: Number(cache?.size_bytes ?? '0'),
         lastUsedUnixMs: Number(cache?.last_used_unix_ms ?? '0'),
-      }
-    })
-  })
-
-  const downloadUpdateRows = createMemo(() => {
-    const mcLatest = mcVersions.data?.latest_release ?? 'latest_release'
-    const trLatest = '1453'
-    const dspLatest = 'steamcmd-source'
-
-    return downloadInstalledRows().map((row) => {
-      const latestVersion =
-        row.target === 'minecraft_vanilla' ? mcLatest : row.target === 'terraria_vanilla' ? trLatest : dspLatest
-      const installedVersion = row.installedVersion
-      const updateAvailable = row.installed && installedVersion !== 'cached' && installedVersion !== latestVersion
-      return {
-        ...row,
-        latestVersion,
-        updateAvailable,
       }
     })
   })
@@ -2985,7 +2966,6 @@ function App() {
                 setSelectedDownloadJobId={setSelectedDownloadJobId}
                 enqueueDownloadWarm={enqueueDownloadWarm}
                 downloadInstalledRows={downloadInstalledRows}
-                downloadUpdateRows={downloadUpdateRows}
                 downloadNowUnixMs={downloadNowUnixMs}
                 isReadOnly={isReadOnly}
                 downloadEnqueueTarget={downloadEnqueueTarget}

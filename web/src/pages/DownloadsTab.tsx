@@ -1,23 +1,394 @@
-import { For, Show } from 'solid-js'
-import { ArrowDown, ArrowUp, Download, Pause, Play, RotateCw, Trash2, X } from 'lucide-solid'
-import { Dropdown } from '../components/Dropdown'
-import { Banner } from '../components/ui/Banner'
+import { For, Show, createMemo, createSignal, type JSX } from 'solid-js'
+import { ArrowDown, ArrowUp, Download, HardDrive, Pause, Play, RotateCw, Search, Trash2, X, ListChecks } from 'lucide-solid'
+import type { DownloadCenterView, DownloadJob, DownloadTarget } from '../app/types'
+import { downloadJobProgressMessage, downloadJobStatusLabel, downloadJobStatusVariant, downloadTargetLabel } from '../app/helpers/downloads'
+import { formatBytes, formatRelativeTime } from '../app/helpers/format'
+import { DownloadProgress } from '../app/primitives/DownloadProgress'
 import { Badge } from '../components/ui/Badge'
 import { Button } from '../components/ui/Button'
 import { EmptyState } from '../components/ui/EmptyState'
 import { Field } from '../components/ui/Field'
 import { IconButton } from '../components/ui/IconButton'
 import { Input } from '../components/ui/Input'
-import { Tabs } from '../components/ui/Tabs'
 import { TemplateMark } from '../components/ui/TemplateMark'
-import { DownloadProgress } from '../app/primitives/DownloadProgress'
-import { downloadJobProgressMessage, downloadJobStatusLabel, downloadJobStatusVariant, downloadTargetLabel } from '../app/helpers/downloads'
-import { formatBytes, formatRelativeTime } from '../app/helpers/format'
-import { instanceCardBackdrop } from '../app/helpers/instances'
 
 export type DownloadsTabProps = {
   tab: () => string
   [key: string]: unknown
+}
+
+type InstalledRow = {
+  target: DownloadTarget
+  templateId: string
+  installed: boolean
+  installedVersion: string
+  sizeBytes: number
+  lastUsedUnixMs: number
+}
+
+type DownloadStatus = {
+  ok: boolean
+  message: string
+  requestId?: string
+  atUnixMs: number
+}
+
+type VersionOption = { value: string; label: string; meta?: string }
+
+const SURFACE =
+  'rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950 dark:shadow-none'
+
+function NavItem(props: {
+  value: DownloadCenterView
+  current: () => DownloadCenterView
+  icon: JSX.Element
+  label: string
+  meta?: string
+  right?: JSX.Element
+  onSelect: (value: DownloadCenterView) => void
+}) {
+  const active = () => props.current() === props.value
+  return (
+    <button
+      type="button"
+      class={`flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/35 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-50 dark:focus-visible:ring-amber-400/35 dark:focus-visible:ring-offset-slate-950 ${
+        active()
+          ? 'bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900'
+          : 'text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-900/40'
+      }`}
+      onClick={() => props.onSelect(props.value)}
+    >
+      <div class="flex min-w-0 items-center gap-3">
+        <div class={`${active() ? 'text-white dark:text-slate-900' : 'text-slate-500 dark:text-slate-400'}`}>{props.icon}</div>
+        <div class="min-w-0">
+          <div class="truncate font-medium">{props.label}</div>
+          <Show when={props.meta}>
+            <div class={`mt-0.5 truncate text-[11px] ${active() ? 'text-white/75 dark:text-slate-700' : 'text-slate-500 dark:text-slate-400'}`}>
+              {props.meta}
+            </div>
+          </Show>
+        </div>
+      </div>
+      <Show when={props.right}>
+        <div class={active() ? 'text-white/90 dark:text-slate-700' : 'text-slate-500 dark:text-slate-400'}>{props.right}</div>
+      </Show>
+    </button>
+  )
+}
+
+function StatusPill(props: { ok: boolean; children: JSX.Element }) {
+  return (
+    <span
+      class={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] ${
+        props.ok
+          ? 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/20 dark:text-emerald-200'
+          : 'border-rose-200 bg-rose-50 text-rose-800 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-200'
+      }`}
+    >
+      {props.children}
+    </span>
+  )
+}
+
+function Section(props: { title: string; description?: string; right?: JSX.Element; children: JSX.Element }) {
+  return (
+    <section class={SURFACE}>
+      <div class="border-b border-slate-200 px-4 py-4 dark:border-slate-800">
+        <div class="flex flex-wrap items-start justify-between gap-3">
+          <div class="min-w-0">
+            <div class="text-base font-semibold tracking-tight text-slate-900 dark:text-slate-100">{props.title}</div>
+            <Show when={props.description}>
+              <div class="mt-1 text-[12px] text-slate-600 dark:text-slate-400">{props.description}</div>
+            </Show>
+          </div>
+          <Show when={props.right}>
+            <div class="flex flex-wrap items-center gap-2">{props.right}</div>
+          </Show>
+        </div>
+      </div>
+      <div class="p-4">{props.children}</div>
+    </section>
+  )
+}
+
+function JobRow(props: {
+  job: DownloadJob
+  nowUnixMs: () => number
+  compact?: boolean
+  canReorder?: boolean
+  onMoveJob: (id: string, delta: number) => void
+  onPauseJob: (id: string) => void
+  onResumeJob: (id: string) => void
+  onCancelJob: (id: string) => void
+  onRetryJob: (id: string) => void
+  onOpenDetails: (id: string) => void
+}) {
+  const progressMessage = () => downloadJobProgressMessage(props.job, props.nowUnixMs())
+  const showReorder = () => Boolean(props.canReorder) && (props.job.state === 'queued' || props.job.state === 'paused')
+
+  return (
+    <div class="flex flex-wrap items-start justify-between gap-3 px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-900/20">
+      <div class="flex min-w-0 items-start gap-3">
+        <TemplateMark templateId={props.job.templateId} class={props.compact ? 'h-8 w-8' : undefined} />
+        <div class="min-w-0">
+          <div class="flex flex-wrap items-center gap-2">
+            <div class="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">
+              {downloadTargetLabel(props.job.target)}
+            </div>
+            <span class="rounded-full border border-slate-200 bg-white px-2 py-0.5 font-mono text-[11px] text-slate-700 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200">
+              {props.job.version}
+            </span>
+            <Badge variant={downloadJobStatusVariant(props.job.state)}>{downloadJobStatusLabel(props.job.state)}</Badge>
+            <Show when={props.job.requestId && !props.compact}>
+              {(req) => <span class="font-mono text-[11px] text-slate-400 dark:text-slate-500">req {req()}</span>}
+            </Show>
+          </div>
+
+          <Show
+            when={props.job.state === 'running'}
+            fallback={<div class="mt-1 text-[12px] text-slate-600 dark:text-slate-300">{props.job.message}</div>}
+          >
+            <DownloadProgress templateId={props.job.templateId} message={progressMessage()} />
+          </Show>
+
+          <div class="mt-1 font-mono text-[11px] text-slate-400 dark:text-slate-500">
+            {formatRelativeTime(props.job.updatedAtUnixMs)}
+          </div>
+        </div>
+      </div>
+
+      <div class="flex flex-none items-center gap-1">
+        <Button size="xs" variant="secondary" onClick={() => props.onOpenDetails(props.job.id)}>
+          Details
+        </Button>
+
+        <Show when={showReorder()}>
+          <>
+            <IconButton label="Move up" variant="ghost" onClick={() => void props.onMoveJob(props.job.id, -1)}>
+              <ArrowUp class="h-4 w-4" aria-hidden="true" />
+            </IconButton>
+            <IconButton label="Move down" variant="ghost" onClick={() => void props.onMoveJob(props.job.id, 1)}>
+              <ArrowDown class="h-4 w-4" aria-hidden="true" />
+            </IconButton>
+          </>
+        </Show>
+
+        <Show when={props.job.state === 'queued'}>
+          <IconButton label="Pause" variant="secondary" onClick={() => void props.onPauseJob(props.job.id)}>
+            <Pause class="h-4 w-4" aria-hidden="true" />
+          </IconButton>
+        </Show>
+        <Show when={props.job.state === 'paused'}>
+          <IconButton label="Resume" variant="secondary" onClick={() => void props.onResumeJob(props.job.id)}>
+            <Play class="h-4 w-4" aria-hidden="true" />
+          </IconButton>
+        </Show>
+        <Show when={props.job.state === 'queued' || props.job.state === 'paused'}>
+          <IconButton label="Cancel" variant="danger" onClick={() => void props.onCancelJob(props.job.id)}>
+            <X class="h-4 w-4" aria-hidden="true" />
+          </IconButton>
+        </Show>
+        <Show when={props.job.state === 'error' || props.job.state === 'success' || props.job.state === 'canceled'}>
+          <IconButton label="Retry" variant="secondary" onClick={() => void props.onRetryJob(props.job.id)}>
+            <RotateCw class="h-4 w-4" aria-hidden="true" />
+          </IconButton>
+        </Show>
+      </div>
+    </div>
+  )
+}
+
+function VersionManager(props: {
+  title: string
+  subtitle: string
+  templateId: string
+  target: DownloadTarget
+  installed: () => InstalledRow | null
+  status: () => DownloadStatus | null
+  options: () => VersionOption[]
+  search: () => string
+  setSearch: (v: string) => void
+  value: () => string
+  onSelect: (v: string) => void
+  onInstall: () => void
+  installPending: () => boolean
+  installDisabled: () => boolean
+  recents: () => string[]
+}) {
+  const filtered = createMemo(() => {
+    const q = props.search().trim().toLowerCase()
+    const opts = props.options()
+    if (!q) return opts
+    return opts.filter((o) => o.label.toLowerCase().includes(q) || o.value.toLowerCase().includes(q))
+  })
+
+  const installedLabel = createMemo(() => {
+    const row = props.installed()
+    if (!row || !row.installed) return 'Not cached'
+    return row.installedVersion
+  })
+
+  const selectionMatchesInstalled = createMemo(() => {
+    const row = props.installed()
+    if (!row || !row.installed) return false
+    const v = row.installedVersion
+    if (!v || v === 'cached') return false
+    return v === props.value()
+  })
+
+  return (
+    <div class="space-y-4">
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div class="min-w-0">
+          <div class="text-lg font-semibold tracking-tight text-slate-900 dark:text-slate-100">{props.title}</div>
+          <div class="mt-1 text-[12px] text-slate-600 dark:text-slate-400">{props.subtitle}</div>
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
+          <Badge variant={props.installed()?.installed ? 'success' : 'neutral'}>{props.installed()?.installed ? 'Cached' : 'Missing'}</Badge>
+          <span class="rounded-full border border-slate-200 bg-white px-2 py-0.5 font-mono text-[11px] text-slate-700 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200">
+            {installedLabel()}
+          </span>
+        </div>
+      </div>
+
+      <div class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+        <section class={SURFACE}>
+          <div class="border-b border-slate-200 px-4 py-3 dark:border-slate-800">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+              <div class="text-sm font-semibold text-slate-900 dark:text-slate-100">Versions</div>
+              <div class="text-[11px] text-slate-500 dark:text-slate-400">{filtered().length} shown</div>
+            </div>
+            <div class="mt-3">
+              <Input
+                value={props.search()}
+                onInput={(e) => props.setSearch(e.currentTarget.value)}
+                placeholder="Search versions…"
+                class="w-full"
+                leftIcon={<Search class="h-4 w-4" aria-hidden="true" />}
+              />
+            </div>
+          </div>
+
+          <div class="max-h-[60vh] overflow-auto">
+            <Show
+              when={filtered().length > 0}
+              fallback={<EmptyState title="No matching versions" description="Try a different search term." class="m-4" />}
+            >
+              <div class="divide-y divide-slate-200 dark:divide-slate-800">
+                <For each={filtered()}>
+                  {(opt) => {
+                    const selected = () => opt.value === props.value()
+                    const isInstalled = () => {
+                      const row = props.installed()
+                      if (!row || !row.installed) return false
+                      if (!row.installedVersion || row.installedVersion === 'cached') return false
+                      return row.installedVersion === opt.value
+                    }
+
+                    return (
+                      <button
+                        type="button"
+                        class={`flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors ${
+                          selected()
+                            ? 'bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900'
+                            : 'hover:bg-slate-50 dark:hover:bg-slate-900/20'
+                        }`}
+                        onClick={() => props.onSelect(opt.value)}
+                      >
+                        <div class="min-w-0">
+                          <div class="truncate text-sm font-medium">{opt.label}</div>
+                          <Show when={opt.meta}>
+                            <div class={`mt-0.5 text-[11px] ${selected() ? 'text-white/75 dark:text-slate-700' : 'text-slate-500 dark:text-slate-400'}`}>
+                              {opt.meta}
+                            </div>
+                          </Show>
+                        </div>
+                        <div class="flex flex-none items-center gap-2">
+                          <Show when={isInstalled()}>
+                            <StatusPill ok>installed</StatusPill>
+                          </Show>
+                          <Show when={selected() && !isInstalled()}>
+                            <span class={`text-[11px] ${selected() ? 'text-white/85 dark:text-slate-700' : 'text-slate-500 dark:text-slate-400'}`}>selected</span>
+                          </Show>
+                        </div>
+                      </button>
+                    )
+                  }}
+                </For>
+              </div>
+            </Show>
+          </div>
+        </section>
+
+        <section class={SURFACE}>
+          <div class="border-b border-slate-200 px-4 py-4 dark:border-slate-800">
+            <div class="text-sm font-semibold text-slate-900 dark:text-slate-100">Install</div>
+            <div class="mt-1 text-[12px] text-slate-600 dark:text-slate-400">
+              Select a version on the left, then install (cache) the server bundle on this node.
+            </div>
+          </div>
+          <div class="space-y-4 p-4">
+            <div class="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-900/20">
+              <div class="text-[11px] font-medium text-slate-600 dark:text-slate-400">Selected</div>
+              <div class="mt-1 font-mono text-[12px] text-slate-900 dark:text-slate-100">{props.value()}</div>
+              <Show when={selectionMatchesInstalled()}>
+                <div class="mt-2 text-[12px] text-emerald-700 dark:text-emerald-300">Already cached.</div>
+              </Show>
+            </div>
+
+            <Button
+              size="sm"
+              variant="primary"
+              leftIcon={<Download class="h-4 w-4" aria-hidden="true" />}
+              loading={props.installPending()}
+              disabled={props.installDisabled()}
+              onClick={props.onInstall}
+            >
+              {selectionMatchesInstalled() ? 'Reinstall' : 'Install'}
+            </Button>
+
+            <Show when={props.recents().length > 0}>
+              <div>
+                <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Recent</div>
+                <div class="mt-2 flex flex-wrap gap-2">
+                  <For each={props.recents()}>
+                    {(v) => (
+                      <button
+                        type="button"
+                        class="rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-mono text-slate-700 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900/30"
+                        onClick={() => props.onSelect(v)}
+                        title="Select version"
+                      >
+                        {v}
+                      </button>
+                    )}
+                  </For>
+                </div>
+              </div>
+            </Show>
+
+            <Show when={props.status()}>
+              {(s) => (
+                <div class="rounded-xl border border-slate-200 bg-white p-3 text-[12px] dark:border-slate-800 dark:bg-slate-950">
+                  <div class="flex flex-wrap items-center justify-between gap-2">
+                    <div class="text-sm font-medium text-slate-900 dark:text-slate-100">Last result</div>
+                    <StatusPill ok={(s() as DownloadStatus).ok}>{(s() as DownloadStatus).ok ? 'ok' : 'failed'}</StatusPill>
+                  </div>
+                  <div class="mt-2 text-slate-700 dark:text-slate-200">{(s() as DownloadStatus).message}</div>
+                  <div class="mt-2 flex flex-wrap items-center justify-between gap-2 font-mono text-[11px] text-slate-500 dark:text-slate-400">
+                    <span>{formatRelativeTime((s() as DownloadStatus).atUnixMs)}</span>
+                    <Show when={(s() as DownloadStatus).requestId}>
+                      {(req) => <span>req {req()}</span>}
+                    </Show>
+                  </div>
+                </div>
+              )}
+            </Show>
+          </div>
+        </section>
+      </div>
+    </div>
+  )
 }
 
 export default function DownloadsTab(props: DownloadsTabProps) {
@@ -38,7 +409,6 @@ export default function DownloadsTab(props: DownloadsTabProps) {
     setSelectedDownloadJobId,
     enqueueDownloadWarm,
     downloadInstalledRows,
-    downloadUpdateRows,
     downloadNowUnixMs,
     isReadOnly,
     downloadEnqueueTarget,
@@ -57,651 +427,427 @@ export default function DownloadsTab(props: DownloadsTabProps) {
     downloadQueueEnqueue,
   } = props as any
 
-  return (
-              <Show when={tab() === 'downloads'}>
-                <div class="min-h-0 flex-1 overflow-auto p-4">
-                  <div class="mx-auto w-full max-w-5xl space-y-4">
-                    <div class="relative overflow-hidden rounded-3xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
-                      <div
-                        class="pointer-events-none absolute -top-24 -right-24 h-56 w-56 rounded-full bg-amber-400/20 blur-3xl"
-                        aria-hidden="true"
-                      />
-                      <div
-                        class="pointer-events-none absolute -bottom-24 -left-24 h-56 w-56 rounded-full bg-sky-400/15 blur-3xl dark:bg-violet-400/10"
-                        aria-hidden="true"
-                      />
-                      <div class="relative flex flex-wrap items-start justify-between gap-3">
-                        <div class="min-w-0">
-                          <div class="flex flex-wrap items-center gap-2">
-                            <div class="text-page-title">Download Center</div>
-                            <Badge variant={hasRunningDownloadJobs() ? 'warning' : 'neutral'}>
-                              {hasRunningDownloadJobs() ? 'Running' : 'Idle'}
-                            </Badge>
-                            <Show when={downloadQueuePaused()}>
-                              <Badge variant="warning">Queue paused</Badge>
-                            </Show>
-                            <Show when={downloadJobs().length > 0}>
-                              <Badge variant="neutral">{downloadJobs().length} tasks</Badge>
-                            </Show>
-                          </div>
-                          <div class="mt-1 text-desc">
-                            Warm server files once so Create/Start stays instant — even when the reverse proxy times out.
-                          </div>
-                        </div>
+  const view = downloadCenterView as () => DownloadCenterView
+  const setView = setDownloadCenterView as (v: DownloadCenterView) => void
 
-                        <div class="flex flex-wrap items-center gap-2">
-                          <Tabs
-                            value={downloadCenterView()}
-                            options={[
-                              { value: 'library', label: 'Library' },
-                              { value: 'queue', label: 'Queue' },
-                              { value: 'installed', label: 'Installed' },
-                              { value: 'updates', label: 'Updates' },
-                            ]}
-                            onChange={setDownloadCenterView}
-                          />
-                          <Show when={downloadCenterView() === 'queue'}>
-                            <Button
-                              size="xs"
-                              variant="secondary"
-                              leftIcon={
-                                downloadQueuePaused() ? (
-                                  <Play class="h-4 w-4" aria-hidden="true" />
-                                ) : (
-                                  <Pause class="h-4 w-4" aria-hidden="true" />
-                                )
-                              }
-                              onClick={() => void toggleDownloadQueuePaused()}
-                            >
-                              {downloadQueuePaused() ? 'Resume queue' : 'Pause queue'}
-                            </Button>
-                            <Button
-                              size="xs"
-                              variant="secondary"
-                              leftIcon={<Trash2 class="h-4 w-4" aria-hidden="true" />}
-                              disabled={hasRunningDownloadJobs() || downloadJobs().length === 0}
-                              onClick={() => void clearDownloadHistory()}
-                            >
-                              Clear history
-                            </Button>
-                          </Show>
-                        </div>
+  const installedByTarget = createMemo(() => {
+    const map = new Map<DownloadTarget, InstalledRow>()
+    for (const row of (downloadInstalledRows() as InstalledRow[]) ?? []) map.set(row.target, row)
+    return map
+  })
+  const installed = (target: DownloadTarget) => installedByTarget().get(target) ?? null
+
+  const statusByTarget = createMemo(() => {
+    const raw = downloadStatus() as Map<DownloadTarget, DownloadStatus>
+    const map = new Map<DownloadTarget, DownloadStatus>()
+    for (const [k, v] of raw.entries()) map.set(k, v)
+    return map
+  })
+  const status = (target: DownloadTarget) => statusByTarget().get(target) ?? null
+
+  const jobs = createMemo(() => (downloadJobs() as DownloadJob[]) ?? [])
+  const activeJobs = createMemo(() => jobs().filter((j) => j.state === 'queued' || j.state === 'running' || j.state === 'paused'))
+  const historyJobs = createMemo(() => jobs().filter((j) => j.state === 'success' || j.state === 'error' || j.state === 'canceled'))
+
+  const counts = createMemo(() => ({
+    active: activeJobs().length,
+    running: activeJobs().filter((j) => j.state === 'running').length,
+    paused: activeJobs().filter((j) => j.state === 'paused').length,
+    queued: activeJobs().filter((j) => j.state === 'queued').length,
+    history: historyJobs().length,
+  }))
+
+  function recentsFor(target: DownloadTarget): string[] {
+    const done = jobs()
+      .filter((j) => j.target === target && j.state === 'success')
+      .slice()
+      .sort((a, b) => b.updatedAtUnixMs - a.updatedAtUnixMs)
+    const out: string[] = []
+    const seen = new Set<string>()
+    for (const job of done) {
+      const v = job.version
+      if (!v || seen.has(v)) continue
+      seen.add(v)
+      out.push(v)
+      if (out.length >= 8) break
+    }
+    return out
+  }
+
+  const cacheEntries = createMemo(() => (controlDiagnostics.data?.cache?.entries ?? []) as Array<{ key: string; path: string; size_bytes: string; last_used_unix_ms: string }>)
+  const cacheTotalBytes = createMemo(() => cacheEntries().reduce((sum, e) => sum + Number(e.size_bytes ?? 0), 0))
+  const [cacheSearch, setCacheSearch] = createSignal('')
+  const filteredCache = createMemo(() => {
+    const q = cacheSearch().trim().toLowerCase()
+    const list = cacheEntries()
+    if (!q) return list
+    return list.filter((e) => e.key.toLowerCase().includes(q) || e.path.toLowerCase().includes(q))
+  })
+
+  const [mcSearch, setMcSearch] = createSignal('')
+  const [trSearch, setTrSearch] = createSignal('')
+
+  const installPending = createMemo(() => Boolean(downloadQueueEnqueue.isPending))
+  const installTarget = downloadEnqueueTarget as () => DownloadTarget | null
+
+  return (
+    <Show when={tab() === 'downloads'}>
+      <div class="flex min-h-0 flex-1 flex-col overflow-hidden md:flex-row">
+        <aside class="flex w-full flex-none flex-col border-b border-slate-200 bg-white/60 p-3 backdrop-blur dark:border-slate-800 dark:bg-slate-950/60 md:w-[264px] md:border-b-0 md:border-r">
+          <div class="px-2 py-2">
+            <div class="text-sm font-semibold text-slate-900 dark:text-slate-100">Downloads</div>
+            <div class="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+              Manage versions and download tasks per node.
+            </div>
+          </div>
+
+          <nav class="mt-2 space-y-1">
+            <NavItem
+              value="tasks"
+              current={view}
+              onSelect={setView}
+              icon={<ListChecks class="h-4 w-4" aria-hidden="true" />}
+              label="Tasks"
+              meta={counts().active > 0 ? `${counts().running} running · ${counts().queued} queued` : 'No active tasks'}
+              right={
+                counts().active > 0 ? (
+                  <span class="rounded-full bg-slate-900 px-2 py-0.5 text-[11px] text-white dark:bg-slate-100 dark:text-slate-900">
+                    {counts().active}
+                  </span>
+                ) : undefined
+              }
+            />
+
+            <NavItem
+              value="minecraft"
+              current={view}
+              onSelect={setView}
+              icon={<TemplateMark templateId="minecraft:vanilla" class="h-7 w-7" />}
+              label="Minecraft"
+              meta={installed('minecraft_vanilla')?.installed ? `cached ${installed('minecraft_vanilla')!.installedVersion}` : 'Not cached'}
+            />
+            <NavItem
+              value="terraria"
+              current={view}
+              onSelect={setView}
+              icon={<TemplateMark templateId="terraria:vanilla" class="h-7 w-7" />}
+              label="Terraria"
+              meta={installed('terraria_vanilla')?.installed ? `cached ${installed('terraria_vanilla')!.installedVersion}` : 'Not cached'}
+            />
+            <NavItem
+              value="dsp"
+              current={view}
+              onSelect={setView}
+              icon={<TemplateMark templateId="dsp:nebula" class="h-7 w-7" />}
+              label="DSP (Nebula)"
+              meta={hasSavedSteamcmdCreds() ? 'SteamCMD configured' : 'SteamCMD required'}
+            />
+
+            <NavItem
+              value="cache"
+              current={view}
+              onSelect={setView}
+              icon={<HardDrive class="h-4 w-4" aria-hidden="true" />}
+              label="Cache"
+              meta={`${cacheEntries().length} entries · ${formatBytes(cacheTotalBytes())}`}
+            />
+          </nav>
+
+          <div class="mt-auto px-2 pt-3 text-[11px] text-slate-500 dark:text-slate-400">
+            Tip: If Create returns HTTP 504, downloads may still continue in the background. Queue versions here first.
+          </div>
+        </aside>
+
+        <main class="min-w-0 flex-1 overflow-auto p-4">
+          <div class="mx-auto w-full max-w-6xl">
+            <Show when={view() === 'tasks'}>
+              <div class="space-y-4">
+                <Section
+                  title="Tasks"
+                  description="Download queue and history. Reorder, pause, retry, and inspect job details."
+                  right={
+                    <>
+                      <Badge variant={hasRunningDownloadJobs() ? 'warning' : 'neutral'}>
+                        {hasRunningDownloadJobs() ? 'Running' : 'Idle'}
+                      </Badge>
+                      <Show when={downloadQueuePaused()}>
+                        <Badge variant="warning">Queue paused</Badge>
+                      </Show>
+                      <Button
+                        size="xs"
+                        variant="secondary"
+                        leftIcon={downloadQueuePaused() ? <Play class="h-4 w-4" aria-hidden="true" /> : <Pause class="h-4 w-4" aria-hidden="true" />}
+                        onClick={() => void toggleDownloadQueuePaused()}
+                      >
+                        {downloadQueuePaused() ? 'Resume' : 'Pause'}
+                      </Button>
+                      <Button
+                        size="xs"
+                        variant="secondary"
+                        leftIcon={<Trash2 class="h-4 w-4" aria-hidden="true" />}
+                        disabled={hasRunningDownloadJobs() || jobs().length === 0}
+                        onClick={() => void clearDownloadHistory()}
+                        title={hasRunningDownloadJobs() ? 'Stop running jobs before clearing history' : 'Clear finished jobs'}
+                      >
+                        Clear history
+                      </Button>
+                    </>
+                  }
+                >
+                  <Show
+                    when={activeJobs().length > 0}
+                    fallback={
+                      <EmptyState
+                        title="No active tasks"
+                        description="Pick a version in Minecraft/Terraria or run DSP update to start downloading."
+                      />
+                    }
+                  >
+                    <div class="overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-800">
+                      <div class="divide-y divide-slate-200 dark:divide-slate-800">
+                        <For each={activeJobs()}>
+                          {(job) => (
+                            <JobRow
+                              job={job}
+                              nowUnixMs={downloadNowUnixMs}
+                              canReorder
+                              onMoveJob={moveDownloadJob}
+                              onPauseJob={pauseDownloadJob}
+                              onResumeJob={resumeDownloadJob}
+                              onCancelJob={cancelDownloadJob}
+                              onRetryJob={retryDownloadJob}
+                              onOpenDetails={(id) => setSelectedDownloadJobId(id)}
+                            />
+                          )}
+                        </For>
                       </div>
                     </div>
+                  </Show>
 
-                    <Banner
-                      variant="warning"
-                      title="Reverse proxy timeouts are OK"
-                      message="If Create returns HTTP 504, it usually means the proxy timed out while backend download is still running. Warm files here first, then Create will be fast."
-                      actions={
-                        downloadCenterView() !== 'queue' ? (
-                          <Button size="xs" variant="secondary" onClick={() => setDownloadCenterView('queue')}>
-                            Open queue
-                          </Button>
-                        ) : undefined
-                      }
-                    />
-
-                    <Show when={downloadCenterView() === 'queue'}>
-                      <div class="rounded-3xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
-                        <div class="flex flex-wrap items-start justify-between gap-3">
-                          <div>
-                            <div class="text-sm font-semibold text-slate-900 dark:text-slate-100">Queue</div>
-                            <div class="mt-1 text-desc">
-                              Manage active and historical download jobs: reorder, pause, retry, and inspect details.
-                            </div>
-                          </div>
-                          <div class="flex items-center gap-2">
-                            <Badge variant={hasRunningDownloadJobs() ? 'warning' : 'neutral'}>
-                              {hasRunningDownloadJobs() ? 'Running' : 'Idle'}
-                            </Badge>
-                            <Show when={downloadQueuePaused()}>
-                              <Badge variant="warning">Paused</Badge>
-                            </Show>
-                          </div>
-                        </div>
-
-                        <Show
-                          when={downloadJobs().length > 0}
-                          fallback={
-                            <EmptyState
-                              title="No download jobs yet"
-                              description="Open Library and queue a template to warm the cache."
-                              actions={
-                                <Button size="sm" variant="secondary" onClick={() => setDownloadCenterView('library')}>
-                                  Open Library
-                                </Button>
-                              }
-                              class="mt-4"
+                  <Show when={historyJobs().length > 0}>
+                    <details class="mt-4 rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
+                      <summary class="cursor-pointer select-none px-4 py-3 text-sm font-medium text-slate-900 hover:bg-slate-50 dark:text-slate-100 dark:hover:bg-slate-900/20">
+                        History ({historyJobs().length})
+                      </summary>
+                      <div class="divide-y divide-slate-200 dark:divide-slate-800">
+                        <For each={historyJobs()}>
+                          {(job) => (
+                            <JobRow
+                              job={job}
+                              nowUnixMs={downloadNowUnixMs}
+                              compact
+                              onMoveJob={moveDownloadJob}
+                              onPauseJob={pauseDownloadJob}
+                              onResumeJob={resumeDownloadJob}
+                              onCancelJob={cancelDownloadJob}
+                              onRetryJob={retryDownloadJob}
+                              onOpenDetails={(id) => setSelectedDownloadJobId(id)}
                             />
-                          }
-                        >
-                          <div class="mt-4 space-y-3">
-                            <For each={downloadJobs()}>
-                              {(job) => {
-                                const progressMessage = () => downloadJobProgressMessage(job, downloadNowUnixMs())
-
-                                return (
-                                  <div
-                                    class={`rounded-2xl border bg-white/60 p-3 shadow-sm dark:bg-slate-950/40 dark:shadow-none ${
-                                      job.state === 'running'
-                                        ? 'border-amber-200 ring-1 ring-amber-500/20 dark:border-amber-900/40'
-                                        : job.state === 'error'
-                                          ? 'border-rose-200 ring-1 ring-rose-500/10 dark:border-rose-900/40'
-                                          : 'border-slate-200 dark:border-slate-800'
-                                    }`}
-                                  >
-                                    <div class="flex flex-wrap items-start justify-between gap-3">
-                                      <div class="flex min-w-0 items-start gap-3">
-                                        <TemplateMark templateId={job.templateId} />
-                                        <div class="min-w-0">
-                                          <div class="flex flex-wrap items-center gap-2">
-                                            <div class="text-xs font-semibold text-slate-900 dark:text-slate-100">
-                                              {downloadTargetLabel(job.target)}
-                                            </div>
-                                            <span class="rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 font-mono text-[11px] text-slate-700 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-200">
-                                              {job.version}
-                                            </span>
-                                            <Badge variant={downloadJobStatusVariant(job.state)}>{downloadJobStatusLabel(job.state)}</Badge>
-                                          </div>
-                                          <div class="mt-1 text-mono-muted">{formatRelativeTime(job.updatedAtUnixMs)}</div>
-                                        </div>
-                                      </div>
-
-                                      <div class="flex flex-none items-center gap-1">
-                                        <IconButton
-                                          label="Move up"
-                                          variant="ghost"
-                                          disabled={job.state === 'running'}
-                                          onClick={() => void moveDownloadJob(job.id, -1)}
-                                        >
-                                          <ArrowUp class="h-4 w-4" aria-hidden="true" />
-                                        </IconButton>
-                                        <IconButton
-                                          label="Move down"
-                                          variant="ghost"
-                                          disabled={job.state === 'running'}
-                                          onClick={() => void moveDownloadJob(job.id, 1)}
-                                        >
-                                          <ArrowDown class="h-4 w-4" aria-hidden="true" />
-                                        </IconButton>
-                                      </div>
-                                    </div>
-
-                                    <Show
-                                      when={job.state === 'running'}
-                                      fallback={<div class="mt-2 text-xs text-slate-600 dark:text-slate-300">{job.message}</div>}
-                                    >
-                                      <DownloadProgress templateId={job.templateId} message={progressMessage()} />
-                                    </Show>
-
-                                    <div class="mt-3 flex flex-wrap items-center justify-between gap-2">
-                                      <Button size="xs" variant="secondary" onClick={() => setSelectedDownloadJobId(job.id)}>
-                                        Details
-                                      </Button>
-
-                                      <div class="flex items-center gap-1">
-                                        <Show when={job.state === 'queued'}>
-                                          <IconButton label="Pause" variant="secondary" onClick={() => void pauseDownloadJob(job.id)}>
-                                            <Pause class="h-4 w-4" aria-hidden="true" />
-                                          </IconButton>
-                                        </Show>
-                                        <Show when={job.state === 'paused'}>
-                                          <IconButton label="Resume" variant="secondary" onClick={() => void resumeDownloadJob(job.id)}>
-                                            <Play class="h-4 w-4" aria-hidden="true" />
-                                          </IconButton>
-                                        </Show>
-                                        <Show when={job.state === 'queued' || job.state === 'paused'}>
-                                          <IconButton label="Cancel" variant="danger" onClick={() => void cancelDownloadJob(job.id)}>
-                                            <X class="h-4 w-4" aria-hidden="true" />
-                                          </IconButton>
-                                        </Show>
-                                        <Show when={job.state === 'error' || job.state === 'success' || job.state === 'canceled'}>
-                                          <IconButton label="Retry" variant="secondary" onClick={() => void retryDownloadJob(job.id)}>
-                                            <RotateCw class="h-4 w-4" aria-hidden="true" />
-                                          </IconButton>
-                                        </Show>
-                                      </div>
-                                    </div>
-
-                                    <Show when={job.requestId}>
-                                      <div class="mt-2 text-mono-muted">req {job.requestId}</div>
-                                    </Show>
-                                  </div>
-                                )
-                              }}
-                            </For>
-                          </div>
-                        </Show>
+                          )}
+                        </For>
                       </div>
-                    </Show>
+                    </details>
+                  </Show>
+                </Section>
+              </div>
+            </Show>
 
-                    <Show when={downloadCenterView() === 'queue' || downloadCenterView() === 'library'}>
-                      <div class="space-y-3">
-                        <div class="flex flex-wrap items-end justify-between gap-3">
-                          <div>
-                            <div class="text-section-title">Library</div>
-                            <div class="mt-1 text-desc">
-                              Queue a warm download for each template. Cache is shared across instances on this node.
-                            </div>
-                          </div>
-                        </div>
+            <Show when={view() === 'minecraft'}>
+              <VersionManager
+                title="Minecraft"
+                subtitle="Minecraft server bundles are version-managed (not “updated”). Cache the version you plan to use."
+                templateId="minecraft:vanilla"
+                target="minecraft_vanilla"
+                installed={() => installed('minecraft_vanilla')}
+                status={() => status('minecraft_vanilla')}
+                options={() => (mcVersionOptions() as VersionOption[]) ?? []}
+                search={mcSearch}
+                setSearch={setMcSearch}
+                value={downloadMcVersion}
+                onSelect={setDownloadMcVersion}
+                onInstall={() => void enqueueDownloadWarm('minecraft_vanilla')}
+                installPending={() => installPending() && installTarget() === 'minecraft_vanilla'}
+                installDisabled={() => isReadOnly()}
+                recents={() => recentsFor('minecraft_vanilla')}
+              />
+            </Show>
 
-                        <div class="grid gap-3 lg:grid-cols-3">
-                          <div class="group relative overflow-hidden rounded-3xl border border-slate-200 bg-white/62 p-4 shadow-sm transition-all duration-150 hover:bg-white/72 hover:shadow-md dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none dark:hover:bg-slate-950/60">
-                            <Show when={instanceCardBackdrop('minecraft:vanilla')}>
-                              {(bg) => (
-                                <>
-                                  <img
-                                    src={bg().src}
-                                    alt=""
-                                    aria-hidden="true"
-                                    class="pointer-events-none absolute inset-0 h-full w-full select-none object-cover opacity-[0.34] saturate-110 contrast-115 blur-[1.4px] transition-transform duration-300 group-hover:scale-[1.04] dark:opacity-[0.3]"
-                                    style={{ 'object-position': bg().position }}
-                                    loading="lazy"
-                                    decoding="async"
-                                  />
-                                  <div class="pointer-events-none absolute inset-0 rounded-3xl bg-gradient-to-r from-white/84 via-white/62 to-white/26 dark:from-slate-950/90 dark:via-slate-950/72 dark:to-slate-950/56" />
-                                  <div class="pointer-events-none absolute inset-0 rounded-3xl bg-gradient-to-b from-transparent to-white/10 dark:to-slate-950/18" />
-                                  <div class="pointer-events-none absolute inset-0 rounded-3xl bg-[radial-gradient(130%_92%_at_86%_56%,rgba(15,23,42,0)_32%,rgba(15,23,42,0.28)_100%)] dark:bg-[radial-gradient(130%_92%_at_86%_56%,rgba(2,6,23,0)_26%,rgba(2,6,23,0.55)_100%)]" />
-                                  <div class="pointer-events-none absolute inset-x-0 bottom-0 h-20 rounded-b-3xl bg-gradient-to-t from-white/70 via-white/52 to-transparent dark:from-slate-950/78 dark:via-slate-950/62 dark:to-transparent" />
-                                </>
-                              )}
-                            </Show>
+            <Show when={view() === 'terraria'}>
+              <VersionManager
+                title="Terraria"
+                subtitle="Terraria server bundles are version-managed. Choose a build number and cache it."
+                templateId="terraria:vanilla"
+                target="terraria_vanilla"
+                installed={() => installed('terraria_vanilla')}
+                status={() => status('terraria_vanilla')}
+                options={() => (trVersionOptions() as VersionOption[]) ?? []}
+                search={trSearch}
+                setSearch={setTrSearch}
+                value={downloadTrVersion}
+                onSelect={setDownloadTrVersion}
+                onInstall={() => void enqueueDownloadWarm('terraria_vanilla')}
+                installPending={() => installPending() && installTarget() === 'terraria_vanilla'}
+                installDisabled={() => isReadOnly()}
+                recents={() => recentsFor('terraria_vanilla')}
+              />
+            </Show>
 
-                            <div class="relative z-10">
-                              <div class="flex items-start justify-between gap-3">
-                                <div class="flex min-w-0 items-start gap-3">
-                                  <TemplateMark templateId="minecraft:vanilla" />
-                                  <div class="min-w-0">
-                                    <div class="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">
-                                      Minecraft (Vanilla)
-                                    </div>
-                                    <div class="mt-0.5 text-mono-muted">minecraft:vanilla</div>
-                                  </div>
-                                </div>
-
-                                <Show when={downloadInstalledRows().find((r: any) => r.target === 'minecraft_vanilla')}>
-                                  {(row) => (
-                                    <div class="flex flex-col items-end gap-1">
-                                      <Badge variant={row().installed ? 'success' : 'neutral'}>
-                                        {row().installed ? 'Cached' : 'Missing'}
-                                      </Badge>
-                                      <div class="text-mono-muted">{formatBytes(row().sizeBytes)}</div>
-                                    </div>
-                                  )}
-                                </Show>
-                              </div>
-
-                              <div class="mt-3 grid gap-2 sm:grid-cols-[1fr_auto] sm:items-end">
-                                <Field label="Version">
-                                  <Dropdown
-                                    label=""
-                                    value={downloadMcVersion()}
-                                    options={mcVersionOptions()}
-                                    onChange={setDownloadMcVersion}
-                                  />
-                                </Field>
-                                <Button
-                                  size="sm"
-                                  variant="primary"
-                                  leftIcon={<Download class="h-4 w-4" aria-hidden="true" />}
-                                  loading={downloadQueueEnqueue.isPending && downloadEnqueueTarget() === 'minecraft_vanilla'}
-                                  disabled={isReadOnly()}
-                                  title={isReadOnly() ? 'Read-only mode' : 'Queue warm download'}
-                                  onClick={() => void enqueueDownloadWarm('minecraft_vanilla')}
-                                >
-                                  Queue download
-                                </Button>
-                              </div>
-
-                              <Show when={downloadInstalledRows().find((r: any) => r.target === 'minecraft_vanilla')}>
-                                {(row) => (
-                                  <div class="mt-2 text-mono-muted">
-                                    installed {row().installedVersion} · last used {formatRelativeTime(row().lastUsedUnixMs)}
-                                  </div>
-                                )}
-                              </Show>
-
-                              <Show when={downloadStatus().get('minecraft_vanilla')}>
-                                {(s) => (
-                                  <div
-                                    class={`mt-3 rounded-2xl border px-3 py-2 text-xs ${
-                                      s().ok
-                                        ? 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/20 dark:text-emerald-200'
-                                        : 'border-rose-200 bg-rose-50 text-rose-800 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-200'
-                                    }`}
-                                  >
-                                    {s().message}
-                                    <div class="mt-1 text-mono-muted opacity-80">{formatRelativeTime(s().atUnixMs)}</div>
-                                  </div>
-                                )}
-                              </Show>
-                            </div>
-                          </div>
-
-                          <div class="group relative overflow-hidden rounded-3xl border border-slate-200 bg-white/62 p-4 shadow-sm transition-all duration-150 hover:bg-white/72 hover:shadow-md dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none dark:hover:bg-slate-950/60">
-                            <Show when={instanceCardBackdrop('terraria:vanilla')}>
-                              {(bg) => (
-                                <>
-                                  <img
-                                    src={bg().src}
-                                    alt=""
-                                    aria-hidden="true"
-                                    class="pointer-events-none absolute inset-0 h-full w-full select-none object-cover opacity-[0.34] saturate-110 contrast-115 blur-[1.4px] transition-transform duration-300 group-hover:scale-[1.04] dark:opacity-[0.3]"
-                                    style={{ 'object-position': bg().position }}
-                                    loading="lazy"
-                                    decoding="async"
-                                  />
-                                  <div class="pointer-events-none absolute inset-0 rounded-3xl bg-gradient-to-r from-white/84 via-white/62 to-white/26 dark:from-slate-950/90 dark:via-slate-950/72 dark:to-slate-950/56" />
-                                  <div class="pointer-events-none absolute inset-0 rounded-3xl bg-gradient-to-b from-transparent to-white/10 dark:to-slate-950/18" />
-                                  <div class="pointer-events-none absolute inset-0 rounded-3xl bg-[radial-gradient(130%_92%_at_86%_56%,rgba(15,23,42,0)_32%,rgba(15,23,42,0.28)_100%)] dark:bg-[radial-gradient(130%_92%_at_86%_56%,rgba(2,6,23,0)_26%,rgba(2,6,23,0.55)_100%)]" />
-                                  <div class="pointer-events-none absolute inset-x-0 bottom-0 h-20 rounded-b-3xl bg-gradient-to-t from-white/70 via-white/52 to-transparent dark:from-slate-950/78 dark:via-slate-950/62 dark:to-transparent" />
-                                </>
-                              )}
-                            </Show>
-
-                            <div class="relative z-10">
-                              <div class="flex items-start justify-between gap-3">
-                                <div class="flex min-w-0 items-start gap-3">
-                                  <TemplateMark templateId="terraria:vanilla" />
-                                  <div class="min-w-0">
-                                    <div class="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">
-                                      Terraria (Vanilla)
-                                    </div>
-                                    <div class="mt-0.5 text-mono-muted">terraria:vanilla</div>
-                                  </div>
-                                </div>
-
-                                <Show when={downloadInstalledRows().find((r: any) => r.target === 'terraria_vanilla')}>
-                                  {(row) => (
-                                    <div class="flex flex-col items-end gap-1">
-                                      <Badge variant={row().installed ? 'success' : 'neutral'}>
-                                        {row().installed ? 'Cached' : 'Missing'}
-                                      </Badge>
-                                      <div class="text-mono-muted">{formatBytes(row().sizeBytes)}</div>
-                                    </div>
-                                  )}
-                                </Show>
-                              </div>
-
-                              <div class="mt-3 grid gap-2 sm:grid-cols-[1fr_auto] sm:items-end">
-                                <Field label="Version">
-                                  <Dropdown
-                                    label=""
-                                    value={downloadTrVersion()}
-                                    options={trVersionOptions()}
-                                    onChange={setDownloadTrVersion}
-                                  />
-                                </Field>
-                                <Button
-                                  size="sm"
-                                  variant="primary"
-                                  leftIcon={<Download class="h-4 w-4" aria-hidden="true" />}
-                                  loading={downloadQueueEnqueue.isPending && downloadEnqueueTarget() === 'terraria_vanilla'}
-                                  disabled={isReadOnly()}
-                                  title={isReadOnly() ? 'Read-only mode' : 'Queue warm download'}
-                                  onClick={() => void enqueueDownloadWarm('terraria_vanilla')}
-                                >
-                                  Queue download
-                                </Button>
-                              </div>
-
-                              <Show when={downloadInstalledRows().find((r: any) => r.target === 'terraria_vanilla')}>
-                                {(row) => (
-                                  <div class="mt-2 text-mono-muted">
-                                    installed {row().installedVersion} · last used {formatRelativeTime(row().lastUsedUnixMs)}
-                                  </div>
-                                )}
-                              </Show>
-
-                              <Show when={downloadStatus().get('terraria_vanilla')}>
-                                {(s) => (
-                                  <div
-                                    class={`mt-3 rounded-2xl border px-3 py-2 text-xs ${
-                                      s().ok
-                                        ? 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/20 dark:text-emerald-200'
-                                        : 'border-rose-200 bg-rose-50 text-rose-800 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-200'
-                                    }`}
-                                  >
-                                    {s().message}
-                                    <div class="mt-1 text-mono-muted opacity-80">{formatRelativeTime(s().atUnixMs)}</div>
-                                  </div>
-                                )}
-                              </Show>
-                            </div>
-                          </div>
-
-                          <div class="group relative overflow-hidden rounded-3xl border border-slate-200 bg-white/62 p-4 shadow-sm transition-all duration-150 hover:bg-white/72 hover:shadow-md dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none dark:hover:bg-slate-950/60">
-                            <Show when={instanceCardBackdrop('dsp:nebula')}>
-                              {(bg) => (
-                                <>
-                                  <img
-                                    src={bg().src}
-                                    alt=""
-                                    aria-hidden="true"
-                                    class="pointer-events-none absolute inset-0 h-full w-full select-none object-cover opacity-[0.34] saturate-110 contrast-115 blur-[1.4px] transition-transform duration-300 group-hover:scale-[1.04] dark:opacity-[0.3]"
-                                    style={{ 'object-position': bg().position }}
-                                    loading="lazy"
-                                    decoding="async"
-                                  />
-                                  <div class="pointer-events-none absolute inset-0 rounded-3xl bg-gradient-to-r from-white/84 via-white/62 to-white/26 dark:from-slate-950/90 dark:via-slate-950/72 dark:to-slate-950/56" />
-                                  <div class="pointer-events-none absolute inset-0 rounded-3xl bg-gradient-to-b from-transparent to-white/10 dark:to-slate-950/18" />
-                                  <div class="pointer-events-none absolute inset-0 rounded-3xl bg-[radial-gradient(130%_92%_at_86%_56%,rgba(15,23,42,0)_32%,rgba(15,23,42,0.28)_100%)] dark:bg-[radial-gradient(130%_92%_at_86%_56%,rgba(2,6,23,0)_26%,rgba(2,6,23,0.55)_100%)]" />
-                                  <div class="pointer-events-none absolute inset-x-0 bottom-0 h-20 rounded-b-3xl bg-gradient-to-t from-white/70 via-white/52 to-transparent dark:from-slate-950/78 dark:via-slate-950/62 dark:to-transparent" />
-                                </>
-                              )}
-                            </Show>
-
-                            <div class="relative z-10">
-                              <div class="flex items-start justify-between gap-3">
-                                <div class="flex min-w-0 items-start gap-3">
-                                  <TemplateMark templateId="dsp:nebula" />
-                                  <div class="min-w-0">
-                                    <div class="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">
-                                      DSP (Nebula)
-                                    </div>
-                                    <div class="mt-0.5 text-mono-muted">dsp:nebula</div>
-                                  </div>
-                                </div>
-
-                                <Badge variant={hasSavedSteamcmdCreds() ? 'success' : 'warning'}>
-                                  {hasSavedSteamcmdCreds() ? 'SteamCMD ready' : 'SteamCMD required'}
-                                </Badge>
-                              </div>
-
-                              <div class="mt-2 text-desc">
-                                Uses SteamCMD credentials in Settings. Auto 2FA is supported when maFile/shared_secret is imported.
-                              </div>
-
-                              <Show when={!hasSavedSteamcmdCreds()}>
-                                <Banner
-                                  variant="warning"
-                                  title="SteamCMD credentials missing"
-                                  message="Open Settings and add Steam username/password (and optionally Auto 2FA)."
-                                  actions={
-                                    <Button size="xs" variant="secondary" onClick={() => setTab('settings')}>
-                                      Open Settings
-                                    </Button>
-                                  }
-                                  class="mt-3"
-                                />
-                              </Show>
-
-                              <div class="mt-3 grid gap-2 sm:grid-cols-[1fr_auto] sm:items-end">
-                                <Field label="Steam Guard code (optional)">
-                                  <Input
-                                    value={downloadDspGuardCode()}
-                                    onInput={(e) => setDownloadDspGuardCode(e.currentTarget.value)}
-                                    placeholder="Only needed when Auto 2FA is unavailable"
-                                    autocomplete="one-time-code"
-                                    class="font-mono text-[11px]"
-                                  />
-                                </Field>
-                                <Button
-                                  size="sm"
-                                  variant="primary"
-                                  leftIcon={<Download class="h-4 w-4" aria-hidden="true" />}
-                                  loading={downloadQueueEnqueue.isPending && downloadEnqueueTarget() === 'dsp_nebula'}
-                                  disabled={isReadOnly()}
-                                  title={isReadOnly() ? 'Read-only mode' : 'Queue warm download'}
-                                  onClick={() => void enqueueDownloadWarm('dsp_nebula')}
-                                >
-                                  Queue download
-                                </Button>
-                              </div>
-
-                              <Show when={downloadInstalledRows().find((r: any) => r.target === 'dsp_nebula')}>
-                                {(row) => (
-                                  <div class="mt-2 text-mono-muted">
-                                    installed {row().installedVersion} · last used {formatRelativeTime(row().lastUsedUnixMs)}
-                                  </div>
-                                )}
-                              </Show>
-
-                              <Show when={downloadStatus().get('dsp_nebula')}>
-                                {(s) => (
-                                  <div
-                                    class={`mt-3 rounded-2xl border px-3 py-2 text-xs ${
-                                      s().ok
-                                        ? 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/20 dark:text-emerald-200'
-                                        : 'border-rose-200 bg-rose-50 text-rose-800 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-200'
-                                    }`}
-                                  >
-                                    {s().message}
-                                    <Show when={s().requestId}>
-                                      <div class="mt-1 text-mono-muted opacity-80">req {s().requestId}</div>
-                                    </Show>
-                                    <div class="mt-1 text-mono-muted opacity-80">{formatRelativeTime(s().atUnixMs)}</div>
-                                  </div>
-                                )}
-                              </Show>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    </Show>
-
-                    <Show when={downloadCenterView() === 'installed'}>
-                      <div class="rounded-3xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
-                        <div class="flex flex-wrap items-start justify-between gap-3">
-                          <div>
-                            <div class="text-sm font-semibold text-slate-900 dark:text-slate-100">Installed</div>
-                            <div class="mt-1 text-desc">What’s currently cached on this node.</div>
-                          </div>
-                        </div>
-
-                        <div class="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                          <For each={downloadInstalledRows()}>
-                            {(row) => (
-                              <div class="rounded-2xl border border-slate-200 bg-white/60 p-3 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
-                                <div class="flex items-start gap-3">
-                                  <TemplateMark templateId={row.templateId} />
-                                  <div class="min-w-0">
-                                    <div class="flex flex-wrap items-center gap-2">
-                                      <div class="font-semibold text-slate-900 dark:text-slate-100">{downloadTargetLabel(row.target)}</div>
-                                      <Badge variant={row.installed ? 'success' : 'neutral'}>{row.installed ? 'Cached' : 'Missing'}</Badge>
-                                    </div>
-                                    <div class="mt-1 text-mono-muted">{row.installedVersion}</div>
-                                    <div class="mt-2 text-[11px] text-slate-600 dark:text-slate-300">
-                                      size {formatBytes(row.sizeBytes)} · last used {formatRelativeTime(row.lastUsedUnixMs)}
-                                    </div>
-                                  </div>
-                                </div>
-                              </div>
-                            )}
-                          </For>
-                        </div>
-                      </div>
-                    </Show>
-
-                    <Show when={downloadCenterView() === 'updates'}>
-                      <div class="rounded-3xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
-                        <div class="flex flex-wrap items-start justify-between gap-3">
-                          <div>
-                            <div class="text-sm font-semibold text-slate-900 dark:text-slate-100">Updates</div>
-                            <div class="mt-1 text-desc">
-                              Compare cached versions with the latest known versions and queue updates when needed.
-                            </div>
-                          </div>
-                        </div>
-
-                        <div class="mt-4 space-y-3">
-                          <For each={downloadUpdateRows()}>
-                            {(row) => (
-                              <div class="rounded-2xl border border-slate-200 bg-white/60 p-3 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
-                                <div class="flex flex-wrap items-start justify-between gap-3">
-                                  <div class="flex min-w-0 items-start gap-3">
-                                    <TemplateMark templateId={row.templateId} />
-                                    <div class="min-w-0">
-                                      <div class="flex flex-wrap items-center gap-2">
-                                        <div class="font-semibold text-slate-900 dark:text-slate-100">
-                                          {downloadTargetLabel(row.target)}
-                                        </div>
-                                        <Badge variant={row.updateAvailable ? 'warning' : 'success'}>
-                                          {row.updateAvailable ? 'Update available' : 'Up to date'}
-                                        </Badge>
-                                      </div>
-                                      <div class="mt-1 text-mono-muted">
-                                        {row.installedVersion} → {row.latestVersion}
-                                      </div>
-                                    </div>
-                                  </div>
-
-                                  <Button
-                                    size="xs"
-                                    variant="secondary"
-                                    disabled={isReadOnly() || !row.updateAvailable}
-                                    onClick={() => void enqueueDownloadWarm(row.target)}
-                                  >
-                                    {row.updateAvailable ? 'Queue update' : 'Up to date'}
-                                  </Button>
-                                </div>
-                              </div>
-                            )}
-                          </For>
-                        </div>
-                      </div>
-                    </Show>
-
-
-                    <div class="rounded-3xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
-                      <div class="flex flex-wrap items-end justify-between gap-3">
-                        <div>
-                          <div class="text-section-title">Cache</div>
-                          <div class="mt-1 text-desc">Recent cache entries (key + size).</div>
-                        </div>
-                        <Show when={(controlDiagnostics.data?.cache?.entries ?? []).length > 0}>
-                          <div class="text-mono-muted">{(controlDiagnostics.data?.cache?.entries ?? []).length} entries</div>
-                        </Show>
-                      </div>
-
-                      <Show
-                        when={(controlDiagnostics.data?.cache?.entries ?? []).length > 0}
-                        fallback={
-                          <EmptyState
-                            title="No cache entries yet"
-                            description="Queue a download in Library to populate the cache."
-                            class="mt-3"
-                          />
-                        }
-                      >
-                        <div class="mt-3 grid gap-2 sm:grid-cols-2">
-                          <For each={(controlDiagnostics.data?.cache?.entries ?? []).slice(0, 8)}>
-                            {(e) => (
-                              <div class="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-slate-200 bg-white/60 px-3 py-2 text-[11px] shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
-                                <span class="min-w-0 truncate font-mono text-slate-700 dark:text-slate-200" title={e.key}>
-                                  {e.key}
-                                </span>
-                                <span class="font-mono text-slate-500">{formatBytes(Number(e.size_bytes))}</span>
-                              </div>
-                            )}
-                          </For>
-                        </div>
-                      </Show>
+            <Show when={view() === 'dsp'}>
+              <div class="space-y-4">
+                <div class="flex flex-wrap items-start justify-between gap-3">
+                  <div class="min-w-0">
+                    <div class="text-lg font-semibold tracking-tight text-slate-900 dark:text-slate-100">DSP (Nebula)</div>
+                    <div class="mt-1 text-[12px] text-slate-600 dark:text-slate-400">
+                      DSP uses SteamCMD and behaves like an updatable app. Running it again pulls the latest files.
                     </div>
                   </div>
+                  <div class="flex flex-wrap items-center gap-2">
+                    <Badge variant={hasSavedSteamcmdCreds() ? 'success' : 'warning'}>
+                      {hasSavedSteamcmdCreds() ? 'SteamCMD ready' : 'SteamCMD required'}
+                    </Badge>
+                    <Badge variant={installed('dsp_nebula')?.installed ? 'success' : 'neutral'}>
+                      {installed('dsp_nebula')?.installed ? 'Cached' : 'Missing'}
+                    </Badge>
+                  </div>
                 </div>
-              </Show>
+
+                <div class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+                  <Section
+                    title="SteamCMD"
+                    description="Steam credentials are configured globally in Settings."
+                    right={
+                      <Button size="xs" variant="secondary" onClick={() => setTab('settings')}>
+                        Open Settings
+                      </Button>
+                    }
+                  >
+                    <Show
+                      when={hasSavedSteamcmdCreds()}
+                      fallback={
+                        <div class="rounded-xl border border-amber-200 bg-amber-50 p-3 text-[12px] text-amber-950 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-100">
+                          SteamCMD credentials are missing. Add username/password in Settings to enable DSP downloads.
+                        </div>
+                      }
+                    >
+                      <div class="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-[12px] text-emerald-950 dark:border-emerald-900/40 dark:bg-emerald-950/20 dark:text-emerald-100">
+                        SteamCMD is configured. You can run updates anytime.
+                      </div>
+                    </Show>
+                  </Section>
+
+                  <Section title="Update" description="Re-download and install the latest DSP server files to this node.">
+                    <div class="space-y-3">
+                      <Field label="Steam Guard code (optional)" description="Only needed when Auto 2FA is unavailable.">
+                        <Input
+                          value={downloadDspGuardCode()}
+                          onInput={(e) => setDownloadDspGuardCode(e.currentTarget.value)}
+                          placeholder="12345"
+                          autocomplete="one-time-code"
+                          class="font-mono text-[11px]"
+                        />
+                      </Field>
+
+                      <Button
+                        size="sm"
+                        variant="primary"
+                        leftIcon={<RotateCw class="h-4 w-4" aria-hidden="true" />}
+                        loading={installPending() && installTarget() === 'dsp_nebula'}
+                        disabled={isReadOnly()}
+                        onClick={() => void enqueueDownloadWarm('dsp_nebula')}
+                      >
+                        Update now
+                      </Button>
+
+                      <Show when={status('dsp_nebula')}>
+                        {(s) => (
+                          <div class="rounded-xl border border-slate-200 bg-white p-3 text-[12px] dark:border-slate-800 dark:bg-slate-950">
+                            <div class="flex flex-wrap items-center justify-between gap-2">
+                              <div class="text-sm font-medium text-slate-900 dark:text-slate-100">Last result</div>
+                              <StatusPill ok={(s() as DownloadStatus).ok}>
+                                {(s() as DownloadStatus).ok ? 'ok' : 'failed'}
+                              </StatusPill>
+                            </div>
+                            <div class="mt-2 text-slate-700 dark:text-slate-200">{(s() as DownloadStatus).message}</div>
+                            <div class="mt-2 flex flex-wrap items-center justify-between gap-2 font-mono text-[11px] text-slate-500 dark:text-slate-400">
+                              <span>{formatRelativeTime((s() as DownloadStatus).atUnixMs)}</span>
+                              <Show when={(s() as DownloadStatus).requestId}>
+                                {(req) => <span>req {req()}</span>}
+                              </Show>
+                            </div>
+                          </div>
+                        )}
+                      </Show>
+                    </div>
+                  </Section>
+                </div>
+              </div>
+            </Show>
+
+            <Show when={view() === 'cache'}>
+              <div class="space-y-4">
+                <div class="flex flex-wrap items-start justify-between gap-3">
+                  <div class="min-w-0">
+                    <div class="text-lg font-semibold tracking-tight text-slate-900 dark:text-slate-100">Cache</div>
+                    <div class="mt-1 text-[12px] text-slate-600 dark:text-slate-400">
+                      Diagnostic view of cached bundles on this node.
+                    </div>
+                  </div>
+                  <div class="flex flex-wrap items-center gap-2">
+                    <span class="rounded-full border border-slate-200 bg-white px-2 py-0.5 font-mono text-[11px] text-slate-700 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200">
+                      {cacheEntries().length} entries
+                    </span>
+                    <span class="rounded-full border border-slate-200 bg-white px-2 py-0.5 font-mono text-[11px] text-slate-700 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200">
+                      {formatBytes(cacheTotalBytes())}
+                    </span>
+                  </div>
+                </div>
+
+                <section class={SURFACE}>
+                  <div class="border-b border-slate-200 px-4 py-4 dark:border-slate-800">
+                    <Input
+                      value={cacheSearch()}
+                      onInput={(e) => setCacheSearch(e.currentTarget.value)}
+                      placeholder="Search by key or path…"
+                      leftIcon={<Search class="h-4 w-4" aria-hidden="true" />}
+                    />
+                    <div class="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
+                      Showing {filteredCache().length}/{cacheEntries().length}
+                    </div>
+                  </div>
+
+                  <Show
+                    when={filteredCache().length > 0}
+                    fallback={<EmptyState title="No cache entries" description="Queue a version to populate the cache." class="m-4" />}
+                  >
+                    <div class="divide-y divide-slate-200 dark:divide-slate-800">
+                      <For each={filteredCache()}>
+                        {(e) => (
+                          <div class="px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-900/20">
+                            <div class="flex flex-wrap items-start justify-between gap-2">
+                              <div class="min-w-0">
+                                <div class="truncate font-mono text-[12px] text-slate-900 dark:text-slate-100" title={e.key}>
+                                  {e.key}
+                                </div>
+                                <div class="mt-1 truncate font-mono text-[11px] text-slate-500 dark:text-slate-400" title={e.path}>
+                                  {e.path}
+                                </div>
+                              </div>
+                              <div class="flex flex-none flex-col items-end gap-1 font-mono text-[11px] text-slate-500 dark:text-slate-400">
+                                <div>{formatBytes(Number(e.size_bytes))}</div>
+                                <div title={e.last_used_unix_ms}>{formatRelativeTime(Number(e.last_used_unix_ms))}</div>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </For>
+                    </div>
+                  </Show>
+                </section>
+              </div>
+            </Show>
+          </div>
+        </main>
+      </div>
+    </Show>
   )
 }
