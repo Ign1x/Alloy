@@ -90,15 +90,33 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> anyhow::Result<()> {
     fs::create_dir_all(dst)?;
     for entry in fs::read_dir(src)? {
         let entry = entry?;
-        let file_type = entry.file_type()?;
         let src_path = entry.path();
         let dst_path = dst.join(entry.file_name());
+        let file_type = entry.file_type()?;
         if file_type.is_dir() {
             copy_dir_recursive(&src_path, &dst_path)?;
             continue;
         }
-        if file_type.is_file() || file_type.is_symlink() {
+        if file_type.is_file() {
             fs::copy(&src_path, &dst_path)?;
+            continue;
+        }
+        if file_type.is_symlink() {
+            let target_meta = fs::metadata(&src_path)
+                .map_err(|e| anyhow::anyhow!("failed to resolve symlink {}: {e}", src_path.display()))?;
+            if target_meta.is_dir() {
+                copy_dir_recursive(&src_path, &dst_path)?;
+                continue;
+            }
+            if target_meta.is_file() {
+                fs::copy(&src_path, &dst_path)?;
+                continue;
+            }
+
+            anyhow::bail!(
+                "unsupported symlink target type at {}",
+                src_path.display()
+            );
         }
     }
     Ok(())
@@ -681,11 +699,28 @@ fn is_executable_file(path: &Path) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{source_server_root, upsert_section_values};
+    use super::{copy_dir_recursive, source_server_root, upsert_section_values};
     use std::{
         collections::BTreeMap,
         path::{Path, PathBuf},
+        sync::atomic::{AtomicU64, Ordering},
+        time::{SystemTime, UNIX_EPOCH},
     };
+
+    fn temp_dir_for(test_name: &str) -> PathBuf {
+        static COUNTER: AtomicU64 = AtomicU64::new(1);
+        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let ts = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let mut dir = std::env::temp_dir();
+        dir.push(format!(
+            "alloy-agent-dsp-{test_name}-{}-{n}-{ts}",
+            std::process::id()
+        ));
+        dir
+    }
 
     #[test]
     fn source_server_root_uses_default_path() {
@@ -732,5 +767,27 @@ mod tests {
         let output = upsert_section_values(input, "Nebula - Settings", &values);
         assert!(output.contains("HostPort = 8469"));
         assert!(output.contains("ServerPassword = \"\""));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn copy_dir_recursive_follows_symlinked_directory() {
+        let root = temp_dir_for("copy-dir-symlink-dir");
+        let src = root.join("src");
+        let dst = root.join("dst");
+        let real = root.join("real");
+        let nested = real.join("nested");
+
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(nested.join("flag.txt"), b"ok").unwrap();
+        std::os::unix::fs::symlink(&real, src.join("linked-dir")).unwrap();
+
+        copy_dir_recursive(&src, &dst).unwrap();
+
+        let copied = dst.join("linked-dir").join("nested").join("flag.txt");
+        assert_eq!(std::fs::read(copied).unwrap(), b"ok");
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
