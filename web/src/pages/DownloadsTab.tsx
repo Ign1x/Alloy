@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createMemo, createSignal, type JSX } from 'solid-js'
+import { For, Show, createMemo, createSignal, type JSX } from 'solid-js'
 import { ArrowDown, ArrowUp, Download, HardDrive, Pause, Play, RotateCw, Search, Trash2, X, ListChecks } from 'lucide-solid'
 import type { DownloadCenterView, DownloadJob, DownloadTarget } from '../app/types'
 import { downloadJobProgressMessage, downloadJobStatusLabel, downloadJobStatusVariant, downloadTargetLabel } from '../app/helpers/downloads'
@@ -40,71 +40,10 @@ type VersionOption = { value: string; label: string; meta?: string }
 const SURFACE =
   'rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950 dark:shadow-none'
 
-function templateKind(templateId: string): string {
-  const i = templateId.indexOf(':')
-  return i >= 0 ? templateId.slice(0, i) : templateId
-}
-
-function templateLabel(templateId: string): string {
-  const kind = templateKind(templateId)
-  if (kind === 'minecraft') return 'Minecraft'
-  if (kind === 'terraria') return 'Terraria'
-  if (kind === 'dsp') return 'DSP (Nebula)'
-  if (kind === 'dst') return "Don't Starve Together"
-  if (kind === 'demo') return 'Demo'
-  return templateId
-}
-
-function gameIconSrc(templateId: string): string | null {
-  const kind = templateKind(templateId)
-  if (kind === 'minecraft') return '/game-icons/minecraft.png'
-  if (kind === 'terraria') return '/game-icons/terraria.png'
-  if (kind === 'dsp') return '/game-icons/dsp.png'
-  if (kind === 'dst') return '/game-icons/dst.png'
-  if (kind === 'demo') return '/game-icons/demo.png'
-  return null
-}
-
-function GameMark(props: { templateId: string; class?: string; title?: string }) {
-  const iconSrc = createMemo(() => gameIconSrc(props.templateId))
-  const label = createMemo(() => props.title ?? templateLabel(props.templateId))
-  const [iconFailed, setIconFailed] = createSignal(false)
-
-  createEffect(() => {
-    props.templateId
-    setIconFailed(false)
-  })
-
-  const showIcon = createMemo(() => Boolean(iconSrc()) && !iconFailed())
-  const fallback = () => (
-    <span
-      role="img"
-      aria-label={label()}
-      title={`${label()} icon missing (add /web/public/game-icons/${templateKind(props.templateId)}.png)`}
-      class={`inline-flex h-9 w-9 items-center justify-center text-[10px] font-semibold text-slate-500 dark:text-slate-400 ${props.class ?? ''}`}
-    >
-      {templateKind(props.templateId).slice(0, 2).toUpperCase()}
-    </span>
-  )
-
-  return (
-    <Show when={showIcon()} fallback={fallback()}>
-      <img
-        src={iconSrc() ?? ''}
-        alt={label()}
-        title={label()}
-        draggable={false}
-        class={`h-9 w-9 object-contain ${props.class ?? ''}`}
-        onError={() => setIconFailed(true)}
-      />
-    </Show>
-  )
-}
-
 function NavItem(props: {
   value: DownloadCenterView
   current: () => DownloadCenterView
-  icon: JSX.Element
+  icon?: JSX.Element
   label: string
   meta?: string
   right?: JSX.Element
@@ -122,7 +61,9 @@ function NavItem(props: {
       onClick={() => props.onSelect(props.value)}
     >
       <div class="flex min-w-0 items-center gap-3">
-        <div class={`${active() ? 'text-white dark:text-slate-900' : 'text-slate-500 dark:text-slate-400'}`}>{props.icon}</div>
+        <div class={`flex h-4 w-4 flex-none items-center justify-center ${active() ? 'text-white dark:text-slate-900' : 'text-slate-500 dark:text-slate-400'}`}>
+          {props.icon}
+        </div>
         <div class="min-w-0">
           <div class="truncate font-medium">{props.label}</div>
           <Show when={props.meta}>
@@ -192,7 +133,6 @@ function JobRow(props: {
   return (
     <div class="flex flex-wrap items-start justify-between gap-3 px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-900/20">
       <div class="flex min-w-0 items-start gap-3">
-        <GameMark templateId={props.job.templateId} class={props.compact ? 'h-8 w-8' : undefined} />
         <div class="min-w-0">
           <div class="flex flex-wrap items-center gap-2">
             <div class="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">
@@ -322,12 +262,9 @@ function VersionManager(props: {
   return (
     <div class="space-y-4">
       <div class="flex flex-wrap items-start justify-between gap-3">
-        <div class="flex min-w-0 items-start gap-3">
-          <GameMark templateId={props.templateId} class="mt-0.5" />
-          <div class="min-w-0">
-            <div class="text-lg font-semibold tracking-tight text-slate-900 dark:text-slate-100">{props.title}</div>
-            <div class="mt-1 text-[12px] text-slate-600 dark:text-slate-400">{props.subtitle}</div>
-          </div>
+        <div class="min-w-0">
+          <div class="text-lg font-semibold tracking-tight text-slate-900 dark:text-slate-100">{props.title}</div>
+          <div class="mt-1 text-[12px] text-slate-600 dark:text-slate-400">{props.subtitle}</div>
         </div>
         <div class="flex flex-wrap items-center gap-2">
           <Badge variant={props.cachedVersions().length > 0 ? 'success' : 'neutral'}>{props.cachedVersions().length > 0 ? 'Cached' : 'Missing'}</Badge>
@@ -727,7 +664,6 @@ export default function DownloadsTab(props: DownloadsTabProps) {
               value="minecraft"
               current={view}
               onSelect={setView}
-              icon={<GameMark templateId="minecraft:vanilla" class="h-7 w-7" />}
               label="Minecraft"
               meta={
                 mcCachedVersions().length > 0
@@ -739,7 +675,6 @@ export default function DownloadsTab(props: DownloadsTabProps) {
               value="terraria"
               current={view}
               onSelect={setView}
-              icon={<GameMark templateId="terraria:vanilla" class="h-7 w-7" />}
               label="Terraria"
               meta={
                 trCachedVersions().length > 0
@@ -751,7 +686,6 @@ export default function DownloadsTab(props: DownloadsTabProps) {
               value="dsp"
               current={view}
               onSelect={setView}
-              icon={<GameMark templateId="dsp:nebula" class="h-7 w-7" />}
               label="DSP (Nebula)"
               meta={
                 hasSavedSteamcmdCreds()
