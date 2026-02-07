@@ -3,8 +3,10 @@ import { formatRelativeTime } from '../../app/helpers/format'
 import { instanceStateLabel } from '../../app/helpers/instances'
 import { connectHost, instancePort } from '../../app/helpers/network'
 import { safeCopy, shortId } from '../../app/helpers/misc'
+import { templateDisplayLabel, templateLogoSrc } from '../../app/helpers/templateBrand'
 import { StartProgress } from '../../app/primitives/StartProgress'
 import { Badge } from '../../components/ui/Badge'
+import { GameAvatar } from '../../components/ui/GameAvatar'
 import { IconButton } from '../../components/ui/IconButton'
 
 export type InstanceCardHeaderProps = {
@@ -21,11 +23,21 @@ export default function InstanceCardHeader(props: InstanceCardHeaderProps) {
     togglePinnedInstance,
   } = props as any
 
+  const currentTemplateLabel = () => templateDisplayLabel(i.config.template_id)
+  const currentTemplateLogo = () => templateLogoSrc(i.config.template_id)
+
   return (
                                 <div class="flex items-start justify-between gap-3">
                                   <div class="min-w-0">
-                                    <div class="truncate font-mono text-sm font-semibold text-slate-900 dark:text-slate-100">
-                                      {instanceDisplayName(i)}
+                                    <div class="flex min-w-0 items-center gap-2">
+                                      <GameAvatar
+                                        name={currentTemplateLabel()}
+                                        src={currentTemplateLogo()}
+                                        title={currentTemplateLabel()}
+                                      />
+                                      <div class="truncate font-mono text-sm font-semibold text-slate-900 dark:text-slate-100">
+                                        {instanceDisplayName(i)}
+                                      </div>
                                     </div>
 	                                    <div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
 	                                      <button

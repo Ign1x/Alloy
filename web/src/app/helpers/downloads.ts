@@ -6,6 +6,15 @@ export function parseUnixMs(value: unknown): number {
   return Number.isFinite(n) ? n : 0
 }
 
+function parseOptionalNumber(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string') {
+    const n = Number(value)
+    if (Number.isFinite(n)) return n
+  }
+  return undefined
+}
+
 export function mapDownloadJobFromServer(raw: unknown): DownloadJob | null {
   if (!raw || typeof raw !== 'object') return null
   const row = raw as Record<string, unknown>
@@ -17,7 +26,7 @@ export function mapDownloadJobFromServer(raw: unknown): DownloadJob | null {
   const stateRaw = row.state
   const message = typeof row.message === 'string' ? row.message : ''
   if (!id || !templateId) return null
-  if (targetRaw !== 'minecraft_vanilla' && targetRaw !== 'terraria_vanilla' && targetRaw !== 'dsp_nebula') return null
+  if (targetRaw !== 'minecraft_vanilla' && targetRaw !== 'terraria_vanilla') return null
   if (
     stateRaw !== 'queued' &&
     stateRaw !== 'running' &&
@@ -49,19 +58,23 @@ export function mapDownloadJobFromServer(raw: unknown): DownloadJob | null {
     requestId: typeof row.request_id === 'string' ? row.request_id : undefined,
     startedAtUnixMs: parseUnixMs(row.started_at_unix_ms) || parseUnixMs(row.created_at_unix_ms),
     updatedAtUnixMs: parseUnixMs(row.updated_at_unix_ms),
+    progressStage: typeof row.progress_stage === 'string' ? row.progress_stage : undefined,
+    progressDownloadedBytes: parseOptionalNumber(row.progress_downloaded_bytes),
+    progressTotalBytes: parseOptionalNumber(row.progress_total_bytes),
+    progressSpeedBytesPerSec: parseOptionalNumber(row.progress_speed_bytes_per_sec),
+    progressPercentX100: parseOptionalNumber(row.progress_percent_x100),
+    progressEtaSec: parseOptionalNumber(row.progress_eta_sec),
   }
 }
 
 export function downloadTargetLabel(target: DownloadTarget): string {
   if (target === 'minecraft_vanilla') return 'Minecraft (Vanilla)'
-  if (target === 'terraria_vanilla') return 'Terraria (Vanilla)'
-  return 'DSP (Nebula)'
+  return 'Terraria (Vanilla)'
 }
 
 export function downloadProgressSteps(templateId: string): string[] {
   if (templateId === 'minecraft:vanilla') return ['Resolve', 'Download', 'Verify', 'Ready']
   if (templateId === 'terraria:vanilla') return ['Resolve', 'Download', 'Extract', 'Ready']
-  if (templateId === 'dsp:nebula') return ['Login', 'Download', 'Install', 'Ready']
   return ['Queue', 'Run', 'Ready']
 }
 
@@ -93,18 +106,28 @@ export function downloadEstimatedMessage(templateId: string, elapsedMs: number):
     if (elapsedMs < 15_000) return 'downloading terraria server package…'
     return 'extracting and verifying terraria server files…'
   }
-  if (templateId === 'dsp:nebula') {
-    if (elapsedMs < 3_000) return 'logging in via steamcmd…'
-    if (elapsedMs < 30_000) return 'downloading dsp server files via steamcmd…'
-    return 'installing and validating dsp runtime files…'
-  }
   return 'preparing files…'
 }
 
 export function downloadJobProgressMessage(job: DownloadJob, nowUnixMs: number): string {
   if (job.state !== 'running') return job.message
+  if (job.message?.trim()) return job.message
   const elapsed = Math.max(0, nowUnixMs - job.startedAtUnixMs)
   return downloadEstimatedMessage(job.templateId, elapsed)
+}
+
+export function downloadJobPercent(job: DownloadJob): number | null {
+  const percentX100 = job.progressPercentX100
+  if (typeof percentX100 === 'number' && Number.isFinite(percentX100)) {
+    return Math.max(0, Math.min(100, percentX100 / 100))
+  }
+
+  const downloaded = job.progressDownloadedBytes
+  const total = job.progressTotalBytes
+  if (typeof downloaded === 'number' && typeof total === 'number' && Number.isFinite(downloaded) && Number.isFinite(total) && total > 0) {
+    return Math.max(0, Math.min(100, (downloaded / total) * 100))
+  }
+  return null
 }
 
 export function downloadJobStatusVariant(state: DownloadJobState): 'warning' | 'neutral' | 'success' | 'danger' {
@@ -122,4 +145,3 @@ export function downloadJobStatusLabel(state: DownloadJobState): string {
   if (state === 'canceled') return 'Canceled'
   return 'Failed'
 }
-

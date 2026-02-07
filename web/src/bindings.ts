@@ -10,7 +10,7 @@ export type CacheStatsOutput = { entries: CacheEntryDto[] }
 
 export type DirEntryDto = { name: string; is_dir: boolean; size_bytes: number; modified_unix_ms: string }
 
-export type DownloadQueueJobDto = { id: string; target: string; template_id: string; version: string; params: Partial<{ [key in string]: string }>; state: string; message: string; request_id: string | null; queue_position: string; attempt_count: number; created_at_unix_ms: string; started_at_unix_ms: string | null; updated_at_unix_ms: string; finished_at_unix_ms: string | null }
+export type DownloadQueueJobDto = { id: string; target: string; template_id: string; version: string; params: Partial<{ [key in string]: string }>; state: string; message: string; request_id: string | null; queue_position: string; attempt_count: number; created_at_unix_ms: string; started_at_unix_ms: string | null; updated_at_unix_ms: string; finished_at_unix_ms: string | null; progress_stage: string | null; progress_downloaded_bytes: string | null; progress_total_bytes: string | null; progress_speed_bytes_per_sec: string | null; progress_percent_x100: number | null; progress_eta_sec: number | null }
 
 export type FsCapabilitiesOutput = { write_enabled: boolean }
 

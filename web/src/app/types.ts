@@ -2,8 +2,8 @@ export type UiTab = 'instances' | 'downloads' | 'files' | 'nodes' | 'frp' | 'set
 
 export type MinecraftCreateMode = 'vanilla' | 'modrinth' | 'import' | 'curseforge'
 export type FrpConfigMode = 'paste' | 'node'
-export type DownloadTarget = 'minecraft_vanilla' | 'terraria_vanilla' | 'dsp_nebula'
-export type DownloadCenterView = 'tasks' | 'minecraft' | 'terraria' | 'dsp' | 'cache'
+export type DownloadTarget = 'minecraft_vanilla' | 'terraria_vanilla'
+export type DownloadCenterView = 'tasks' | 'minecraft' | 'terraria' | 'cache'
 export type DownloadJobState = 'queued' | 'running' | 'paused' | 'success' | 'error' | 'canceled'
 export type DownloadJob = {
   id: string
@@ -16,6 +16,12 @@ export type DownloadJob = {
   requestId?: string
   startedAtUnixMs: number
   updatedAtUnixMs: number
+  progressStage?: string
+  progressDownloadedBytes?: number
+  progressTotalBytes?: number
+  progressSpeedBytesPerSec?: number
+  progressPercentX100?: number
+  progressEtaSec?: number
 }
 
 export type ToastVariant = 'info' | 'success' | 'error'
@@ -27,7 +33,6 @@ export type Toast = {
   requestId?: string
 }
 
-export const DSP_DEFAULT_SOURCE_ROOT = '/data/uploads/dsp/server'
 export const DOWNLOAD_VIEW_STORAGE_KEY = 'alloy.download.view.v2'
 export const CREATE_TEMPLATE_MINECRAFT = '__minecraft__'
 

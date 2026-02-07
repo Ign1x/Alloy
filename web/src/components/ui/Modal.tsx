@@ -25,7 +25,7 @@ export type ModalSize = 'sm' | 'md' | 'lg' | 'xl'
 
 export type ModalProps = {
   open: boolean
-  title: string
+  title: string | JSX.Element
   description?: string
   size?: ModalSize
   children: JSX.Element
@@ -163,4 +163,3 @@ export function Modal(props: ModalProps) {
     </Show>
   )
 }
-

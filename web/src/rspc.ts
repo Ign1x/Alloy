@@ -189,7 +189,7 @@ class AlloyFetchTransport {
       }
     } else if (operation === 'mutation') {
       method = 'POST'
-      body = JSON.stringify(input || {})
+      body = JSON.stringify(input === undefined ? null : input)
       headers.set('Content-Type', 'application/json')
     }
 

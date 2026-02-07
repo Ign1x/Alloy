@@ -1,6 +1,6 @@
 import { Show } from 'solid-js'
-import { downloadJobStatusLabel, downloadJobStatusVariant, downloadTargetLabel } from '../app/helpers/downloads'
-import { formatDateTime } from '../app/helpers/format'
+import { downloadJobPercent, downloadJobStatusLabel, downloadJobStatusVariant, downloadTargetLabel } from '../app/helpers/downloads'
+import { formatBytes, formatDateTime } from '../app/helpers/format'
 import type { DownloadJob, DownloadTarget } from '../app/types'
 import { Badge } from './ui/Badge'
 import { Button } from './ui/Button'
@@ -54,6 +54,26 @@ export default function DownloadTaskModal(props: DownloadTaskModalProps) {
             {(job) => {
               const latestFailure = () => latestDownloadFailureByTarget().get(job().target)
               const latestFailureText = () => (latestFailure()?.message ?? '').trim()
+              const progressPercent = () => downloadJobPercent(job())
+              const progressLabel = () => {
+                const pct = progressPercent()
+                if (pct == null) return 'running'
+                return `${pct.toFixed(1)}%`
+              }
+              const progressBarWidth = () => {
+                const pct = progressPercent()
+                if (pct == null) return '30%'
+                const clamped = Math.max(0, Math.min(100, pct))
+                if (clamped > 0 && clamped < 2) return '2%'
+                return `${clamped}%`
+              }
+              const progressBarClass = () => {
+                const pct = progressPercent()
+                if (pct == null) return 'animate-pulse bg-amber-400'
+                if (pct < 30) return 'bg-amber-500'
+                if (pct >= 90) return 'bg-emerald-400'
+                return 'bg-emerald-500'
+              }
               return (
                 <div class="space-y-3">
                   <div class="rounded-xl border border-slate-200 bg-white/70 px-3 py-2 text-xs dark:border-slate-800 dark:bg-slate-950/40">
@@ -74,6 +94,32 @@ export default function DownloadTaskModal(props: DownloadTaskModalProps) {
                       started {formatDateTime(job().startedAtUnixMs)} · updated {formatDateTime(job().updatedAtUnixMs)}
                     </div>
                   </div>
+
+                  <Show when={job().state === 'running'}>
+                    <div class="rounded-xl border border-slate-200 bg-white/70 px-3 py-2 text-xs dark:border-slate-800 dark:bg-slate-950/40">
+                      <div class="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Live Progress</div>
+                      <div class="mt-1 flex items-center justify-between text-[10px] uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                        <span>{job().progressStage || 'download'}</span>
+                        <span class="font-mono text-slate-700 dark:text-slate-200">{progressLabel()}</span>
+                      </div>
+                      <div class="mt-1 h-2 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
+                        <div
+                          class={`h-full rounded-full transition-all duration-300 ${progressBarClass()}`}
+                          style={{ width: progressBarWidth() }}
+                          aria-hidden="true"
+                        />
+                      </div>
+                      <div class="mt-1 flex flex-wrap gap-x-4 gap-y-1 font-mono text-[11px] text-slate-700 dark:text-slate-200">
+                        <span>speed {job().progressSpeedBytesPerSec ? `${formatBytes(job().progressSpeedBytesPerSec)}/s` : '—'}</span>
+                        <span>
+                          progress {progressPercent() == null ? '—' : `${progressPercent()!.toFixed(1)}%`}
+                        </span>
+                        <span>
+                          size {formatBytes(job().progressDownloadedBytes)} / {formatBytes(job().progressTotalBytes)}
+                        </span>
+                      </div>
+                    </div>
+                  </Show>
 
                   <div class="rounded-xl border border-slate-200 bg-white/70 px-3 py-2 text-xs dark:border-slate-800 dark:bg-slate-950/40">
                     <div class="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Message</div>

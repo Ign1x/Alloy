@@ -1,4 +1,3 @@
-import { DSP_DEFAULT_SOURCE_ROOT } from '../types'
 import { connectHost, parseFrpEndpoint } from './network'
 
 export type CreatePreviewRow = {
@@ -27,12 +26,6 @@ export type CreateAdvancedDirtyInput = {
   dstPort: string
   dstMasterPort: string
   dstAuthPort: string
-  dspPort: string
-  dspServerPassword: string
-  dspRemoteAccessPassword: string
-  dspAutoPauseEnabled: boolean
-  dspUps: string
-  dspWineBin: string
 }
 
 export type BuildCreatePreviewInput = {
@@ -68,14 +61,6 @@ export type BuildCreatePreviewInput = {
   trWorldName: string
   trWorldSize: string
   trPassword: string
-  dspStartupMode: string
-  dspSaveName: string
-  dspPort: string
-  dspServerPassword: string
-  dspRemoteAccessPassword: string
-  dspAutoPauseEnabled: boolean
-  dspUps: string
-  dspWineBin: string
 }
 
 function asPortLabel(raw: string): string {
@@ -110,19 +95,6 @@ export function computeCreateAdvancedDirty(input: CreateAdvancedDirtyInput): boo
     if (p && p !== '0') return true
     if (mp && mp !== '0') return true
     if (ap && ap !== '0') return true
-    return false
-  }
-
-  if (template === 'dsp:nebula') {
-    const p = input.dspPort.trim()
-    if (p && p !== '0') return true
-    if (input.dspServerPassword.trim()) return true
-    if (input.dspRemoteAccessPassword.trim()) return true
-    if (input.dspAutoPauseEnabled) return true
-    const ups = input.dspUps.trim()
-    if (ups && ups !== '60') return true
-    const wine = input.dspWineBin.trim()
-    if (wine && wine !== 'wine64') return true
     return false
   }
 
@@ -261,30 +233,6 @@ export function buildCreatePreview(input: BuildCreatePreviewInput): CreatePrevie
     rows.push({ label: 'World name', value: input.trWorldName.trim() || 'world' })
     rows.push({ label: 'World size', value: input.trWorldSize.trim() || '1' })
     rows.push({ label: 'Password', value: input.trPassword.trim() ? '(set)' : '(none)', isSecret: true })
-  }
-
-  if (template_id === 'dsp:nebula') {
-    const mode = input.dspStartupMode.trim() || 'auto'
-    const save = input.dspSaveName.trim()
-
-    rows.push({ label: 'Server source', value: DSP_DEFAULT_SOURCE_ROOT })
-    rows.push({ label: 'Startup mode', value: mode })
-    if (mode === 'load') rows.push({ label: 'Save name', value: save || '(not set)' })
-    else if (save) rows.push({ label: 'Save name', value: save })
-
-    const portLabel = asPortLabel(input.dspPort)
-    rows.push({ label: 'Port', value: portLabel })
-    rows.push({ label: 'Connect', value: connectValue(portLabel) })
-
-    if (input.createAdvanced || input.createAdvancedDirty) {
-      rows.push({ label: 'Server password', value: input.dspServerPassword.trim() ? '(set)' : '(none)', isSecret: true })
-      rows.push({ label: 'Remote password', value: input.dspRemoteAccessPassword.trim() ? '(set)' : '(none)', isSecret: true })
-      rows.push({ label: 'Auto pause', value: input.dspAutoPauseEnabled ? 'enabled' : 'disabled' })
-      rows.push({ label: 'UPS', value: input.dspUps.trim() || '60' })
-      rows.push({ label: 'Wine', value: input.dspWineBin.trim() || 'wine64' })
-    }
-
-    if (mode === 'load' && !save) warnings.push('Provide Save name when startup mode is load.')
   }
 
   return { template_id, templateLabel, rows, warnings }

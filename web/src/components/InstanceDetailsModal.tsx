@@ -4,12 +4,14 @@ import { formatBytes, formatCpuPercent, parseU64 } from '../app/helpers/format'
 import { canStartInstance, instanceStateLabel, isStopping } from '../app/helpers/instances'
 import { connectHost, instancePort, parseFrpEndpoint } from '../app/helpers/network'
 import { downloadJson, isSecretParamKey, safeCopy } from '../app/helpers/misc'
+import { templateDisplayLabel, templateLogoSrc } from '../app/helpers/templateBrand'
 import { StartProgress } from '../app/primitives/StartProgress'
 import { FileBrowser } from './FileBrowser'
 import { LogViewer } from './LogViewer'
 import { Badge } from './ui/Badge'
 import { Button } from './ui/Button'
 import { ErrorState } from './ui/ErrorState'
+import { GameAvatar } from './ui/GameAvatar'
 import { IconButton } from './ui/IconButton'
 import { Input } from './ui/Input'
 import { Modal } from './ui/Modal'
@@ -47,17 +49,38 @@ export default function InstanceDetailsModal(props: InstanceDetailsModalProps) {
     setImportSaveUrl,
     importSaveFromUrl,
     processLogsTail,
+    canTailProcessLogs: canTailProcessLogsProp,
     processLogLive,
     setProcessLogLive,
     setProcessLogLines,
     isAuthed,
   } = props as any
 
+  const canTailProcessLogs = () => (typeof canTailProcessLogsProp === 'function' ? Boolean(canTailProcessLogsProp()) : true)
+
+  const selectedTemplateId = () => {
+    const current = selectedInstance()
+    return current?.config?.template_id ?? ''
+  }
+
+  const selectedTemplateLabel = () => templateDisplayLabel(selectedTemplateId())
+
+  const modalTitle = () => (
+    <span class="flex min-w-0 items-center gap-2">
+      <GameAvatar
+        name={selectedTemplateLabel()}
+        src={templateLogoSrc(selectedTemplateId())}
+        title={selectedTemplateLabel()}
+      />
+      <span class="truncate">{selectedInstanceDisplayName() ?? 'Instance details'}</span>
+    </span>
+  )
+
   return (
 	        <Modal
 	          open={showInstanceModal() && selectedInstanceId() != null}
 	          onClose={() => setShowInstanceModal(false)}
-	          title={selectedInstanceDisplayName() ?? 'Instance details'}
+	          title={modalTitle()}
 	          size="xl"
 	        >
           <Show when={selectedInstance()} fallback={<div class="text-sm text-slate-500">No instance selected.</div>}>
@@ -507,8 +530,7 @@ export default function InstanceDetailsModal(props: InstanceDetailsModalProps) {
                           inst().config.template_id === 'minecraft:import' ||
                           inst().config.template_id === 'minecraft:curseforge' ||
                           inst().config.template_id === 'terraria:vanilla' ||
-                          inst().config.template_id === 'dst:vanilla' ||
-                          inst().config.template_id === 'dsp:nebula'
+                          inst().config.template_id === 'dst:vanilla'
                         }
                       >
                         <div class="rounded-2xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
@@ -528,14 +550,7 @@ export default function InstanceDetailsModal(props: InstanceDetailsModalProps) {
                               fallback={
                                 <Show
                                   when={inst().config.template_id === 'dst:vanilla'}
-                                  fallback={
-                                    <Show
-                                      when={inst().config.template_id === 'dsp:nebula'}
-                                      fallback={<span>Paste a world .zip URL (must contain a single Minecraft world).</span>}
-                                    >
-                                      <span>Paste a .zip URL containing at least one DSP save (.dsv).</span>
-                                    </Show>
-                                  }
+                                  fallback={<span>Paste a world .zip URL (must contain a single Minecraft world).</span>}
                                 >
                                   <span>Paste a .zip URL containing a single DST cluster (Cluster_1/).</span>
                                 </Show>
@@ -596,14 +611,19 @@ export default function InstanceDetailsModal(props: InstanceDetailsModalProps) {
                   </Show>
 
                   <Show when={instanceDetailTab() === 'logs'}>
-                    <Show when={processLogsTail.isError}>
+                    <Show when={!canTailProcessLogs()}>
+                      <div class="mt-3 rounded-xl border border-slate-200 bg-white/70 px-3 py-2 text-xs text-slate-500 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-400">
+                        Instance is not running. Start it to view live process logs.
+                      </div>
+                    </Show>
+                    <Show when={canTailProcessLogs() && processLogsTail.isError}>
                       <ErrorState error={processLogsTail.error} title="Failed to load logs" onRetry={() => processLogsTail.refetch()} />
                     </Show>
                     <LogViewer
                       title="Process logs"
                       lines={processLogLines()}
-                      loading={processLogsTail.isPending}
-                      error={processLogsTail.isError ? processLogsTail.error : undefined}
+                      loading={canTailProcessLogs() ? processLogsTail.isPending : false}
+                      error={canTailProcessLogs() && processLogsTail.isError ? processLogsTail.error : undefined}
                       minimal={true}
                       live={processLogLive()}
                       onLiveChange={setProcessLogLive}

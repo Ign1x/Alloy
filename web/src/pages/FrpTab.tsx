@@ -4,7 +4,7 @@ import { Button } from '../components/ui/Button'
 import { EmptyState } from '../components/ui/EmptyState'
 import { ErrorState } from '../components/ui/ErrorState'
 import { IconButton } from '../components/ui/IconButton'
-import { detectFrpConfigFormat, parseFrpEndpoint } from '../app/helpers/network'
+import { compactAllocatablePortsSpec, detectFrpConfigFormat, formatLatencyMs, parseFrpEndpoint } from '../app/helpers/network'
 import { safeCopy } from '../app/helpers/misc'
 
 export type FrpTabProps = {
@@ -77,13 +77,14 @@ export default function FrpTab(props: FrpTabProps) {
                                   const endpoint = () =>
                                     n.server_addr && n.server_port ? `${n.server_addr}:${n.server_port}` : parseFrpEndpoint(n.config)
                                   const configFormat = () => detectFrpConfigFormat(n.config)
-                                  const latencyLabel = () => (n.latency_ms != null ? `${n.latency_ms} ms` : 'offline')
+                                  const latencyLabel = () => formatLatencyMs(n.latency_ms)
                                   const latencyClass = () =>
                                     n.latency_ms == null
                                       ? 'text-rose-600 dark:text-rose-300'
                                       : n.latency_ms > 300
                                         ? 'text-amber-600 dark:text-amber-300'
                                         : 'text-emerald-600 dark:text-emerald-300'
+                                  const allocPorts = () => compactAllocatablePortsSpec(n.allocatable_ports)
 
                                   return (
                                     <div class="rounded-2xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
@@ -97,9 +98,10 @@ export default function FrpTab(props: FrpTabProps) {
                                             <div>
                                               Latency: <span class={`font-mono ${latencyClass()}`}>{latencyLabel()}</span>
                                             </div>
-                                            <Show when={(n.allocatable_ports ?? '').trim()}>
+                                            <Show when={allocPorts()}>
                                               <div>
-                                                Alloc ports: <span class="font-mono">{n.allocatable_ports}</span>
+                                                Alloc ports:{' '}
+                                                <span class="font-mono break-all whitespace-pre-wrap">{allocPorts()}</span>
                                               </div>
                                             </Show>
                                             <div>

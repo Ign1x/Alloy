@@ -1,18 +1,18 @@
 import { For, Show } from 'solid-js'
 import { safeCopy } from '../app/helpers/misc'
+import { templateDisplayLabel, templateLogoSrc } from '../app/helpers/templateBrand'
 import { isAlloyApiError } from '../rspc'
 import { Dropdown } from '../components/Dropdown'
 import { Badge } from '../components/ui/Badge'
 import { Button } from '../components/ui/Button'
 import { Field } from '../components/ui/Field'
+import { GameAvatar } from '../components/ui/GameAvatar'
 import { IconButton } from '../components/ui/IconButton'
 import { Input } from '../components/ui/Input'
-import { TemplateMark } from '../components/ui/TemplateMark'
 import { Tooltip } from '../components/ui/Tooltip'
 import MinecraftCreateSection from './instances-create/MinecraftCreateSection'
 import DstCreateSection from './instances-create/DstCreateSection'
 import TerrariaCreateSection from './instances-create/TerrariaCreateSection'
-import DspCreateSection from './instances-create/DspCreateSection'
 
 export type InstancesCreatePanelProps = {
   [key: string]: unknown
@@ -25,18 +25,6 @@ export default function InstancesCreatePanel(props: InstancesCreatePanelProps) {
     createInstance,
     createPreview,
     createTemplateId,
-    dspAutoPauseEnabled,
-    dspPort,
-    dspRemoteAccessPassword,
-    dspSaveName,
-    dspServerPassword,
-    dspSourceInitRequired,
-    dspStartupMode,
-    dspSteamGuardCode,
-    dspSteamcmdSettingsRequiredMessage,
-    dspUps,
-    dspWarmNeedsInit,
-    dspWineBin,
     dstAuthPort,
     dstClusterName,
     dstClusterToken,
@@ -46,7 +34,6 @@ export default function InstancesCreatePanel(props: InstancesCreatePanelProps) {
     dstPort,
     focusFirstCreateError,
     friendlyErrorMessage,
-    hasSavedSteamcmdCreds,
     instanceName,
     invalidateInstances,
     isReadOnly,
@@ -62,20 +49,15 @@ export default function InstancesCreatePanel(props: InstancesCreatePanelProps) {
     mcVersion,
     pushToast,
     revealInstance,
-    runDspInitAndMaybeCreate,
     selectedTemplate,
     setCreateFieldErrors,
     setCreateFormError,
     setCreateInstanceNameEl,
     setCreateInstanceNameRef,
     setCreateSleepSecondsEl,
-    setDspSteamGuardCode,
-    setDspWarmNeedsInit,
     setInstanceName,
-    setPendingCreateAfterDspInit,
     setSelectedInstanceId,
     setSelectedTemplate,
-    setShowDspInitModal,
     setSleepSeconds,
     setWarmFieldErrors,
     setWarmFormError,
@@ -153,7 +135,6 @@ export default function InstancesCreatePanel(props: InstancesCreatePanelProps) {
 
                       <TerrariaCreateSection {...(props as any)} />
 
-                      <DspCreateSection {...(props as any)} />
 
                       <div class="rounded-xl border border-slate-200 bg-white/60 p-3 dark:border-slate-800 dark:bg-slate-950/40">
                         <div class="flex items-center justify-between gap-3">
@@ -179,7 +160,12 @@ export default function InstancesCreatePanel(props: InstancesCreatePanelProps) {
                                 </Badge>
                               </Tooltip>
                             </Show>
-                            <TemplateMark templateId={createPreview().template_id} class="h-8 w-8" />
+                            <GameAvatar
+                              name={templateDisplayLabel(createPreview().template_id)}
+                              src={templateLogoSrc(createPreview().template_id)}
+                              class="h-8 w-8 rounded-lg"
+                              title={templateDisplayLabel(createPreview().template_id)}
+                            />
                           </div>
                         </div>
                         <div class="mt-2 space-y-1.5">
@@ -294,36 +280,11 @@ export default function InstancesCreatePanel(props: InstancesCreatePanelProps) {
                               if (p) params.port = p
                               if (mp) params.master_port = mp
                               if (ap) params.auth_port = ap
-                            } else if (template_id === 'dsp:nebula') {
-                              const mode = dspStartupMode().trim() || 'auto'
-                              const save = dspSaveName().trim()
-                              if (mode === 'load' && !save) localErrors.save_name = 'Required when startup_mode=load.'
-                              params.startup_mode = mode
-                              if (save) params.save_name = save
-                              if (dspPort().trim()) params.port = dspPort().trim()
-                              if (dspServerPassword().trim()) params.server_password = dspServerPassword().trim()
-                              if (dspRemoteAccessPassword().trim()) params.remote_access_password = dspRemoteAccessPassword().trim()
-                              params.auto_pause_enabled = dspAutoPauseEnabled() ? 'true' : 'false'
-                              params.ups = dspUps().trim() || '60'
-                              params.wine_bin = dspWineBin().trim() || 'wine64'
                             }
 
                             if (Object.keys(localErrors).length > 0) {
                               setCreateFieldErrors(localErrors)
                               queueMicrotask(() => focusFirstCreateError(localErrors))
-                              return
-                            }
-
-                            if (template_id === 'dsp:nebula' && dspWarmNeedsInit()) {
-                              if (!hasSavedSteamcmdCreds()) {
-                                setPendingCreateAfterDspInit(null)
-                                setCreateFieldErrors({})
-                                setCreateFormError({ message: dspSteamcmdSettingsRequiredMessage() })
-                                pushToast('error', 'SteamCMD not configured', dspSteamcmdSettingsRequiredMessage())
-                                return
-                              }
-                              setPendingCreateAfterDspInit({ template_id, params: { ...params }, display_name })
-                              await runDspInitAndMaybeCreate()
                               return
                             }
 
@@ -336,26 +297,6 @@ export default function InstancesCreatePanel(props: InstancesCreatePanelProps) {
                             } catch (e) {
                               if (isAlloyApiError(e)) {
                                 const fieldErrors = e.data.field_errors ?? {}
-                                if (template_id === 'dsp:nebula' && dspSourceInitRequired(e.data.message, fieldErrors)) {
-                                  setDspWarmNeedsInit(true)
-                                  setCreateFieldErrors({})
-                                  setCreateFormError(null)
-                                  setWarmFieldErrors(fieldErrors)
-                                  setWarmFormError({ message: e.data.message, requestId: e.data.request_id })
-
-                                  if (!hasSavedSteamcmdCreds()) {
-                                    setPendingCreateAfterDspInit(null)
-                                    setWarmFieldErrors({})
-                                    setWarmFormError(null)
-                                    setCreateFormError({ message: dspSteamcmdSettingsRequiredMessage(), requestId: e.data.request_id })
-                                    pushToast('error', 'SteamCMD not configured', dspSteamcmdSettingsRequiredMessage(), e.data.request_id)
-                                  } else {
-                                    setPendingCreateAfterDspInit({ template_id, params: { ...params }, display_name })
-                                    await runDspInitAndMaybeCreate()
-                                  }
-                                  if (e.data.hint) pushToast('info', 'Hint', e.data.hint, e.data.request_id)
-                                  return
-                                }
 
                                 setCreateFieldErrors(fieldErrors)
                                 setCreateFormError({ message: e.data.message, requestId: e.data.request_id })
@@ -387,7 +328,7 @@ export default function InstancesCreatePanel(props: InstancesCreatePanelProps) {
                           disabled={
                             isReadOnly() ||
                             createInstance.isPending ||
-                            !['minecraft:vanilla', 'terraria:vanilla', 'dsp:nebula'].includes(createTemplateId())
+                            !['minecraft:vanilla', 'terraria:vanilla'].includes(createTemplateId())
                           }
                           title={isReadOnly() ? 'Read-only mode' : 'Only download required files (no start)'}
 	                          onClick={async () => {
@@ -403,47 +344,11 @@ export default function InstancesCreatePanel(props: InstancesCreatePanelProps) {
                               const v = trVersion().trim()
                               params.version = v || '1453'
                             }
-                            if (template_id === 'dsp:nebula') {
-                              const guardCode = dspSteamGuardCode().trim()
 
-                              if (dspWarmNeedsInit() && !hasSavedSteamcmdCreds()) {
-                                setWarmFieldErrors({})
-                                setWarmFormError(null)
-                                pushToast('error', 'SteamCMD not configured', dspSteamcmdSettingsRequiredMessage())
-                                return
-                              }
-
-                              if (guardCode) params.steam_guard_code = guardCode
-                            }
                             try {
                               const out = await warmCache.mutateAsync({ template_id, params })
-                              if (template_id === 'dsp:nebula') {
-                                setDspWarmNeedsInit(false)
-                                setWarmFieldErrors({})
-                                setDspSteamGuardCode('')
-                              }
                               pushToast('success', 'Cache warmed', out.message)
                             } catch (e) {
-                              if (template_id === 'dsp:nebula' && isAlloyApiError(e)) {
-                                const fieldErrors = e.data.field_errors ?? {}
-                                const needsGuard = Boolean(fieldErrors.steam_guard_code)
-
-                                if (needsGuard) {
-                                  setWarmFieldErrors({ steam_guard_code: fieldErrors.steam_guard_code })
-                                  setWarmFormError({ message: e.data.message, requestId: e.data.request_id })
-                                  setShowDspInitModal(true)
-                                } else {
-                                  setWarmFieldErrors({})
-                                  setWarmFormError(null)
-                                  setShowDspInitModal(false)
-                                  if (dspSourceInitRequired(e.data.message, fieldErrors) || fieldErrors.steam_username || fieldErrors.steam_password) {
-                                    setDspWarmNeedsInit(true)
-                                    pushToast('error', 'SteamCMD not configured', dspSteamcmdSettingsRequiredMessage(), e.data.request_id)
-                                  }
-                                }
-                                if (e.data.hint) pushToast('info', 'Hint', e.data.hint, e.data.request_id)
-                                return
-                              }
                               toastError('Warm cache failed', e)
                             }
                           }}

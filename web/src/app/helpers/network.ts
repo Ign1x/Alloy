@@ -103,3 +103,69 @@ export function parseFrpEndpoint(config: string | null | undefined): string | nu
 
   return null
 }
+
+function parsePortInRange(raw: string): number | null {
+  const text = raw.trim()
+  if (!/^\d+$/.test(text)) return null
+  const port = Number.parseInt(text, 10)
+  if (!Number.isFinite(port) || port <= 0 || port > 65535) return null
+  return port
+}
+
+export function compactAllocatablePortsSpec(value: string | null | undefined): string {
+  const raw = (value ?? '').trim()
+  if (!raw) return ''
+
+  const expanded = new Set<number>()
+  for (const seg of raw.split(',')) {
+    const token = seg.trim()
+    if (!token) continue
+
+    const rangeMatch = token.match(/^(\d+)\s*-\s*(\d+)$/)
+    if (rangeMatch) {
+      const a = parsePortInRange(rangeMatch[1])
+      const b = parsePortInRange(rangeMatch[2])
+      if (a == null || b == null) continue
+      const lo = Math.min(a, b)
+      const hi = Math.max(a, b)
+      if (hi - lo > 4000) continue
+      for (let p = lo; p <= hi; p++) {
+        expanded.add(p)
+        if (expanded.size > 4000) break
+      }
+      continue
+    }
+
+    const port = parsePortInRange(token)
+    if (port != null) {
+      expanded.add(port)
+      if (expanded.size > 4000) break
+    }
+  }
+
+  if (expanded.size === 0) return ''
+
+  const sorted = [...expanded].sort((a, b) => a - b)
+  const out: string[] = []
+  let start = sorted[0]
+  let prev = sorted[0]
+
+  for (let i = 1; i < sorted.length; i++) {
+    const port = sorted[i]
+    if (port === prev + 1) {
+      prev = port
+      continue
+    }
+    out.push(start === prev ? `${start}` : `${start}-${prev}`)
+    start = port
+    prev = port
+  }
+  out.push(start === prev ? `${start}` : `${start}-${prev}`)
+  return out.join(',')
+}
+
+export function formatLatencyMs(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) return 'offline'
+  if (value <= 0) return '<1 ms'
+  return `${Math.floor(value)} ms`
+}

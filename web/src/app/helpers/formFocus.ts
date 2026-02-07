@@ -23,13 +23,6 @@ type FocusCreateRefs = {
   createDstPortEl?: HTMLInputElement
   createDstMasterPortEl?: HTMLInputElement
   createDstAuthPortEl?: HTMLInputElement
-  createDspStartupModeEl?: HTMLDivElement
-  createDspSaveNameEl?: HTMLInputElement
-  createDspPortEl?: HTMLInputElement
-  createDspServerPasswordEl?: HTMLInputElement
-  createDspRemoteAccessPasswordEl?: HTMLInputElement
-  createDspUpsEl?: HTMLInputElement
-  createDspWineBinEl?: HTMLInputElement
 }
 
 type FocusEditRefs = {
@@ -99,9 +92,7 @@ export function focusFirstCreateError(options: {
                 ? ['cluster_token', 'cluster_name', 'max_players', 'password', 'port', 'master_port', 'auth_port', 'display_name']
                 : template_id === 'terraria:vanilla'
                   ? ['version', 'max_players', 'world_name', 'port', 'world_size', 'password', 'frp_config', 'display_name']
-                  : template_id === 'dsp:nebula'
-                    ? ['startup_mode', 'save_name', 'port', 'server_password', 'remote_access_password', 'ups', 'wine_bin', 'display_name']
-                    : ['display_name']
+                  : ['display_name']
 
   const needsAdvanced =
     !createAdvanced &&
@@ -110,12 +101,7 @@ export function focusFirstCreateError(options: {
       Boolean(errors.auth_port) ||
       Boolean(errors.world_size) ||
       Boolean(errors.password) ||
-      Boolean(errors.frp_config) ||
-      Boolean(errors.server_password) ||
-      Boolean(errors.remote_access_password) ||
-      Boolean(errors.auto_pause_enabled) ||
-      Boolean(errors.ups) ||
-      Boolean(errors.wine_bin))
+      Boolean(errors.frp_config))
   if (needsAdvanced) setCreateAdvanced(true)
 
   const run = () => {
@@ -165,15 +151,6 @@ export function focusFirstCreateError(options: {
         if (key === 'auth_port' && focusEl(refs.createDstAuthPortEl)) return
       }
 
-      if (template_id === 'dsp:nebula') {
-        if (key === 'startup_mode' && focusDropdown(refs.createDspStartupModeEl)) return
-        if (key === 'save_name' && focusEl(refs.createDspSaveNameEl)) return
-        if (key === 'port' && focusEl(refs.createDspPortEl)) return
-        if (key === 'server_password' && focusEl(refs.createDspServerPasswordEl)) return
-        if (key === 'remote_access_password' && focusEl(refs.createDspRemoteAccessPasswordEl)) return
-        if (key === 'ups' && focusEl(refs.createDspUpsEl)) return
-        if (key === 'wine_bin' && focusEl(refs.createDspWineBinEl)) return
-      }
     }
   }
 

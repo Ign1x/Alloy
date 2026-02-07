@@ -61,16 +61,6 @@ function DstWilsonIcon() {
   )
 }
 
-function PlanetRingIcon() {
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="none" class="h-5 w-5" aria-hidden="true">
-      <circle cx="10" cy="10" r="2.8" stroke="currentColor" stroke-width="1.35" />
-      <ellipse cx="10" cy="10" rx="7.2" ry="3.55" stroke="currentColor" stroke-width="1.2" />
-      <path d="M9.6 6.35 8.6 10h1.4l-.6 3.65 2.35-4.35h-1.5l.95-2.95Z" fill="currentColor" />
-    </svg>
-  )
-}
-
 function MoonIcon() {
   return (
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-5 w-5" aria-hidden="true">
@@ -115,14 +105,6 @@ export function TemplateMark(props: TemplateMarkProps) {
         class:
           'border-sky-200 bg-sky-50/80 text-sky-900 dark:border-sky-900/40 dark:bg-sky-950/20 dark:text-sky-200',
         icon: <TreeIcon />,
-      }
-    }
-    if (kind === 'dsp') {
-      return {
-        label: 'Dyson Sphere Program',
-        class:
-          'border-violet-200 bg-violet-50/80 text-violet-900 dark:border-violet-900/40 dark:bg-violet-950/20 dark:text-violet-200',
-        icon: <PlanetRingIcon />,
       }
     }
     if (kind === 'demo') {

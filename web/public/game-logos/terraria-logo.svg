@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <defs>
+    <linearGradient id="trSky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#8ee0ff"/>
+      <stop offset="1" stop-color="#4f9fd8"/>
+    </linearGradient>
+    <linearGradient id="trCanopy" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#45b46f"/>
+      <stop offset="1" stop-color="#2f7f4d"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="2" y="2" width="60" height="60" rx="12" fill="#0b1732"/>
+  <rect x="8" y="8" width="48" height="48" rx="9" fill="url(#trSky)"/>
+  <rect x="8" y="44" width="48" height="12" rx="0 0 9 9" fill="#4b7e2f"/>
+
+  <path d="M32 13 20 31h7l-4 7h7l-3 6h10l-3-6h7l-4-7h7L32 13Z" fill="url(#trCanopy)"/>
+  <rect x="29.5" y="39" width="5" height="11" rx="2.5" fill="#7a4d2f"/>
+
+  <circle cx="18" cy="17" r="2.5" fill="#e7fbff" opacity=".9"/>
+  <circle cx="23" cy="14" r="1.5" fill="#e7fbff" opacity=".85"/>
+
+</svg>
