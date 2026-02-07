@@ -3,7 +3,6 @@ import { ArrowDown, ArrowUp, Download, HardDrive, Pause, Play, RotateCw, Search,
 import type { DownloadCenterView, DownloadJob, DownloadTarget } from '../app/types'
 import { downloadJobProgressMessage, downloadJobStatusLabel, downloadJobStatusVariant, downloadTargetLabel } from '../app/helpers/downloads'
 import { formatBytes, formatRelativeTime } from '../app/helpers/format'
-import { instanceCardBackdrop } from '../app/helpers/instances'
 import { DownloadProgress } from '../app/primitives/DownloadProgress'
 import { queryClient } from '../rspc'
 import { Badge } from '../components/ui/Badge'
@@ -68,42 +67,24 @@ function gameIconSrc(templateId: string): string | null {
 
 function GameMark(props: { templateId: string; class?: string; title?: string }) {
   const iconSrc = createMemo(() => gameIconSrc(props.templateId))
-  const backdrop = createMemo(() => instanceCardBackdrop(props.templateId))
   const label = createMemo(() => props.title ?? templateLabel(props.templateId))
   const [iconFailed, setIconFailed] = createSignal(false)
-  const [backdropFailed, setBackdropFailed] = createSignal(false)
 
   createEffect(() => {
     props.templateId
     setIconFailed(false)
-    setBackdropFailed(false)
   })
 
   const showIcon = createMemo(() => Boolean(iconSrc()) && !iconFailed())
-
   const fallback = () => (
-    <Show
-      when={!backdropFailed() && backdrop()}
-      fallback={
-        <span
-          class={`inline-flex h-9 w-9 items-center justify-center bg-slate-200 text-[10px] text-slate-700 dark:bg-slate-800 dark:text-slate-200 ${props.class ?? ''}`}
-        >
-          {templateKind(props.templateId).slice(0, 2).toUpperCase()}
-        </span>
-      }
+    <span
+      role="img"
+      aria-label={label()}
+      title={`${label()} icon missing (add /web/public/game-icons/${templateKind(props.templateId)}.png)`}
+      class={`inline-flex h-9 w-9 items-center justify-center text-[10px] font-semibold text-slate-500 dark:text-slate-400 ${props.class ?? ''}`}
     >
-      {(b) => (
-        <img
-          src={b().src}
-          style={{ 'object-position': b().position }}
-          alt={label()}
-          title={label()}
-          draggable={false}
-          class={`h-9 w-9 object-cover ${props.class ?? ''}`}
-          onError={() => setBackdropFailed(true)}
-        />
-      )}
-    </Show>
+      {templateKind(props.templateId).slice(0, 2).toUpperCase()}
+    </span>
   )
 
   return (

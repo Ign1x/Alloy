@@ -11,4 +11,4 @@ Recommended:
 - Square image, >= 256×256.
 - Transparent background if possible.
 
-The Downloads page will automatically use these icons (no frame/border). If an icon is missing, it falls back to the existing backdrop image.
+The Downloads page will automatically use these icons (no frame/border). If an icon is missing, it shows a small text placeholder instead (no cover/backdrop fallback).
