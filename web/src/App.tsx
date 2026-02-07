@@ -230,6 +230,12 @@ function App() {
     if (lower.includes('504 gateway time-out') || lower.includes('504 gateway timeout')) {
       return 'Gateway timed out, but backend may still be downloading. Open Downloads, warm files first, then retry.'
     }
+    if (lower.includes('502 bad gateway') || lower.includes('http 502')) {
+      return 'Bad Gateway (502). The web proxy could not reach the backend. Refresh the page and retry.'
+    }
+    if (lower.includes('<html') && (lower.includes('bad gateway') || lower.includes('nginx'))) {
+      return 'The server returned an HTML error page. Refresh the page and retry.'
+    }
     return raw
   }
 
