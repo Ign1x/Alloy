@@ -16,7 +16,7 @@ export function instanceCardBackdrop(templateId: string): InstanceCardBackdrop |
   if (kind === 'dst') return { src: '/game-backdrops/dst-bg.jpg', position: '82% 56%' }
   if (kind === 'terraria') return { src: '/game-backdrops/terraria-bg.jpg', position: '80% 58%' }
   if (kind === 'dsp') return { src: '/game-backdrops/dsp-bg.jpg', position: '78% 54%' }
-  if (kind === 'demo') return { src: '/game-backdrops/sleep-bg.jpg', position: '50% 52%' }
+  if (kind === 'demo') return { src: '/game-backdrops/demo-bg.svg', position: '50% 52%' }
   return null
 }
 
