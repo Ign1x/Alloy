@@ -28,6 +28,18 @@ type CachedVersionRow = {
   meta?: string
 }
 
+type CacheDisplayRow = {
+  groupId: 'minecraft' | 'terraria' | 'dsp' | 'other'
+  kind: 'aggregate' | 'version' | 'source' | 'marker' | 'other'
+  title: string
+  meta?: string
+  key: string
+  path: string
+  sizeBytes: number
+  lastUsedUnixMs: number
+  version?: string
+}
+
 type DownloadStatus = {
   ok: boolean
   message: string
@@ -39,6 +51,26 @@ type VersionOption = { value: string; label: string; meta?: string }
 
 const SURFACE =
   'rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950 dark:shadow-none'
+
+const VERSION_COLLATOR = new Intl.Collator('en', { numeric: true, sensitivity: 'base' })
+
+function compareVersionDesc(a: string, b: string): number {
+  const av = a.trim().toLowerCase()
+  const bv = b.trim().toLowerCase()
+  const aUnknown = !av || av === 'unknown'
+  const bUnknown = !bv || bv === 'unknown'
+  if (aUnknown && bUnknown) return 0
+  if (aUnknown) return 1
+  if (bUnknown) return -1
+  return VERSION_COLLATOR.compare(bv, av)
+}
+
+function groupTitle(groupId: CacheDisplayRow['groupId']): string {
+  if (groupId === 'minecraft') return 'Minecraft'
+  if (groupId === 'terraria') return 'Terraria'
+  if (groupId === 'dsp') return 'DSP (Nebula)'
+  return 'Other'
+}
 
 function NavItem(props: {
   value: DownloadCenterView
@@ -246,7 +278,7 @@ function VersionManager(props: {
     if (cached.length === 0) return 'Not cached'
     const last = cached[0]
     const lastLabel = labelByValue().get(last.version) ?? last.version
-    return `${cached.length} cached · ${formatBytes(cachedTotalBytes())} · last ${lastLabel}`
+    return `${cached.length} cached · ${formatBytes(cachedTotalBytes())} · latest ${lastLabel}`
   })
 
   const selectedLabel = createMemo(() => labelByValue().get(props.value()) ?? props.value())
@@ -571,7 +603,7 @@ export default function DownloadsTab(props: DownloadsTabProps) {
         meta: `sha1 ${parsed.sha1.slice(0, 8)}`,
       })
     }
-    out.sort((a, b) => b.lastUsedUnixMs - a.lastUsedUnixMs || a.version.localeCompare(b.version))
+    out.sort((a, b) => compareVersionDesc(a.version, b.version) || b.lastUsedUnixMs - a.lastUsedUnixMs)
     return out
   })
 
@@ -589,7 +621,7 @@ export default function DownloadsTab(props: DownloadsTabProps) {
         lastUsedUnixMs: Number(e.last_used_unix_ms ?? 0),
       })
     }
-    out.sort((a, b) => b.lastUsedUnixMs - a.lastUsedUnixMs || a.version.localeCompare(b.version))
+    out.sort((a, b) => compareVersionDesc(a.version, b.version) || b.lastUsedUnixMs - a.lastUsedUnixMs)
     return out
   })
 
@@ -619,11 +651,144 @@ export default function DownloadsTab(props: DownloadsTabProps) {
   }
 
   const [cacheSearch, setCacheSearch] = createSignal('')
-  const filteredCache = createMemo(() => {
+  const cacheDisplayRows = createMemo(() => {
+    const out: CacheDisplayRow[] = []
+    for (const e of cacheEntries()) {
+      const key = e.key
+      const base = {
+        key,
+        path: e.path,
+        sizeBytes: Number(e.size_bytes ?? 0),
+        lastUsedUnixMs: Number(e.last_used_unix_ms ?? 0),
+      }
+
+      const mc = parseMinecraftCacheKey(key)
+      if (key === 'minecraft:vanilla') {
+        out.push({
+          groupId: 'minecraft',
+          kind: 'aggregate',
+          title: 'All cached versions',
+          meta: 'aggregate',
+          ...base,
+        })
+        continue
+      }
+      if (mc) {
+        out.push({
+          groupId: 'minecraft',
+          kind: 'version',
+          title: mc.version,
+          version: mc.version,
+          meta: `sha1 ${mc.sha1.slice(0, 8)}`,
+          ...base,
+        })
+        continue
+      }
+
+      if (key === 'terraria:vanilla') {
+        out.push({
+          groupId: 'terraria',
+          kind: 'aggregate',
+          title: 'All cached versions',
+          meta: 'aggregate',
+          ...base,
+        })
+        continue
+      }
+      if (key.startsWith('terraria:vanilla@')) {
+        const version = key.slice('terraria:vanilla@'.length)
+        out.push({
+          groupId: 'terraria',
+          kind: 'version',
+          title: version || key,
+          version: version || undefined,
+          ...base,
+        })
+        continue
+      }
+
+      if (key === 'dsp:nebula@source') {
+        out.push({
+          groupId: 'dsp',
+          kind: 'source',
+          title: 'Server files',
+          meta: 'source root',
+          ...base,
+        })
+        continue
+      }
+      if (key === 'dsp:nebula') {
+        out.push({
+          groupId: 'dsp',
+          kind: 'marker',
+          title: 'Cache marker',
+          meta: 'cache/dsp',
+          ...base,
+        })
+        continue
+      }
+
+      out.push({
+        groupId: 'other',
+        kind: 'other',
+        title: key,
+        ...base,
+      })
+    }
+
     const q = cacheSearch().trim().toLowerCase()
-    const list = cacheEntries()
-    if (!q) return list
-    return list.filter((e) => e.key.toLowerCase().includes(q) || e.path.toLowerCase().includes(q))
+    if (!q) return out
+    return out.filter((row) => {
+      if (row.title.toLowerCase().includes(q)) return true
+      if (row.key.toLowerCase().includes(q)) return true
+      if (row.path.toLowerCase().includes(q)) return true
+      if ((row.meta ?? '').toLowerCase().includes(q)) return true
+      return false
+    })
+  })
+
+  const cacheGroups = createMemo(() => {
+    const byId = new Map<CacheDisplayRow['groupId'], CacheDisplayRow[]>()
+    for (const row of cacheDisplayRows()) {
+      const list = byId.get(row.groupId)
+      if (list) list.push(row)
+      else byId.set(row.groupId, [row])
+    }
+
+    const kindRank = (row: CacheDisplayRow) => {
+      if (row.kind === 'aggregate') return 0
+      if (row.kind === 'source') return 0
+      if (row.kind === 'marker') return 1
+      if (row.kind === 'version') return 2
+      return 3
+    }
+
+    const compareRow = (a: CacheDisplayRow, b: CacheDisplayRow) => {
+      const rank = kindRank(a) - kindRank(b)
+      if (rank !== 0) return rank
+
+      if (a.kind === 'version' && b.kind === 'version') {
+        return compareVersionDesc(a.version ?? '', b.version ?? '') || b.lastUsedUnixMs - a.lastUsedUnixMs
+      }
+
+      if (a.groupId === 'other') {
+        return b.sizeBytes - a.sizeBytes || b.lastUsedUnixMs - a.lastUsedUnixMs || a.key.localeCompare(b.key)
+      }
+
+      return b.lastUsedUnixMs - a.lastUsedUnixMs || a.key.localeCompare(b.key)
+    }
+
+    const order: CacheDisplayRow['groupId'][] = ['minecraft', 'terraria', 'dsp', 'other']
+    const groups: Array<{ id: CacheDisplayRow['groupId']; title: string; entries: CacheDisplayRow[]; totalBytes: number; lastUsedUnixMs: number }> = []
+    for (const id of order) {
+      const entries = byId.get(id) ?? []
+      if (!entries.length) continue
+      entries.sort(compareRow)
+      const totalBytes = entries.reduce((sum, e) => sum + e.sizeBytes, 0)
+      const lastUsedUnixMs = entries.reduce((max, e) => Math.max(max, e.lastUsedUnixMs), 0)
+      groups.push({ id, title: groupTitle(id), entries, totalBytes, lastUsedUnixMs })
+    }
+    return groups
   })
 
   const [mcSearch, setMcSearch] = createSignal('')
@@ -667,7 +832,7 @@ export default function DownloadsTab(props: DownloadsTabProps) {
               label="Minecraft"
               meta={
                 mcCachedVersions().length > 0
-                  ? `${mcCachedVersions().length} cached · last ${mcCachedVersions()[0]?.version ?? ''}`.trim()
+                  ? `${mcCachedVersions().length} cached · latest ${mcCachedVersions()[0]?.version ?? ''}`.trim()
                   : 'Not cached'
               }
             />
@@ -678,7 +843,7 @@ export default function DownloadsTab(props: DownloadsTabProps) {
               label="Terraria"
               meta={
                 trCachedVersions().length > 0
-                  ? `${trCachedVersions().length} cached · last ${trCachedVersions()[0]?.version ?? ''}`.trim()
+                  ? `${trCachedVersions().length} cached · latest ${trCachedVersions()[0]?.version ?? ''}`.trim()
                   : 'Not cached'
               }
             />
@@ -1002,46 +1167,78 @@ export default function DownloadsTab(props: DownloadsTabProps) {
                       leftIcon={<Search class="h-4 w-4" aria-hidden="true" />}
                     />
                     <div class="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
-                      Showing {filteredCache().length}/{cacheEntries().length}
+                      Showing {cacheDisplayRows().length}/{cacheEntries().length}
                     </div>
                   </div>
 
                   <Show
-                    when={filteredCache().length > 0}
+                    when={cacheDisplayRows().length > 0}
                     fallback={<EmptyState title="No cache entries" description="Queue a version to populate the cache." class="m-4" />}
                   >
-                    <div class="divide-y divide-slate-200 dark:divide-slate-800">
-                      <For each={filteredCache()}>
-                        {(e) => (
-                          <div class="px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-900/20">
-                            <div class="flex flex-wrap items-start justify-between gap-2">
-                              <div class="min-w-0">
-                                <div class="truncate font-mono text-[12px] text-slate-900 dark:text-slate-100" title={e.key}>
-                                  {e.key}
-                                </div>
-                                <div class="mt-1 truncate font-mono text-[11px] text-slate-500 dark:text-slate-400" title={e.path}>
-                                  {e.path}
-                                </div>
+                    <div class="space-y-4 p-4">
+                      <For each={cacheGroups()}>
+                        {(g) => (
+                          <div class="overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-800">
+                            <div class="flex flex-wrap items-center justify-between gap-2 bg-slate-50 px-4 py-3 dark:bg-slate-900/20">
+                              <div class="text-sm font-semibold text-slate-900 dark:text-slate-100">{g.title}</div>
+                              <div class="flex flex-wrap items-center gap-2">
+                                <span class="rounded-full border border-slate-200 bg-white px-2 py-0.5 font-mono text-[11px] text-slate-700 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200">
+                                  {g.entries.length} entries
+                                </span>
+                                <span class="rounded-full border border-slate-200 bg-white px-2 py-0.5 font-mono text-[11px] text-slate-700 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200">
+                                  {formatBytes(g.totalBytes)}
+                                </span>
+                                <span class="rounded-full border border-slate-200 bg-white px-2 py-0.5 font-mono text-[11px] text-slate-700 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200">
+                                  {formatRelativeTime(g.lastUsedUnixMs)}
+                                </span>
                               </div>
-                              <div class="flex flex-none items-center gap-2">
-                                <div class="flex flex-col items-end gap-1 font-mono text-[11px] text-slate-500 dark:text-slate-400">
-                                  <div>{formatBytes(Number(e.size_bytes))}</div>
-                                  <div title={e.last_used_unix_ms}>{formatRelativeTime(Number(e.last_used_unix_ms))}</div>
-                                </div>
-                                <IconButton
-                                  label="Delete cache entry"
-                                  variant="danger"
-                                  disabled={deleteDisabled()}
-                                  onClick={() => void deleteCacheKey(e.key, e.key)}
-                                >
-                                  <Show
-                                    when={deletingKey() === e.key}
-                                    fallback={<Trash2 class="h-4 w-4" aria-hidden="true" />}
-                                  >
-                                    <RotateCw class="h-4 w-4 animate-spin" aria-hidden="true" />
-                                  </Show>
-                                </IconButton>
-                              </div>
+                            </div>
+
+                            <div class="divide-y divide-slate-200 dark:divide-slate-800">
+                              <For each={g.entries}>
+                                {(e) => (
+                                  <div class="grid gap-3 px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-900/20 md:grid-cols-[minmax(0,1fr)_220px] md:items-start">
+                                    <div class="min-w-0">
+                                      <div class="flex flex-wrap items-center gap-2">
+                                        <div class="text-sm font-semibold text-slate-900 dark:text-slate-100">{e.title}</div>
+                                        <Show when={e.meta}>
+                                          <span class="rounded-full border border-slate-200 bg-white px-2 py-0.5 font-mono text-[11px] text-slate-700 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200">
+                                            {e.meta}
+                                          </span>
+                                        </Show>
+                                      </div>
+                                      <div class="mt-1 space-y-1">
+                                        <div class="break-all font-mono text-[12px] text-slate-700 dark:text-slate-200" title={e.key}>
+                                          {e.key}
+                                        </div>
+                                        <div class="break-all font-mono text-[12px] text-slate-500 dark:text-slate-400" title={e.path}>
+                                          {e.path}
+                                        </div>
+                                      </div>
+                                    </div>
+
+                                    <div class="flex flex-none items-center justify-between gap-3 md:justify-end">
+                                      <div class="flex flex-col items-end gap-1 font-mono text-[12px] text-slate-600 dark:text-slate-300">
+                                        <div class="text-slate-900 dark:text-slate-100">{formatBytes(e.sizeBytes)}</div>
+                                        <div title={new Date(e.lastUsedUnixMs).toLocaleString()}>{formatRelativeTime(e.lastUsedUnixMs)}</div>
+                                      </div>
+                                      <IconButton
+                                        label="Delete cache entry"
+                                        variant="danger"
+                                        disabled={deleteDisabled()}
+                                        onClick={() => void deleteCacheKey(e.key, `${g.title} ${e.title}`)}
+                                      >
+                                        <Show
+                                          when={deletingKey() === e.key}
+                                          fallback={<Trash2 class="h-4 w-4" aria-hidden="true" />}
+                                        >
+                                          <RotateCw class="h-4 w-4 animate-spin" aria-hidden="true" />
+                                        </Show>
+                                      </IconButton>
+                                    </div>
+                                  </div>
+                                )}
+                              </For>
                             </div>
                           </div>
                         )}
