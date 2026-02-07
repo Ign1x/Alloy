@@ -1,4 +1,4 @@
-import { For, Show, createMemo, createSignal, type JSX } from 'solid-js'
+import { For, Show, createEffect, createMemo, createSignal, type JSX } from 'solid-js'
 import { ArrowDown, ArrowUp, Download, HardDrive, Pause, Play, RotateCw, Search, Trash2, X, ListChecks } from 'lucide-solid'
 import type { DownloadCenterView, DownloadJob, DownloadTarget } from '../app/types'
 import { downloadJobProgressMessage, downloadJobStatusLabel, downloadJobStatusVariant, downloadTargetLabel } from '../app/helpers/downloads'
@@ -56,15 +56,37 @@ function templateLabel(templateId: string): string {
   return templateId
 }
 
+function gameIconSrc(templateId: string): string | null {
+  const kind = templateKind(templateId)
+  if (kind === 'minecraft') return '/game-icons/minecraft.png'
+  if (kind === 'terraria') return '/game-icons/terraria.png'
+  if (kind === 'dsp') return '/game-icons/dsp.png'
+  if (kind === 'dst') return '/game-icons/dst.png'
+  if (kind === 'demo') return '/game-icons/demo.png'
+  return null
+}
+
 function GameMark(props: { templateId: string; class?: string; title?: string }) {
+  const iconSrc = createMemo(() => gameIconSrc(props.templateId))
   const backdrop = createMemo(() => instanceCardBackdrop(props.templateId))
   const label = createMemo(() => props.title ?? templateLabel(props.templateId))
-  return (
+  const [iconFailed, setIconFailed] = createSignal(false)
+  const [backdropFailed, setBackdropFailed] = createSignal(false)
+
+  createEffect(() => {
+    props.templateId
+    setIconFailed(false)
+    setBackdropFailed(false)
+  })
+
+  const showIcon = createMemo(() => Boolean(iconSrc()) && !iconFailed())
+
+  const fallback = () => (
     <Show
-      when={backdrop()}
+      when={!backdropFailed() && backdrop()}
       fallback={
         <span
-          class={`inline-flex h-9 w-9 items-center justify-center rounded-lg bg-slate-200 text-[10px] text-slate-700 dark:bg-slate-800 dark:text-slate-200 ${props.class ?? ''}`}
+          class={`inline-flex h-9 w-9 items-center justify-center bg-slate-200 text-[10px] text-slate-700 dark:bg-slate-800 dark:text-slate-200 ${props.class ?? ''}`}
         >
           {templateKind(props.templateId).slice(0, 2).toUpperCase()}
         </span>
@@ -72,14 +94,28 @@ function GameMark(props: { templateId: string; class?: string; title?: string })
     >
       {(b) => (
         <img
-          src={(b() as { src: string; position: string }).src}
-          style={{ 'object-position': (b() as { src: string; position: string }).position }}
+          src={b().src}
+          style={{ 'object-position': b().position }}
           alt={label()}
           title={label()}
           draggable={false}
-          class={`h-9 w-9 rounded-lg object-cover ${props.class ?? ''}`}
+          class={`h-9 w-9 object-cover ${props.class ?? ''}`}
+          onError={() => setBackdropFailed(true)}
         />
       )}
+    </Show>
+  )
+
+  return (
+    <Show when={showIcon()} fallback={fallback()}>
+      <img
+        src={iconSrc() ?? ''}
+        alt={label()}
+        title={label()}
+        draggable={false}
+        class={`h-9 w-9 object-contain ${props.class ?? ''}`}
+        onError={() => setIconFailed(true)}
+      />
     </Show>
   )
 }
