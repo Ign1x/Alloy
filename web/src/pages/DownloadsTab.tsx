@@ -3,6 +3,7 @@ import { ArrowDown, ArrowUp, Download, HardDrive, Pause, Play, RotateCw, Search,
 import type { DownloadCenterView, DownloadJob, DownloadTarget } from '../app/types'
 import { downloadJobProgressMessage, downloadJobStatusLabel, downloadJobStatusVariant, downloadTargetLabel } from '../app/helpers/downloads'
 import { formatBytes, formatRelativeTime } from '../app/helpers/format'
+import { instanceCardBackdrop } from '../app/helpers/instances'
 import { DownloadProgress } from '../app/primitives/DownloadProgress'
 import { queryClient } from '../rspc'
 import { Badge } from '../components/ui/Badge'
@@ -11,7 +12,6 @@ import { EmptyState } from '../components/ui/EmptyState'
 import { Field } from '../components/ui/Field'
 import { IconButton } from '../components/ui/IconButton'
 import { Input } from '../components/ui/Input'
-import { TemplateMark } from '../components/ui/TemplateMark'
 
 export type DownloadsTabProps = {
   tab: () => string
@@ -40,6 +40,49 @@ type VersionOption = { value: string; label: string; meta?: string }
 
 const SURFACE =
   'rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950 dark:shadow-none'
+
+function templateKind(templateId: string): string {
+  const i = templateId.indexOf(':')
+  return i >= 0 ? templateId.slice(0, i) : templateId
+}
+
+function templateLabel(templateId: string): string {
+  const kind = templateKind(templateId)
+  if (kind === 'minecraft') return 'Minecraft'
+  if (kind === 'terraria') return 'Terraria'
+  if (kind === 'dsp') return 'DSP (Nebula)'
+  if (kind === 'dst') return "Don't Starve Together"
+  if (kind === 'demo') return 'Demo'
+  return templateId
+}
+
+function GameMark(props: { templateId: string; class?: string; title?: string }) {
+  const backdrop = createMemo(() => instanceCardBackdrop(props.templateId))
+  const label = createMemo(() => props.title ?? templateLabel(props.templateId))
+  return (
+    <Show
+      when={backdrop()}
+      fallback={
+        <span
+          class={`inline-flex h-9 w-9 items-center justify-center rounded-lg bg-slate-200 text-[10px] text-slate-700 dark:bg-slate-800 dark:text-slate-200 ${props.class ?? ''}`}
+        >
+          {templateKind(props.templateId).slice(0, 2).toUpperCase()}
+        </span>
+      }
+    >
+      {(b) => (
+        <img
+          src={(b() as { src: string; position: string }).src}
+          style={{ 'object-position': (b() as { src: string; position: string }).position }}
+          alt={label()}
+          title={label()}
+          draggable={false}
+          class={`h-9 w-9 rounded-lg object-cover ${props.class ?? ''}`}
+        />
+      )}
+    </Show>
+  )
+}
 
 function NavItem(props: {
   value: DownloadCenterView
@@ -132,7 +175,7 @@ function JobRow(props: {
   return (
     <div class="flex flex-wrap items-start justify-between gap-3 px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-900/20">
       <div class="flex min-w-0 items-start gap-3">
-        <TemplateMark templateId={props.job.templateId} class={props.compact ? 'h-8 w-8' : undefined} />
+        <GameMark templateId={props.job.templateId} class={props.compact ? 'h-8 w-8' : undefined} />
         <div class="min-w-0">
           <div class="flex flex-wrap items-center gap-2">
             <div class="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">
@@ -263,7 +306,7 @@ function VersionManager(props: {
     <div class="space-y-4">
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div class="flex min-w-0 items-start gap-3">
-          <TemplateMark templateId={props.templateId} class="mt-0.5 h-9 w-9" />
+          <GameMark templateId={props.templateId} class="mt-0.5" />
           <div class="min-w-0">
             <div class="text-lg font-semibold tracking-tight text-slate-900 dark:text-slate-100">{props.title}</div>
             <div class="mt-1 text-[12px] text-slate-600 dark:text-slate-400">{props.subtitle}</div>
@@ -667,7 +710,7 @@ export default function DownloadsTab(props: DownloadsTabProps) {
               value="minecraft"
               current={view}
               onSelect={setView}
-              icon={<TemplateMark templateId="minecraft:vanilla" class="h-7 w-7" />}
+              icon={<GameMark templateId="minecraft:vanilla" class="h-7 w-7" />}
               label="Minecraft"
               meta={
                 mcCachedVersions().length > 0
@@ -679,7 +722,7 @@ export default function DownloadsTab(props: DownloadsTabProps) {
               value="terraria"
               current={view}
               onSelect={setView}
-              icon={<TemplateMark templateId="terraria:vanilla" class="h-7 w-7" />}
+              icon={<GameMark templateId="terraria:vanilla" class="h-7 w-7" />}
               label="Terraria"
               meta={
                 trCachedVersions().length > 0
@@ -691,7 +734,7 @@ export default function DownloadsTab(props: DownloadsTabProps) {
               value="dsp"
               current={view}
               onSelect={setView}
-              icon={<TemplateMark templateId="dsp:nebula" class="h-7 w-7" />}
+              icon={<GameMark templateId="dsp:nebula" class="h-7 w-7" />}
               label="DSP (Nebula)"
               meta={
                 hasSavedSteamcmdCreds()
