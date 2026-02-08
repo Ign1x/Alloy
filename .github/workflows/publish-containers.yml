@@ -89,8 +89,15 @@ jobs:
           agent_tag="v${agent_version}"
 
           dockerhub_namespace="${DOCKERHUB_NAMESPACE_SECRET:-${DOCKERHUB_USERNAME:-}}"
+          dockerhub_namespace="$(printf '%s' "$dockerhub_namespace" | tr -d '[:space:]')"
+
+          valid_dockerhub_namespace="false"
+          if [ -n "$dockerhub_namespace" ] && printf '%s' "$dockerhub_namespace" | grep -Eq '^[a-z0-9]+([._-][a-z0-9]+)*$'; then
+            valid_dockerhub_namespace="true"
+          fi
+
           have_dockerhub="false"
-          if [ -n "${DOCKERHUB_USERNAME:-}" ] && [ -n "${DOCKERHUB_TOKEN:-}" ] && [ -n "${dockerhub_namespace:-}" ]; then
+          if [ -n "${DOCKERHUB_USERNAME:-}" ] && [ -n "${DOCKERHUB_TOKEN:-}" ] && [ "$valid_dockerhub_namespace" = "true" ]; then
             have_dockerhub="true"
           fi
 
@@ -161,6 +168,7 @@ jobs:
         run: |
           set -euo pipefail
           owner_lc="$(echo "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')"
+          dockerhub_namespace="$(printf '%s' "${DOCKERHUB_NAMESPACE:-}" | tr -d '[:space:]')"
 
           component_tag="$TAG"
           if [ "$IMAGE_NAME" = "alloy-control" ]; then
@@ -175,11 +183,11 @@ jobs:
             tags="${tags}"$'\n'"ghcr.io/${owner_lc}/${IMAGE_NAME}:latest"
           fi
 
-          if [ "$PUBLISH_DOCKERHUB" = "true" ]; then
-            tags="${tags}"$'\n'"${DOCKERHUB_NAMESPACE}/${IMAGE_NAME}:${TAG}"
-            tags="${tags}"$'\n'"${DOCKERHUB_NAMESPACE}/${IMAGE_NAME}:${component_tag}"
+          if [ "$PUBLISH_DOCKERHUB" = "true" ] && [ -n "$dockerhub_namespace" ]; then
+            tags="${tags}"$'\n'"${dockerhub_namespace}/${IMAGE_NAME}:${TAG}"
+            tags="${tags}"$'\n'"${dockerhub_namespace}/${IMAGE_NAME}:${component_tag}"
             if [ "$PUSH_LATEST" = "true" ]; then
-              tags="${tags}"$'\n'"${DOCKERHUB_NAMESPACE}/${IMAGE_NAME}:latest"
+              tags="${tags}"$'\n'"${dockerhub_namespace}/${IMAGE_NAME}:latest"
             fi
           fi
 
@@ -229,15 +237,16 @@ jobs:
           owner_lc="$(echo "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')"
           published_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           control_major_minor="$(printf '%s' "$CONTROL_VERSION" | awk -F. '{print $1 "." $2}')"
+          dockerhub_namespace="$(printf '%s' "${DOCKERHUB_NAMESPACE:-}" | tr -d '[:space:]')"
 
           ghcr_control="ghcr.io/${owner_lc}/alloy-control:${CONTROL_TAG}"
           ghcr_agent="ghcr.io/${owner_lc}/alloy-agent:${AGENT_TAG}"
 
           dockerhub_control=""
           dockerhub_agent=""
-          if [ "$PUBLISH_DOCKERHUB" = "true" ]; then
-            dockerhub_control="${DOCKERHUB_NAMESPACE}/alloy-control:${CONTROL_TAG}"
-            dockerhub_agent="${DOCKERHUB_NAMESPACE}/alloy-agent:${AGENT_TAG}"
+          if [ "$PUBLISH_DOCKERHUB" = "true" ] && [ -n "$dockerhub_namespace" ]; then
+            dockerhub_control="${dockerhub_namespace}/alloy-control:${CONTROL_TAG}"
+            dockerhub_agent="${dockerhub_namespace}/alloy-agent:${AGENT_TAG}"
           fi
 
           jq -n \
