@@ -73,7 +73,7 @@ services:
       - ALLOY_UPDATE_WATCHTOWER_URL=http://watchtower:8080
       - ALLOY_UPDATE_WATCHTOWER_TOKEN=${ALLOY_WATCHTOWER_TOKEN:-}
       # Optional update manifest for component-specific versions (control/agent).
-      - ALLOY_UPDATE_MANIFEST_URL=${ALLOY_UPDATE_MANIFEST_URL:-https://raw.githubusercontent.com/Ign1x/Alloy/main/deploy/update-manifest.json}
+      - ALLOY_UPDATE_MANIFEST_URL=${ALLOY_UPDATE_MANIFEST_URL:-https://github.com/Ign1x/Alloy/releases/latest/download/update-manifest.json}
     depends_on:
       - postgres
       - alloy-agent

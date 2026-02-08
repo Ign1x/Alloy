@@ -48,9 +48,24 @@ docker compose -f deploy/docker-compose.release.yml pull
 docker compose -f deploy/docker-compose.release.yml up -d
 ```
 
+By default, release compose pulls from GHCR (`ghcr.io/ign1x`).
+You can switch to another registry namespace (for example DockerHub mirror) without editing YAML:
+
+```bash
+export ALLOY_IMAGE_REPO_PREFIX=docker.io/<your-namespace>
+export ALLOY_IMAGE_TAG=latest
+docker compose -f deploy/docker-compose.release.yml pull
+docker compose -f deploy/docker-compose.release.yml up -d
+```
+
 ### One-click updates (optional)
 
-`deploy/docker-compose.release.yml` includes a `watchtower` service with an HTTP API and a default update manifest URL. If you set `ALLOY_WATCHTOWER_TOKEN` (compose `.env`) and keep the panel admin-only, you can trigger control updates from the UI:
+`deploy/docker-compose.release.yml` includes a `watchtower` service with an HTTP API and a default manifest URL:
+
+- `https://github.com/Ign1x/Alloy/releases/latest/download/update-manifest.json`
+
+This manifest asset is published together with each tag release by CI.
+If you set `ALLOY_WATCHTOWER_TOKEN` (compose `.env`) and keep the panel admin-only, you can trigger control updates from the UI:
 
 - Web → **Settings** → **Updates** → **Update now**
 
@@ -276,9 +291,38 @@ For panel one-click updates, set on `alloy-control`:
 
 - `ALLOY_UPDATE_WATCHTOWER_URL=http://watchtower:8080` (required)
 - `ALLOY_UPDATE_WATCHTOWER_TOKEN=<token>` (optional; required only when watchtower HTTP API auth is enabled)
-- `ALLOY_UPDATE_MANIFEST_URL=<json-url>` (optional; if set, update checks read component versions from manifest first, then fall back to GitHub `releases/latest`)
+- `ALLOY_UPDATE_MANIFEST_URL=<json-url>` (optional; defaults to `https://github.com/Ign1x/Alloy/releases/latest/download/update-manifest.json`)
 
-A sample manifest is provided at `deploy/update-manifest.json`.
+The default manifest URL is release-asset based (not branch-file based), so update checks stay stable even if the default branch name changes.
+A sample manifest is also kept at `deploy/update-manifest.json`.
+
+For release compose image sources:
+
+- `ALLOY_IMAGE_REPO_PREFIX=ghcr.io/ign1x` (default)
+- `ALLOY_IMAGE_REPO_PREFIX=docker.io/<your-namespace>` (DockerHub mirror)
+- `ALLOY_IMAGE_TAG=latest` (default; can pin to `v0.x.y` if desired)
+
+### Automated release publishing (GHCR primary + DockerHub mirror)
+
+CI workflow: `.github/workflows/publish-containers.yml`
+
+Trigger modes:
+
+- Push tag `v*` (for example `v0.2.3`)
+- Manual run (`workflow_dispatch`) with `tag`
+
+What CI does:
+
+1. Build/push `alloy-agent`, `alloy-control`, `alloy-web` to GHCR
+2. Optionally mirror the same tags to DockerHub (if secrets are configured)
+3. Generate `update-manifest.json` for that tag
+4. Upload manifest as release asset, so `releases/latest/download/update-manifest.json` always points to the newest published release
+
+Required repo secrets for DockerHub mirror:
+
+- `DOCKERHUB_USERNAME`
+- `DOCKERHUB_TOKEN`
+- `DOCKERHUB_NAMESPACE` (optional; defaults to `DOCKERHUB_USERNAME`)
 
 ### Remote node self-update (from Control Web)
 

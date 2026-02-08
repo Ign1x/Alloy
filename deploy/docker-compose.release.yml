@@ -11,7 +11,7 @@ services:
     restart: unless-stopped
 
   alloy-agent:
-    image: ghcr.io/ign1x/alloy-agent:latest
+    image: ${ALLOY_IMAGE_REPO_PREFIX:-ghcr.io/ign1x}/alloy-agent:${ALLOY_IMAGE_TAG:-latest}
     # Use host networking so game servers can bind arbitrary ports without
     # needing explicit `ports:` mappings (best for multi-game + dynamic ports).
     #
@@ -27,7 +27,7 @@ services:
       - ALLOY_SANDBOX_MODE=auto
       - ALLOY_SANDBOX_DOCKER_ENABLED=true
       - ALLOY_SANDBOX_FORCE_MODE=docker
-      - ALLOY_SANDBOX_DOCKER_IMAGE=ghcr.io/ign1x/alloy-agent:latest
+      - ALLOY_SANDBOX_DOCKER_IMAGE=${ALLOY_IMAGE_REPO_PREFIX:-ghcr.io/ign1x}/alloy-agent:${ALLOY_IMAGE_TAG:-latest}
       - ALLOY_SANDBOX_DOCKER_DATA_VOLUME=alloy-agent-data
       # Best-effort cgroup v2 quota enforcement (memory/cpu/pids).
       - ALLOY_SANDBOX_ENABLE_CGROUPS=true
@@ -51,7 +51,7 @@ services:
     restart: unless-stopped
 
   alloy-control:
-    image: ghcr.io/ign1x/alloy-control:latest
+    image: ${ALLOY_IMAGE_REPO_PREFIX:-ghcr.io/ign1x}/alloy-control:${ALLOY_IMAGE_TAG:-latest}
     ports:
       - "8080:8080"
     extra_hosts:
@@ -68,7 +68,7 @@ services:
       - ALLOY_UPDATE_WATCHTOWER_URL=http://watchtower:8080
       - ALLOY_UPDATE_WATCHTOWER_TOKEN=${ALLOY_WATCHTOWER_TOKEN:-}
       # Optional update manifest for component-specific versions (control/agent).
-      - ALLOY_UPDATE_MANIFEST_URL=${ALLOY_UPDATE_MANIFEST_URL:-https://raw.githubusercontent.com/Ign1x/Alloy/main/deploy/update-manifest.json}
+      - ALLOY_UPDATE_MANIFEST_URL=${ALLOY_UPDATE_MANIFEST_URL:-https://github.com/Ign1x/Alloy/releases/latest/download/update-manifest.json}
     depends_on:
       - postgres
       - alloy-agent
@@ -77,7 +77,7 @@ services:
     restart: unless-stopped
 
   web:
-    image: ghcr.io/ign1x/alloy-web:latest
+    image: ${ALLOY_IMAGE_REPO_PREFIX:-ghcr.io/ign1x}/alloy-web:${ALLOY_IMAGE_TAG:-latest}
     ports:
       - "3000:80"
     depends_on:

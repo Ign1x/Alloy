@@ -1,0 +1,260 @@
+name: Publish Containers
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (vX.Y.Z)"
+        required: true
+        type: string
+      publish_dockerhub:
+        description: "Also publish DockerHub mirror (requires secrets)"
+        required: true
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      version: ${{ steps.meta.outputs.version }}
+      channel: ${{ steps.meta.outputs.channel }}
+      push_latest: ${{ steps.meta.outputs.push_latest }}
+      release_url: ${{ steps.meta.outputs.release_url }}
+      publish_dockerhub: ${{ steps.meta.outputs.publish_dockerhub }}
+      dockerhub_namespace: ${{ steps.meta.outputs.dockerhub_namespace }}
+    steps:
+      - id: meta
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+          INPUT_PUBLISH_DOCKERHUB: ${{ github.event.inputs.publish_dockerhub }}
+          REPOSITORY: ${{ github.repository }}
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          DOCKERHUB_NAMESPACE_SECRET: ${{ secrets.DOCKERHUB_NAMESPACE }}
+        run: |
+          set -euo pipefail
+
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            tag="${INPUT_TAG:-}"
+            dispatch_publish="${INPUT_PUBLISH_DOCKERHUB:-true}"
+          else
+            tag="${REF_NAME}"
+            dispatch_publish="true"
+          fi
+
+          if [ -z "$tag" ]; then
+            echo "Release tag is required (for example: v0.2.3)." >&2
+            exit 1
+          fi
+
+          if ! printf '%s' "$tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$'; then
+            echo "Invalid tag format: $tag" >&2
+            exit 1
+          fi
+
+          version="${tag#v}"
+          channel="stable"
+          push_latest="true"
+          if printf '%s' "$tag" | grep -Eq '[-+]'; then
+            channel="prerelease"
+            push_latest="false"
+          fi
+
+          dockerhub_namespace="${DOCKERHUB_NAMESPACE_SECRET:-${DOCKERHUB_USERNAME:-}}"
+          have_dockerhub="false"
+          if [ -n "${DOCKERHUB_USERNAME:-}" ] && [ -n "${DOCKERHUB_TOKEN:-}" ] && [ -n "${dockerhub_namespace:-}" ]; then
+            have_dockerhub="true"
+          fi
+
+          publish_dockerhub="false"
+          if [ "$dispatch_publish" = "true" ] && [ "$have_dockerhub" = "true" ]; then
+            publish_dockerhub="true"
+          fi
+
+          release_url="https://github.com/${REPOSITORY}/releases/tag/${tag}"
+
+          {
+            echo "tag=$tag"
+            echo "version=$version"
+            echo "channel=$channel"
+            echo "push_latest=$push_latest"
+            echo "release_url=$release_url"
+            echo "publish_dockerhub=$publish_dockerhub"
+            echo "dockerhub_namespace=$dockerhub_namespace"
+          } >> "$GITHUB_OUTPUT"
+
+  build-and-publish:
+    needs: prepare
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image_name: alloy-agent
+            dockerfile: deploy/agent.Dockerfile
+          - image_name: alloy-control
+            dockerfile: deploy/control.Dockerfile
+          - image_name: alloy-web
+            dockerfile: deploy/web.Dockerfile
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Login to DockerHub (optional mirror)
+        if: needs.prepare.outputs.publish_dockerhub == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: docker.io
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - id: tags
+        env:
+          TAG: ${{ needs.prepare.outputs.tag }}
+          PUSH_LATEST: ${{ needs.prepare.outputs.push_latest }}
+          PUBLISH_DOCKERHUB: ${{ needs.prepare.outputs.publish_dockerhub }}
+          DOCKERHUB_NAMESPACE: ${{ needs.prepare.outputs.dockerhub_namespace }}
+          IMAGE_NAME: ${{ matrix.image_name }}
+        run: |
+          set -euo pipefail
+          owner_lc="$(echo "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')"
+
+          tags="ghcr.io/${owner_lc}/${IMAGE_NAME}:${TAG}"
+          if [ "$PUSH_LATEST" = "true" ]; then
+            tags="${tags}"$'\n'"ghcr.io/${owner_lc}/${IMAGE_NAME}:latest"
+          fi
+
+          if [ "$PUBLISH_DOCKERHUB" = "true" ]; then
+            tags="${tags}"$'\n'"${DOCKERHUB_NAMESPACE}/${IMAGE_NAME}:${TAG}"
+            if [ "$PUSH_LATEST" = "true" ]; then
+              tags="${tags}"$'\n'"${DOCKERHUB_NAMESPACE}/${IMAGE_NAME}:latest"
+            fi
+          fi
+
+          {
+            echo "value<<EOF"
+            echo "$tags"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build and push ${{ matrix.image_name }}
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: ${{ steps.tags.outputs.value }}
+          labels: |
+            org.opencontainers.image.title=${{ matrix.image_name }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.version=${{ needs.prepare.outputs.tag }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  publish-manifest-asset:
+    needs:
+      - prepare
+      - build-and-publish
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate update manifest
+        env:
+          TAG: ${{ needs.prepare.outputs.tag }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          CHANNEL: ${{ needs.prepare.outputs.channel }}
+          RELEASE_URL: ${{ needs.prepare.outputs.release_url }}
+          PUBLISH_DOCKERHUB: ${{ needs.prepare.outputs.publish_dockerhub }}
+          DOCKERHUB_NAMESPACE: ${{ needs.prepare.outputs.dockerhub_namespace }}
+        run: |
+          set -euo pipefail
+
+          owner_lc="$(echo "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')"
+          published_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          major_minor="$(printf '%s' "$VERSION" | awk -F. '{print $1 "." $2}')"
+
+          ghcr_control="ghcr.io/${owner_lc}/alloy-control:${TAG}"
+          ghcr_agent="ghcr.io/${owner_lc}/alloy-agent:${TAG}"
+
+          dockerhub_control=""
+          dockerhub_agent=""
+          if [ "$PUBLISH_DOCKERHUB" = "true" ]; then
+            dockerhub_control="${DOCKERHUB_NAMESPACE}/alloy-control:${TAG}"
+            dockerhub_agent="${DOCKERHUB_NAMESPACE}/alloy-agent:${TAG}"
+          fi
+
+          jq -n \
+            --arg tag "$TAG" \
+            --arg version "$VERSION" \
+            --arg channel "$CHANNEL" \
+            --arg published_at "$published_at" \
+            --arg release_url "$RELEASE_URL" \
+            --arg ghcr_control "$ghcr_control" \
+            --arg ghcr_agent "$ghcr_agent" \
+            --arg dockerhub_control "$dockerhub_control" \
+            --arg dockerhub_agent "$dockerhub_agent" \
+            --arg control_min_agent "${major_minor}.0" \
+            --arg control_max_agent "${major_minor}.x" \
+            --arg major_minor "$major_minor" \
+            '{
+              schema: 1,
+              channel: $channel,
+              published_at: $published_at,
+              control: {
+                tag: $tag,
+                version: $version,
+                url: $release_url,
+                images: {
+                  ghcr: $ghcr_control,
+                  dockerhub: (if $dockerhub_control == "" then null else $dockerhub_control end)
+                }
+              },
+              agent: {
+                tag: $tag,
+                version: $version,
+                url: $release_url,
+                images: {
+                  ghcr: $ghcr_agent,
+                  dockerhub: (if $dockerhub_agent == "" then null else $dockerhub_agent end)
+                }
+              },
+              compatibility: {
+                control_min_agent: $control_min_agent,
+                control_max_agent: $control_max_agent,
+                note: ("Control and agent in the same minor series are recommended (for example, " + $major_minor + ".x with " + $major_minor + ".x).")
+              }
+            }' > update-manifest.json
+
+      - name: Create/update GitHub release and upload manifest
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.prepare.outputs.tag }}
+          name: ${{ needs.prepare.outputs.tag }}
+          draft: false
+          prerelease: ${{ needs.prepare.outputs.channel != 'stable' }}
+          files: update-manifest.json
+          overwrite_files: true
