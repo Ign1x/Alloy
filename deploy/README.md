@@ -311,12 +311,19 @@ Trigger modes:
 - Push tag `v*` (for example `v0.2.3`)
 - Manual run (`workflow_dispatch`) with `tag`
 
+Notes:
+
+- Release tag and component versions can differ.
+- Manifest `control.version` comes from `crates/alloy-control/Cargo.toml`.
+- Manifest `agent.version` comes from `crates/alloy-agent/Cargo.toml`.
+
 What CI does:
 
 1. Build/push `alloy-agent`, `alloy-control`, `alloy-web` to GHCR
-2. Optionally mirror the same tags to DockerHub (if secrets are configured)
-3. Generate `update-manifest.json` for that tag
-4. Upload manifest as release asset, so `releases/latest/download/update-manifest.json` always points to the newest published release
+2. Tag images by both release tag (`vX.Y.Z`) and component tag (`alloy-control:vA.B.C`, `alloy-agent:vD.E.F`), so control/agent can evolve independently
+3. Optionally mirror the same tags to DockerHub (if secrets are configured)
+4. Generate `update-manifest.json` with independent `control` and `agent` versions
+5. Upload manifest as release asset, so `releases/latest/download/update-manifest.json` always points to the newest published release
 
 Required repo secrets for DockerHub mirror:
 

@@ -29,9 +29,56 @@ export default function NodesTab(props: NodesTabProps) {
     nodeSelfUpdateStatus,
     nodeEnabledOverride,
     setNodeEnabledOverride,
+    updateCheck,
     pushToast,
     toastError,
   } = props as any
+
+  type SimpleVersion = { major: number; minor: number; patch: number }
+
+  function parseSimpleVersion(raw: string | null | undefined): SimpleVersion | null {
+    if (!raw) return null
+    const value = raw.trim().replace(/^v/i, '')
+    if (!value) return null
+    const parts = value.split(/[.+-]/)
+    if (parts.length < 3) return null
+    const major = Number.parseInt(parts[0] ?? '', 10)
+    const minor = Number.parseInt(parts[1] ?? '', 10)
+    const patch = Number.parseInt(parts[2] ?? '', 10)
+    if (!Number.isFinite(major) || !Number.isFinite(minor) || !Number.isFinite(patch)) return null
+    return { major, minor, patch }
+  }
+
+  function compareSimpleVersion(a: SimpleVersion, b: SimpleVersion): number {
+    if (a.major !== b.major) return a.major > b.major ? 1 : -1
+    if (a.minor !== b.minor) return a.minor > b.minor ? 1 : -1
+    if (a.patch !== b.patch) return a.patch > b.patch ? 1 : -1
+    return 0
+  }
+
+  function nodeAgentUpdateState(node: { agent_version: string | null | undefined }) {
+    const target = updateCheck.data?.agent_latest
+    if (!target) {
+      return {
+        targetTag: null as string | null,
+        updateAvailable: null as boolean | null,
+      }
+    }
+
+    const currentParsed = parseSimpleVersion(node.agent_version)
+    const targetParsed = parseSimpleVersion(target.version ?? target.tag)
+    if (!currentParsed || !targetParsed) {
+      return {
+        targetTag: target.tag,
+        updateAvailable: null as boolean | null,
+      }
+    }
+
+    return {
+      targetTag: target.tag,
+      updateAvailable: compareSimpleVersion(currentParsed, targetParsed) < 0,
+    }
+  }
 
   function nodeUpdateDisabledReason(node: { id: string; enabled: boolean }): string | null {
     if (!node.enabled) return 'Enable this node first'
@@ -40,6 +87,25 @@ export default function NodesTab(props: NodesTabProps) {
     if (nodeSelfUpdateStatus.isError) return 'Updater status unavailable'
     if (!nodeSelfUpdateStatus.data?.configured) return 'Node updater is not configured'
     return null
+  }
+
+  function nodeUpdateButtonLabel(node: { agent_version: string | null | undefined }): string {
+    const state = nodeAgentUpdateState(node)
+    if (state.updateAvailable === false) return 'Re-run update'
+    return 'Update node'
+  }
+
+  function nodeUpdateButtonTitle(node: { id: string; enabled: boolean; agent_version: string | null | undefined }): string {
+    const disabled = nodeUpdateDisabledReason(node)
+    if (disabled) return disabled
+    const state = nodeAgentUpdateState(node)
+    if (state.updateAvailable === false) {
+      return 'Node agent is already up to date (you can still force update)'
+    }
+    if (state.targetTag) {
+      return `Trigger node self update (target ${state.targetTag})`
+    }
+    return 'Trigger node self update'
   }
 
   return (
@@ -173,6 +239,38 @@ export default function NodesTab(props: NodesTabProps) {
                                                 {(nodeSelfUpdateStatus.data?.provider || 'watchtower').toLowerCase()} · {nodeSelfUpdateStatus.data?.endpoint || '-'}
                                               </div>
                                             </Show>
+
+                                            <Show when={updateCheck.isPending}>
+                                              <span class="mt-1 inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] text-slate-600 dark:border-slate-800 dark:bg-slate-900/40 dark:text-slate-300">
+                                                Checking target version…
+                                              </span>
+                                            </Show>
+
+                                            <Show when={!updateCheck.isPending && updateCheck.data?.agent_latest}>
+                                              {(agentLatest) => (
+                                                <div class="mt-1 flex flex-wrap items-center gap-1 text-[10px]">
+                                                  <span class="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-slate-600 dark:border-slate-800 dark:bg-slate-900/40 dark:text-slate-300">
+                                                    Target {agentLatest().tag}
+                                                  </span>
+                                                  <Show when={nodeAgentUpdateState(n()).updateAvailable === true}>
+                                                    <span class="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-amber-700 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-300">
+                                                      Update available
+                                                    </span>
+                                                  </Show>
+                                                  <Show when={nodeAgentUpdateState(n()).updateAvailable === false}>
+                                                    <span class="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/20 dark:text-emerald-300">
+                                                      Agent up to date
+                                                    </span>
+                                                  </Show>
+                                                  <Show when={nodeAgentUpdateState(n()).updateAvailable == null}>
+                                                    <span class="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-slate-600 dark:border-slate-800 dark:bg-slate-900/40 dark:text-slate-300">
+                                                      Version compare unavailable
+                                                    </span>
+                                                  </Show>
+                                                </div>
+                                              )}
+                                            </Show>
+
                                             <Show when={!nodeSelfUpdateStatus.isPending && nodeSelfUpdateStatus.isError}>
                                               <span class="inline-flex items-center rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 text-[10px] text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-300">
                                                 Updater check failed
@@ -186,10 +284,10 @@ export default function NodesTab(props: NodesTabProps) {
                                           <Button
                                             type="button"
                                             size="sm"
-                                            variant="secondary"
+                                            variant={nodeAgentUpdateState(n()).updateAvailable === true ? 'primary' : 'secondary'}
                                             loading={triggerNodeSelfUpdate.isPending}
                                             disabled={triggerNodeSelfUpdate.isPending || Boolean(nodeUpdateDisabledReason(n()))}
-                                            title={nodeUpdateDisabledReason(n()) ?? 'Trigger node self update'}
+                                            title={nodeUpdateButtonTitle(n())}
                                             onClick={async () => {
                                               try {
                                                 const out = await triggerNodeSelfUpdate.mutateAsync({ node_id: n().id })
@@ -209,7 +307,7 @@ export default function NodesTab(props: NodesTabProps) {
                                               }
                                             }}
                                           >
-                                            Update node
+                                            {nodeUpdateButtonLabel(n())}
                                           </Button>
 
                                           <button
@@ -263,8 +361,22 @@ export default function NodesTab(props: NodesTabProps) {
                                         <div class="mt-1 text-slate-700 dark:text-slate-200">{n().last_error ? 'Error' : n().last_seen_at ? 'Healthy' : 'Unknown'}</div>
                                       </div>
                                       <div>
-                                        <div class="text-[11px] text-slate-500">Agent</div>
+                                        <div class="text-[11px] text-slate-500">Agent current</div>
                                         <div class="mt-1 text-slate-700 dark:text-slate-200">{n().agent_version ?? '-'}</div>
+                                      </div>
+                                      <div>
+                                        <div class="text-[11px] text-slate-500">Agent target</div>
+                                        <div class="mt-1 text-slate-700 dark:text-slate-200">{nodeAgentUpdateState(n()).targetTag ?? '-'}</div>
+                                      </div>
+                                      <div>
+                                        <div class="text-[11px] text-slate-500">Agent update</div>
+                                        <div class="mt-1 text-slate-700 dark:text-slate-200">
+                                          {nodeAgentUpdateState(n()).updateAvailable === true
+                                            ? 'Available'
+                                            : nodeAgentUpdateState(n()).updateAvailable === false
+                                              ? 'Up to date'
+                                              : 'Unknown'}
+                                        </div>
                                       </div>
                                       <div class="col-span-2">
                                         <div class="text-[11px] text-slate-500">Last seen</div>

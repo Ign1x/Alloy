@@ -2210,6 +2210,7 @@ function App() {
     nodeSelfUpdateStatus,
     nodeEnabledOverride,
     setNodeEnabledOverride,
+    updateCheck,
     pushToast,
     toastError,
   }

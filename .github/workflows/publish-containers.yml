@@ -28,13 +28,18 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.meta.outputs.tag }}
-      version: ${{ steps.meta.outputs.version }}
       channel: ${{ steps.meta.outputs.channel }}
       push_latest: ${{ steps.meta.outputs.push_latest }}
       release_url: ${{ steps.meta.outputs.release_url }}
       publish_dockerhub: ${{ steps.meta.outputs.publish_dockerhub }}
       dockerhub_namespace: ${{ steps.meta.outputs.dockerhub_namespace }}
+      control_version: ${{ steps.meta.outputs.control_version }}
+      agent_version: ${{ steps.meta.outputs.agent_version }}
+      control_tag: ${{ steps.meta.outputs.control_tag }}
+      agent_tag: ${{ steps.meta.outputs.agent_tag }}
     steps:
+      - uses: actions/checkout@v4
+
       - id: meta
         env:
           EVENT_NAME: ${{ github.event_name }}
@@ -66,13 +71,22 @@ jobs:
             exit 1
           fi
 
-          version="${tag#v}"
           channel="stable"
           push_latest="true"
           if printf '%s' "$tag" | grep -Eq '[-+]'; then
             channel="prerelease"
             push_latest="false"
           fi
+
+          control_version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' crates/alloy-control/Cargo.toml | head -n1)"
+          agent_version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' crates/alloy-agent/Cargo.toml | head -n1)"
+          if [ -z "$control_version" ] || [ -z "$agent_version" ]; then
+            echo "Failed to detect control/agent versions from Cargo.toml" >&2
+            exit 1
+          fi
+
+          control_tag="v${control_version}"
+          agent_tag="v${agent_version}"
 
           dockerhub_namespace="${DOCKERHUB_NAMESPACE_SECRET:-${DOCKERHUB_USERNAME:-}}"
           have_dockerhub="false"
@@ -89,12 +103,15 @@ jobs:
 
           {
             echo "tag=$tag"
-            echo "version=$version"
             echo "channel=$channel"
             echo "push_latest=$push_latest"
             echo "release_url=$release_url"
             echo "publish_dockerhub=$publish_dockerhub"
             echo "dockerhub_namespace=$dockerhub_namespace"
+            echo "control_version=$control_version"
+            echo "agent_version=$agent_version"
+            echo "control_tag=$control_tag"
+            echo "agent_tag=$agent_tag"
           } >> "$GITHUB_OUTPUT"
 
   build-and-publish:
@@ -138,22 +155,35 @@ jobs:
           PUSH_LATEST: ${{ needs.prepare.outputs.push_latest }}
           PUBLISH_DOCKERHUB: ${{ needs.prepare.outputs.publish_dockerhub }}
           DOCKERHUB_NAMESPACE: ${{ needs.prepare.outputs.dockerhub_namespace }}
+          CONTROL_TAG: ${{ needs.prepare.outputs.control_tag }}
+          AGENT_TAG: ${{ needs.prepare.outputs.agent_tag }}
           IMAGE_NAME: ${{ matrix.image_name }}
         run: |
           set -euo pipefail
           owner_lc="$(echo "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')"
 
+          component_tag="$TAG"
+          if [ "$IMAGE_NAME" = "alloy-control" ]; then
+            component_tag="$CONTROL_TAG"
+          elif [ "$IMAGE_NAME" = "alloy-agent" ]; then
+            component_tag="$AGENT_TAG"
+          fi
+
           tags="ghcr.io/${owner_lc}/${IMAGE_NAME}:${TAG}"
+          tags="${tags}"$'\n'"ghcr.io/${owner_lc}/${IMAGE_NAME}:${component_tag}"
           if [ "$PUSH_LATEST" = "true" ]; then
             tags="${tags}"$'\n'"ghcr.io/${owner_lc}/${IMAGE_NAME}:latest"
           fi
 
           if [ "$PUBLISH_DOCKERHUB" = "true" ]; then
             tags="${tags}"$'\n'"${DOCKERHUB_NAMESPACE}/${IMAGE_NAME}:${TAG}"
+            tags="${tags}"$'\n'"${DOCKERHUB_NAMESPACE}/${IMAGE_NAME}:${component_tag}"
             if [ "$PUSH_LATEST" = "true" ]; then
               tags="${tags}"$'\n'"${DOCKERHUB_NAMESPACE}/${IMAGE_NAME}:latest"
             fi
           fi
+
+          tags="$(printf '%s\n' "$tags" | awk 'NF && !seen[$0]++')"
 
           {
             echo "value<<EOF"
@@ -185,48 +215,51 @@ jobs:
       - name: Generate update manifest
         env:
           TAG: ${{ needs.prepare.outputs.tag }}
-          VERSION: ${{ needs.prepare.outputs.version }}
           CHANNEL: ${{ needs.prepare.outputs.channel }}
           RELEASE_URL: ${{ needs.prepare.outputs.release_url }}
           PUBLISH_DOCKERHUB: ${{ needs.prepare.outputs.publish_dockerhub }}
           DOCKERHUB_NAMESPACE: ${{ needs.prepare.outputs.dockerhub_namespace }}
+          CONTROL_VERSION: ${{ needs.prepare.outputs.control_version }}
+          AGENT_VERSION: ${{ needs.prepare.outputs.agent_version }}
+          CONTROL_TAG: ${{ needs.prepare.outputs.control_tag }}
+          AGENT_TAG: ${{ needs.prepare.outputs.agent_tag }}
         run: |
           set -euo pipefail
 
           owner_lc="$(echo "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')"
           published_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          major_minor="$(printf '%s' "$VERSION" | awk -F. '{print $1 "." $2}')"
+          control_major_minor="$(printf '%s' "$CONTROL_VERSION" | awk -F. '{print $1 "." $2}')"
 
-          ghcr_control="ghcr.io/${owner_lc}/alloy-control:${TAG}"
-          ghcr_agent="ghcr.io/${owner_lc}/alloy-agent:${TAG}"
+          ghcr_control="ghcr.io/${owner_lc}/alloy-control:${CONTROL_TAG}"
+          ghcr_agent="ghcr.io/${owner_lc}/alloy-agent:${AGENT_TAG}"
 
           dockerhub_control=""
           dockerhub_agent=""
           if [ "$PUBLISH_DOCKERHUB" = "true" ]; then
-            dockerhub_control="${DOCKERHUB_NAMESPACE}/alloy-control:${TAG}"
-            dockerhub_agent="${DOCKERHUB_NAMESPACE}/alloy-agent:${TAG}"
+            dockerhub_control="${DOCKERHUB_NAMESPACE}/alloy-control:${CONTROL_TAG}"
+            dockerhub_agent="${DOCKERHUB_NAMESPACE}/alloy-agent:${AGENT_TAG}"
           fi
 
           jq -n \
-            --arg tag "$TAG" \
-            --arg version "$VERSION" \
             --arg channel "$CHANNEL" \
             --arg published_at "$published_at" \
             --arg release_url "$RELEASE_URL" \
+            --arg control_tag "$CONTROL_TAG" \
+            --arg control_version "$CONTROL_VERSION" \
+            --arg agent_tag "$AGENT_TAG" \
+            --arg agent_version "$AGENT_VERSION" \
             --arg ghcr_control "$ghcr_control" \
             --arg ghcr_agent "$ghcr_agent" \
             --arg dockerhub_control "$dockerhub_control" \
             --arg dockerhub_agent "$dockerhub_agent" \
-            --arg control_min_agent "${major_minor}.0" \
-            --arg control_max_agent "${major_minor}.x" \
-            --arg major_minor "$major_minor" \
+            --arg control_major_minor "$control_major_minor" \
             '{
               schema: 1,
               channel: $channel,
               published_at: $published_at,
               control: {
-                tag: $tag,
-                version: $version,
+                tag: $control_tag,
+                version: $control_version,
                 url: $release_url,
                 images: {
                   ghcr: $ghcr_control,
@@ -234,8 +267,8 @@ jobs:
                 }
               },
               agent: {
-                tag: $tag,
-                version: $version,
+                tag: $agent_tag,
+                version: $agent_version,
                 url: $release_url,
                 images: {
                   ghcr: $ghcr_agent,
@@ -243,9 +276,9 @@ jobs:
                 }
               },
               compatibility: {
-                control_min_agent: $control_min_agent,
-                control_max_agent: $control_max_agent,
-                note: ("Control and agent in the same minor series are recommended (for example, " + $major_minor + ".x with " + $major_minor + ".x).")
+                control_min_agent: ($control_major_minor + ".0"),
+                control_max_agent: ($control_major_minor + ".x"),
+                note: ("Control and agent in the same minor series are recommended (control " + $control_major_minor + ".x).")
               }
             }' > update-manifest.json
 
