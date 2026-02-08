@@ -1,8 +1,4 @@
-use std::{
-    collections::BTreeMap,
-    sync::OnceLock,
-    time::Duration,
-};
+use std::{collections::BTreeMap, sync::OnceLock, time::Duration};
 
 const DEFAULT_LOG_MAX_LINES: usize = 1000;
 const DEFAULT_LOG_FILE_MAX_BYTES: u64 = 10 * 1024 * 1024; // 10 MiB

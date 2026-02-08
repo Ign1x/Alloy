@@ -14,6 +14,8 @@ export function templateDisplayLabel(templateId: string): string {
   if (kind === 'minecraft') return 'Minecraft'
   if (kind === 'terraria') return 'Terraria'
   if (kind === 'dst') return "Don't Starve Together"
+  if (kind === 'palworld') return 'Palworld'
+  if (kind === 'factorio') return 'Factorio'
   if (kind === 'demo') return 'Demo'
   return titleCase(kind)
 }
@@ -23,5 +25,7 @@ export function templateLogoSrc(templateId: string): string | undefined {
   if (kind === 'minecraft') return 'https://external-content.duckduckgo.com/ip3/www.minecraft.net.ico'
   if (kind === 'terraria') return 'https://external-content.duckduckgo.com/ip3/www.terraria.org.ico'
   if (kind === 'dst') return 'https://external-content.duckduckgo.com/ip3/dontstarve.fandom.com.ico'
+  if (kind === 'palworld') return 'https://external-content.duckduckgo.com/ip3/pocketpair.jp.ico'
+  if (kind === 'factorio') return 'https://external-content.duckduckgo.com/ip3/www.factorio.com.ico'
   return undefined
 }

@@ -13,6 +13,8 @@ import { Tooltip } from '../components/ui/Tooltip'
 import MinecraftCreateSection from './instances-create/MinecraftCreateSection'
 import DstCreateSection from './instances-create/DstCreateSection'
 import TerrariaCreateSection from './instances-create/TerrariaCreateSection'
+import PalworldCreateSection from './instances-create/PalworldCreateSection'
+import FactorioCreateSection from './instances-create/FactorioCreateSection'
 
 export type InstancesCreatePanelProps = {
   [key: string]: unknown
@@ -23,6 +25,8 @@ export default function InstancesCreatePanel(props: InstancesCreatePanelProps) {
     createFieldErrors,
     createFormError,
     createInstance,
+    createNodeDropdownOptions,
+    createNodeId,
     createPreview,
     createTemplateId,
     dstAuthPort,
@@ -54,6 +58,8 @@ export default function InstancesCreatePanel(props: InstancesCreatePanelProps) {
     setCreateFormError,
     setCreateInstanceNameEl,
     setCreateInstanceNameRef,
+    setCreateNodeId,
+    setCreateNodeSelectEl,
     setCreateSleepSecondsEl,
     setInstanceName,
     setSelectedInstanceId,
@@ -105,6 +111,18 @@ export default function InstancesCreatePanel(props: InstancesCreatePanelProps) {
                         />
                       </Field>
 
+                      <Field label="Agent" error={createFieldErrors().node_id}>
+                        <div ref={(el) => setCreateNodeSelectEl?.(el)}>
+                          <Dropdown
+                            label=""
+                            value={createNodeId()}
+                            options={createNodeDropdownOptions()}
+                            placeholder="Default agent"
+                            onChange={setCreateNodeId}
+                          />
+                        </div>
+                      </Field>
+
 	                      <Show when={selectedTemplate() === 'demo:sleep'}>
 	                        <Field
 	                          label="Seconds"
@@ -134,6 +152,10 @@ export default function InstancesCreatePanel(props: InstancesCreatePanelProps) {
                       <DstCreateSection {...(props as any)} />
 
                       <TerrariaCreateSection {...(props as any)} />
+
+                      <PalworldCreateSection {...(props as any)} />
+
+                      <FactorioCreateSection {...(props as any)} />
 
 
                       <div class="rounded-xl border border-slate-200 bg-white/60 p-3 dark:border-slate-800 dark:bg-slate-950/40">
@@ -280,6 +302,28 @@ export default function InstancesCreatePanel(props: InstancesCreatePanelProps) {
                               if (p) params.port = p
                               if (mp) params.master_port = mp
                               if (ap) params.auth_port = ap
+                            } else if (template_id === 'palworld:vanilla') {
+                              params.server_name = (props as any).pwServerName().trim() || 'Alloy Palworld server'
+                              params.max_players = (props as any).pwMaxPlayers().trim() || '32'
+                              params.public = (props as any).pwPublic() ? 'true' : 'false'
+                              if ((props as any).pwServerDescription().trim()) params.server_description = (props as any).pwServerDescription().trim()
+                              if ((props as any).pwPassword().trim()) params.password = (props as any).pwPassword().trim()
+                              if ((props as any).pwAdminPassword().trim()) params.admin_password = (props as any).pwAdminPassword().trim()
+                              if ((props as any).pwPort().trim()) params.port = (props as any).pwPort().trim()
+                              if ((props as any).pwQueryPort().trim()) params.query_port = (props as any).pwQueryPort().trim()
+                            } else if (template_id === 'factorio:vanilla') {
+                              params.version = (props as any).fxVersion().trim() || 'stable'
+                              params.server_name = (props as any).fxServerName().trim() || 'Alloy Factorio server'
+                              params.max_players = (props as any).fxMaxPlayers().trim() || '8'
+                              params.public = (props as any).fxPublic() ? 'true' : 'false'
+                              if ((props as any).fxPort().trim()) params.port = (props as any).fxPort().trim()
+                              if ((props as any).fxServerDescription().trim()) params.server_description = (props as any).fxServerDescription().trim()
+                              if ((props as any).fxRconEnabled()) {
+                                params.rcon_enabled = 'true'
+                                if ((props as any).fxRconPort().trim()) params.rcon_port = (props as any).fxRconPort().trim()
+                                if ((props as any).fxRconPassword().trim()) params.rcon_password = (props as any).fxRconPassword().trim()
+                                else localErrors.rcon_password = 'RCON enabled requires a password.'
+                              }
                             }
 
                             if (Object.keys(localErrors).length > 0) {
@@ -289,7 +333,8 @@ export default function InstancesCreatePanel(props: InstancesCreatePanelProps) {
                             }
 
                             try {
-                              const out = await createInstance.mutateAsync({ template_id, params, display_name })
+                              const node_id = createNodeId().trim() || null
+                              const out = await createInstance.mutateAsync({ template_id, params, display_name, node_id })
                               pushToast('success', 'Instance created', display_name ?? undefined)
                               await invalidateInstances()
                               revealInstance(out.instance_id)
@@ -328,7 +373,7 @@ export default function InstancesCreatePanel(props: InstancesCreatePanelProps) {
                           disabled={
                             isReadOnly() ||
                             createInstance.isPending ||
-                            !['minecraft:vanilla', 'terraria:vanilla'].includes(createTemplateId())
+                            !['minecraft:vanilla', 'terraria:vanilla', 'palworld:vanilla', 'factorio:vanilla'].includes(createTemplateId())
                           }
                           title={isReadOnly() ? 'Read-only mode' : 'Only download required files (no start)'}
 	                          onClick={async () => {
@@ -343,6 +388,10 @@ export default function InstancesCreatePanel(props: InstancesCreatePanelProps) {
                             if (template_id === 'terraria:vanilla') {
                               const v = trVersion().trim()
                               params.version = v || '1453'
+                            }
+                            if (template_id === 'factorio:vanilla') {
+                              const v = (props as any).fxVersion().trim()
+                              params.version = v || 'stable'
                             }
 
                             try {

@@ -9,6 +9,7 @@ mod m0006_create_settings;
 mod m0007_create_frp_nodes;
 mod m0008_add_frp_node_metadata;
 mod m0009_create_download_jobs;
+mod m0010_create_instance_nodes;
 
 pub struct Migrator;
 
@@ -25,6 +26,7 @@ impl MigratorTrait for Migrator {
             Box::new(m0007_create_frp_nodes::Migration),
             Box::new(m0008_add_frp_node_metadata::Migration),
             Box::new(m0009_create_download_jobs::Migration),
+            Box::new(m0010_create_instance_nodes::Migration),
         ]
     }
 }

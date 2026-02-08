@@ -88,7 +88,7 @@ RUN set -eux; \
     if [ "$arch" = "amd64" ]; then dpkg --add-architecture i386; fi; \
     apt-get update; \
     # Keep native curl for agent/runtime tools.
-    pkgs="ca-certificates libcurl4 libcurl3-gnutls libgcc-s1 libicu72 libssl3 libstdc++6 zlib1g tar bubblewrap xvfb xauth"; \
+    pkgs="ca-certificates libcurl4 libcurl3-gnutls libgcc-s1 libicu72 libssl3 libstdc++6 zlib1g tar xz-utils bubblewrap xvfb xauth"; \
     # SteamCMD (used by DST) ships 32-bit binaries and only works on amd64.
     if [ "$arch" = "amd64" ]; then \
       # SteamCMD commonly needs: 32-bit glibc loader + libstdc++ + zlib + tinfo/ncurses.

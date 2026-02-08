@@ -21,7 +21,7 @@ export type DownloadsTabProps = {
 type CacheEntryRow = { key: string; path: string; size_bytes: string; last_used_unix_ms: string }
 
 type CacheDisplayRow = {
-  groupId: 'minecraft' | 'terraria' | 'other'
+  groupId: 'minecraft' | 'terraria' | 'dst' | 'palworld' | 'factorio' | 'other'
   kind: 'aggregate' | 'version' | 'source' | 'marker' | 'other'
   title: string
   meta?: string
@@ -49,6 +49,9 @@ function compareVersionDesc(a: string, b: string): number {
 function groupTitle(groupId: CacheDisplayRow['groupId']): string {
   if (groupId === 'minecraft') return 'Minecraft'
   if (groupId === 'terraria') return 'Terraria'
+  if (groupId === 'dst') return "Don't Starve Together"
+  if (groupId === 'palworld') return 'Palworld'
+  if (groupId === 'factorio') return 'Factorio'
   return 'Other'
 }
 
@@ -83,6 +86,15 @@ export default function DownloadsTab(props: DownloadsTabProps) {
     downloadTrVersion,
     setDownloadTrVersion,
     trVersionOptions,
+    downloadDstVersion,
+    setDownloadDstVersion,
+    dstVersionOptions,
+    downloadPwVersion,
+    setDownloadPwVersion,
+    pwVersionOptions,
+    downloadFxVersion,
+    setDownloadFxVersion,
+    fxVersionOptions,
     downloadQueueEnqueue,
   } = props as any
 
@@ -146,6 +158,60 @@ export default function DownloadsTab(props: DownloadsTabProps) {
     for (const e of cacheEntries()) {
       if (!e.key.startsWith('terraria:vanilla@')) continue
       const version = e.key.slice('terraria:vanilla@'.length)
+      if (!version) continue
+      out.push({
+        version,
+        key: e.key,
+        path: e.path,
+        sizeBytes: Number(e.size_bytes ?? 0),
+        lastUsedUnixMs: Number(e.last_used_unix_ms ?? 0),
+      })
+    }
+    out.sort((a, b) => compareVersionDesc(a.version, b.version) || b.lastUsedUnixMs - a.lastUsedUnixMs)
+    return out
+  })
+
+  const dstCachedVersions = createMemo(() => {
+    const out: CachedVersionRow[] = []
+    for (const e of cacheEntries()) {
+      if (!e.key.startsWith('dst:vanilla@')) continue
+      const version = e.key.slice('dst:vanilla@'.length)
+      if (!version) continue
+      out.push({
+        version,
+        key: e.key,
+        path: e.path,
+        sizeBytes: Number(e.size_bytes ?? 0),
+        lastUsedUnixMs: Number(e.last_used_unix_ms ?? 0),
+      })
+    }
+    out.sort((a, b) => compareVersionDesc(a.version, b.version) || b.lastUsedUnixMs - a.lastUsedUnixMs)
+    return out
+  })
+
+  const pwCachedVersions = createMemo(() => {
+    const out: CachedVersionRow[] = []
+    for (const e of cacheEntries()) {
+      if (!e.key.startsWith('palworld:vanilla@')) continue
+      const version = e.key.slice('palworld:vanilla@'.length)
+      if (!version) continue
+      out.push({
+        version,
+        key: e.key,
+        path: e.path,
+        sizeBytes: Number(e.size_bytes ?? 0),
+        lastUsedUnixMs: Number(e.last_used_unix_ms ?? 0),
+      })
+    }
+    out.sort((a, b) => compareVersionDesc(a.version, b.version) || b.lastUsedUnixMs - a.lastUsedUnixMs)
+    return out
+  })
+
+  const fxCachedVersions = createMemo(() => {
+    const out: CachedVersionRow[] = []
+    for (const e of cacheEntries()) {
+      if (!e.key.startsWith('factorio:vanilla@')) continue
+      const version = e.key.slice('factorio:vanilla@'.length)
       if (!version) continue
       out.push({
         version,
@@ -237,6 +303,72 @@ export default function DownloadsTab(props: DownloadsTabProps) {
         continue
       }
 
+      if (key === 'dst:vanilla') {
+        out.push({
+          groupId: 'dst',
+          kind: 'aggregate',
+          title: 'All cached versions',
+          meta: 'aggregate',
+          ...base,
+        })
+        continue
+      }
+      if (key.startsWith('dst:vanilla@')) {
+        const version = key.slice('dst:vanilla@'.length)
+        out.push({
+          groupId: 'dst',
+          kind: 'version',
+          title: version || key,
+          version: version || undefined,
+          ...base,
+        })
+        continue
+      }
+
+      if (key === 'palworld:vanilla') {
+        out.push({
+          groupId: 'palworld',
+          kind: 'aggregate',
+          title: 'All cached versions',
+          meta: 'aggregate',
+          ...base,
+        })
+        continue
+      }
+      if (key.startsWith('palworld:vanilla@')) {
+        const version = key.slice('palworld:vanilla@'.length)
+        out.push({
+          groupId: 'palworld',
+          kind: 'version',
+          title: version || key,
+          version: version || undefined,
+          ...base,
+        })
+        continue
+      }
+
+      if (key === 'factorio:vanilla') {
+        out.push({
+          groupId: 'factorio',
+          kind: 'aggregate',
+          title: 'All cached versions',
+          meta: 'aggregate',
+          ...base,
+        })
+        continue
+      }
+      if (key.startsWith('factorio:vanilla@')) {
+        const version = key.slice('factorio:vanilla@'.length)
+        out.push({
+          groupId: 'factorio',
+          kind: 'version',
+          title: version || key,
+          version: version || undefined,
+          ...base,
+        })
+        continue
+      }
+
       out.push({
         groupId: 'other',
         kind: 'other',
@@ -287,7 +419,7 @@ export default function DownloadsTab(props: DownloadsTabProps) {
       return b.lastUsedUnixMs - a.lastUsedUnixMs || a.key.localeCompare(b.key)
     }
 
-    const order: CacheDisplayRow['groupId'][] = ['minecraft', 'terraria', 'other']
+    const order: CacheDisplayRow['groupId'][] = ['minecraft', 'terraria', 'dst', 'palworld', 'factorio', 'other']
     const groups: Array<{ id: CacheDisplayRow['groupId']; title: string; entries: CacheDisplayRow[]; totalBytes: number; lastUsedUnixMs: number }> = []
     for (const id of order) {
       const entries = byId.get(id) ?? []
@@ -302,6 +434,9 @@ export default function DownloadsTab(props: DownloadsTabProps) {
 
   const [mcSearch, setMcSearch] = createSignal('')
   const [trSearch, setTrSearch] = createSignal('')
+  const [dstSearch, setDstSearch] = createSignal('')
+  const [pwSearch, setPwSearch] = createSignal('')
+  const [fxSearch, setFxSearch] = createSignal('')
 
   const installPending = createMemo(() => Boolean(downloadQueueEnqueue.isPending))
   const installTarget = downloadEnqueueTarget as () => DownloadTarget | null
@@ -355,6 +490,42 @@ export default function DownloadsTab(props: DownloadsTabProps) {
               meta={
                 trCachedVersions().length > 0
                   ? `${trCachedVersions().length} cached · latest ${trCachedVersions()[0]?.version ?? ''}`.trim()
+                  : 'Not cached'
+              }
+            />
+            <NavItem
+              value="dst"
+              current={view}
+              onSelect={setView}
+              icon={<GameAvatar name={templateDisplayLabel('dst:vanilla')} src={templateLogoSrc('dst:vanilla')} />}
+              label="DST"
+              meta={
+                dstCachedVersions().length > 0
+                  ? `${dstCachedVersions().length} cached · latest ${dstCachedVersions()[0]?.version ?? ''}`.trim()
+                  : 'Not cached'
+              }
+            />
+            <NavItem
+              value="palworld"
+              current={view}
+              onSelect={setView}
+              icon={<GameAvatar name={templateDisplayLabel('palworld:vanilla')} src={templateLogoSrc('palworld:vanilla')} />}
+              label="Palworld"
+              meta={
+                pwCachedVersions().length > 0
+                  ? `${pwCachedVersions().length} cached · latest ${pwCachedVersions()[0]?.version ?? ''}`.trim()
+                  : 'Not cached'
+              }
+            />
+            <NavItem
+              value="factorio"
+              current={view}
+              onSelect={setView}
+              icon={<GameAvatar name={templateDisplayLabel('factorio:vanilla')} src={templateLogoSrc('factorio:vanilla')} />}
+              label="Factorio"
+              meta={
+                fxCachedVersions().length > 0
+                  ? `${fxCachedVersions().length} cached · latest ${fxCachedVersions()[0]?.version ?? ''}`.trim()
                   : 'Not cached'
               }
             />
@@ -414,7 +585,7 @@ export default function DownloadsTab(props: DownloadsTabProps) {
                     fallback={
                       <EmptyState
                         title="No active tasks"
-                        description="Pick a version in Minecraft or Terraria to start downloading."
+                        description="Pick a version in Downloads to start downloading."
                       />
                     }
                   >
@@ -504,6 +675,72 @@ export default function DownloadsTab(props: DownloadsTabProps) {
                 onSelect={setDownloadTrVersion}
                 onInstall={() => void enqueueDownloadWarm('terraria_vanilla')}
                 installPending={() => installPending() && installTarget() === 'terraria_vanilla'}
+                installDisabled={() => isReadOnly()}
+                deleteDisabled={deleteDisabled}
+                deletingKey={deletingKey}
+                onDeleteCacheKey={(key, label) => void deleteCacheKey(key, label)}
+              />
+            </Show>
+
+            <Show when={view() === 'dst'}>
+              <VersionManager
+                title="Don't Starve Together"
+                subtitle="DST dedicated server is installed via SteamCMD and cached per install target."
+                templateId="dst:vanilla"
+                aggregateCacheKey="dst:vanilla"
+                cachedVersions={dstCachedVersions}
+                status={() => status('dst_vanilla')}
+                options={() => (dstVersionOptions() as VersionOption[]) ?? []}
+                search={dstSearch}
+                setSearch={setDstSearch}
+                value={downloadDstVersion}
+                onSelect={setDownloadDstVersion}
+                onInstall={() => void enqueueDownloadWarm('dst_vanilla')}
+                installPending={() => installPending() && installTarget() === 'dst_vanilla'}
+                installDisabled={() => isReadOnly()}
+                deleteDisabled={deleteDisabled}
+                deletingKey={deletingKey}
+                onDeleteCacheKey={(key, label) => void deleteCacheKey(key, label)}
+              />
+            </Show>
+
+            <Show when={view() === 'palworld'}>
+              <VersionManager
+                title="Palworld"
+                subtitle="Palworld dedicated server is installed via SteamCMD and cached per install target."
+                templateId="palworld:vanilla"
+                aggregateCacheKey="palworld:vanilla"
+                cachedVersions={pwCachedVersions}
+                status={() => status('palworld_vanilla')}
+                options={() => (pwVersionOptions() as VersionOption[]) ?? []}
+                search={pwSearch}
+                setSearch={setPwSearch}
+                value={downloadPwVersion}
+                onSelect={setDownloadPwVersion}
+                onInstall={() => void enqueueDownloadWarm('palworld_vanilla')}
+                installPending={() => installPending() && installTarget() === 'palworld_vanilla'}
+                installDisabled={() => isReadOnly()}
+                deleteDisabled={deleteDisabled}
+                deletingKey={deletingKey}
+                onDeleteCacheKey={(key, label) => void deleteCacheKey(key, label)}
+              />
+            </Show>
+
+            <Show when={view() === 'factorio'}>
+              <VersionManager
+                title="Factorio"
+                subtitle="Factorio headless packages are version-managed. Choose channel or version and cache it."
+                templateId="factorio:vanilla"
+                aggregateCacheKey="factorio:vanilla"
+                cachedVersions={fxCachedVersions}
+                status={() => status('factorio_vanilla')}
+                options={() => (fxVersionOptions() as VersionOption[]) ?? []}
+                search={fxSearch}
+                setSearch={setFxSearch}
+                value={downloadFxVersion}
+                onSelect={setDownloadFxVersion}
+                onInstall={() => void enqueueDownloadWarm('factorio_vanilla')}
+                installPending={() => installPending() && installTarget() === 'factorio_vanilla'}
                 installDisabled={() => isReadOnly()}
                 deleteDisabled={deleteDisabled}
                 deletingKey={deletingKey}

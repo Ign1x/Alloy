@@ -205,6 +205,8 @@ mod download_progress;
 mod dst;
 mod dst_download;
 mod error_payload;
+mod factorio;
+mod factorio_download;
 mod filesystem_service;
 mod health_service;
 mod instance_service;
@@ -215,11 +217,14 @@ mod minecraft_download;
 mod minecraft_import;
 mod minecraft_launch;
 mod minecraft_modrinth;
+mod palworld;
+mod palworld_download;
 mod port_alloc;
 mod process_manager;
 mod process_manager_support;
 mod process_service;
 mod sandbox;
+mod self_update;
 mod templates;
 mod terraria;
 mod terraria_download;
@@ -262,6 +267,7 @@ async fn main() -> anyhow::Result<()> {
 
     Server::builder()
         .add_service(health_service::server())
+        .add_service(self_update::server())
         .add_service(filesystem_service::server())
         .add_service(logs_service::server())
         .add_service(process_service::server(manager.clone()))

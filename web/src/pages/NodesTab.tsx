@@ -3,6 +3,8 @@ import { EmptyState } from '../components/ui/EmptyState'
 import { ErrorState } from '../components/ui/ErrorState'
 import { IconButton } from '../components/ui/IconButton'
 import { Skeleton } from '../components/ui/Skeleton'
+import { Button } from '../components/ui/Button'
+import { isAlloyApiError } from '../rspc'
 import { formatRelativeTime } from '../app/helpers/format'
 import NodesPage from './NodesPage'
 
@@ -23,9 +25,22 @@ export default function NodesTab(props: NodesTabProps) {
     setSelectedNodeId,
     selectedNode,
     setNodeEnabled,
+    triggerNodeSelfUpdate,
+    nodeSelfUpdateStatus,
     nodeEnabledOverride,
     setNodeEnabledOverride,
+    pushToast,
+    toastError,
   } = props as any
+
+  function nodeUpdateDisabledReason(node: { id: string; enabled: boolean }): string | null {
+    if (!node.enabled) return 'Enable this node first'
+    if (selectedNodeId() !== node.id) return 'Select this node first'
+    if (nodeSelfUpdateStatus.isPending) return 'Checking node updater status'
+    if (nodeSelfUpdateStatus.isError) return 'Updater status unavailable'
+    if (!nodeSelfUpdateStatus.data?.configured) return 'Node updater is not configured'
+    return null
+  }
 
   return (
               <Show when={tab() === 'nodes'}>
@@ -134,50 +149,112 @@ export default function NodesTab(props: NodesTabProps) {
                                       <div class="min-w-0">
                                         <div class="truncate text-sm font-medium text-slate-900 dark:text-slate-100">{n().name}</div>
                                         <div class="mt-0.5 truncate font-mono text-[11px] text-slate-500">{n().endpoint}</div>
+                                        <Show when={me()?.is_admin && selectedNodeId() === n().id}>
+                                          <div class="mt-1">
+                                            <Show when={nodeSelfUpdateStatus.isPending}>
+                                              <span class="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] text-slate-600 dark:border-slate-800 dark:bg-slate-900/40 dark:text-slate-300">
+                                                Checking updater…
+                                              </span>
+                                            </Show>
+                                            <Show when={!nodeSelfUpdateStatus.isPending && !nodeSelfUpdateStatus.isError && nodeSelfUpdateStatus.data}>
+                                              <span
+                                                class={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] ${
+                                                  nodeSelfUpdateStatus.data?.configured
+                                                    ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/20 dark:text-emerald-300'
+                                                    : 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-300'
+                                                }`}
+                                                title={nodeSelfUpdateStatus.data?.endpoint ?? ''}
+                                              >
+                                                {nodeSelfUpdateStatus.data?.configured ? 'Updater configured' : 'Updater not configured'}
+                                              </span>
+                                            </Show>
+                                            <Show when={!nodeSelfUpdateStatus.isPending && !nodeSelfUpdateStatus.isError && nodeSelfUpdateStatus.data}>
+                                              <div class="mt-1 truncate font-mono text-[10px] text-slate-500 dark:text-slate-400" title={nodeSelfUpdateStatus.data?.endpoint ?? ''}>
+                                                {(nodeSelfUpdateStatus.data?.provider || 'watchtower').toLowerCase()} · {nodeSelfUpdateStatus.data?.endpoint || '-'}
+                                              </div>
+                                            </Show>
+                                            <Show when={!nodeSelfUpdateStatus.isPending && nodeSelfUpdateStatus.isError}>
+                                              <span class="inline-flex items-center rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 text-[10px] text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-300">
+                                                Updater check failed
+                                              </span>
+                                            </Show>
+                                          </div>
+                                        </Show>
                                       </div>
-                                      <Show when={me()?.is_admin}>
-                                        <button
-                                          type="button"
-                                          disabled={setNodeEnabled.isPending}
-                                          class="group inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/60 px-2 py-1.5 text-[11px] text-slate-700 shadow-sm hover:bg-white disabled:opacity-50 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-300 dark:shadow-none dark:hover:bg-slate-900"
-                                          onClick={async () => {
-                                            const id = n().id
-                                            const current =
-                                              Object.prototype.hasOwnProperty.call(nodeEnabledOverride(), id)
-                                                ? nodeEnabledOverride()[id]
-                                                : n().enabled
-                                            const next = !current
-                                            setNodeEnabledOverride({ ...nodeEnabledOverride(), [id]: next })
-                                            try {
-                                              await setNodeEnabled.mutateAsync({ node_id: id, enabled: next })
-                                              void invalidateNodes()
-                                            } catch {
-                                              setNodeEnabledOverride({ ...nodeEnabledOverride(), [id]: current })
-                                            }
-                                          }}
-                                        >
-                                          <span class="text-slate-500 dark:text-slate-500">Enabled</span>
-                                          <span
-                                            class={`relative inline-flex h-5 w-9 items-center rounded-full border transition-colors ${
-                                              (Object.prototype.hasOwnProperty.call(nodeEnabledOverride(), n().id)
-                                                ? nodeEnabledOverride()[n().id]
-                                                : n().enabled)
-                                                ? 'border-emerald-200 bg-emerald-100 dark:border-emerald-900/40 dark:bg-emerald-950/20'
-                                                : 'border-slate-300 bg-slate-200 dark:border-slate-700 dark:bg-slate-900/40'
-                                            }`}
+                                      <div class="flex flex-wrap items-center justify-end gap-2">
+                                        <Show when={me()?.is_admin}>
+                                          <Button
+                                            type="button"
+                                            size="sm"
+                                            variant="secondary"
+                                            loading={triggerNodeSelfUpdate.isPending}
+                                            disabled={triggerNodeSelfUpdate.isPending || Boolean(nodeUpdateDisabledReason(n()))}
+                                            title={nodeUpdateDisabledReason(n()) ?? 'Trigger node self update'}
+                                            onClick={async () => {
+                                              try {
+                                                const out = await triggerNodeSelfUpdate.mutateAsync({ node_id: n().id })
+                                                pushToast('success', 'Update triggered', out.message || `Node ${n().name} update requested.`)
+                                                if (out.status?.endpoint) {
+                                                  pushToast('info', 'Updater endpoint', out.status.endpoint)
+                                                }
+                                                setTimeout(() => {
+                                                  void invalidateNodes()
+                                                  void nodeSelfUpdateStatus.refetch()
+                                                }, 2500)
+                                              } catch (e) {
+                                                if (isAlloyApiError(e) && e.data.hint) {
+                                                  pushToast('info', 'Hint', e.data.hint, e.data.request_id)
+                                                }
+                                                toastError('Node update failed', e)
+                                              }
+                                            }}
                                           >
+                                            Update node
+                                          </Button>
+
+                                          <button
+                                            type="button"
+                                            disabled={setNodeEnabled.isPending}
+                                            class="group inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/60 px-2 py-1.5 text-[11px] text-slate-700 shadow-sm hover:bg-white disabled:opacity-50 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-300 dark:shadow-none dark:hover:bg-slate-900"
+                                            onClick={async () => {
+                                              const id = n().id
+                                              const current =
+                                                Object.prototype.hasOwnProperty.call(nodeEnabledOverride(), id)
+                                                  ? nodeEnabledOverride()[id]
+                                                  : n().enabled
+                                              const next = !current
+                                              setNodeEnabledOverride({ ...nodeEnabledOverride(), [id]: next })
+                                              try {
+                                                await setNodeEnabled.mutateAsync({ node_id: id, enabled: next })
+                                                void invalidateNodes()
+                                              } catch {
+                                                setNodeEnabledOverride({ ...nodeEnabledOverride(), [id]: current })
+                                              }
+                                            }}
+                                          >
+                                            <span class="text-slate-500 dark:text-slate-500">Enabled</span>
                                             <span
-                                              class={`inline-block h-4 w-4 transform rounded-full bg-slate-100 shadow transition-transform ${
+                                              class={`relative inline-flex h-5 w-9 items-center rounded-full border transition-colors ${
                                                 (Object.prototype.hasOwnProperty.call(nodeEnabledOverride(), n().id)
                                                   ? nodeEnabledOverride()[n().id]
                                                   : n().enabled)
-                                                  ? 'translate-x-4'
-                                                  : 'translate-x-1'
+                                                  ? 'border-emerald-200 bg-emerald-100 dark:border-emerald-900/40 dark:bg-emerald-950/20'
+                                                  : 'border-slate-300 bg-slate-200 dark:border-slate-700 dark:bg-slate-900/40'
                                               }`}
-                                            />
-                                          </span>
-                                        </button>
-                                      </Show>
+                                            >
+                                              <span
+                                                class={`inline-block h-4 w-4 transform rounded-full bg-slate-100 shadow transition-transform ${
+                                                  (Object.prototype.hasOwnProperty.call(nodeEnabledOverride(), n().id)
+                                                    ? nodeEnabledOverride()[n().id]
+                                                    : n().enabled)
+                                                    ? 'translate-x-4'
+                                                    : 'translate-x-1'
+                                                }`}
+                                              />
+                                            </span>
+                                          </button>
+                                        </Show>
+                                      </div>
                                     </div>
 
                                     <div class="mt-4 grid grid-cols-2 gap-3 text-xs">

@@ -214,17 +214,18 @@ where
     };
     for attempt in 1..=3_u32 {
         let res: anyhow::Result<Vec<u8>> = (async {
-            let (bytes, report) = download_zip_with_progress(url.clone(), None, |downloaded, total, speed| {
-                last_report = DownloadReport {
-                    downloaded_bytes: downloaded,
-                    total_bytes: total,
-                    speed_bytes_per_sec: speed,
-                };
-                if let Some(cb) = on_progress.as_mut() {
-                    cb(downloaded, total, speed);
-                }
-            })
-            .await?;
+            let (bytes, report) =
+                download_zip_with_progress(url.clone(), None, |downloaded, total, speed| {
+                    last_report = DownloadReport {
+                        downloaded_bytes: downloaded,
+                        total_bytes: total,
+                        speed_bytes_per_sec: speed,
+                    };
+                    if let Some(cb) = on_progress.as_mut() {
+                        cb(downloaded, total, speed);
+                    }
+                })
+                .await?;
             last_report = report;
             Ok(bytes)
         })

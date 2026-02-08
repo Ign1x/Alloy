@@ -68,6 +68,11 @@ function App() {
   let createTrPasswordEl: HTMLInputElement | undefined
   let createTrFrpConfigEl: HTMLTextAreaElement | undefined
   let createTrFrpNodeEl: HTMLDivElement | undefined
+  let createPwPortEl: HTMLInputElement | undefined
+  let createPwQueryPortEl: HTMLInputElement | undefined
+  let createFxPortEl: HTMLInputElement | undefined
+  let createFxRconPortEl: HTMLInputElement | undefined
+  let createFxRconPasswordEl: HTMLInputElement | undefined
   let createDstClusterTokenEl: HTMLInputElement | undefined
   let createDstClusterNameEl: HTMLInputElement | undefined
   let createDstMaxPlayersEl: HTMLInputElement | undefined
@@ -75,6 +80,7 @@ function App() {
   let createDstPortEl: HTMLInputElement | undefined
   let createDstMasterPortEl: HTMLInputElement | undefined
   let createDstAuthPortEl: HTMLInputElement | undefined
+  let createNodeSelectEl: HTMLDivElement | undefined
   let editDisplayNameEl: HTMLInputElement | undefined
   let editSleepSecondsEl: HTMLInputElement | undefined
   let editMcMemoryEl: HTMLInputElement | undefined
@@ -392,7 +398,17 @@ function App() {
     setInstancesPollMs(backoff + jitter)
   })
 
-  type InstanceListItem = { config: { instance_id: string; template_id: string; params: unknown; display_name: string | null }; status: ProcessStatusDto | null }
+  type InstanceListItem = {
+    config: {
+      instance_id: string
+      template_id: string
+      params: unknown
+      display_name: string | null
+      node_id?: string | null
+      node_name?: string | null
+    }
+    status: ProcessStatusDto | null
+  }
   const [instanceStatusKeys, setInstanceStatusKeys] = createSignal<Record<string, { key: string; updated_at_unix_ms: number }>>({})
 
   createEffect(() => {
@@ -959,10 +975,13 @@ function App() {
   const [trVersion, setTrVersion] = createSignal('1453')
   const [downloadMcVersion, setDownloadMcVersion] = createSignal('latest_release')
   const [downloadTrVersion, setDownloadTrVersion] = createSignal('1453')
+  const [downloadDstVersion, setDownloadDstVersion] = createSignal('latest')
+  const [downloadPwVersion, setDownloadPwVersion] = createSignal('latest')
+  const [downloadFxVersion, setDownloadFxVersion] = createSignal('stable')
   const [downloadCenterView, setDownloadCenterView] = createSignal<DownloadCenterView>((() => {
     try {
       const v = localStorage.getItem(DOWNLOAD_VIEW_STORAGE_KEY)
-      if (v === 'tasks' || v === 'minecraft' || v === 'terraria' || v === 'cache') return v
+      if (v === 'tasks' || v === 'minecraft' || v === 'terraria' || v === 'dst' || v === 'palworld' || v === 'factorio' || v === 'cache') return v
     } catch {
       // ignore
     }
@@ -1067,6 +1086,26 @@ function App() {
   const [dstPort, setDstPort] = createSignal('0')
   const [dstMasterPort, setDstMasterPort] = createSignal('0')
   const [dstAuthPort, setDstAuthPort] = createSignal('0')
+  const [createNodeId, setCreateNodeId] = createSignal('')
+
+  const [pwServerName, setPwServerName] = createSignal('Alloy Palworld server')
+  const [pwServerDescription, setPwServerDescription] = createSignal('')
+  const [pwMaxPlayers, setPwMaxPlayers] = createSignal('32')
+  const [pwPassword, setPwPassword] = createSignal('')
+  const [pwAdminPassword, setPwAdminPassword] = createSignal('')
+  const [pwPublic, setPwPublic] = createSignal(false)
+  const [pwPort, setPwPort] = createSignal('8211')
+  const [pwQueryPort, setPwQueryPort] = createSignal('27015')
+
+  const [fxVersion, setFxVersion] = createSignal('stable')
+  const [fxServerName, setFxServerName] = createSignal('Alloy Factorio server')
+  const [fxServerDescription, setFxServerDescription] = createSignal('')
+  const [fxMaxPlayers, setFxMaxPlayers] = createSignal('8')
+  const [fxPublic, setFxPublic] = createSignal(false)
+  const [fxPort, setFxPort] = createSignal('34197')
+  const [fxRconEnabled, setFxRconEnabled] = createSignal(false)
+  const [fxRconPort, setFxRconPort] = createSignal('27015')
+  const [fxRconPassword, setFxRconPassword] = createSignal('')
 
 
   const createTemplateId = createMemo(() => {
@@ -1107,6 +1146,12 @@ function App() {
       trPassword: trPassword(),
       trFrpEnabled: trFrpEnabled(),
       trEffectiveFrpConfig: trEffectiveFrpConfig(),
+      pwPort: pwPort(),
+      pwQueryPort: pwQueryPort(),
+      fxPort: fxPort(),
+      fxRconEnabled: fxRconEnabled(),
+      fxRconPort: fxRconPort(),
+      fxRconPassword: fxRconPassword(),
       dstPort: dstPort(),
       dstMasterPort: dstMasterPort(),
       dstAuthPort: dstAuthPort(),
@@ -1118,6 +1163,7 @@ function App() {
       templateId: createTemplateId(),
       templateLabel: templateDisplayName(createTemplateId()),
       instanceName: instanceName(),
+      nodeName: createNodeId().trim() ? 'Manual node' : 'Auto schedule',
       sleepSeconds: sleepSeconds(),
       createAdvanced: createAdvanced(),
       createAdvancedDirty: createAdvancedDirty(),
@@ -1147,6 +1193,23 @@ function App() {
       trWorldName: trWorldName(),
       trWorldSize: trWorldSize(),
       trPassword: trPassword(),
+      pwServerName: pwServerName(),
+      pwServerDescription: pwServerDescription(),
+      pwMaxPlayers: pwMaxPlayers(),
+      pwPassword: pwPassword(),
+      pwAdminPassword: pwAdminPassword(),
+      pwPublic: pwPublic(),
+      pwPort: pwPort(),
+      pwQueryPort: pwQueryPort(),
+      fxVersion: fxVersion(),
+      fxServerName: fxServerName(),
+      fxServerDescription: fxServerDescription(),
+      fxMaxPlayers: fxMaxPlayers(),
+      fxPublic: fxPublic(),
+      fxPort: fxPort(),
+      fxRconEnabled: fxRconEnabled(),
+      fxRconPort: fxRconPort(),
+      fxRconPassword: fxRconPassword(),
     }),
   )
   createEffect(() => {
@@ -1167,6 +1230,7 @@ function App() {
     setTrFrpNodeId('')
     setDstClusterTokenVisible(false)
     setDstPasswordVisible(false)
+    setCreateNodeId('')
   })
 
   function focusFirstCreateError(errors: Record<string, string>) {
@@ -1193,6 +1257,11 @@ function App() {
         createTrPasswordEl,
         createTrFrpConfigEl,
         createTrFrpNodeEl,
+        createPwPortEl,
+        createPwQueryPortEl,
+        createFxPortEl,
+        createFxRconPortEl,
+        createFxRconPasswordEl,
         createDstClusterTokenEl,
         createDstClusterNameEl,
         createDstMaxPlayersEl,
@@ -1200,6 +1269,7 @@ function App() {
         createDstPortEl,
         createDstMasterPortEl,
         createDstAuthPortEl,
+        createNodeSelectEl,
       },
       mcFrpEnabled: mcFrpEnabled(),
       mcFrpMode: mcFrpMode(),
@@ -1319,25 +1389,46 @@ function App() {
   function buildDownloadRequest(
     target: DownloadTarget,
   ): { templateId: string; version: string; params: Record<string, string> } | null {
-    let templateId = 'minecraft:vanilla'
-    let version = 'latest'
-    const params: Record<string, string> = {}
-
     if (target === 'minecraft_vanilla') {
+      const templateId = 'minecraft:vanilla'
+      const params: Record<string, string> = {}
       const v = downloadMcVersion().trim()
       params.version = v || 'latest_release'
-      version = params.version
-      templateId = 'minecraft:vanilla'
+      const version = params.version
+      return { templateId, version, params }
     }
 
     if (target === 'terraria_vanilla') {
+      const templateId = 'terraria:vanilla'
+      const params: Record<string, string> = {}
       const v = downloadTrVersion().trim()
       params.version = v || '1453'
-      version = params.version
-      templateId = 'terraria:vanilla'
+      const version = params.version
+      return { templateId, version, params }
     }
 
-    return { templateId, version, params }
+    if (target === 'dst_vanilla') {
+      const templateId = 'dst:vanilla'
+      const version = downloadDstVersion().trim() || 'latest'
+      return { templateId, version, params: {} }
+    }
+
+    if (target === 'palworld_vanilla') {
+      const templateId = 'palworld:vanilla'
+      const version = downloadPwVersion().trim() || 'latest'
+      return { templateId, version, params: {} }
+    }
+
+    if (target === 'factorio_vanilla') {
+      const templateId = 'factorio:vanilla'
+      const params: Record<string, string> = {}
+      const v = downloadFxVersion().trim()
+      params.version = v || 'stable'
+      const version = params.version
+      return { templateId, version, params }
+    }
+
+    return null
   }
 
   async function enqueueDownloadWarm(target: DownloadTarget) {
@@ -1415,6 +1506,14 @@ function App() {
     { value: '1434', label: '1.4.3.4 (1434)' },
     { value: '1423', label: '1.4.2.3 (1423)' },
   ])
+
+  const fxVersionOptions = createMemo(() => [
+    { value: 'stable', label: 'Stable (latest stable)' },
+    { value: 'experimental', label: 'Experimental (latest)' },
+  ])
+
+  const pwVersionOptions = createMemo(() => [{ value: 'latest', label: 'Latest (SteamCMD app update)' }])
+  const dstVersionOptions = createMemo(() => [{ value: 'latest', label: 'Latest (SteamCMD app update)' }])
 
   const mcVersionOptions = createMemo(() => {
     const data = mcVersions.data
@@ -1530,7 +1629,7 @@ function App() {
 
   const nodes = rspc.createQuery(
     () => ['node.list', null],
-    () => ({ enabled: isAuthed() && tab() === 'nodes', refetchInterval: 5000, refetchOnWindowFocus: false }),
+    () => ({ enabled: isAuthed() && (tab() === 'nodes' || tab() === 'instances'), refetchInterval: 5000, refetchOnWindowFocus: false }),
   )
 
   const [nodesLastUpdatedAtUnixMs, setNodesLastUpdatedAtUnixMs] = createSignal<number | null>(null)
@@ -1540,6 +1639,20 @@ function App() {
   })
 
   const setNodeEnabled = rspc.createMutation(() => 'node.setEnabled')
+  const triggerNodeSelfUpdate = rspc.createMutation(() => 'node.triggerSelfUpdate')
+  const nodeSelfUpdateStatus = rspc.createQuery(
+    () => [
+      'node.selfUpdateStatus',
+      {
+        node_id: selectedNodeId() ?? '',
+      },
+    ],
+    () => ({
+      enabled: isAuthed() && Boolean(me()?.is_admin) && tab() === 'nodes' && Boolean(selectedNodeId()),
+      refetchOnWindowFocus: false,
+      refetchInterval: tab() === 'nodes' && selectedNodeId() ? 10000 : false,
+    }),
+  )
   const [nodeEnabledOverride, setNodeEnabledOverride] = createSignal<Record<string, boolean>>({})
 
   type NodeDto = {
@@ -1553,6 +1666,25 @@ function App() {
     has_connect_token?: boolean
   }
   type NodeCreateResult = { node: NodeDto; connect_token: string }
+
+  const createNodeDropdownOptions = createMemo(() => {
+    const list = (nodes.data ?? []) as NodeDto[]
+    const selectable = list.filter((n) => n.enabled)
+    const out: { value: string; label: string; meta?: string }[] = []
+    out.push({
+      value: '',
+      label: selectable.length > 0 ? 'Auto schedule' : 'Default agent',
+      meta: selectable.length > 0 ? 'Least-loaded across available nodes' : 'Use control default routing',
+    })
+    for (const n of selectable) {
+      out.push({
+        value: n.id,
+        label: n.name,
+        meta: n.endpoint?.trim() || undefined,
+      })
+    }
+    return out
+  })
 
   type FrpNodeDto = {
     id: string
@@ -1649,9 +1781,7 @@ function App() {
     return [
       'services:',
       '  alloy-agent:',
-      '    build:',
-      '      context: .',
-      '      dockerfile: deploy/agent.Dockerfile',
+      '    image: ghcr.io/ign1x/alloy-agent:latest',
       '    network_mode: \"host\"',
       '    restart: unless-stopped',
       '    environment:',
@@ -1661,8 +1791,25 @@ function App() {
       `      - ALLOY_CONTROL_WS_URL=${url}`,
       `      - ALLOY_NODE_NAME=${name}`,
       `      - ALLOY_NODE_TOKEN=${token}`,
+      '      - ALLOY_AGENT_SELF_UPDATE_WATCHTOWER_URL=http://watchtower:8080',
+      '      - ALLOY_AGENT_SELF_UPDATE_WATCHTOWER_TOKEN=${ALLOY_AGENT_WATCHTOWER_TOKEN:-change-me}',
       '    volumes:',
       '      - alloy-agent-data:/data',
+      '      - /var/run/docker.sock:/var/run/docker.sock',
+      '    labels:',
+      '      - "com.centurylinklabs.watchtower.enable=true"',
+      '  watchtower:',
+      '    image: nickfedor/watchtower:latest',
+      '    restart: unless-stopped',
+      '    volumes:',
+      '      - /var/run/docker.sock:/var/run/docker.sock',
+      '    environment:',
+      '      - WATCHTOWER_LABEL_ENABLE=true',
+      '      - WATCHTOWER_HTTP_API_UPDATE=true',
+      '      - WATCHTOWER_HTTP_API_TOKEN=${ALLOY_AGENT_WATCHTOWER_TOKEN:-change-me}',
+      '      - WATCHTOWER_CLEANUP=true',
+      '    labels:',
+      '      - "com.centurylinklabs.watchtower.enable=false"',
       'volumes:',
       '  alloy-agent-data:',
       '',
@@ -1752,6 +1899,8 @@ function App() {
   // Files state/queries will be moved into FilesPage next.
 
   const instancesTabProps = {
+    createNodeDropdownOptions,
+    createNodeId,
     createAdvanced,
     createAdvancedDirty,
     createFieldErrors,
@@ -1829,6 +1978,8 @@ function App() {
     setCreateFieldErrors,
     setCreateFormError,
     setCreateInstanceNameEl: (el: HTMLInputElement) => (createInstanceNameEl = el),
+    setCreateNodeId,
+    setCreateNodeSelectEl: (el: HTMLDivElement) => (createNodeSelectEl = el),
     setCreateMcCurseforgeEl: (el: HTMLInputElement) => (createMcCurseforgeEl = el),
     setCreateMcEulaEl: (el: HTMLInputElement) => (createMcEulaEl = el),
     setCreateMcFrpConfigEl: (el: HTMLTextAreaElement) => (createMcFrpConfigEl = el),
@@ -1845,6 +1996,11 @@ function App() {
     setCreateTrPortEl: (el: HTMLInputElement) => (createTrPortEl = el),
     setCreateTrWorldNameEl: (el: HTMLInputElement) => (createTrWorldNameEl = el),
     setCreateTrWorldSizeEl: (el: HTMLInputElement) => (createTrWorldSizeEl = el),
+    setCreatePwPortEl: (el: HTMLInputElement) => (createPwPortEl = el),
+    setCreatePwQueryPortEl: (el: HTMLInputElement) => (createPwQueryPortEl = el),
+    setCreateFxPortEl: (el: HTMLInputElement) => (createFxPortEl = el),
+    setCreateFxRconPortEl: (el: HTMLInputElement) => (createFxRconPortEl = el),
+    setCreateFxRconPasswordEl: (el: HTMLInputElement) => (createFxRconPasswordEl = el),
     setDstAuthPort,
     setDstClusterName,
     setDstClusterToken,
@@ -1889,6 +2045,41 @@ function App() {
     setTrVersion,
     setTrWorldName,
     setTrWorldSize,
+    pwServerName,
+    setPwServerName,
+    pwServerDescription,
+    setPwServerDescription,
+    pwMaxPlayers,
+    setPwMaxPlayers,
+    pwPassword,
+    setPwPassword,
+    pwAdminPassword,
+    setPwAdminPassword,
+    pwPublic,
+    setPwPublic,
+    pwPort,
+    setPwPort,
+    pwQueryPort,
+    setPwQueryPort,
+    fxVersion,
+    setFxVersion,
+    fxVersionOptions,
+    fxServerName,
+    setFxServerName,
+    fxServerDescription,
+    setFxServerDescription,
+    fxMaxPlayers,
+    setFxMaxPlayers,
+    fxPublic,
+    setFxPublic,
+    fxPort,
+    setFxPort,
+    fxRconEnabled,
+    setFxRconEnabled,
+    fxRconPort,
+    setFxRconPort,
+    fxRconPassword,
+    setFxRconPassword,
     setWarmFieldErrors,
     setWarmFormError,
     settingsStatus,
@@ -1946,8 +2137,15 @@ function App() {
     downloadTrVersion,
     setDownloadTrVersion,
     trVersionOptions,
-    hasSavedSteamcmdCreds,
-    setTab,
+    downloadDstVersion,
+    setDownloadDstVersion,
+    dstVersionOptions,
+    downloadPwVersion,
+    setDownloadPwVersion,
+    pwVersionOptions,
+    downloadFxVersion,
+    setDownloadFxVersion,
+    fxVersionOptions,
     downloadQueueEnqueue,
   }
 
@@ -2008,8 +2206,12 @@ function App() {
     setSelectedNodeId,
     selectedNode,
     setNodeEnabled,
+    triggerNodeSelfUpdate,
+    nodeSelfUpdateStatus,
     nodeEnabledOverride,
     setNodeEnabledOverride,
+    pushToast,
+    toastError,
   }
 
   const openLoginModal = () => {
@@ -2301,49 +2503,95 @@ function App() {
 
   const topHeaderProps = {
     setMobileNavOpen,
-    backendPending: ping.isPending,
-    backendError: ping.isError,
-    agentPending: agentHealth.isPending,
-    agentError: agentHealth.isError,
-    isReadOnly: isReadOnly(),
-    themeButtonTitle: themeButtonTitle(),
-    themePref: themePref(),
+    get backendPending() {
+      return ping.isPending
+    },
+    get backendError() {
+      return ping.isError
+    },
+    get agentPending() {
+      return agentHealth.isPending
+    },
+    get agentError() {
+      return agentHealth.isError
+    },
+    get isReadOnly() {
+      return isReadOnly()
+    },
+    get themeButtonTitle() {
+      return themeButtonTitle()
+    },
+    get themePref() {
+      return themePref()
+    },
     setThemePref,
-    authLoading: authLoading(),
-    me: me(),
+    get authLoading() {
+      return authLoading()
+    },
+    get me() {
+      return me()
+    },
     openLoginModal,
-    showAccountMenu: showAccountMenu(),
+    get showAccountMenu() {
+      return showAccountMenu()
+    },
     setShowAccountMenu,
     openDiagnostics,
     handleLogout,
   }
 
   const mobileDrawerProps = {
-    mobileNavOpen: mobileNavOpen(),
+    get mobileNavOpen() {
+      return mobileNavOpen()
+    },
     setMobileNavOpen,
-    tab: tab(),
+    get tab() {
+      return tab()
+    },
     setTab,
-    me: me(),
-    themePref: themePref(),
+    get me() {
+      return me()
+    },
+    get themePref() {
+      return themePref()
+    },
     setThemePref,
-    isReadOnly: isReadOnly(),
+    get isReadOnly() {
+      return isReadOnly()
+    },
     openLoginModal,
     handleLogout,
   }
 
   const authOverlayProps = {
-    authError: authError(),
+    get authError() {
+      return authError()
+    },
     openLoginModal,
   }
 
   const statusBannersProps = {
-    pingError: ping.isError,
-    agentError: agentHealth.isError,
-    isReadOnly: isReadOnly(),
-    fsWriteEnabled: fsWriteEnabled(),
-    tab: tab(),
-    lastBackendOkAtUnixMs: lastBackendOkAtUnixMs(),
-    lastAgentOkAtUnixMs: lastAgentOkAtUnixMs(),
+    get pingError() {
+      return ping.isError
+    },
+    get agentError() {
+      return agentHealth.isError
+    },
+    get isReadOnly() {
+      return isReadOnly()
+    },
+    get fsWriteEnabled() {
+      return fsWriteEnabled()
+    },
+    get tab() {
+      return tab()
+    },
+    get lastBackendOkAtUnixMs() {
+      return lastBackendOkAtUnixMs()
+    },
+    get lastAgentOkAtUnixMs() {
+      return lastAgentOkAtUnixMs()
+    },
     retryBackend,
     retryAgent,
     openDiagnostics,

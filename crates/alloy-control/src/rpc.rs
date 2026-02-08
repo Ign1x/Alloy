@@ -1,10 +1,11 @@
 use alloy_proto::agent_v1::{
     ClearCacheRequest, CreateInstanceRequest, DeleteInstancePreviewRequest, DeleteInstanceRequest,
-    GetCacheStatsRequest, GetCapabilitiesRequest, GetInstanceRequest, GetStatusRequest,
-    GetWarmTemplateProgressRequest, HealthCheckRequest, ListDirRequest, ListInstancesRequest,
-    ListProcessesRequest, ListTemplatesRequest, ReadFileRequest, StartFromTemplateRequest,
-    StartInstanceRequest, StopInstanceRequest, StopProcessRequest, TailFileRequest,
-    TailLogsRequest, UpdateInstanceRequest, WarmTemplateCacheRequest,
+    GetCacheStatsRequest, GetCapabilitiesRequest, GetInstanceRequest, GetSelfUpdateStatusRequest,
+    GetStatusRequest, GetWarmTemplateProgressRequest, HealthCheckRequest, ListDirRequest,
+    ListInstancesRequest, ListProcessesRequest, ListTemplatesRequest, ReadFileRequest,
+    StartFromTemplateRequest, StartInstanceRequest, StopInstanceRequest, StopProcessRequest,
+    TailFileRequest, TailLogsRequest, TriggerSelfUpdateRequest, UpdateInstanceRequest,
+    WarmTemplateCacheRequest,
 };
 use rspc::{Procedure, ProcedureError, ResolverError, Router};
 
@@ -25,6 +26,7 @@ const SETTING_STEAMCMD_PASSWORD: &str = "steamcmd.password";
 const SETTING_STEAMCMD_SHARED_SECRET: &str = "steamcmd.shared_secret";
 const SETTING_STEAMCMD_ACCOUNT_NAME: &str = "steamcmd.account_name";
 const SETTING_DOWNLOAD_QUEUE_PAUSED: &str = "downloads.queue.paused";
+const LEGACY_SETTING_INSTANCE_NODE_PREFIX: &str = "instance.node.";
 
 const DOWNLOAD_STATE_QUEUED: &str = "queued";
 const DOWNLOAD_STATE_RUNNING: &str = "running";
@@ -1160,6 +1162,7 @@ pub struct CreateInstanceInput {
     pub template_id: String,
     pub params: std::collections::BTreeMap<String, String>,
     pub display_name: Option<String>,
+    pub node_id: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, Type)]
@@ -1168,6 +1171,8 @@ pub struct InstanceConfigDto {
     pub template_id: String,
     pub params: std::collections::BTreeMap<String, String>,
     pub display_name: Option<String>,
+    pub node_id: Option<String>,
+    pub node_name: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, Type)]
@@ -1294,7 +1299,41 @@ pub struct NodeSetEnabledInput {
     pub enabled: bool,
 }
 
-fn map_instance_config(cfg: alloy_proto::agent_v1::InstanceConfig) -> InstanceConfigDto {
+#[derive(Debug, Clone, serde::Deserialize, Type)]
+pub struct NodeUpdateStatusInput {
+    pub node_id: String,
+}
+
+#[derive(Debug, Clone, serde::Deserialize, Type)]
+pub struct NodeUpdateTriggerInput {
+    pub node_id: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize, Type)]
+pub struct NodeUpdateStatusDto {
+    pub configured: bool,
+    pub provider: String,
+    pub endpoint: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize, Type)]
+pub struct NodeUpdateTriggerOutput {
+    pub ok: bool,
+    pub message: String,
+    pub status: NodeUpdateStatusDto,
+}
+
+#[derive(Debug, Clone)]
+struct NodeTarget {
+    id: Option<String>,
+    name: String,
+}
+
+fn map_instance_config(
+    cfg: alloy_proto::agent_v1::InstanceConfig,
+    node_id: Option<String>,
+    node_name: Option<String>,
+) -> InstanceConfigDto {
     InstanceConfigDto {
         instance_id: cfg.instance_id,
         template_id: cfg.template_id,
@@ -1304,6 +1343,8 @@ fn map_instance_config(cfg: alloy_proto::agent_v1::InstanceConfig) -> InstanceCo
         } else {
             Some(cfg.display_name)
         },
+        node_id,
+        node_name,
     }
 }
 
@@ -1378,13 +1419,15 @@ fn map_process_status(p: alloy_proto::agent_v1::ProcessStatus) -> ProcessStatusD
 fn map_instance_info(
     ctx: &Ctx,
     info: alloy_proto::agent_v1::InstanceInfo,
+    node_id: Option<String>,
+    node_name: Option<String>,
 ) -> Result<InstanceInfoDto, ApiError> {
     let cfg = info
         .config
         .ok_or_else(|| api_error(ctx, "internal", "missing instance config"))?;
 
     Ok(InstanceInfoDto {
-        config: map_instance_config(cfg),
+        config: map_instance_config(cfg, node_id, node_name),
         status: info.status.map(map_process_status),
     })
 }
@@ -1395,6 +1438,423 @@ fn clamp_u64_to_u32(v: u64) -> u32 {
     } else {
         v as u32
     }
+}
+
+fn default_instance_node_name() -> String {
+    std::env::var("ALLOY_DEFAULT_NODE")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| "default".to_string())
+}
+
+fn legacy_instance_node_setting_key(instance_id: &str) -> String {
+    format!("{LEGACY_SETTING_INSTANCE_NODE_PREFIX}{instance_id}")
+}
+
+fn node_response_fields(node: Option<&NodeTarget>) -> (Option<String>, Option<String>) {
+    if let Some(n) = node {
+        return (n.id.clone(), Some(n.name.clone()));
+    }
+    (None, None)
+}
+
+async fn list_registered_node_targets(
+    ctx: &Ctx,
+    enabled_only: bool,
+) -> Result<Vec<NodeTarget>, ApiError> {
+    use alloy_db::entities::nodes;
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+
+    let query = if enabled_only {
+        nodes::Entity::find().filter(nodes::Column::Enabled.eq(true))
+    } else {
+        nodes::Entity::find()
+    };
+
+    let rows = query
+        .all(&*ctx.db)
+        .await
+        .map_err(|e| api_error(ctx, "db_error", format!("db error: {e}")))?;
+
+    let mut out = Vec::<NodeTarget>::new();
+    for row in rows {
+        out.push(NodeTarget {
+            id: Some(row.id.to_string()),
+            name: row.name,
+        });
+    }
+
+    Ok(out)
+}
+
+async fn list_instance_scan_targets(ctx: &Ctx) -> Result<Vec<NodeTarget>, ApiError> {
+    use alloy_db::entities::instance_nodes;
+    use sea_orm::EntityTrait;
+
+    let mut by_name = std::collections::BTreeMap::<String, Option<String>>::new();
+
+    for node in list_registered_node_targets(ctx, false).await? {
+        by_name.entry(node.name).or_insert(node.id);
+    }
+
+    let default_name = default_instance_node_name();
+    by_name.entry(default_name).or_insert(None);
+
+    let owned_rows = instance_nodes::Entity::find()
+        .all(&*ctx.db)
+        .await
+        .map_err(|e| api_error(ctx, "db_error", format!("db error: {e}")))?;
+
+    for owned in owned_rows {
+        if owned.node_name.trim().is_empty() {
+            continue;
+        }
+        by_name
+            .entry(owned.node_name)
+            .or_insert_with(|| owned.node_id.map(|id| id.to_string()));
+    }
+
+    Ok(by_name
+        .into_iter()
+        .map(|(name, id)| NodeTarget { id, name })
+        .collect())
+}
+
+async fn resolve_create_instance_node_target(
+    ctx: &Ctx,
+    raw_node_id: Option<String>,
+) -> Result<NodeTarget, ApiError> {
+    if let Some(raw) = raw_node_id {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            return schedule_node_for_create(ctx).await;
+        }
+
+        use alloy_db::entities::nodes;
+        use sea_orm::EntityTrait;
+
+        let node_uuid = sea_orm::prelude::Uuid::parse_str(trimmed).map_err(|_| {
+            api_error_with_field(
+                ctx,
+                "invalid_param",
+                "invalid node",
+                "node_id",
+                "invalid node id",
+            )
+        })?;
+
+        let node = nodes::Entity::find_by_id(node_uuid)
+            .one(&*ctx.db)
+            .await
+            .map_err(|e| api_error(ctx, "db_error", format!("db error: {e}")))?
+            .ok_or_else(|| {
+                api_error_with_field(
+                    ctx,
+                    "not_found",
+                    "node not found",
+                    "node_id",
+                    "selected node does not exist",
+                )
+            })?;
+
+        if !node.enabled {
+            return Err(api_error_with_field(
+                ctx,
+                "invalid_param",
+                "invalid node",
+                "node_id",
+                "selected node is disabled",
+            ));
+        }
+
+        return Ok(NodeTarget {
+            id: Some(node.id.to_string()),
+            name: node.name,
+        });
+    }
+
+    schedule_node_for_create(ctx).await
+}
+
+async fn schedule_node_for_create(ctx: &Ctx) -> Result<NodeTarget, ApiError> {
+    let default_name = default_instance_node_name();
+    let connected: std::collections::BTreeSet<String> = agent_transport(ctx)
+        .connected_nodes()
+        .await
+        .into_iter()
+        .collect();
+
+    let enabled_nodes = list_registered_node_targets(ctx, true).await?;
+
+    if connected.is_empty() {
+        let default_id = enabled_nodes
+            .iter()
+            .find(|n| n.name == default_name)
+            .and_then(|n| n.id.clone());
+        return Ok(NodeTarget {
+            id: default_id,
+            name: default_name,
+        });
+    }
+
+    let mut candidates = enabled_nodes
+        .into_iter()
+        .filter(|n| connected.contains(&n.name))
+        .collect::<Vec<_>>();
+
+    if connected.contains(&default_name) && !candidates.iter().any(|n| n.name == default_name) {
+        candidates.push(NodeTarget {
+            id: None,
+            name: default_name.clone(),
+        });
+    }
+
+    if candidates.is_empty() {
+        if let Some(name) = connected.into_iter().next() {
+            return Ok(NodeTarget { id: None, name });
+        }
+        return Ok(NodeTarget {
+            id: None,
+            name: default_name,
+        });
+    }
+
+    let mut picked: Option<(NodeTarget, u64, i32)> = None;
+    for candidate in candidates {
+        let load = count_instances_on_node_name(ctx, &candidate.name).await?;
+        let tie_rank = if candidate.name == default_name { 0 } else { 1 };
+        let replace = match picked.as_ref() {
+            None => true,
+            Some((best_candidate, best_load, best_tie_rank)) => {
+                load < *best_load
+                    || (load == *best_load
+                        && (tie_rank < *best_tie_rank
+                            || (tie_rank == *best_tie_rank
+                                && candidate.name < best_candidate.name)))
+            }
+        };
+        if replace {
+            picked = Some((candidate, load, tie_rank));
+        }
+    }
+
+    Ok(picked
+        .map(|(candidate, _, _)| candidate)
+        .unwrap_or(NodeTarget {
+            id: None,
+            name: default_name,
+        }))
+}
+
+async fn count_instances_on_node_name(ctx: &Ctx, node_name: &str) -> Result<u64, ApiError> {
+    use alloy_db::entities::instance_nodes;
+    use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter};
+
+    instance_nodes::Entity::find()
+        .filter(instance_nodes::Column::NodeName.eq(node_name.to_string()))
+        .count(&*ctx.db)
+        .await
+        .map_err(|e| api_error(ctx, "db_error", format!("db error: {e}")))
+}
+
+async fn save_instance_node_target(
+    ctx: &Ctx,
+    instance_id: &str,
+    node: &NodeTarget,
+) -> Result<(), ApiError> {
+    use alloy_db::entities::instance_nodes;
+    use sea_orm::{EntityTrait, Set};
+
+    let now: sea_orm::prelude::DateTimeWithTimeZone = chrono::Utc::now().into();
+    let parsed_node_id = node
+        .id
+        .as_deref()
+        .and_then(|raw| sea_orm::prelude::Uuid::parse_str(raw).ok());
+
+    let model = instance_nodes::ActiveModel {
+        instance_id: Set(instance_id.to_string()),
+        node_id: Set(parsed_node_id),
+        node_name: Set(node.name.clone()),
+        created_at: Set(now),
+        updated_at: Set(now),
+    };
+
+    instance_nodes::Entity::insert(model)
+        .on_conflict(
+            sea_orm::sea_query::OnConflict::column(instance_nodes::Column::InstanceId)
+                .update_columns([
+                    instance_nodes::Column::NodeId,
+                    instance_nodes::Column::NodeName,
+                    instance_nodes::Column::UpdatedAt,
+                ])
+                .to_owned(),
+        )
+        .exec(&*ctx.db)
+        .await
+        .map_err(|e| api_error(ctx, "db_error", format!("db error: {e}")))?;
+
+    Ok(())
+}
+
+async fn delete_instance_node_target(ctx: &Ctx, instance_id: &str) -> Result<(), ApiError> {
+    use alloy_db::entities::instance_nodes;
+    use sea_orm::EntityTrait;
+
+    instance_nodes::Entity::delete_by_id(instance_id.to_string())
+        .exec(&*ctx.db)
+        .await
+        .map_err(|e| api_error(ctx, "db_error", format!("db error: {e}")))?;
+
+    Ok(())
+}
+
+async fn load_legacy_instance_node_target(
+    ctx: &Ctx,
+    instance_id: &str,
+) -> Result<Option<NodeTarget>, ApiError> {
+    let key = legacy_instance_node_setting_key(instance_id);
+    let Some(raw_node_id) = setting_get(&*ctx.db, &key)
+        .await
+        .map_err(|e| api_error(ctx, "db_error", format!("db error: {e}")))?
+    else {
+        return Ok(None);
+    };
+
+    let trimmed = raw_node_id.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+
+    let parsed = match sea_orm::prelude::Uuid::parse_str(trimmed) {
+        Ok(v) => v,
+        Err(_) => return Ok(None),
+    };
+
+    use alloy_db::entities::nodes;
+    use sea_orm::EntityTrait;
+
+    let Some(node) = nodes::Entity::find_by_id(parsed)
+        .one(&*ctx.db)
+        .await
+        .map_err(|e| api_error(ctx, "db_error", format!("db error: {e}")))?
+    else {
+        return Ok(None);
+    };
+
+    Ok(Some(NodeTarget {
+        id: Some(node.id.to_string()),
+        name: node.name,
+    }))
+}
+
+async fn load_instance_node_target(
+    ctx: &Ctx,
+    instance_id: &str,
+) -> Result<Option<NodeTarget>, ApiError> {
+    use alloy_db::entities::instance_nodes;
+    use sea_orm::EntityTrait;
+
+    if let Some(owned) = instance_nodes::Entity::find_by_id(instance_id.to_string())
+        .one(&*ctx.db)
+        .await
+        .map_err(|e| api_error(ctx, "db_error", format!("db error: {e}")))?
+    {
+        if let Some(node_id) = owned.node_id {
+            use alloy_db::entities::nodes;
+
+            if let Some(node) = nodes::Entity::find_by_id(node_id)
+                .one(&*ctx.db)
+                .await
+                .map_err(|e| api_error(ctx, "db_error", format!("db error: {e}")))?
+            {
+                return Ok(Some(NodeTarget {
+                    id: Some(node.id.to_string()),
+                    name: node.name,
+                }));
+            }
+        }
+
+        let node_name = owned.node_name.trim().to_string();
+        if !node_name.is_empty() {
+            return Ok(Some(NodeTarget {
+                id: owned.node_id.map(|id| id.to_string()),
+                name: node_name,
+            }));
+        }
+    }
+
+    if let Some(legacy_target) = load_legacy_instance_node_target(ctx, instance_id).await? {
+        let _ = save_instance_node_target(ctx, instance_id, &legacy_target).await;
+        let legacy_key = legacy_instance_node_setting_key(instance_id);
+        let _ = setting_clear(&*ctx.db, &legacy_key).await;
+        return Ok(Some(legacy_target));
+    }
+
+    Ok(None)
+}
+
+async fn discover_instance_node_target(
+    ctx: &Ctx,
+    instance_id: &str,
+) -> Result<Option<NodeTarget>, ApiError> {
+    let candidates = list_instance_scan_targets(ctx).await?;
+
+    for node in candidates {
+        let transport = agent_transport(ctx).with_node(node.name.clone());
+        let resp = transport
+            .call::<_, alloy_proto::agent_v1::GetInstanceResponse>(
+                "/alloy.agent.v1.InstanceService/Get",
+                GetInstanceRequest {
+                    instance_id: instance_id.to_string(),
+                },
+            )
+            .await;
+        match resp {
+            Ok(_) => {
+                let _ = save_instance_node_target(ctx, instance_id, &node).await;
+                return Ok(Some(node));
+            }
+            Err(status) => {
+                if matches!(
+                    status.code(),
+                    tonic::Code::NotFound | tonic::Code::Unavailable
+                ) {
+                    continue;
+                }
+            }
+        }
+    }
+
+    Ok(None)
+}
+
+async fn instance_transport_for_id(
+    ctx: &Ctx,
+    instance_id: &str,
+) -> Result<(AgentTransport, Option<NodeTarget>), ApiError> {
+    if let Some(node) = load_instance_node_target(ctx, instance_id).await? {
+        let transport = agent_transport(ctx).with_node(node.name.clone());
+        return Ok((transport, Some(node)));
+    }
+
+    if let Some(node) = discover_instance_node_target(ctx, instance_id).await? {
+        let transport = agent_transport(ctx).with_node(node.name.clone());
+        return Ok((transport, Some(node)));
+    }
+
+    Ok((agent_transport(ctx), None))
+}
+
+async fn node_target_for_response(
+    ctx: &Ctx,
+    instance_id: &str,
+    discovered: Option<NodeTarget>,
+) -> Result<Option<NodeTarget>, ApiError> {
+    if discovered.is_some() {
+        return Ok(discovered);
+    }
+    load_instance_node_target(ctx, instance_id).await
 }
 
 fn agent_transport(ctx: &Ctx) -> AgentTransport {
@@ -1513,6 +1973,9 @@ fn normalize_download_target(raw: &str) -> Option<&'static str> {
     match raw.trim() {
         "minecraft_vanilla" => Some("minecraft_vanilla"),
         "terraria_vanilla" => Some("terraria_vanilla"),
+        "dst_vanilla" => Some("dst_vanilla"),
+        "palworld_vanilla" => Some("palworld_vanilla"),
+        "factorio_vanilla" => Some("factorio_vanilla"),
         _ => None,
     }
 }
@@ -1521,6 +1984,9 @@ fn expected_template_id_for_target(target: &str) -> Option<&'static str> {
     match target {
         "minecraft_vanilla" => Some("minecraft:vanilla"),
         "terraria_vanilla" => Some("terraria:vanilla"),
+        "dst_vanilla" => Some("dst:vanilla"),
+        "palworld_vanilla" => Some("palworld:vanilla"),
+        "factorio_vanilla" => Some("factorio:vanilla"),
         _ => None,
     }
 }
@@ -1529,6 +1995,9 @@ fn normalize_download_template_id(raw: &str) -> Option<&'static str> {
     match raw.trim() {
         "minecraft:vanilla" => Some("minecraft:vanilla"),
         "terraria:vanilla" => Some("terraria:vanilla"),
+        "dst:vanilla" => Some("dst:vanilla"),
+        "palworld:vanilla" => Some("palworld:vanilla"),
+        "factorio:vanilla" => Some("factorio:vanilla"),
         _ => None,
     }
 }
@@ -1625,7 +2094,11 @@ fn progress_percent_x100(downloaded_bytes: u64, total_bytes: u64) -> Option<u32>
     Some(pct as u32)
 }
 
-fn progress_eta_sec(downloaded_bytes: u64, total_bytes: u64, speed_bytes_per_sec: u64) -> Option<u32> {
+fn progress_eta_sec(
+    downloaded_bytes: u64,
+    total_bytes: u64,
+    speed_bytes_per_sec: u64,
+) -> Option<u32> {
     if speed_bytes_per_sec == 0 || total_bytes <= downloaded_bytes {
         return None;
     }
@@ -1638,24 +2111,21 @@ fn map_download_job_model(
     model: alloy_db::entities::download_jobs::Model,
     progress: Option<&DownloadProgressSnapshot>,
 ) -> DownloadQueueJobDto {
-    let progress_stage = progress
-        .and_then(|p| {
-            let s = p.stage.trim();
-            if s.is_empty() {
-                None
-            } else {
-                Some(s.to_string())
-            }
-        });
+    let progress_stage = progress.and_then(|p| {
+        let s = p.stage.trim();
+        if s.is_empty() {
+            None
+        } else {
+            Some(s.to_string())
+        }
+    });
     let progress_downloaded_bytes = progress.map(|p| p.downloaded_bytes.to_string());
     let progress_total_bytes = progress.map(|p| p.total_bytes.to_string());
     let progress_speed_bytes_per_sec = progress.map(|p| p.speed_bytes_per_sec.to_string());
-    let progress_percent_x100 = progress.and_then(|p| {
-        progress_percent_x100(p.downloaded_bytes, p.total_bytes)
-    });
-    let progress_eta_sec = progress.and_then(|p| {
-        progress_eta_sec(p.downloaded_bytes, p.total_bytes, p.speed_bytes_per_sec)
-    });
+    let progress_percent_x100 =
+        progress.and_then(|p| progress_percent_x100(p.downloaded_bytes, p.total_bytes));
+    let progress_eta_sec = progress
+        .and_then(|p| progress_eta_sec(p.downloaded_bytes, p.total_bytes, p.speed_bytes_per_sec));
 
     DownloadQueueJobDto {
         id: model.id.to_string(),
@@ -1939,14 +2409,14 @@ async fn run_next_download_queue_job(runtime: &DownloadQueueRuntime) -> Result<b
     };
 
     let now: sea_orm::prelude::DateTimeWithTimeZone = chrono::Utc::now().into();
-                let mut running: download_jobs::ActiveModel = row.clone().into();
-                running.state = Set(DOWNLOAD_STATE_RUNNING.to_string());
-                running.message = Set("resolving download target…".to_string());
-                running.request_id = Set(None);
-                running.started_at = Set(Some(now));
-                running.finished_at = Set(None);
-                running.updated_at = Set(now);
-                running.attempt_count = Set(row.attempt_count.saturating_add(1));
+    let mut running: download_jobs::ActiveModel = row.clone().into();
+    running.state = Set(DOWNLOAD_STATE_RUNNING.to_string());
+    running.message = Set("resolving download target…".to_string());
+    running.request_id = Set(None);
+    running.started_at = Set(Some(now));
+    running.finished_at = Set(None);
+    running.updated_at = Set(now);
+    running.attempt_count = Set(row.attempt_count.saturating_add(1));
     let running = running
         .update(&*runtime.db)
         .await
@@ -3106,10 +3576,20 @@ pub fn router() -> Router<Ctx> {
                     ensure_writable(&ctx)?;
                     enforce_rate_limit(&ctx)?;
 
-                    let mut params = input.params;
+                    let CreateInstanceInput {
+                        template_id,
+                        params,
+                        display_name,
+                        node_id,
+                    } = input;
+
+                    let requested_node = resolve_create_instance_node_target(&ctx, node_id).await?;
+                    let transport = agent_transport(&ctx).with_node(requested_node.name.clone());
+
+                    let mut params = params;
 
                     // Defaults and control-plane settings injection.
-                    if input.template_id == "dst:vanilla" {
+                    if template_id == "dst:vanilla" {
                         let current = params.get("cluster_token").map(|s| s.trim()).unwrap_or("");
                         if current.is_empty() {
                             if let Some(v) = setting_get(&*ctx.db, SETTING_DST_DEFAULT_KLEI_KEY)
@@ -3126,7 +3606,7 @@ pub fn router() -> Router<Ctx> {
                         }
                     }
 
-                    if input.template_id == "minecraft:curseforge" {
+                    if template_id == "minecraft:curseforge" {
                         let current = params
                             .get("curseforge_api_key")
                             .map(|s| s.trim())
@@ -3156,14 +3636,13 @@ pub fn router() -> Router<Ctx> {
                         }
                     }
 
-                    let transport = agent_transport(&ctx);
                     let resp: alloy_proto::agent_v1::CreateInstanceResponse = transport
                         .call(
                             "/alloy.agent.v1.InstanceService/Create",
                             CreateInstanceRequest {
-                                template_id: input.template_id,
+                                template_id,
                                 params: params.into_iter().collect(),
-                                display_name: input.display_name.unwrap_or_default(),
+                                display_name: display_name.unwrap_or_default(),
                             },
                         )
                         .await
@@ -3175,6 +3654,10 @@ pub fn router() -> Router<Ctx> {
                         .config
                         .ok_or_else(|| api_error(&ctx, "internal", "missing instance config"))?;
 
+                    save_instance_node_target(&ctx, &cfg.instance_id, &requested_node).await?;
+
+                    let (node_id, node_name) = node_response_fields(Some(&requested_node));
+
                     audit::record(
                         &ctx,
                         "instance.create",
@@ -3183,14 +3666,17 @@ pub fn router() -> Router<Ctx> {
                     )
                     .await;
 
-                    Ok(map_instance_config(cfg))
+                    Ok(map_instance_config(cfg, node_id, node_name))
                 },
             ),
         )
         .procedure(
             "get",
             Procedure::builder::<ApiError>().query(|ctx, input: InstanceIdInput| async move {
-                let transport = agent_transport(&ctx);
+                let (transport, node_target) =
+                    instance_transport_for_id(&ctx, &input.instance_id).await?;
+                let response_node_target =
+                    node_target_for_response(&ctx, &input.instance_id, node_target).await?;
                 let resp: alloy_proto::agent_v1::GetInstanceResponse = transport
                     .call(
                         "/alloy.agent.v1.InstanceService/Get",
@@ -3205,24 +3691,59 @@ pub fn router() -> Router<Ctx> {
                     .info
                     .ok_or_else(|| api_error(&ctx, "internal", "missing instance info"))?;
 
-                map_instance_info(&ctx, info)
+                let (node_id, node_name) = node_response_fields(response_node_target.as_ref());
+                map_instance_info(&ctx, info, node_id, node_name)
             }),
         )
         .procedure(
             "list",
             Procedure::builder::<ApiError>().query(|ctx, _: ()| async move {
-                let transport = agent_transport(&ctx);
-                let resp: alloy_proto::agent_v1::ListInstancesResponse = transport
-                    .call(
-                        "/alloy.agent.v1.InstanceService/List",
-                        ListInstancesRequest {},
-                    )
-                    .await
-                    .map_err(|status| api_error_from_agent_status(&ctx, "instance.list", status))?;
+                let mut by_id = std::collections::BTreeMap::<String, (InstanceInfoDto, i32)>::new();
+                let nodes = list_instance_scan_targets(&ctx).await?;
+
+                for node in nodes {
+                    let transport = agent_transport(&ctx).with_node(node.name.clone());
+                    let resp = match transport
+                        .call::<_, alloy_proto::agent_v1::ListInstancesResponse>(
+                            "/alloy.agent.v1.InstanceService/List",
+                            ListInstancesRequest {},
+                        )
+                        .await
+                    {
+                        Ok(v) => v,
+                        Err(status) => {
+                            if status.code() == tonic::Code::Unavailable {
+                                continue;
+                            }
+                            return Err(api_error_from_agent_status(&ctx, "instance.list", status));
+                        }
+                    };
+
+                    let priority = if node.name == default_instance_node_name() {
+                        1
+                    } else {
+                        0
+                    };
+                    let (node_id, node_name) = node_response_fields(Some(&node));
+
+                    for info in resp.instances {
+                        let mapped =
+                            map_instance_info(&ctx, info, node_id.clone(), node_name.clone())?;
+                        let instance_id = mapped.config.instance_id.clone();
+                        let _ = save_instance_node_target(&ctx, &instance_id, &node).await;
+                        let should_replace = match by_id.get(&instance_id) {
+                            Some((_existing, existing_priority)) => priority > *existing_priority,
+                            None => true,
+                        };
+                        if should_replace {
+                            by_id.insert(instance_id, (mapped, priority));
+                        }
+                    }
+                }
 
                 let mut out = Vec::new();
-                for info in resp.instances {
-                    out.push(map_instance_info(&ctx, info)?);
+                for (_id, (info, _priority)) in by_id {
+                    out.push(info);
                 }
                 Ok(out)
             }),
@@ -3233,9 +3754,9 @@ pub fn router() -> Router<Ctx> {
                 |ctx, input: InstanceDiagnosticsInput| async move {
                     enforce_rate_limit(&ctx)?;
 
-                    let transport = agent_transport(&ctx);
-
                     let instance_id = input.instance_id;
+                    let (transport, _node_target) =
+                        instance_transport_for_id(&ctx, &instance_id).await?;
                     let max_lines = input.max_lines.unwrap_or(400).clamp(1, 2000);
                     let limit_bytes = input
                         .limit_bytes
@@ -3403,7 +3924,8 @@ pub fn router() -> Router<Ctx> {
                 ensure_writable(&ctx)?;
                 enforce_rate_limit(&ctx)?;
 
-                let transport = agent_transport(&ctx);
+                let (transport, _node_target) =
+                    instance_transport_for_id(&ctx, &input.instance_id).await?;
                 let resp: alloy_proto::agent_v1::StartInstanceResponse = transport
                     .call(
                         "/alloy.agent.v1.InstanceService/Start",
@@ -3438,7 +3960,8 @@ pub fn router() -> Router<Ctx> {
                     ensure_writable(&ctx)?;
                     enforce_rate_limit(&ctx)?;
 
-                    let transport = agent_transport(&ctx);
+                    let (transport, _node_target) =
+                        instance_transport_for_id(&ctx, &input.instance_id).await?;
 
                     // Best-effort: if the instance isn't running, the stop call may return NOT_FOUND.
                     // Treat that as "already stopped" and continue to start.
@@ -3498,7 +4021,8 @@ pub fn router() -> Router<Ctx> {
                 ensure_writable(&ctx)?;
                 enforce_rate_limit(&ctx)?;
 
-                let transport = agent_transport(&ctx);
+                let (transport, _node_target) =
+                    instance_transport_for_id(&ctx, &input.instance_id).await?;
                 let resp: alloy_proto::agent_v1::StopInstanceResponse = transport
                     .call(
                         "/alloy.agent.v1.InstanceService/Stop",
@@ -3532,7 +4056,10 @@ pub fn router() -> Router<Ctx> {
                     ensure_writable(&ctx)?;
                     enforce_rate_limit(&ctx)?;
 
-                    let transport = agent_transport(&ctx);
+                    let (transport, node_target) =
+                        instance_transport_for_id(&ctx, &input.instance_id).await?;
+                    let response_node_target =
+                        node_target_for_response(&ctx, &input.instance_id, node_target).await?;
                     let resp: alloy_proto::agent_v1::UpdateInstanceResponse = transport
                         .call(
                             "/alloy.agent.v1.InstanceService/Update",
@@ -3551,6 +4078,8 @@ pub fn router() -> Router<Ctx> {
                         .config
                         .ok_or_else(|| api_error(&ctx, "internal", "missing instance config"))?;
 
+                    let (node_id, node_name) = node_response_fields(response_node_target.as_ref());
+
                     audit::record(
                         &ctx,
                         "instance.update",
@@ -3559,7 +4088,7 @@ pub fn router() -> Router<Ctx> {
                     )
                     .await;
 
-                    Ok(map_instance_config(cfg))
+                    Ok(map_instance_config(cfg, node_id, node_name))
                 },
             ),
         )
@@ -3570,7 +4099,8 @@ pub fn router() -> Router<Ctx> {
                     ensure_writable(&ctx)?;
                     enforce_rate_limit(&ctx)?;
 
-                    let transport = agent_transport(&ctx);
+                    let (transport, _node_target) =
+                        instance_transport_for_id(&ctx, &input.instance_id).await?;
                     let resp: alloy_proto::agent_v1::ImportSaveFromUrlResponse = transport
                         .call(
                             "/alloy.agent.v1.InstanceService/ImportSaveFromUrl",
@@ -3606,7 +4136,8 @@ pub fn router() -> Router<Ctx> {
         .procedure(
             "deletePreview",
             Procedure::builder::<ApiError>().query(|ctx, input: InstanceIdInput| async move {
-                let transport = agent_transport(&ctx);
+                let (transport, _node_target) =
+                    instance_transport_for_id(&ctx, &input.instance_id).await?;
                 let resp: alloy_proto::agent_v1::DeleteInstancePreviewResponse = transport
                     .call(
                         "/alloy.agent.v1.InstanceService/DeletePreview",
@@ -3633,7 +4164,8 @@ pub fn router() -> Router<Ctx> {
                 enforce_rate_limit(&ctx)?;
 
                 let instance_id = input.instance_id;
-                let transport = agent_transport(&ctx);
+                let (transport, _node_target) =
+                    instance_transport_for_id(&ctx, &instance_id).await?;
                 let resp: alloy_proto::agent_v1::DeleteInstanceResponse = transport
                     .call(
                         "/alloy.agent.v1.InstanceService/Delete",
@@ -3647,6 +4179,9 @@ pub fn router() -> Router<Ctx> {
                     })?;
 
                 if resp.ok {
+                    let _ = delete_instance_node_target(&ctx, &instance_id).await;
+                    let legacy_key = legacy_instance_node_setting_key(&instance_id);
+                    let _ = setting_clear(&*ctx.db, &legacy_key).await;
                     audit::record(&ctx, "instance.delete", &instance_id, None).await;
                 }
 
@@ -3815,6 +4350,162 @@ pub fn router() -> Router<Ctx> {
                         last_seen_at: updated.last_seen_at.map(|t| t.to_rfc3339()),
                         agent_version: updated.agent_version,
                         last_error: updated.last_error,
+                    })
+                },
+            ),
+        )
+        .procedure(
+            "selfUpdateStatus",
+            Procedure::builder::<ApiError>().query(
+                |ctx: Ctx, input: NodeUpdateStatusInput| async move {
+                    use alloy_db::entities::nodes;
+                    use sea_orm::EntityTrait;
+
+                    let user = ctx
+                        .user
+                        .clone()
+                        .ok_or_else(|| api_error(&ctx, "unauthorized", "unauthorized"))?;
+                    if !user.is_admin {
+                        return Err(api_error(&ctx, "forbidden", "forbidden"));
+                    }
+
+                    let id = sea_orm::prelude::Uuid::parse_str(&input.node_id)
+                        .map_err(|_| api_error(&ctx, "invalid_param", "invalid node_id"))?;
+
+                    let node = nodes::Entity::find_by_id(id)
+                        .one(&*ctx.db)
+                        .await
+                        .map_err(|e| api_error(&ctx, "db_error", format!("db error: {e}")))?
+                        .ok_or_else(|| api_error(&ctx, "not_found", "node not found"))?;
+
+                    let transport = agent_transport(&ctx).with_node(node.name.clone());
+                    let status_resp: alloy_proto::agent_v1::GetSelfUpdateStatusResponse =
+                        transport
+                            .call(
+                                "/alloy.agent.v1.AgentUpdateService/GetSelfUpdateStatus",
+                                GetSelfUpdateStatusRequest {},
+                            )
+                            .await
+                            .map_err(|status| {
+                                api_error_from_agent_status(
+                                    &ctx,
+                                    "node.selfUpdateStatus",
+                                    status,
+                                )
+                            })?;
+
+                    Ok(NodeUpdateStatusDto {
+                        configured: status_resp.configured,
+                        provider: status_resp.provider.trim().to_string(),
+                        endpoint: status_resp.endpoint,
+                    })
+                },
+            ),
+        )
+        .procedure(
+            "triggerSelfUpdate",
+            Procedure::builder::<ApiError>().mutation(
+                |ctx: Ctx, input: NodeUpdateTriggerInput| async move {
+                    use alloy_db::entities::nodes;
+                    use sea_orm::EntityTrait;
+
+                    ensure_writable(&ctx)?;
+                    enforce_rate_limit(&ctx)?;
+
+                    let user = ctx
+                        .user
+                        .clone()
+                        .ok_or_else(|| api_error(&ctx, "unauthorized", "unauthorized"))?;
+                    if !user.is_admin {
+                        return Err(api_error(&ctx, "forbidden", "forbidden"));
+                    }
+
+                    let id = sea_orm::prelude::Uuid::parse_str(&input.node_id)
+                        .map_err(|_| api_error(&ctx, "invalid_param", "invalid node_id"))?;
+
+                    let node = nodes::Entity::find_by_id(id)
+                        .one(&*ctx.db)
+                        .await
+                        .map_err(|e| api_error(&ctx, "db_error", format!("db error: {e}")))?
+                        .ok_or_else(|| api_error(&ctx, "not_found", "node not found"))?;
+
+                    let transport = agent_transport(&ctx).with_node(node.name.clone());
+                    let status_resp: alloy_proto::agent_v1::GetSelfUpdateStatusResponse =
+                        transport
+                            .call(
+                                "/alloy.agent.v1.AgentUpdateService/GetSelfUpdateStatus",
+                                GetSelfUpdateStatusRequest {},
+                            )
+                            .await
+                            .map_err(|status| {
+                                api_error_from_agent_status(
+                                    &ctx,
+                                    "node.triggerSelfUpdate.getStatus",
+                                    status,
+                                )
+                            })?;
+
+                    let status = NodeUpdateStatusDto {
+                        configured: status_resp.configured,
+                        provider: status_resp.provider.trim().to_string(),
+                        endpoint: status_resp.endpoint,
+                    };
+
+                    if !status.configured {
+                        let mut err = api_error_with_field(
+                            &ctx,
+                            "not_supported",
+                            "node self updater is not configured",
+                            "node_id",
+                            "node self updater is not configured",
+                        );
+                        err.hint = Some(
+                            "Set ALLOY_AGENT_SELF_UPDATE_WATCHTOWER_TOKEN on that node and restart alloy-agent."
+                                .to_string(),
+                        );
+                        return Err(err);
+                    }
+
+                    let trigger_resp: alloy_proto::agent_v1::TriggerSelfUpdateResponse = transport
+                        .call(
+                            "/alloy.agent.v1.AgentUpdateService/TriggerSelfUpdate",
+                            TriggerSelfUpdateRequest {},
+                        )
+                        .await
+                        .map_err(|status| {
+                            api_error_from_agent_status(
+                                &ctx,
+                                "node.triggerSelfUpdate.trigger",
+                                status,
+                            )
+                        })?;
+
+                    let provider = if status.provider.trim().is_empty() {
+                        "watchtower"
+                    } else {
+                        status.provider.as_str()
+                    };
+
+                    audit::record(
+                        &ctx,
+                        "node.triggerSelfUpdate",
+                        &node.id.to_string(),
+                        Some(serde_json::json!({
+                            "node_name": node.name,
+                            "provider": provider,
+                            "endpoint": status.endpoint,
+                        })),
+                    )
+                    .await;
+
+                    Ok(NodeUpdateTriggerOutput {
+                        ok: trigger_resp.ok,
+                        message: trigger_resp.message,
+                        status: NodeUpdateStatusDto {
+                            configured: status.configured,
+                            provider: provider.to_string(),
+                            endpoint: status.endpoint,
+                        },
                     })
                 },
             ),

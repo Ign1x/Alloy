@@ -7,7 +7,31 @@ service AgentHealthService {
   rpc Check(HealthCheckRequest) returns (HealthCheckResponse);
 }
 
+// AgentUpdateService handles self-updates of the alloy-agent container.
+//
+// Intended for remote node management where control can only reach the node
+// through the reverse tunnel.
+service AgentUpdateService {
+  rpc GetSelfUpdateStatus(GetSelfUpdateStatusRequest) returns (GetSelfUpdateStatusResponse);
+  rpc TriggerSelfUpdate(TriggerSelfUpdateRequest) returns (TriggerSelfUpdateResponse);
+}
+
 message HealthCheckRequest {}
+
+message GetSelfUpdateStatusRequest {}
+
+message GetSelfUpdateStatusResponse {
+  bool configured = 1;
+  string provider = 2;
+  string endpoint = 3;
+}
+
+message TriggerSelfUpdateRequest {}
+
+message TriggerSelfUpdateResponse {
+  bool ok = 1;
+  string message = 2;
+}
 
 message PortAvailability {
   uint32 port = 1;

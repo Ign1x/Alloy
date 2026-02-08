@@ -92,17 +92,19 @@ pub fn update(progress_id: &str, args: UpdateArgs) {
     cleanup_locked(&mut map);
 
     let now = now_unix_ms();
-    let entry = map.entry(key.to_string()).or_insert_with(|| WarmProgressEntry {
-        snapshot: WarmProgressSnapshot {
-            stage: String::new(),
-            downloaded_bytes: 0,
-            total_bytes: 0,
-            speed_bytes_per_sec: 0,
-            message: String::new(),
-            done: false,
-            updated_at_unix_ms: now,
-        },
-    });
+    let entry = map
+        .entry(key.to_string())
+        .or_insert_with(|| WarmProgressEntry {
+            snapshot: WarmProgressSnapshot {
+                stage: String::new(),
+                downloaded_bytes: 0,
+                total_bytes: 0,
+                speed_bytes_per_sec: 0,
+                message: String::new(),
+                done: false,
+                updated_at_unix_ms: now,
+            },
+        });
 
     if let Some(stage) = args.stage {
         entry.snapshot.stage = stage;

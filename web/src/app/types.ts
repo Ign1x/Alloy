@@ -2,8 +2,20 @@ export type UiTab = 'instances' | 'downloads' | 'files' | 'nodes' | 'frp' | 'set
 
 export type MinecraftCreateMode = 'vanilla' | 'modrinth' | 'import' | 'curseforge'
 export type FrpConfigMode = 'paste' | 'node'
-export type DownloadTarget = 'minecraft_vanilla' | 'terraria_vanilla'
-export type DownloadCenterView = 'tasks' | 'minecraft' | 'terraria' | 'cache'
+export type DownloadTarget =
+  | 'minecraft_vanilla'
+  | 'terraria_vanilla'
+  | 'dst_vanilla'
+  | 'palworld_vanilla'
+  | 'factorio_vanilla'
+export type DownloadCenterView =
+  | 'tasks'
+  | 'minecraft'
+  | 'terraria'
+  | 'dst'
+  | 'palworld'
+  | 'factorio'
+  | 'cache'
 export type DownloadJobState = 'queued' | 'running' | 'paused' | 'success' | 'error' | 'canceled'
 export type DownloadJob = {
   id: string

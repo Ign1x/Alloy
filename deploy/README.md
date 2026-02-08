@@ -200,6 +200,51 @@ curl -fsS -X POST -H 'content-type: application/json' \
   http://localhost:8080/rspc/process.start
 ```
 
+## Palworld (vanilla)
+
+Milestone 3 template id: `palworld:vanilla`
+
+Optional params:
+- `server_name` (default: `Alloy Palworld server`)
+- `server_description` (default: empty)
+- `max_players` (default: `32`)
+- `port` (default: `8211`, `0` means auto)
+- `query_port` (default: `27015`, `0` means auto)
+- `password` (optional)
+- `admin_password` (optional)
+- `public` (`false` by default)
+
+Start (rspc):
+
+```bash
+curl -fsS -X POST -H 'content-type: application/json' \
+  --data '{"template_id":"palworld:vanilla","params":{"server_name":"Alloy Palworld server","max_players":"32","port":"8211","query_port":"27015","public":"false"}}' \
+  http://localhost:8080/rspc/process.start
+```
+
+## Factorio (vanilla)
+
+Milestone 4 template id: `factorio:vanilla`
+
+Optional params:
+- `version` (default: `stable`, also supports `experimental`)
+- `server_name` (default: `Alloy Factorio server`)
+- `server_description` (default: empty)
+- `max_players` (default: `8`)
+- `port` (default: `34197`, `0` means auto)
+- `public` (`false` by default)
+- `rcon_enabled` (`false` by default)
+- `rcon_port` (default: `27015`, `0` means auto)
+- `rcon_password` (required when `rcon_enabled=true`)
+
+Start (rspc):
+
+```bash
+curl -fsS -X POST -H 'content-type: application/json' \
+  --data '{"template_id":"factorio:vanilla","params":{"version":"stable","server_name":"Alloy Factorio server","max_players":"8","port":"34197","public":"false"}}' \
+  http://localhost:8080/rspc/process.start
+```
+
 ## Troubleshooting (common)
 
 | What you see | Likely cause | Fix |
@@ -226,3 +271,28 @@ To enable **reverse tunnel** (agent -> control), set on `alloy-agent`:
 - `ALLOY_CONTROL_WS_URL=http://<control-host>:8080/agent/ws`
 - `ALLOY_NODE_NAME=<node-name>` (optional; defaults to `$ALLOY_NODE_NAME` or `$HOSTNAME`)
 - `ALLOY_NODE_TOKEN=<token>` (optional; required if the node is created via the Nodes UI)
+
+### Remote node self-update (from Control Web)
+
+You can trigger updates for a remote node's `alloy-agent` from **Nodes** in the panel.
+
+On each remote node, run a local Watchtower sidecar and configure agent env:
+
+- `ALLOY_AGENT_SELF_UPDATE_WATCHTOWER_URL=http://watchtower:8080`
+- `ALLOY_AGENT_SELF_UPDATE_WATCHTOWER_TOKEN=<node-local-token>`
+
+And on the node-local Watchtower container:
+
+- `WATCHTOWER_HTTP_API_UPDATE=true`
+- `WATCHTOWER_HTTP_API_TOKEN=<same node-local-token>`
+- `WATCHTOWER_LABEL_ENABLE=true`
+
+Also label the remote `alloy-agent` container:
+
+- `com.centurylinklabs.watchtower.enable=true`
+
+Notes:
+
+- This updates the **selected node only**, not control/web.
+- The connection path is `control -> agent tunnel -> node-local watchtower`.
+- After update, the node briefly disconnects and auto-reconnects.

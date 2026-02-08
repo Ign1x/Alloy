@@ -16,6 +16,11 @@ type FocusCreateRefs = {
   createTrPasswordEl?: HTMLInputElement
   createTrFrpConfigEl?: HTMLTextAreaElement
   createTrFrpNodeEl?: HTMLDivElement
+  createPwPortEl?: HTMLInputElement
+  createPwQueryPortEl?: HTMLInputElement
+  createFxPortEl?: HTMLInputElement
+  createFxRconPortEl?: HTMLInputElement
+  createFxRconPasswordEl?: HTMLInputElement
   createDstClusterTokenEl?: HTMLInputElement
   createDstClusterNameEl?: HTMLInputElement
   createDstMaxPlayersEl?: HTMLInputElement
@@ -23,6 +28,7 @@ type FocusCreateRefs = {
   createDstPortEl?: HTMLInputElement
   createDstMasterPortEl?: HTMLInputElement
   createDstAuthPortEl?: HTMLInputElement
+  createNodeSelectEl?: HTMLDivElement
 }
 
 type FocusEditRefs = {
@@ -79,24 +85,31 @@ export function focusFirstCreateError(options: {
 
   const order: string[] =
     template_id === 'demo:sleep'
-      ? ['seconds', 'display_name']
+      ? ['node_id', 'seconds', 'display_name']
       : template_id === 'minecraft:vanilla'
-        ? ['accept_eula', 'version', 'memory_mb', 'port', 'frp_config', 'display_name']
+        ? ['node_id', 'accept_eula', 'version', 'memory_mb', 'port', 'frp_config', 'display_name']
         : template_id === 'minecraft:modrinth'
-          ? ['accept_eula', 'mrpack', 'memory_mb', 'port', 'frp_config', 'display_name']
+          ? ['node_id', 'accept_eula', 'mrpack', 'memory_mb', 'port', 'frp_config', 'display_name']
           : template_id === 'minecraft:import'
-            ? ['accept_eula', 'pack', 'memory_mb', 'port', 'frp_config', 'display_name']
+            ? ['node_id', 'accept_eula', 'pack', 'memory_mb', 'port', 'frp_config', 'display_name']
             : template_id === 'minecraft:curseforge'
-              ? ['accept_eula', 'curseforge', 'memory_mb', 'port', 'frp_config', 'display_name']
+              ? ['node_id', 'accept_eula', 'curseforge', 'memory_mb', 'port', 'frp_config', 'display_name']
               : template_id === 'dst:vanilla'
-                ? ['cluster_token', 'cluster_name', 'max_players', 'password', 'port', 'master_port', 'auth_port', 'display_name']
+                ? ['node_id', 'cluster_token', 'cluster_name', 'max_players', 'password', 'port', 'master_port', 'auth_port', 'display_name']
                 : template_id === 'terraria:vanilla'
-                  ? ['version', 'max_players', 'world_name', 'port', 'world_size', 'password', 'frp_config', 'display_name']
-                  : ['display_name']
+                  ? ['node_id', 'version', 'max_players', 'world_name', 'port', 'world_size', 'password', 'frp_config', 'display_name']
+                  : template_id === 'palworld:vanilla'
+                    ? ['node_id', 'server_name', 'max_players', 'port', 'query_port', 'password', 'admin_password', 'display_name']
+                    : template_id === 'factorio:vanilla'
+                      ? ['node_id', 'version', 'server_name', 'max_players', 'port', 'rcon_port', 'rcon_password', 'display_name']
+                  : ['node_id', 'display_name']
 
   const needsAdvanced =
     !createAdvanced &&
     (Boolean(errors.port) ||
+      Boolean(errors.query_port) ||
+      Boolean(errors.rcon_port) ||
+      Boolean(errors.rcon_password) ||
       Boolean(errors.master_port) ||
       Boolean(errors.auth_port) ||
       Boolean(errors.world_size) ||
@@ -108,6 +121,7 @@ export function focusFirstCreateError(options: {
     for (const key of order) {
       if (!errors[key]) continue
 
+      if (key === 'node_id' && focusDropdown(refs.createNodeSelectEl)) return
       if (key === 'display_name' && focusEl(refs.createInstanceNameEl)) return
       if (key === 'seconds' && focusEl(refs.createSleepSecondsEl)) return
 
@@ -149,6 +163,17 @@ export function focusFirstCreateError(options: {
         if (key === 'port' && focusEl(refs.createDstPortEl)) return
         if (key === 'master_port' && focusEl(refs.createDstMasterPortEl)) return
         if (key === 'auth_port' && focusEl(refs.createDstAuthPortEl)) return
+      }
+
+      if (template_id === 'palworld:vanilla') {
+        if (key === 'port' && focusEl(refs.createPwPortEl)) return
+        if (key === 'query_port' && focusEl(refs.createPwQueryPortEl)) return
+      }
+
+      if (template_id === 'factorio:vanilla') {
+        if (key === 'port' && focusEl(refs.createFxPortEl)) return
+        if (key === 'rcon_port' && focusEl(refs.createFxRconPortEl)) return
+        if (key === 'rcon_password' && focusEl(refs.createFxRconPasswordEl)) return
       }
 
     }

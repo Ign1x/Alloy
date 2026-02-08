@@ -23,6 +23,12 @@ export type CreateAdvancedDirtyInput = {
   trPassword: string
   trFrpEnabled: boolean
   trEffectiveFrpConfig: string
+  pwPort: string
+  pwQueryPort: string
+  fxPort: string
+  fxRconEnabled: boolean
+  fxRconPort: string
+  fxRconPassword: string
   dstPort: string
   dstMasterPort: string
   dstAuthPort: string
@@ -32,6 +38,7 @@ export type BuildCreatePreviewInput = {
   templateId: string
   templateLabel: string
   instanceName: string
+  nodeName: string
   sleepSeconds: string
   createAdvanced: boolean
   createAdvancedDirty: boolean
@@ -61,6 +68,23 @@ export type BuildCreatePreviewInput = {
   trWorldName: string
   trWorldSize: string
   trPassword: string
+  pwServerName: string
+  pwServerDescription: string
+  pwMaxPlayers: string
+  pwPassword: string
+  pwAdminPassword: string
+  pwPublic: boolean
+  pwPort: string
+  pwQueryPort: string
+  fxVersion: string
+  fxServerName: string
+  fxServerDescription: string
+  fxMaxPlayers: string
+  fxPublic: boolean
+  fxPort: string
+  fxRconEnabled: boolean
+  fxRconPort: string
+  fxRconPassword: string
 }
 
 function asPortLabel(raw: string): string {
@@ -88,6 +112,22 @@ export function computeCreateAdvancedDirty(input: CreateAdvancedDirtyInput): boo
     return false
   }
 
+  if (template === 'palworld:vanilla') {
+    const p = input.pwPort.trim()
+    const qp = input.pwQueryPort.trim()
+    if (p && p !== '8211') return true
+    if (qp && qp !== '27015') return true
+    return false
+  }
+
+  if (template === 'factorio:vanilla') {
+    if (input.fxRconEnabled) return true
+    const rp = input.fxRconPort.trim()
+    if (rp && rp !== '27015') return true
+    if (input.fxRconPassword.trim()) return true
+    return false
+  }
+
   if (template === 'dst:vanilla') {
     const p = input.dstPort.trim()
     const mp = input.dstMasterPort.trim()
@@ -110,6 +150,9 @@ export function buildCreatePreview(input: BuildCreatePreviewInput): CreatePrevie
 
   const name = input.instanceName.trim()
   if (name) rows.push({ label: 'Name', value: name })
+
+  const nodeName = input.nodeName.trim()
+  if (nodeName) rows.push({ label: 'Node', value: nodeName })
 
   if (template_id === 'demo:sleep') {
     rows.push({ label: 'Seconds', value: input.sleepSeconds.trim() || '60' })
@@ -233,6 +276,44 @@ export function buildCreatePreview(input: BuildCreatePreviewInput): CreatePrevie
     rows.push({ label: 'World name', value: input.trWorldName.trim() || 'world' })
     rows.push({ label: 'World size', value: input.trWorldSize.trim() || '1' })
     rows.push({ label: 'Password', value: input.trPassword.trim() ? '(set)' : '(none)', isSecret: true })
+  }
+
+  if (template_id === 'palworld:vanilla') {
+    rows.push({ label: 'Server name', value: input.pwServerName.trim() || 'Alloy Palworld server' })
+    rows.push({ label: 'Max players', value: input.pwMaxPlayers.trim() || '32' })
+    rows.push({ label: 'Public', value: input.pwPublic ? 'yes' : 'no' })
+
+    const portLabel = asPortLabel(input.pwPort)
+    rows.push({ label: 'Port', value: portLabel })
+    rows.push({ label: 'Connect', value: connectValue(portLabel) })
+
+    if (input.createAdvanced || input.createAdvancedDirty) {
+      rows.push({ label: 'Query port', value: asPortLabel(input.pwQueryPort) })
+      rows.push({ label: 'Password', value: input.pwPassword.trim() ? '(set)' : '(none)', isSecret: true })
+      rows.push({ label: 'Admin password', value: input.pwAdminPassword.trim() ? '(set)' : '(none)', isSecret: true })
+      if (input.pwServerDescription.trim()) rows.push({ label: 'Description', value: input.pwServerDescription.trim() })
+    }
+  }
+
+  if (template_id === 'factorio:vanilla') {
+    rows.push({ label: 'Version', value: input.fxVersion.trim() || 'stable' })
+    rows.push({ label: 'Server name', value: input.fxServerName.trim() || 'Alloy Factorio server' })
+    rows.push({ label: 'Max players', value: input.fxMaxPlayers.trim() || '8' })
+    rows.push({ label: 'Public', value: input.fxPublic ? 'yes' : 'no' })
+
+    const portLabel = asPortLabel(input.fxPort)
+    rows.push({ label: 'Port (UDP)', value: portLabel })
+    rows.push({ label: 'Connect', value: connectValue(portLabel) })
+
+    if (input.createAdvanced || input.createAdvancedDirty) {
+      rows.push({ label: 'RCON', value: input.fxRconEnabled ? 'enabled' : 'disabled' })
+      if (input.fxRconEnabled) {
+        rows.push({ label: 'RCON port', value: asPortLabel(input.fxRconPort) })
+        rows.push({ label: 'RCON password', value: input.fxRconPassword.trim() ? '(set)' : '(not set)', isSecret: true })
+        if (!input.fxRconPassword.trim()) warnings.push('Set RCON password or disable RCON.')
+      }
+      if (input.fxServerDescription.trim()) rows.push({ label: 'Description', value: input.fxServerDescription.trim() })
+    }
   }
 
   return { template_id, templateLabel, rows, warnings }

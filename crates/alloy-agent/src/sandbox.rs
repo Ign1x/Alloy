@@ -198,6 +198,21 @@ fn parse_string_param<'a>(params: &'a BTreeMap<String, String>, key: &str) -> Op
     params.get(key).map(|v| v.trim()).filter(|v| !v.is_empty())
 }
 
+fn sanitize_docker_user(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if trimmed
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || ch == ':' || ch == '-' || ch == '_')
+    {
+        Some(trimmed.to_string())
+    } else {
+        None
+    }
+}
+
 fn choose_mode(
     sandbox_enabled: bool,
     mode_override: Option<&str>,
@@ -737,6 +752,13 @@ fn build_docker_args(
     out.push("host".to_string());
     out.push("--name".to_string());
     out.push(cname);
+
+    if let Some(user) =
+        parse_string_param(params, "sandbox_docker_user").and_then(sanitize_docker_user)
+    {
+        out.push("--user".to_string());
+        out.push(user);
+    }
 
     out.push("--security-opt".to_string());
     out.push("no-new-privileges:true".to_string());

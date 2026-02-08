@@ -87,6 +87,7 @@ fn safe_to_retry_over_direct(method: &str) -> bool {
     matches!(
         method,
         "/alloy.agent.v1.AgentHealthService/Check"
+            | "/alloy.agent.v1.AgentUpdateService/GetSelfUpdateStatus"
             | "/alloy.agent.v1.FilesystemService/GetCapabilities"
             | "/alloy.agent.v1.FilesystemService/ListDir"
             | "/alloy.agent.v1.FilesystemService/ReadFile"
@@ -108,6 +109,7 @@ fn is_long_running_method(method: &str) -> bool {
             | "/alloy.agent.v1.ProcessService/StartFromTemplate"
             | "/alloy.agent.v1.InstanceService/Start"
             | "/alloy.agent.v1.InstanceService/ImportSaveFromUrl"
+            | "/alloy.agent.v1.AgentUpdateService/TriggerSelfUpdate"
     )
 }
 
@@ -131,6 +133,15 @@ impl AgentTransport {
             next_id: Arc::new(AtomicU64::new(1)),
             b64: base64::engine::general_purpose::STANDARD,
         }
+    }
+
+    pub fn with_node(mut self, node: impl Into<String>) -> Self {
+        let raw = node.into();
+        let trimmed = raw.trim();
+        if !trimmed.is_empty() {
+            self.node = trimmed.to_string();
+        }
+        self
     }
 
     pub async fn connected_nodes(&self) -> Vec<String> {

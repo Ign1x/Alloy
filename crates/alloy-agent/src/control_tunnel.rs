@@ -9,15 +9,17 @@ use tracing::{Instrument, info_span};
 
 use alloy_proto::agent_v1::{
     ClearCacheRequest, CreateInstanceRequest, DeleteInstancePreviewRequest, DeleteInstanceRequest,
-    GetCacheStatsRequest, GetCapabilitiesRequest, GetInstanceRequest, GetStatusRequest,
-    GetWarmTemplateProgressRequest, HealthCheckRequest, ImportSaveFromUrlRequest,
-    ListDirRequest, ListInstancesRequest, ListProcessesRequest, ListTemplatesRequest,
-    MkdirRequest, ReadFileRequest, RenameRequest, StartFromTemplateRequest,
-    StartInstanceRequest, StopInstanceRequest, StopProcessRequest, TailFileRequest,
-    TailLogsRequest, UpdateInstanceRequest, WarmTemplateCacheRequest,
-    WriteFileRequest, agent_health_service_server::AgentHealthService,
-    filesystem_service_server::FilesystemService, instance_service_server::InstanceService,
-    logs_service_server::LogsService, process_service_server::ProcessService,
+    GetCacheStatsRequest, GetCapabilitiesRequest, GetInstanceRequest, GetSelfUpdateStatusRequest,
+    GetStatusRequest, GetWarmTemplateProgressRequest, HealthCheckRequest,
+    ImportSaveFromUrlRequest, ListDirRequest, ListInstancesRequest, ListProcessesRequest,
+    ListTemplatesRequest, MkdirRequest, ReadFileRequest, RenameRequest,
+    StartFromTemplateRequest, StartInstanceRequest, StopInstanceRequest, StopProcessRequest,
+    TailFileRequest, TailLogsRequest, TriggerSelfUpdateRequest, UpdateInstanceRequest,
+    WarmTemplateCacheRequest, WriteFileRequest,
+    agent_update_service_server::AgentUpdateService,
+    agent_health_service_server::AgentHealthService, filesystem_service_server::FilesystemService,
+    instance_service_server::InstanceService, logs_service_server::LogsService,
+    process_service_server::ProcessService,
 };
 use tonic::{Request, Status};
 
@@ -54,6 +56,7 @@ enum ControlToAgentFrame {
 #[derive(Debug, Clone)]
 struct AgentRpc {
     health: crate::health_service::HealthApi,
+    update: crate::self_update::SelfUpdateApi,
     fs: crate::filesystem_service::FilesystemApi,
     logs: crate::logs_service::LogsApi,
     process: crate::process_service::ProcessApi,
@@ -64,6 +67,7 @@ impl AgentRpc {
     fn new(manager: ProcessManager) -> Self {
         Self {
             health: crate::health_service::HealthApi,
+            update: crate::self_update::SelfUpdateApi,
             fs: crate::filesystem_service::FilesystemApi,
             logs: crate::logs_service::LogsApi,
             process: crate::process_service::ProcessApi::new(manager.clone()),
@@ -80,6 +84,24 @@ impl AgentRpc {
             "/alloy.agent.v1.AgentHealthService/Check" => {
                 let req: HealthCheckRequest = self.decode_req(payload)?;
                 let resp = self.health.check(Request::new(req)).await?.into_inner();
+                Ok(resp.encode_to_vec())
+            }
+            "/alloy.agent.v1.AgentUpdateService/GetSelfUpdateStatus" => {
+                let req: GetSelfUpdateStatusRequest = self.decode_req(payload)?;
+                let resp = self
+                    .update
+                    .get_self_update_status(Request::new(req))
+                    .await?
+                    .into_inner();
+                Ok(resp.encode_to_vec())
+            }
+            "/alloy.agent.v1.AgentUpdateService/TriggerSelfUpdate" => {
+                let req: TriggerSelfUpdateRequest = self.decode_req(payload)?;
+                let resp = self
+                    .update
+                    .trigger_self_update(Request::new(req))
+                    .await?
+                    .into_inner();
                 Ok(resp.encode_to_vec())
             }
 

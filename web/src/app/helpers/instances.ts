@@ -15,6 +15,8 @@ export function instanceCardBackdrop(templateId: string): InstanceCardBackdrop |
   if (kind === 'minecraft') return { src: '/game-backdrops/minecraft-bg.jpg', position: '66% 52%' }
   if (kind === 'dst') return { src: '/game-backdrops/dst-bg.jpg', position: '82% 56%' }
   if (kind === 'terraria') return { src: '/game-backdrops/terraria-bg.jpg', position: '80% 58%' }
+  if (kind === 'palworld') return { src: '/game-backdrops/terraria-bg.jpg', position: '72% 52%' }
+  if (kind === 'factorio') return { src: '/game-backdrops/minecraft-bg.jpg', position: '60% 50%' }
   if (kind === 'demo') return { src: '/game-backdrops/demo-bg.svg', position: '50% 52%' }
   return null
 }
@@ -52,6 +54,8 @@ export function startProgressSteps(templateId: string): string[] {
   if (templateId === 'minecraft:import') return ['Import', 'Extract', 'Spawn', 'Wait']
   if (templateId === 'minecraft:curseforge') return ['Resolve', 'Download', 'Extract', 'Spawn', 'Wait']
   if (templateId === 'terraria:vanilla') return ['Resolve', 'Download', 'Extract', 'Spawn', 'Wait']
+  if (templateId === 'palworld:vanilla') return ['Install', 'Spawn', 'Wait']
+  if (templateId === 'factorio:vanilla') return ['Resolve', 'Download', 'Extract', 'Spawn', 'Wait']
   return ['Spawn', 'Wait']
 }
 

@@ -613,6 +613,165 @@ pub fn list_templates() -> Vec<ProcessTemplate> {
             ],
             graceful_stdin: None,
         },
+        ProcessTemplate {
+            template_id: "palworld:vanilla".to_string(),
+            display_name: "Palworld: Vanilla".to_string(),
+            command: "./PalServer.sh".to_string(),
+            args: vec![],
+            params: vec![
+                param_int(
+                    "port",
+                    "Port",
+                    false,
+                    "8211",
+                    0,
+                    65535,
+                    "8211 (0 = auto)",
+                    "Game port. Use 0 to auto-assign.",
+                ),
+                param_int(
+                    "query_port",
+                    "Query port",
+                    false,
+                    "27015",
+                    0,
+                    65535,
+                    "27015 (0 = auto)",
+                    "Steam query port. Use 0 to auto-assign.",
+                ),
+                param_int(
+                    "max_players",
+                    "Max players",
+                    false,
+                    "32",
+                    1,
+                    128,
+                    "32",
+                    "Maximum number of players.",
+                ),
+                param_string(
+                    "server_name",
+                    "Server name",
+                    false,
+                    "Alloy Palworld server",
+                    Vec::new(),
+                    "Alloy Palworld server",
+                    "Shown in the server browser.",
+                ),
+                param_string(
+                    "server_description",
+                    "Server description",
+                    false,
+                    "",
+                    Vec::new(),
+                    "",
+                    "Optional server description.",
+                ),
+                param_secret("password", "Password", false, "", "Optional join password."),
+                param_secret(
+                    "admin_password",
+                    "Admin password",
+                    false,
+                    "",
+                    "Optional admin password.",
+                ),
+                param_bool(
+                    "public",
+                    "Public server",
+                    false,
+                    false,
+                    "Enable public server listing when supported by network/NAT.",
+                ),
+            ],
+            graceful_stdin: None,
+        },
+        ProcessTemplate {
+            template_id: "factorio:vanilla".to_string(),
+            display_name: "Factorio: Vanilla".to_string(),
+            command: "./factorio".to_string(),
+            args: vec![],
+            params: vec![
+                param_string(
+                    "version",
+                    "Version",
+                    false,
+                    "stable",
+                    vec!["stable", "experimental"],
+                    "stable",
+                    "Factorio headless channel or explicit version (e.g. 1.1.110).",
+                ),
+                param_int(
+                    "port",
+                    "Port",
+                    false,
+                    "34197",
+                    0,
+                    65535,
+                    "34197 (0 = auto)",
+                    "UDP game port. Use 0 to auto-assign.",
+                ),
+                param_int(
+                    "max_players",
+                    "Max players",
+                    false,
+                    "8",
+                    1,
+                    1024,
+                    "8",
+                    "Maximum number of players.",
+                ),
+                param_string(
+                    "server_name",
+                    "Server name",
+                    false,
+                    "Alloy Factorio server",
+                    Vec::new(),
+                    "Alloy Factorio server",
+                    "Shown in the server list.",
+                ),
+                param_string(
+                    "server_description",
+                    "Server description",
+                    false,
+                    "",
+                    Vec::new(),
+                    "",
+                    "Optional server description.",
+                ),
+                param_bool(
+                    "public",
+                    "Public listing",
+                    false,
+                    false,
+                    "Whether to list this server publicly.",
+                ),
+                param_bool(
+                    "rcon_enabled",
+                    "Enable RCON",
+                    false,
+                    false,
+                    "Enable RCON remote console.",
+                ),
+                param_int(
+                    "rcon_port",
+                    "RCON port",
+                    false,
+                    "27015",
+                    0,
+                    65535,
+                    "27015 (0 = auto)",
+                    "RCON TCP port. Use 0 to auto-assign.",
+                ),
+                param_secret(
+                    "rcon_password",
+                    "RCON password",
+                    false,
+                    "",
+                    "Required when RCON is enabled.",
+                ),
+            ],
+            graceful_stdin: Some("/quit\n".to_string()),
+        },
     ];
 
     for t in &mut templates {
@@ -694,6 +853,14 @@ pub fn apply_params(
 
     if t.template_id == "dst:vanilla" {
         let _ = crate::dst::validate_vanilla_params(params)?;
+    }
+
+    if t.template_id == "palworld:vanilla" {
+        let _ = crate::palworld::validate_vanilla_params(params)?;
+    }
+
+    if t.template_id == "factorio:vanilla" {
+        let _ = crate::factorio::validate_vanilla_params(params)?;
     }
 
     Ok(t)

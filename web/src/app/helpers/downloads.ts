@@ -26,7 +26,15 @@ export function mapDownloadJobFromServer(raw: unknown): DownloadJob | null {
   const stateRaw = row.state
   const message = typeof row.message === 'string' ? row.message : ''
   if (!id || !templateId) return null
-  if (targetRaw !== 'minecraft_vanilla' && targetRaw !== 'terraria_vanilla') return null
+  if (
+    targetRaw !== 'minecraft_vanilla' &&
+    targetRaw !== 'terraria_vanilla' &&
+    targetRaw !== 'dst_vanilla' &&
+    targetRaw !== 'palworld_vanilla' &&
+    targetRaw !== 'factorio_vanilla'
+  ) {
+    return null
+  }
   if (
     stateRaw !== 'queued' &&
     stateRaw !== 'running' &&
@@ -69,12 +77,18 @@ export function mapDownloadJobFromServer(raw: unknown): DownloadJob | null {
 
 export function downloadTargetLabel(target: DownloadTarget): string {
   if (target === 'minecraft_vanilla') return 'Minecraft (Vanilla)'
-  return 'Terraria (Vanilla)'
+  if (target === 'terraria_vanilla') return 'Terraria (Vanilla)'
+  if (target === 'dst_vanilla') return "Don't Starve Together (Vanilla)"
+  if (target === 'palworld_vanilla') return 'Palworld (Vanilla)'
+  return 'Factorio (Vanilla)'
 }
 
 export function downloadProgressSteps(templateId: string): string[] {
   if (templateId === 'minecraft:vanilla') return ['Resolve', 'Download', 'Verify', 'Ready']
   if (templateId === 'terraria:vanilla') return ['Resolve', 'Download', 'Extract', 'Ready']
+  if (templateId === 'dst:vanilla') return ['Install', 'Ready']
+  if (templateId === 'palworld:vanilla') return ['Install', 'Ready']
+  if (templateId === 'factorio:vanilla') return ['Resolve', 'Download', 'Extract', 'Ready']
   return ['Queue', 'Run', 'Ready']
 }
 
@@ -105,6 +119,19 @@ export function downloadEstimatedMessage(templateId: string, elapsedMs: number):
     if (elapsedMs < 2_000) return 'resolving terraria release metadata…'
     if (elapsedMs < 15_000) return 'downloading terraria server package…'
     return 'extracting and verifying terraria server files…'
+  }
+  if (templateId === 'dst:vanilla') {
+    if (elapsedMs < 3_000) return 'installing dst dedicated server via steamcmd…'
+    return 'verifying dst install files…'
+  }
+  if (templateId === 'palworld:vanilla') {
+    if (elapsedMs < 3_000) return 'installing palworld server via steamcmd…'
+    return 'verifying palworld install files…'
+  }
+  if (templateId === 'factorio:vanilla') {
+    if (elapsedMs < 2_000) return 'resolving factorio package…'
+    if (elapsedMs < 20_000) return 'downloading factorio headless package…'
+    return 'extracting factorio server files…'
   }
   return 'preparing files…'
 }

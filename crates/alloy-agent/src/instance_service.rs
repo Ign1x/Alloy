@@ -163,6 +163,62 @@ async fn ensure_persisted_ports(inst: &mut PersistedInstance) -> Result<(), Stat
                 save_instance(inst).await?;
             }
         }
+        "factorio:vanilla" => {
+            let current = inst.params.get("port").map(|s| s.trim()).unwrap_or("");
+            if current.is_empty() || current == "0" {
+                let port = port_alloc::allocate_udp_port(0)
+                    .map_err(|e| Status::internal(format!("failed to allocate port: {e}")))?;
+                inst.params.insert("port".to_string(), port.to_string());
+                save_instance(inst).await?;
+            }
+        }
+        "palworld:vanilla" => {
+            use std::collections::HashSet;
+
+            let mut changed = false;
+            let mut used = HashSet::<u16>::new();
+            for k in ["port", "query_port"] {
+                let current = inst.params.get(k).map(|s| s.trim()).unwrap_or("");
+                if current.is_empty() || current == "0" {
+                    continue;
+                }
+                if let Ok(v) = current.parse::<u16>()
+                    && v != 0
+                {
+                    used.insert(v);
+                }
+            }
+
+            for k in ["port", "query_port"] {
+                let current = inst.params.get(k).map(|s| s.trim()).unwrap_or("");
+                if !current.is_empty() && current != "0" {
+                    continue;
+                }
+
+                let mut picked: Option<u16> = None;
+                for _ in 0..16 {
+                    let p = port_alloc::allocate_udp_port(0)
+                        .map_err(|e| Status::internal(format!("failed to allocate port: {e}")))?;
+                    if p == 0 || used.contains(&p) {
+                        continue;
+                    }
+                    used.insert(p);
+                    picked = Some(p);
+                    break;
+                }
+
+                let Some(p) = picked else {
+                    return Err(Status::internal("failed to allocate unique ports"));
+                };
+
+                inst.params.insert(k.to_string(), p.to_string());
+                changed = true;
+            }
+
+            if changed {
+                save_instance(inst).await?;
+            }
+        }
         "dst:vanilla" => {
             use std::collections::HashSet;
 

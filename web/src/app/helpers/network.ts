@@ -7,6 +7,10 @@ export function parsePort(value: unknown): number | null {
 
 export function instancePort(info: { config: { template_id: string; params: unknown } }): number | null {
   const params = info.config.params as Record<string, unknown> | null | undefined
+  const templateId = String(info.config.template_id || '')
+  if (templateId === 'dst:vanilla') return parsePort(params?.port)
+  if (templateId === 'palworld:vanilla') return parsePort(params?.port)
+  if (templateId === 'factorio:vanilla') return parsePort(params?.port)
   return parsePort(params?.port)
 }
 

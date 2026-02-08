@@ -13,7 +13,7 @@ use alloy_proto::agent_v1::{
 use tonic::{Request, Response, Status};
 
 use crate::process_manager::ProcessManager;
-use crate::{minecraft_download, terraria_download};
+use crate::{dst_download, factorio_download, minecraft_download, palworld_download, terraria_download};
 
 #[derive(Debug, Clone)]
 pub struct ProcessApi {
@@ -192,21 +192,21 @@ impl ProcessService for ProcessApi {
                         );
                     }),
                 )
-                    .await
-                    .map_err(|e| {
-                        if progress_set {
-                            crate::download_progress::fail(
-                                &progress_id,
-                                format!("failed to download minecraft server jar: {e}"),
-                            );
-                        }
-                        Status::internal(crate::error_payload::encode(
-                            "download_failed",
+                .await
+                .map_err(|e| {
+                    if progress_set {
+                        crate::download_progress::fail(
+                            &progress_id,
                             format!("failed to download minecraft server jar: {e}"),
-                            None,
-                            Some("Try again; if it persists, clear cache and retry.".to_string()),
-                        ))
-                    })?;
+                        );
+                    }
+                    Status::internal(crate::error_payload::encode(
+                        "download_failed",
+                        format!("failed to download minecraft server jar: {e}"),
+                        None,
+                        Some("Try again; if it persists, clear cache and retry.".to_string()),
+                    ))
+                })?;
 
                 report_progress(
                     "verify",
@@ -297,21 +297,21 @@ impl ProcessService for ProcessApi {
                         );
                     }),
                 )
-                    .await
-                    .map_err(|e| {
-                        if progress_set {
-                            crate::download_progress::fail(
-                                &progress_id,
-                                format!("failed to download terraria server zip: {e}"),
-                            );
-                        }
-                        Status::internal(crate::error_payload::encode(
-                            "download_failed",
+                .await
+                .map_err(|e| {
+                    if progress_set {
+                        crate::download_progress::fail(
+                            &progress_id,
                             format!("failed to download terraria server zip: {e}"),
-                            None,
-                            Some("Try again; if it persists, clear cache and retry.".to_string()),
-                        ))
-                    })?;
+                        );
+                    }
+                    Status::internal(crate::error_payload::encode(
+                        "download_failed",
+                        format!("failed to download terraria server zip: {e}"),
+                        None,
+                        Some("Try again; if it persists, clear cache and retry.".to_string()),
+                    ))
+                })?;
 
                 report_progress(
                     "extract",
@@ -353,6 +353,205 @@ impl ProcessService for ProcessApi {
                     "terraria cache warmed: version={} zip_path={} server_root={}",
                     resolved.version_id,
                     zip_path.display(),
+                    extracted.server_root.display()
+                )
+            }
+            "dst:vanilla" => {
+                let version = params
+                    .get("version")
+                    .map(|s| s.trim())
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or("latest");
+
+                if progress_set {
+                    crate::download_progress::start(
+                        &progress_id,
+                        "install",
+                        format!("installing dst dedicated server ({version}) via steamcmd..."),
+                        None,
+                    );
+                }
+
+                let installed = dst_download::ensure_dst_server()
+                    .await
+                    .map_err(|e| {
+                        if progress_set {
+                            crate::download_progress::fail(
+                                &progress_id,
+                                format!("failed to install dst dedicated server: {e}"),
+                            );
+                        }
+                        Status::internal(crate::error_payload::encode(
+                            "download_failed",
+                            format!("failed to install dst dedicated server: {e}"),
+                            None,
+                            Some(
+                                "SteamCMD install failed. Check network and runtime dependencies."
+                                    .to_string(),
+                            ),
+                        ))
+                    })?;
+
+                if progress_set {
+                    crate::download_progress::finish(
+                        &progress_id,
+                        "dst cache warmed",
+                        0,
+                        0,
+                        0,
+                    );
+                }
+
+                format!(
+                    "dst cache warmed: version={} server_root={} bin={}",
+                    version,
+                    installed.server_root.display(),
+                    installed.bin.display()
+                )
+            }
+            "palworld:vanilla" => {
+                if progress_set {
+                    crate::download_progress::start(
+                        &progress_id,
+                        "install",
+                        "installing palworld server files via steamcmd...",
+                        None,
+                    );
+                }
+
+                let installed = palworld_download::ensure_palworld_server()
+                    .await
+                    .map_err(|e| {
+                        if progress_set {
+                            crate::download_progress::fail(
+                                &progress_id,
+                                format!("failed to install palworld server: {e}"),
+                            );
+                        }
+                        Status::internal(crate::error_payload::encode(
+                            "download_failed",
+                            format!("failed to install palworld server: {e}"),
+                            None,
+                            Some(
+                                "SteamCMD install failed. Check network and runtime dependencies."
+                                    .to_string(),
+                            ),
+                        ))
+                    })?;
+
+                if progress_set {
+                    crate::download_progress::finish(
+                        &progress_id,
+                        "palworld cache warmed",
+                        0,
+                        0,
+                        0,
+                    );
+                }
+
+                format!(
+                    "palworld cache warmed: server_root={} launcher={}",
+                    installed.server_root.display(),
+                    installed.launcher.display()
+                )
+            }
+            "factorio:vanilla" => {
+                let version = params
+                    .get("version")
+                    .map(|s| s.trim())
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or("stable");
+
+                if progress_set {
+                    crate::download_progress::start(
+                        &progress_id,
+                        "resolve",
+                        format!("resolving factorio version {version}..."),
+                        None,
+                    );
+                }
+
+                let resolved = factorio_download::resolve_server_package(version).map_err(|e| {
+                    if progress_set {
+                        crate::download_progress::fail(
+                            &progress_id,
+                            format!("failed to resolve factorio package: {e}"),
+                        );
+                    }
+                    Status::invalid_argument(crate::error_payload::encode(
+                        "download_failed",
+                        format!("failed to resolve factorio package: {e}"),
+                        None,
+                        Some("Check version/channel and network connectivity.".to_string()),
+                    ))
+                })?;
+
+                report_progress(
+                    "download",
+                    Some(0),
+                    Some(0),
+                    Some(0),
+                    format!("downloading factorio {}...", resolved.version_id),
+                    Some(false),
+                );
+
+                let package_path = factorio_download::ensure_server_package(&resolved)
+                    .await
+                    .map_err(|e| {
+                        if progress_set {
+                            crate::download_progress::fail(
+                                &progress_id,
+                                format!("failed to download factorio package: {e}"),
+                            );
+                        }
+                        Status::internal(crate::error_payload::encode(
+                            "download_failed",
+                            format!("failed to download factorio package: {e}"),
+                            None,
+                            Some("Try again; if it persists, clear cache and retry.".to_string()),
+                        ))
+                    })?;
+
+                report_progress(
+                    "extract",
+                    Some(0),
+                    Some(0),
+                    Some(0),
+                    format!("extracting factorio {} files...", resolved.version_id),
+                    Some(false),
+                );
+
+                let extracted =
+                    factorio_download::extract_server_to_cache(&package_path, &resolved.version_id)
+                        .map_err(|e| {
+                            if progress_set {
+                                crate::download_progress::fail(
+                                    &progress_id,
+                                    format!("failed to extract factorio package: {e}"),
+                                );
+                            }
+                            Status::internal(crate::error_payload::encode(
+                                "download_failed",
+                                format!("failed to extract factorio package: {e}"),
+                                None,
+                                Some("Clear cache and retry extraction.".to_string()),
+                            ))
+                        })?;
+
+                if progress_set {
+                    crate::download_progress::finish(
+                        &progress_id,
+                        format!("factorio {} ready", resolved.version_id),
+                        0,
+                        0,
+                        0,
+                    );
+                }
+
+                format!(
+                    "factorio cache warmed: version={} package_path={} server_root={}",
+                    resolved.version_id,
+                    package_path.display(),
                     extracted.server_root.display()
                 )
             }
@@ -590,6 +789,117 @@ impl ProcessService for ProcessApi {
             ));
             out.extend(tr_entries);
 
+            // DST: steamcmd install cache (typically a single "latest" entry).
+            let dst_root = crate::minecraft::data_root()
+                .join("cache")
+                .join("dst")
+                .join("vanilla");
+            let mut dst_entries: Vec<(String, std::path::PathBuf, u64, u64)> = Vec::new();
+            if let Ok(rd) = std::fs::read_dir(&dst_root) {
+                for entry in rd.flatten() {
+                    let path = entry.path();
+                    let Ok(ft) = entry.file_type() else {
+                        continue;
+                    };
+                    if !ft.is_dir() {
+                        continue;
+                    }
+                    let version = entry.file_name().to_string_lossy().to_string();
+                    if version.trim().is_empty() {
+                        continue;
+                    }
+
+                    let (size, last_modified) = dir_stats(&path);
+                    let last_used = read_last_used_marker(&path).max(last_modified);
+                    let key = format!("dst:vanilla@{version}");
+                    dst_entries.push((key, path, size, last_used));
+                }
+            }
+            dst_entries.sort_by(|a, b| b.3.cmp(&a.3).then_with(|| a.0.cmp(&b.0)));
+            let dst_size = dst_entries.iter().map(|e| e.2).sum::<u64>();
+            let dst_last = dst_entries.iter().map(|e| e.3).max().unwrap_or(0);
+            out.push((
+                "dst:vanilla".to_string(),
+                dst_root.clone(),
+                dst_size,
+                dst_last,
+            ));
+            out.extend(dst_entries);
+
+            // Palworld: steamcmd install cache (typically a single "latest" entry).
+            let pw_root = crate::palworld::data_root()
+                .join("cache")
+                .join("palworld")
+                .join("vanilla");
+            let mut pw_entries: Vec<(String, std::path::PathBuf, u64, u64)> = Vec::new();
+            if let Ok(rd) = std::fs::read_dir(&pw_root) {
+                for entry in rd.flatten() {
+                    let path = entry.path();
+                    let Ok(ft) = entry.file_type() else {
+                        continue;
+                    };
+                    if !ft.is_dir() {
+                        continue;
+                    }
+                    let version = entry.file_name().to_string_lossy().to_string();
+                    if version.trim().is_empty() {
+                        continue;
+                    }
+
+                    let (size, last_modified) = dir_stats(&path);
+                    let last_used = read_last_used_marker(&path).max(last_modified);
+                    let key = format!("palworld:vanilla@{version}");
+                    pw_entries.push((key, path, size, last_used));
+                }
+            }
+            pw_entries.sort_by(|a, b| b.3.cmp(&a.3).then_with(|| a.0.cmp(&b.0)));
+            let pw_size = pw_entries.iter().map(|e| e.2).sum::<u64>();
+            let pw_last = pw_entries.iter().map(|e| e.3).max().unwrap_or(0);
+            out.push((
+                "palworld:vanilla".to_string(),
+                pw_root.clone(),
+                pw_size,
+                pw_last,
+            ));
+            out.extend(pw_entries);
+
+            // Factorio: per-version extracted/download cache.
+            let fx_root = crate::factorio::data_root()
+                .join("cache")
+                .join("factorio")
+                .join("vanilla");
+            let mut fx_entries: Vec<(String, std::path::PathBuf, u64, u64)> = Vec::new();
+            if let Ok(rd) = std::fs::read_dir(&fx_root) {
+                for entry in rd.flatten() {
+                    let path = entry.path();
+                    let Ok(ft) = entry.file_type() else {
+                        continue;
+                    };
+                    if !ft.is_dir() {
+                        continue;
+                    }
+                    let version = entry.file_name().to_string_lossy().to_string();
+                    if version.trim().is_empty() {
+                        continue;
+                    }
+
+                    let (size, last_modified) = dir_stats(&path);
+                    let last_used = read_last_used_marker(&path).max(last_modified);
+                    let key = format!("factorio:vanilla@{version}");
+                    fx_entries.push((key, path, size, last_used));
+                }
+            }
+            fx_entries.sort_by(|a, b| b.3.cmp(&a.3).then_with(|| a.0.cmp(&b.0)));
+            let fx_size = fx_entries.iter().map(|e| e.2).sum::<u64>();
+            let fx_last = fx_entries.iter().map(|e| e.3).max().unwrap_or(0);
+            out.push((
+                "factorio:vanilla".to_string(),
+                fx_root.clone(),
+                fx_size,
+                fx_last,
+            ));
+            out.extend(fx_entries);
+
             out
         })
         .await
@@ -617,6 +927,15 @@ impl ProcessService for ProcessApi {
             if key == "terraria:vanilla" || key.starts_with("terraria:vanilla@") {
                 return Some("terraria:vanilla");
             }
+            if key == "dst:vanilla" || key.starts_with("dst:vanilla@") {
+                return Some("dst:vanilla");
+            }
+            if key == "palworld:vanilla" || key.starts_with("palworld:vanilla@") {
+                return Some("palworld:vanilla");
+            }
+            if key == "factorio:vanilla" || key.starts_with("factorio:vanilla@") {
+                return Some("factorio:vanilla");
+            }
             None
         }
 
@@ -629,6 +948,9 @@ impl ProcessService for ProcessApi {
             vec![
                 "minecraft:vanilla".to_string(),
                 "terraria:vanilla".to_string(),
+                "dst:vanilla".to_string(),
+                "palworld:vanilla".to_string(),
+                "factorio:vanilla".to_string(),
             ]
         } else {
             req.keys
@@ -688,6 +1010,54 @@ impl ProcessService for ProcessApi {
                     )));
                 }
                 terraria_download::cache_dir().join(version)
+            } else if key == "dst:vanilla" {
+                crate::minecraft::data_root()
+                    .join("cache")
+                    .join("dst")
+                    .join("vanilla")
+            } else if let Some(version) = key.strip_prefix("dst:vanilla@") {
+                if version.trim().is_empty() {
+                    return Err(Status::invalid_argument(format!(
+                        "invalid dst cache key: {key}"
+                    )));
+                }
+                crate::minecraft::data_root()
+                    .join("cache")
+                    .join("dst")
+                    .join("vanilla")
+                    .join(version)
+            } else if key == "palworld:vanilla" {
+                crate::palworld::data_root()
+                    .join("cache")
+                    .join("palworld")
+                    .join("vanilla")
+            } else if let Some(version) = key.strip_prefix("palworld:vanilla@") {
+                if version.trim().is_empty() {
+                    return Err(Status::invalid_argument(format!(
+                        "invalid palworld cache key: {key}"
+                    )));
+                }
+                crate::palworld::data_root()
+                    .join("cache")
+                    .join("palworld")
+                    .join("vanilla")
+                    .join(version)
+            } else if key == "factorio:vanilla" {
+                crate::factorio::data_root()
+                    .join("cache")
+                    .join("factorio")
+                    .join("vanilla")
+            } else if let Some(version) = key.strip_prefix("factorio:vanilla@") {
+                if version.trim().is_empty() {
+                    return Err(Status::invalid_argument(format!(
+                        "invalid factorio cache key: {key}"
+                    )));
+                }
+                crate::factorio::data_root()
+                    .join("cache")
+                    .join("factorio")
+                    .join("vanilla")
+                    .join(version)
             } else {
                 return Err(Status::invalid_argument(format!(
                     "unknown cache key: {key}"

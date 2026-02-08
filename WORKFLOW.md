@@ -190,6 +190,23 @@ TODO:
 TODO:
 - [ ] Add DST dedicated server template + docs (SteamCMD-based)
 
+### Phase 5.5 - Palworld + Factorio
+Definition of Done (must be true):
+- Agent exposes templates `palworld:vanilla` and `factorio:vanilla` (no arbitrary cmd from web/control)
+- Both templates support one-click create/start from web UI with sensible defaults
+- Palworld and Factorio server binaries are downloaded/installed to persistent cache under `ALLOY_DATA_ROOT`
+- Start/stop works end-to-end and logs are visible from the existing logs viewer
+
+TODO:
+- [x] Add Palworld/Factorio template definitions + param schemas in agent
+- [x] Implement Palworld server install/resolve (SteamCMD) + cached layout
+- [x] Implement Factorio headless install/resolve + cached layout
+- [x] Implement Palworld instance layout + launch/stop flow in process manager
+- [x] Implement Factorio instance layout + launch/stop flow in process manager
+- [x] Add web create form sections + preview rows for Palworld/Factorio
+- [x] Update docs (`deploy/README.md`) with defaults and create examples
+- [x] Verify build/test for touched crates and check off this section
+
 ---
 
 ## Milestone 1 - Minecraft Vanilla (real)
@@ -240,4 +257,51 @@ TODO:
 - [x] Stop via stdin `exit\n` then TERM/KILL fallback
 - [x] Update Docker agent image/runtime prerequisites if needed and mount `/data`
 - [x] Update web UI: add terraria start form (version/port/max_players/world/password)
+- [x] Verify end-to-end in docker-compose and check off this section
+
+---
+
+## Milestone 3 - Palworld Vanilla (real)
+Definition of Done (must be true):
+- Agent exposes a template `palworld:vanilla` (no arbitrary cmd from web/control)
+- Agent installs Palworld dedicated server files (SteamCMD) and caches them under `ALLOY_DATA_ROOT`
+- Agent creates an instance dir and writes/patches `PalWorldSettings.ini` with server config (port/players/password/server name)
+- Start/stop works end-to-end from web UI, logs are visible via tail, and stop is graceful (stdin/TERM/KILL fallback)
+
+Defaults (recorded):
+- Port: 8211 (configurable, `0` means auto assign)
+- Query port: 27015 (configurable, `0` means auto assign)
+- Max players: 32 (configurable)
+- Public: false by default
+
+TODO:
+- [x] Add `palworld:vanilla` template and param validation in agent
+- [x] Implement Palworld SteamCMD install + cache reuse
+- [x] Create instance layout under `ALLOY_DATA_ROOT` and patch `PalWorldSettings.ini`
+- [x] Start server via `PalServer.sh` (or equivalent launcher) with instance-local config
+- [x] Stop via stdin/TERM/KILL fallback
+- [x] Update web UI: add palworld start form (name/port/query/max_players/password/public)
+- [x] Verify end-to-end in docker-compose and check off this section
+
+---
+
+## Milestone 4 - Factorio Vanilla (real)
+Definition of Done (must be true):
+- Agent exposes a template `factorio:vanilla` (no arbitrary cmd from web/control)
+- Agent downloads Factorio headless server package and caches it under `ALLOY_DATA_ROOT`
+- Agent creates an instance dir and writes `server-settings.json` plus default save for first start
+- Start/stop works end-to-end from web UI, logs are visible via tail, and stop is graceful (stdin `/quit` + TERM/KILL fallback)
+
+Defaults (recorded):
+- Port: 34197/udp (configurable, `0` means auto assign)
+- RCON: disabled by default (optional)
+- Public listing: false by default
+
+TODO:
+- [x] Add `factorio:vanilla` template and param validation in agent
+- [x] Implement Factorio package resolve + download/cache/extract
+- [x] Create instance layout under `ALLOY_DATA_ROOT` (`server-settings.json`, saves dir)
+- [x] Start server with `--start-server-load-latest` (auto-create save on first run)
+- [x] Stop via stdin `/quit` then TERM/KILL fallback
+- [x] Update web UI: add factorio start form (version/port/name/max_players/rcon)
 - [x] Verify end-to-end in docker-compose and check off this section

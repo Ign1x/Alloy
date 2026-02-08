@@ -17,33 +17,26 @@ use tokio::{
 
 use crate::dst;
 use crate::dst_download;
+use crate::factorio;
+use crate::factorio_download;
 use crate::minecraft;
 use crate::minecraft_curseforge;
 use crate::minecraft_download;
 use crate::minecraft_import;
 use crate::minecraft_launch;
 use crate::minecraft_modrinth;
+use crate::palworld;
+use crate::palworld_download;
 use crate::port_alloc;
+use crate::process_manager_support::{
+    RestartConfig, RestartPolicy, compute_backoff_ms, early_exit_threshold, env_u64,
+    format_error_chain, log_file_limits, log_max_lines, parse_restart_config, port_probe_timeout,
+    read_proc_cpu_ticks, read_proc_rss_bytes, resource_sample_interval, ticks_per_sec,
+};
 use crate::sandbox;
 use crate::templates;
 use crate::terraria;
 use crate::terraria_download;
-use crate::process_manager_support::{
-    RestartConfig,
-    RestartPolicy,
-    compute_backoff_ms,
-    early_exit_threshold,
-    env_u64,
-    format_error_chain,
-    log_file_limits,
-    log_max_lines,
-    parse_restart_config,
-    port_probe_timeout,
-    read_proc_cpu_ticks,
-    read_proc_rss_bytes,
-    resource_sample_interval,
-    ticks_per_sec,
-};
 
 #[cfg(target_os = "linux")]
 async fn read_proc_io_bytes(pid: u32) -> Option<(u64, u64)> {
@@ -1459,6 +1452,8 @@ impl ProcessManager {
             || t.template_id == "minecraft:curseforge"
             || t.template_id == "dst:vanilla"
             || t.template_id == "terraria:vanilla"
+            || t.template_id == "palworld:vanilla"
+            || t.template_id == "factorio:vanilla"
         {
             minecraft::instance_dir(&id.0)
         } else {
@@ -4289,6 +4284,878 @@ impl ProcessManager {
                     pid: pid_u32,
                     exit_code: None,
                     message: Some(format!("waiting for port {}...", tr.port)),
+                    resources: None,
+                });
+            }
+
+            if t.template_id == "palworld:vanilla" {
+                ensure_min_free_space(&palworld::data_root()).map_err(|e| {
+                    crate::error_payload::anyhow(
+                        "insufficient_disk",
+                        e.to_string(),
+                        None,
+                        Some("Free up disk space under ALLOY_DATA_ROOT and try again.".to_string()),
+                    )
+                })?;
+
+                let pw = palworld::validate_vanilla_params(&params)?;
+
+                let game_port = port_alloc::allocate_udp_port(pw.port).map_err(|e| {
+                    let mut fields = BTreeMap::new();
+                    fields.insert("port".to_string(), e.to_string());
+                    crate::error_payload::anyhow(
+                        "invalid_param",
+                        "invalid port",
+                        Some(fields),
+                        Some("Pick another port (or use 0 to auto-assign).".to_string()),
+                    )
+                })?;
+                let query_port = port_alloc::allocate_udp_port(pw.query_port).map_err(|e| {
+                    let mut fields = BTreeMap::new();
+                    fields.insert("query_port".to_string(), e.to_string());
+                    crate::error_payload::anyhow(
+                        "invalid_param",
+                        "invalid query_port",
+                        Some(fields),
+                        Some("Pick another port (or use 0 to auto-assign).".to_string()),
+                    )
+                })?;
+                if game_port == query_port {
+                    return Err(crate::error_payload::anyhow(
+                        "invalid_param",
+                        "port and query_port must be different",
+                        None,
+                        Some("Use different values or set one of them to 0 (auto).".to_string()),
+                    ));
+                }
+
+                let pw = palworld::VanillaParams {
+                    port: game_port,
+                    query_port,
+                    ..pw
+                };
+                params.insert("port".to_string(), game_port.to_string());
+                params.insert("query_port".to_string(), query_port.to_string());
+                let restart = parse_restart_config(&params);
+
+                let dir = palworld::instance_dir(&id.0);
+                palworld::ensure_vanilla_instance_layout(&dir, &pw)?;
+
+                set_entry_message(
+                    &self.inner,
+                    &id.0,
+                    Some("installing palworld server files...".to_string()),
+                )
+                .await;
+                sink.emit("[alloy-agent] installing palworld server files".to_string())
+                    .await;
+
+                let installed = palworld_download::ensure_palworld_server()
+                    .await
+                    .map_err(|e| {
+                        crate::error_payload::anyhow(
+                            "download_failed",
+                            format!("failed to install palworld server: {e}"),
+                            None,
+                            Some(
+                                "SteamCMD install failed. Check network and 32-bit runtime dependencies in agent image."
+                                    .to_string(),
+                            ),
+                        )
+                    })?;
+
+                palworld::ensure_instance_runtime_permissions(&dir).map_err(|e| {
+                    crate::error_payload::anyhow(
+                        "spawn_failed",
+                        format!("failed to prepare palworld instance permissions: {e}"),
+                        None,
+                        Some("Check filesystem permissions under ALLOY_DATA_ROOT and retry.".to_string()),
+                    )
+                })?;
+                let binary = palworld::ensure_runtime_artifacts(&installed.server_root).map_err(|e| {
+                    crate::error_payload::anyhow(
+                        "spawn_failed",
+                        format!("failed to prepare palworld runtime files: {e}"),
+                        None,
+                        Some("Check Palworld cache integrity and retry start.".to_string()),
+                    )
+                })?;
+                params
+                    .entry("sandbox_docker_user".to_string())
+                    .or_insert_with(|| "1000:1000".to_string());
+
+                let exec = binary.display().to_string();
+                let user_dir = dir.join("palworld-user");
+                let raw_args = palworld::launch_args(&pw, &user_dir);
+                let spawn_cwd = binary
+                    .parent()
+                    .map(|p| p.to_path_buf())
+                    .unwrap_or_else(|| installed.server_root.clone());
+
+                let (mut cmd, sandbox_launch) = prepare_instance_command(
+                    &id.0,
+                    &t.template_id,
+                    &params,
+                    &dir,
+                    &spawn_cwd,
+                    &exec,
+                    &raw_args,
+                    &[installed.server_root.clone()],
+                )?;
+
+                let started_at_unix_ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as u64;
+                let mut run = RunInfo {
+                    process_id: id.0.clone(),
+                    template_id: t.template_id.clone(),
+                    started_at_unix_ms,
+                    agent_version: env!("CARGO_PKG_VERSION").to_string(),
+                    pid: None,
+                    pgid: None,
+                    container_name: sandbox_launch.container_name().map(ToOwned::to_owned),
+                    container_id: None,
+                    exec: sandbox_launch.exec.clone(),
+                    args: sandbox_launch.args.clone(),
+                    cwd: sandbox_launch.cwd.display().to_string(),
+                    params: redact_params(params.clone()),
+                    env: collect_safe_env(),
+                };
+                let _ = write_run_json(&dir, &run).await;
+
+                sink.emit(format!("[alloy-agent] sandbox: {}", sandbox_launch.summary()))
+                    .await;
+                for warning in sandbox_launch.warnings() {
+                    sink.emit(format!("[alloy-agent] sandbox warning: {warning}"))
+                        .await;
+                }
+
+                sink.emit(format!(
+                    "[alloy-agent] palworld exec: {} {} (cwd {}) ports=udp:{} query={}",
+                    sandbox_launch.exec,
+                    sandbox_launch.args.join(" "),
+                    sandbox_launch.cwd.display(),
+                    pw.port,
+                    pw.query_port,
+                ))
+                .await;
+
+                set_entry_message(
+                    &self.inner,
+                    &id.0,
+                    Some(format!("spawning palworld server (udp {})...", pw.port)),
+                )
+                .await;
+
+                let mut child = cmd
+                    .spawn()
+                    .with_context(|| {
+                        format!(
+                            "spawn palworld server: exec={} (cwd {})",
+                            exec,
+                            spawn_cwd.display()
+                        )
+                    })
+                    .map_err(|e| {
+                        crate::error_payload::anyhow(
+                            "spawn_failed",
+                            e.to_string(),
+                            None,
+                            Some(
+                                "Ensure Palworld server files were installed and are executable."
+                                    .to_string(),
+                            ),
+                        )
+                    })?;
+                let started = tokio::time::Instant::now();
+                let pid_u32 = child.id();
+                let pgid = pid_u32.map(|p| p as i32);
+
+                if let Some(pid) = pid_u32
+                    && let Some(warn) = sandbox_launch.attach_pid(pid)
+                {
+                    sink.emit(format!("[alloy-agent] sandbox warning: {warn}"))
+                        .await;
+                }
+
+                run.pid = pid_u32;
+                run.pgid = pgid;
+                refresh_docker_container_metadata(&id.0, &mut run).await;
+                let _ = write_run_json(&dir, &run).await;
+
+                let stdin = child.stdin.take();
+                let stdout = child.stdout.take();
+                let stderr = child.stderr.take();
+
+                if let Some(out) = stdout {
+                    let sink = sink.clone();
+                    tokio::spawn(async move {
+                        let mut lines = BufReader::new(out).lines();
+                        while let Ok(Some(line)) = lines.next_line().await {
+                            sink.emit(format!("[stdout] {line}")).await;
+                        }
+                    });
+                }
+                if let Some(err) = stderr {
+                    let sink = sink.clone();
+                    tokio::spawn(async move {
+                        let mut lines = BufReader::new(err).lines();
+                        while let Ok(Some(line)) = lines.next_line().await {
+                            sink.emit(format!("[stderr] {line}")).await;
+                        }
+                    });
+                }
+
+                {
+                    let mut inner = self.inner.lock().await;
+                    inner.insert(
+                        id.0.clone(),
+                        ProcessEntry {
+                            template_id: ProcessTemplateId(t.template_id.clone()),
+                            state: ProcessState::Starting,
+                            pid: pid_u32,
+                            resources: None,
+                            exit_code: None,
+                            message: Some(format!("waiting for udp ports {} / {}...", pw.port, pw.query_port)),
+                            restart,
+                            restart_attempts: reused_restart_attempts,
+                            stdin,
+                            graceful_stdin: t.graceful_stdin.clone(),
+                            pgid,
+                            logs: logs.clone(),
+                            log_file_tx: Some(log_tx.clone()),
+                        },
+                    );
+                }
+
+                if let Some(pid) = pid_u32 {
+                    self.spawn_resource_sampler(id.0.clone(), pid);
+                }
+
+                // Palworld doesn't expose a simple HTTP/TCP readiness probe; mark running after short delay.
+                let inner = self.inner.clone();
+                let id_str = id.0.clone();
+                tokio::spawn({
+                    let inner = inner.clone();
+                    async move {
+                        tokio::time::sleep(Duration::from_millis(1800)).await;
+                        let mut map = inner.lock().await;
+                        let Some(e) = map.get_mut(&id_str) else { return };
+                        if e.pid == pid_u32 && matches!(e.state, ProcessState::Starting) {
+                            e.state = ProcessState::Running;
+                            e.message = None;
+                        }
+                    }
+                });
+
+                let manager = self.clone();
+                let inner = self.inner.clone();
+                let id_str = id.0.clone();
+                let process_pgid = pgid;
+                let wait_sink = sink.clone();
+                let template_id = t.template_id.clone();
+                let params_for_restart = params.clone();
+                tokio::spawn(async move {
+                    let res = child.wait().await;
+                    #[cfg(unix)]
+                    if let Some(pgid) = process_pgid {
+                        unsafe {
+                            libc::kill(-pgid, libc::SIGTERM);
+                        }
+                        tokio::time::sleep(Duration::from_millis(500)).await;
+                        let alive = unsafe { libc::kill(-pgid, 0) == 0 };
+                        if alive {
+                            unsafe {
+                                libc::kill(-pgid, libc::SIGKILL);
+                            }
+                        }
+                    }
+                    let runtime = tokio::time::Instant::now().duration_since(started);
+
+                    let mut restart_after: Option<Duration> = None;
+                    let mut restart_attempt: u32 = 0;
+
+                    let (final_state, exit_code) = {
+                        let mut map = inner.lock().await;
+                        let Some(e) = map.get_mut(&id_str) else {
+                            return;
+                        };
+
+                        e.stdin = None;
+                        let stopping = matches!(e.state, ProcessState::Stopping);
+
+                        match res {
+                            Ok(status) => {
+                                e.exit_code = status.code();
+
+                                if stopping {
+                                    e.state = ProcessState::Exited;
+                                    e.message = Some("stopped".to_string());
+                                } else if runtime < early_exit_threshold() {
+                                    e.state = ProcessState::Failed;
+                                    e.message = Some(format!(
+                                        "exited too quickly ({}ms)",
+                                        runtime.as_millis()
+                                    ));
+                                } else if status.success() {
+                                    e.state = ProcessState::Exited;
+                                    e.message = Some("exited".to_string());
+                                } else {
+                                    e.state = ProcessState::Failed;
+                                    e.message = Some(format!(
+                                        "exited with code {}",
+                                        status.code().unwrap_or_default()
+                                    ));
+                                }
+                            }
+                            Err(err) => {
+                                e.state = ProcessState::Failed;
+                                e.message = Some(format!("wait failed: {err}"));
+                            }
+                        }
+
+                        if !stopping {
+                            let is_failure = matches!(e.state, ProcessState::Failed)
+                                || e.exit_code.is_some_and(|c| c != 0);
+                            let should_restart = match e.restart.policy {
+                                RestartPolicy::Off => false,
+                                RestartPolicy::Always => true,
+                                RestartPolicy::OnFailure => is_failure,
+                            };
+
+                            if should_restart && e.restart_attempts < e.restart.max_retries {
+                                e.restart_attempts = e.restart_attempts.saturating_add(1);
+                                let delay_ms = compute_backoff_ms(e.restart, e.restart_attempts);
+                                restart_after = Some(Duration::from_millis(delay_ms));
+                                restart_attempt = e.restart_attempts;
+                                e.message = Some(format!(
+                                    "restarting in {}ms (attempt {}/{})",
+                                    delay_ms, restart_attempt, e.restart.max_retries
+                                ));
+                            }
+                        }
+
+                        (e.state, e.exit_code)
+                    };
+
+                    wait_sink
+                        .emit(format!(
+                            "[alloy-agent] process exited: state={:?} exit_code={:?} runtime_ms={}",
+                            final_state,
+                            exit_code,
+                            runtime.as_millis()
+                        ))
+                        .await;
+
+                    if let Some(delay) = restart_after {
+                        wait_sink
+                            .emit(format!(
+                                "[alloy-agent] auto-restart scheduled in {}ms (attempt {})",
+                                delay.as_millis(),
+                                restart_attempt
+                            ))
+                            .await;
+                        let handle = tokio::runtime::Handle::current();
+                        let wait_sink = wait_sink.clone();
+                        tokio::task::spawn_blocking(move || {
+                            std::thread::sleep(delay);
+                            let res = handle.block_on(manager.start_from_template_with_process_id(
+                                &id_str,
+                                &template_id,
+                                params_for_restart,
+                            ));
+                            match res {
+                                Ok(st) if matches!(st.state, ProcessState::Failed) => {
+                                    let msg = st
+                                        .message
+                                        .filter(|s| !s.trim().is_empty())
+                                        .unwrap_or_else(|| "unknown error".to_string());
+                                    handle.block_on(wait_sink.emit(format!(
+                                        "[alloy-agent] auto-restart failed: {msg}"
+                                    )));
+                                }
+                                Ok(_) => {
+                                    handle.block_on(wait_sink.emit(
+                                        "[alloy-agent] auto-restart triggered".to_string(),
+                                    ));
+                                }
+                                Err(err) => {
+                                    handle.block_on(wait_sink.emit(format!(
+                                        "[alloy-agent] auto-restart failed: {err}"
+                                    )));
+                                }
+                            }
+                        });
+                    }
+                });
+
+                return Ok(ProcessStatus {
+                    id: id.clone(),
+                    template_id: ProcessTemplateId(t.template_id.clone()),
+                    state: ProcessState::Starting,
+                    pid: pid_u32,
+                    exit_code: None,
+                    message: Some(format!("starting palworld (udp {} / {})...", pw.port, pw.query_port)),
+                    resources: None,
+                });
+            }
+
+            if t.template_id == "factorio:vanilla" {
+                ensure_min_free_space(&factorio::data_root()).map_err(|e| {
+                    crate::error_payload::anyhow(
+                        "insufficient_disk",
+                        e.to_string(),
+                        None,
+                        Some("Free up disk space under ALLOY_DATA_ROOT and try again.".to_string()),
+                    )
+                })?;
+
+                let fx = factorio::validate_vanilla_params(&params)?;
+
+                let game_port = port_alloc::allocate_udp_port(fx.port).map_err(|e| {
+                    let mut fields = BTreeMap::new();
+                    fields.insert("port".to_string(), e.to_string());
+                    crate::error_payload::anyhow(
+                        "invalid_param",
+                        "invalid port",
+                        Some(fields),
+                        Some("Pick another port (or use 0 to auto-assign).".to_string()),
+                    )
+                })?;
+                let rcon_port = if fx.rcon_enabled {
+                    Some(port_alloc::allocate_tcp_port(fx.rcon_port).map_err(|e| {
+                        let mut fields = BTreeMap::new();
+                        fields.insert("rcon_port".to_string(), e.to_string());
+                        crate::error_payload::anyhow(
+                            "invalid_param",
+                            "invalid rcon_port",
+                            Some(fields),
+                            Some("Pick another port (or use 0 to auto-assign).".to_string()),
+                        )
+                    })?)
+                } else {
+                    None
+                };
+
+                let fx = factorio::VanillaParams {
+                    port: game_port,
+                    rcon_port: rcon_port.unwrap_or(fx.rcon_port),
+                    ..fx
+                };
+                params.insert("port".to_string(), game_port.to_string());
+                if let Some(v) = rcon_port {
+                    params.insert("rcon_port".to_string(), v.to_string());
+                }
+                let restart = parse_restart_config(&params);
+
+                let dir = factorio::instance_dir(&id.0);
+                factorio::ensure_vanilla_instance_layout(&dir, &fx)?;
+
+                set_entry_message(
+                    &self.inner,
+                    &id.0,
+                    Some("resolving factorio server package...".to_string()),
+                )
+                .await;
+                sink.emit("[alloy-agent] resolving factorio server package".to_string())
+                    .await;
+                let resolved = factorio_download::resolve_server_package(&fx.version).map_err(|e| {
+                    crate::error_payload::anyhow(
+                        "download_failed",
+                        format!("failed to resolve factorio package: {e}"),
+                        None,
+                        Some("Check version/channel and network connectivity, then retry.".to_string()),
+                    )
+                })?;
+
+                set_entry_message(
+                    &self.inner,
+                    &id.0,
+                    Some("downloading factorio server package...".to_string()),
+                )
+                .await;
+                sink.emit("[alloy-agent] downloading factorio server package".to_string())
+                    .await;
+                let package_path = factorio_download::ensure_server_package(&resolved)
+                    .await
+                    .map_err(|e| {
+                        crate::error_payload::anyhow(
+                            "download_failed",
+                            format!("failed to download factorio package: {e}"),
+                            None,
+                            Some("Try again; if it persists, clear cache and retry.".to_string()),
+                        )
+                    })?;
+
+                set_entry_message(
+                    &self.inner,
+                    &id.0,
+                    Some("extracting factorio server files...".to_string()),
+                )
+                .await;
+                sink.emit("[alloy-agent] extracting factorio server files".to_string())
+                    .await;
+                let extracted = factorio_download::extract_server_to_cache(
+                    &package_path,
+                    &resolved.version_id,
+                )
+                .map_err(|e| {
+                    crate::error_payload::anyhow(
+                        "download_failed",
+                        format!("failed to extract factorio package: {e}"),
+                        None,
+                        Some("Clear cache and retry extraction.".to_string()),
+                    )
+                })?;
+
+                set_entry_message(
+                    &self.inner,
+                    &id.0,
+                    Some("creating/verifying factorio save...".to_string()),
+                )
+                .await;
+                let save_path = factorio::ensure_default_save(&dir, &extracted.binary).map_err(|e| {
+                    crate::error_payload::anyhow(
+                        "spawn_failed",
+                        format!("failed to create default factorio save: {e}"),
+                        None,
+                        Some("Check Factorio runtime dependencies and retry.".to_string()),
+                    )
+                })?;
+
+                let exec = extracted.binary.display().to_string();
+                let mut raw_args = vec![
+                    "--config".to_string(),
+                    dir.join("config").join("config.ini").display().to_string(),
+                    "--port".to_string(),
+                    fx.port.to_string(),
+                    "--server-settings".to_string(),
+                    dir.join("config")
+                        .join("server-settings.json")
+                        .display()
+                        .to_string(),
+                    "--server-id".to_string(),
+                    dir.join("config").join("server-id.json").display().to_string(),
+                    "--start-server-load-latest".to_string(),
+                    "--mod-directory".to_string(),
+                    dir.join("mods").display().to_string(),
+                ];
+                if fx.rcon_enabled {
+                    raw_args.push("--rcon-port".to_string());
+                    raw_args.push(fx.rcon_port.to_string());
+                    if let Some(pw) = &fx.rcon_password {
+                        raw_args.push("--rcon-password".to_string());
+                        raw_args.push(pw.clone());
+                    }
+                }
+
+                let (mut cmd, sandbox_launch) = prepare_instance_command(
+                    &id.0,
+                    &t.template_id,
+                    &params,
+                    &dir,
+                    &extracted.server_root,
+                    &exec,
+                    &raw_args,
+                    &[extracted.server_root.clone()],
+                )?;
+
+                let started_at_unix_ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as u64;
+                let mut run = RunInfo {
+                    process_id: id.0.clone(),
+                    template_id: t.template_id.clone(),
+                    started_at_unix_ms,
+                    agent_version: env!("CARGO_PKG_VERSION").to_string(),
+                    pid: None,
+                    pgid: None,
+                    container_name: sandbox_launch.container_name().map(ToOwned::to_owned),
+                    container_id: None,
+                    exec: sandbox_launch.exec.clone(),
+                    args: sandbox_launch.args.clone(),
+                    cwd: sandbox_launch.cwd.display().to_string(),
+                    params: redact_params(params.clone()),
+                    env: collect_safe_env(),
+                };
+                let _ = write_run_json(&dir, &run).await;
+
+                sink.emit(format!("[alloy-agent] sandbox: {}", sandbox_launch.summary()))
+                    .await;
+                for warning in sandbox_launch.warnings() {
+                    sink.emit(format!("[alloy-agent] sandbox warning: {warning}"))
+                        .await;
+                }
+
+                sink.emit(format!(
+                    "[alloy-agent] factorio exec: {} {} (cwd {}) port={} version={} save={}",
+                    sandbox_launch.exec,
+                    sandbox_launch.args.join(" "),
+                    sandbox_launch.cwd.display(),
+                    fx.port,
+                    resolved.version_id,
+                    save_path.display(),
+                ))
+                .await;
+
+                set_entry_message(
+                    &self.inner,
+                    &id.0,
+                    Some(format!("spawning factorio server (udp {})...", fx.port)),
+                )
+                .await;
+
+                let mut child = cmd
+                    .spawn()
+                    .with_context(|| {
+                        format!(
+                            "spawn factorio server: exec={} (cwd {})",
+                            exec,
+                            extracted.server_root.display()
+                        )
+                    })
+                    .map_err(|e| {
+                        crate::error_payload::anyhow(
+                            "spawn_failed",
+                            e.to_string(),
+                            None,
+                            Some(
+                                "Ensure the Factorio binary is executable and dependencies are installed."
+                                    .to_string(),
+                            ),
+                        )
+                    })?;
+                let started = tokio::time::Instant::now();
+                let pid_u32 = child.id();
+                let pgid = pid_u32.map(|p| p as i32);
+
+                if let Some(pid) = pid_u32
+                    && let Some(warn) = sandbox_launch.attach_pid(pid)
+                {
+                    sink.emit(format!("[alloy-agent] sandbox warning: {warn}"))
+                        .await;
+                }
+
+                run.pid = pid_u32;
+                run.pgid = pgid;
+                refresh_docker_container_metadata(&id.0, &mut run).await;
+                let _ = write_run_json(&dir, &run).await;
+
+                let stdin = child.stdin.take();
+                let stdout = child.stdout.take();
+                let stderr = child.stderr.take();
+
+                if let Some(out) = stdout {
+                    let sink = sink.clone();
+                    tokio::spawn(async move {
+                        let mut lines = BufReader::new(out).lines();
+                        while let Ok(Some(line)) = lines.next_line().await {
+                            sink.emit(format!("[stdout] {line}")).await;
+                        }
+                    });
+                }
+                if let Some(err) = stderr {
+                    let sink = sink.clone();
+                    tokio::spawn(async move {
+                        let mut lines = BufReader::new(err).lines();
+                        while let Ok(Some(line)) = lines.next_line().await {
+                            sink.emit(format!("[stderr] {line}")).await;
+                        }
+                    });
+                }
+
+                {
+                    let mut inner = self.inner.lock().await;
+                    inner.insert(
+                        id.0.clone(),
+                        ProcessEntry {
+                            template_id: ProcessTemplateId(t.template_id.clone()),
+                            state: ProcessState::Starting,
+                            pid: pid_u32,
+                            resources: None,
+                            exit_code: None,
+                            message: Some(format!("waiting for port {}...", fx.port)),
+                            restart,
+                            restart_attempts: reused_restart_attempts,
+                            stdin,
+                            graceful_stdin: t.graceful_stdin.clone(),
+                            pgid,
+                            logs: logs.clone(),
+                            log_file_tx: Some(log_tx.clone()),
+                        },
+                    );
+                }
+
+                if let Some(pid) = pid_u32 {
+                    self.spawn_resource_sampler(id.0.clone(), pid);
+                }
+
+                // Factorio is UDP-based; mark running after a short warm-up.
+                let inner = self.inner.clone();
+                let id_str = id.0.clone();
+                tokio::spawn({
+                    let inner = inner.clone();
+                    async move {
+                        tokio::time::sleep(Duration::from_millis(2500)).await;
+                        let mut map = inner.lock().await;
+                        let Some(e) = map.get_mut(&id_str) else { return };
+                        if e.pid == pid_u32 && matches!(e.state, ProcessState::Starting) {
+                            e.state = ProcessState::Running;
+                            e.message = None;
+                        }
+                    }
+                });
+
+                let manager = self.clone();
+                let inner = self.inner.clone();
+                let id_str = id.0.clone();
+                let process_pgid = pgid;
+                let wait_sink = sink.clone();
+                let template_id = t.template_id.clone();
+                let params_for_restart = params.clone();
+                tokio::spawn(async move {
+                    let res = child.wait().await;
+                    #[cfg(unix)]
+                    if let Some(pgid) = process_pgid {
+                        unsafe {
+                            libc::kill(-pgid, libc::SIGTERM);
+                        }
+                        tokio::time::sleep(Duration::from_millis(500)).await;
+                        let alive = unsafe { libc::kill(-pgid, 0) == 0 };
+                        if alive {
+                            unsafe {
+                                libc::kill(-pgid, libc::SIGKILL);
+                            }
+                        }
+                    }
+                    let runtime = tokio::time::Instant::now().duration_since(started);
+
+                    let mut restart_after: Option<Duration> = None;
+                    let mut restart_attempt: u32 = 0;
+
+                    let (final_state, exit_code) = {
+                        let mut map = inner.lock().await;
+                        let Some(e) = map.get_mut(&id_str) else {
+                            return;
+                        };
+
+                        e.stdin = None;
+                        let stopping = matches!(e.state, ProcessState::Stopping);
+
+                        match res {
+                            Ok(status) => {
+                                e.exit_code = status.code();
+
+                                if stopping {
+                                    e.state = ProcessState::Exited;
+                                    e.message = Some("stopped".to_string());
+                                } else if runtime < early_exit_threshold() {
+                                    e.state = ProcessState::Failed;
+                                    e.message = Some(format!(
+                                        "exited too quickly ({}ms)",
+                                        runtime.as_millis()
+                                    ));
+                                } else if status.success() {
+                                    e.state = ProcessState::Exited;
+                                    e.message = Some("exited".to_string());
+                                } else {
+                                    e.state = ProcessState::Failed;
+                                    e.message = Some(format!(
+                                        "exited with code {}",
+                                        status.code().unwrap_or_default()
+                                    ));
+                                }
+                            }
+                            Err(err) => {
+                                e.state = ProcessState::Failed;
+                                e.message = Some(format!("wait failed: {err}"));
+                            }
+                        }
+
+                        if !stopping {
+                            let is_failure = matches!(e.state, ProcessState::Failed)
+                                || e.exit_code.is_some_and(|c| c != 0);
+                            let should_restart = match e.restart.policy {
+                                RestartPolicy::Off => false,
+                                RestartPolicy::Always => true,
+                                RestartPolicy::OnFailure => is_failure,
+                            };
+
+                            if should_restart && e.restart_attempts < e.restart.max_retries {
+                                e.restart_attempts = e.restart_attempts.saturating_add(1);
+                                let delay_ms = compute_backoff_ms(e.restart, e.restart_attempts);
+                                restart_after = Some(Duration::from_millis(delay_ms));
+                                restart_attempt = e.restart_attempts;
+                                e.message = Some(format!(
+                                    "restarting in {}ms (attempt {}/{})",
+                                    delay_ms, restart_attempt, e.restart.max_retries
+                                ));
+                            }
+                        }
+
+                        (e.state, e.exit_code)
+                    };
+
+                    wait_sink
+                        .emit(format!(
+                            "[alloy-agent] process exited: state={:?} exit_code={:?} runtime_ms={}",
+                            final_state,
+                            exit_code,
+                            runtime.as_millis()
+                        ))
+                        .await;
+
+                    if let Some(delay) = restart_after {
+                        wait_sink
+                            .emit(format!(
+                                "[alloy-agent] auto-restart scheduled in {}ms (attempt {})",
+                                delay.as_millis(),
+                                restart_attempt
+                            ))
+                            .await;
+                        let handle = tokio::runtime::Handle::current();
+                        let wait_sink = wait_sink.clone();
+                        tokio::task::spawn_blocking(move || {
+                            std::thread::sleep(delay);
+                            let res = handle.block_on(manager.start_from_template_with_process_id(
+                                &id_str,
+                                &template_id,
+                                params_for_restart,
+                            ));
+                            match res {
+                                Ok(st) if matches!(st.state, ProcessState::Failed) => {
+                                    let msg = st
+                                        .message
+                                        .filter(|s| !s.trim().is_empty())
+                                        .unwrap_or_else(|| "unknown error".to_string());
+                                    handle.block_on(wait_sink.emit(format!(
+                                        "[alloy-agent] auto-restart failed: {msg}"
+                                    )));
+                                }
+                                Ok(_) => {
+                                    handle.block_on(wait_sink.emit(
+                                        "[alloy-agent] auto-restart triggered".to_string(),
+                                    ));
+                                }
+                                Err(err) => {
+                                    handle.block_on(wait_sink.emit(format!(
+                                        "[alloy-agent] auto-restart failed: {err}"
+                                    )));
+                                }
+                            }
+                        });
+                    }
+                });
+
+                return Ok(ProcessStatus {
+                    id: id.clone(),
+                    template_id: ProcessTemplateId(t.template_id.clone()),
+                    state: ProcessState::Starting,
+                    pid: pid_u32,
+                    exit_code: None,
+                    message: Some(format!("starting factorio (udp {})...", fx.port)),
                     resources: None,
                 });
             }
