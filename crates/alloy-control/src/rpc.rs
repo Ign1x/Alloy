@@ -1261,9 +1261,27 @@ pub struct UpdateLatestReleaseDto {
 }
 
 #[derive(Debug, Clone, serde::Serialize, Type)]
+pub struct UpdateSourceDto {
+    pub kind: String,
+    pub channel: Option<String>,
+    pub manifest_url: Option<String>,
+    pub warning: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, Type)]
+pub struct UpdateCompatibilityDto {
+    pub control_min_agent: Option<String>,
+    pub control_max_agent: Option<String>,
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, Type)]
 pub struct UpdateCheckOutput {
     pub current_version: String,
     pub latest: Option<UpdateLatestReleaseDto>,
+    pub agent_latest: Option<UpdateLatestReleaseDto>,
+    pub compatibility: Option<UpdateCompatibilityDto>,
+    pub source: UpdateSourceDto,
     pub update_available: bool,
     pub can_trigger_update: bool,
 }
@@ -1321,6 +1339,31 @@ pub struct NodeUpdateTriggerOutput {
     pub ok: bool,
     pub message: String,
     pub status: NodeUpdateStatusDto,
+}
+
+fn map_update_latest_release(rel: &crate::update::LatestRelease) -> UpdateLatestReleaseDto {
+    let version = crate::update::parse_simple_version(&rel.tag_name)
+        .map(|v| format!("{}.{}.{}", v.major, v.minor, v.patch));
+
+    UpdateLatestReleaseDto {
+        tag: rel.tag_name.clone(),
+        version,
+        url: rel.html_url.clone(),
+        published_at: rel.published_at.clone(),
+        body: rel.body.as_deref().and_then(|b| {
+            let trimmed = b.trim();
+            if trimmed.is_empty() {
+                return None;
+            }
+            const MAX: usize = 16 * 1024;
+            if trimmed.len() <= MAX {
+                return Some(trimmed.to_string());
+            }
+            let mut out = trimmed[..MAX].to_string();
+            out.push_str("\n…");
+            Some(out)
+        }),
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -4844,7 +4887,7 @@ pub fn router() -> Router<Ctx> {
                 let current_version = env!("CARGO_PKG_VERSION").to_string();
                 let current = crate::update::parse_simple_version(&current_version);
 
-                let latest = crate::update::latest_release().await.map_err(|e| {
+                let catalog = crate::update::update_catalog().await.map_err(|e| {
                     api_error(
                         &ctx,
                         "upstream_error",
@@ -4852,9 +4895,7 @@ pub fn router() -> Router<Ctx> {
                     )
                 })?;
 
-                let latest_version = crate::update::parse_simple_version(&latest.tag_name)
-                    .map(|v| format!("{}.{}.{}", v.major, v.minor, v.patch));
-                let latest_parsed = crate::update::parse_simple_version(&latest.tag_name);
+                let latest_parsed = crate::update::parse_simple_version(&catalog.control.tag_name);
                 let update_available = match (current, latest_parsed) {
                     (Some(cur), Some(lat)) => lat > cur,
                     _ => false,
@@ -4862,26 +4903,21 @@ pub fn router() -> Router<Ctx> {
 
                 Ok(UpdateCheckOutput {
                     current_version,
-                    latest: Some(UpdateLatestReleaseDto {
-                        tag: latest.tag_name.clone(),
-                        version: latest_version,
-                        url: latest.html_url.clone(),
-                        published_at: latest.published_at.clone(),
-                        body: latest.body.as_deref().and_then(|b| {
-                            let trimmed = b.trim();
-                            if trimmed.is_empty() {
-                                return None;
-                            }
-                            // Keep payload bounded; the UI can link to the full release page.
-                            const MAX: usize = 16 * 1024;
-                            if trimmed.len() <= MAX {
-                                return Some(trimmed.to_string());
-                            }
-                            let mut out = trimmed[..MAX].to_string();
-                            out.push_str("\n…");
-                            Some(out)
-                        }),
+                    latest: Some(map_update_latest_release(&catalog.control)),
+                    agent_latest: catalog.agent.as_ref().map(map_update_latest_release),
+                    compatibility: catalog.compatibility.as_ref().map(|compat| {
+                        UpdateCompatibilityDto {
+                            control_min_agent: compat.control_min_agent.clone(),
+                            control_max_agent: compat.control_max_agent.clone(),
+                            note: compat.note.clone(),
+                        }
                     }),
+                    source: UpdateSourceDto {
+                        kind: catalog.source.as_str().to_string(),
+                        channel: catalog.channel.clone(),
+                        manifest_url: catalog.manifest_url.clone(),
+                        warning: catalog.warning.clone(),
+                    },
                     update_available,
                     can_trigger_update: crate::update::watchtower_configured(),
                 })
@@ -4904,7 +4940,7 @@ pub fn router() -> Router<Ctx> {
                 if !crate::update::watchtower_configured() {
                     let mut err = api_error(&ctx, "not_supported", "updater is not configured");
                     err.hint = Some(
-                        "Set ALLOY_UPDATE_WATCHTOWER_URL and ALLOY_UPDATE_WATCHTOWER_TOKEN, then restart control."
+                        "Set ALLOY_UPDATE_WATCHTOWER_URL (and ALLOY_UPDATE_WATCHTOWER_TOKEN if your updater requires auth), then restart control."
                             .to_string(),
                     );
                     return Err(err);

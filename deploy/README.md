@@ -50,7 +50,7 @@ docker compose -f deploy/docker-compose.release.yml up -d
 
 ### One-click updates (optional)
 
-`deploy/docker-compose.release.yml` includes a `watchtower` service with an HTTP API. If you set `ALLOY_WATCHTOWER_TOKEN` (compose `.env`) and keep the panel admin-only, you can trigger updates from the UI:
+`deploy/docker-compose.release.yml` includes a `watchtower` service with an HTTP API and a default update manifest URL. If you set `ALLOY_WATCHTOWER_TOKEN` (compose `.env`) and keep the panel admin-only, you can trigger control updates from the UI:
 
 - Web → **Settings** → **Updates** → **Update now**
 
@@ -271,6 +271,14 @@ To enable **reverse tunnel** (agent -> control), set on `alloy-agent`:
 - `ALLOY_CONTROL_WS_URL=http://<control-host>:8080/agent/ws`
 - `ALLOY_NODE_NAME=<node-name>` (optional; defaults to `$ALLOY_NODE_NAME` or `$HOSTNAME`)
 - `ALLOY_NODE_TOKEN=<token>` (optional; required if the node is created via the Nodes UI)
+
+For panel one-click updates, set on `alloy-control`:
+
+- `ALLOY_UPDATE_WATCHTOWER_URL=http://watchtower:8080` (required)
+- `ALLOY_UPDATE_WATCHTOWER_TOKEN=<token>` (optional; required only when watchtower HTTP API auth is enabled)
+- `ALLOY_UPDATE_MANIFEST_URL=<json-url>` (optional; if set, update checks read component versions from manifest first, then fall back to GitHub `releases/latest`)
+
+A sample manifest is provided at `deploy/update-manifest.json`.
 
 ### Remote node self-update (from Control Web)
 

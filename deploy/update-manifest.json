@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "channel": "stable",
+  "control": {
+    "tag": "v0.2.2",
+    "version": "0.2.2",
+    "url": "https://github.com/Ign1x/Alloy/releases/tag/v0.2.2"
+  },
+  "agent": {
+    "tag": "v0.2.2",
+    "version": "0.2.2",
+    "url": "https://github.com/Ign1x/Alloy/releases/tag/v0.2.2"
+  },
+  "compatibility": {
+    "control_min_agent": "0.2.0",
+    "control_max_agent": "0.2.x",
+    "note": "Control and agent in the same minor series are recommended (for example, 0.2.x with 0.2.x)."
+  }
+}

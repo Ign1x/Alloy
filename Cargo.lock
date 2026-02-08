@@ -59,7 +59,7 @@ checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
 
 [[package]]
 name = "alloy-agent"
-version = "0.2.0"
+version = "0.2.2"
 dependencies = [
  "alloy-process",
  "alloy-proto",
@@ -86,7 +86,7 @@ dependencies = [
 
 [[package]]
 name = "alloy-control"
-version = "0.2.0"
+version = "0.2.2"
 dependencies = [
  "alloy-db",
  "alloy-migration",
@@ -126,25 +126,25 @@ dependencies = [
 
 [[package]]
 name = "alloy-core"
-version = "0.2.0"
+version = "0.2.2"
 
 [[package]]
 name = "alloy-db"
-version = "0.2.0"
+version = "0.2.2"
 dependencies = [
  "sea-orm",
 ]
 
 [[package]]
 name = "alloy-migration"
-version = "0.2.0"
+version = "0.2.2"
 dependencies = [
  "sea-orm-migration",
 ]
 
 [[package]]
 name = "alloy-process"
-version = "0.2.0"
+version = "0.2.2"
 dependencies = [
  "serde",
  "specta",
@@ -153,7 +153,7 @@ dependencies = [
 
 [[package]]
 name = "alloy-proto"
-version = "0.2.0"
+version = "0.2.2"
 dependencies = [
  "prost",
  "tonic",

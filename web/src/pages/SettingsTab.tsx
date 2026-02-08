@@ -393,12 +393,12 @@ export default function SettingsTab(props: SettingsTabProps) {
                           <div class="min-w-0">
                             <div class="text-sm font-medium text-slate-900 dark:text-slate-100">Updates</div>
                             <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                              Current <span class="font-mono">{controlDiagnostics.data?.control_version ?? '—'}</span>
+                              Control current <span class="font-mono">{controlDiagnostics.data?.control_version ?? '—'}</span>
                               <Show when={updateCheck.data?.latest}>
                                 {(latest) => (
                                   <>
                                     {' '}
-                                    · Latest{' '}
+                                    · latest{' '}
                                     <a
                                       href={latest().url}
                                       target="_blank"
@@ -411,7 +411,25 @@ export default function SettingsTab(props: SettingsTabProps) {
                                 )}
                               </Show>
                             </div>
+
+                            <Show when={updateCheck.data?.agent_latest}>
+                              {(agentLatest) => (
+                                <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                                  Agent latest{' '}
+                                  <a
+                                    href={agentLatest().url}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    class="font-mono text-slate-900 underline decoration-slate-300 underline-offset-2 hover:decoration-slate-500 dark:text-slate-100 dark:decoration-slate-700 dark:hover:decoration-slate-500"
+                                  >
+                                    {agentLatest().tag}
+                                  </a>
+                                  {' '}· trigger agent updates from <span class="font-medium">Nodes</span>.
+                                </div>
+                              )}
+                            </Show>
                           </div>
+
                           <div class="flex flex-wrap items-center gap-2">
                             <Show when={updateCheck.isPending}>
                               <Badge variant="neutral">Checking</Badge>
@@ -421,6 +439,14 @@ export default function SettingsTab(props: SettingsTabProps) {
                                 {updateCheck.data?.update_available ? 'Update available' : 'Up to date'}
                               </Badge>
                             </Show>
+                            <Show when={updateCheck.data?.source?.kind}>
+                              {(kind) => (
+                                <Badge variant="neutral">
+                                  {kind()}
+                                  {updateCheck.data?.source?.channel ? `:${updateCheck.data?.source?.channel}` : ''}
+                                </Badge>
+                              )}
+                            </Show>
                           </div>
                         </div>
 
@@ -428,6 +454,55 @@ export default function SettingsTab(props: SettingsTabProps) {
                           {(publishedAt) => (
                             <div class="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
                               Published <span class="font-mono">{publishedAt()}</span>
+                            </div>
+                          )}
+                        </Show>
+
+                        <Show when={updateCheck.data?.source?.kind === 'manifest' ? updateCheck.data?.source?.manifest_url : null}>
+                          {(manifestUrl) => (
+                            <div class="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
+                              Manifest source{' '}
+                              <a
+                                href={manifestUrl()}
+                                target="_blank"
+                                rel="noreferrer"
+                                class="font-mono text-slate-900 underline decoration-slate-300 underline-offset-2 hover:decoration-slate-500 dark:text-slate-100 dark:decoration-slate-700 dark:hover:decoration-slate-500"
+                              >
+                                {manifestUrl()}
+                              </a>
+                            </div>
+                          )}
+                        </Show>
+
+                        <Show when={updateCheck.data?.compatibility}>
+                          {(compat) => (
+                            <div class="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
+                              Compatibility
+                              <Show when={compat().control_min_agent}>
+                                {(min) => (
+                                  <>
+                                    {' '}· agent ≥ <span class="font-mono">{min()}</span>
+                                  </>
+                                )}
+                              </Show>
+                              <Show when={compat().control_max_agent}>
+                                {(max) => (
+                                  <>
+                                    {' '}· agent ≤ <span class="font-mono">{max()}</span>
+                                  </>
+                                )}
+                              </Show>
+                              <Show when={compat().note}>
+                                {(note) => <div class="mt-1">{note()}</div>}
+                              </Show>
+                            </div>
+                          )}
+                        </Show>
+
+                        <Show when={updateCheck.data?.source?.warning}>
+                          {(warning) => (
+                            <div class="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-[11px] text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
+                              {warning()}
                             </div>
                           )}
                         </Show>
@@ -510,8 +585,8 @@ export default function SettingsTab(props: SettingsTabProps) {
                         <Show when={updateCheck.data && !updateCheck.data.can_trigger_update}>
                           <div class="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
                             One-click update requires Watchtower HTTP API. Set{' '}
-                            <span class="font-mono">ALLOY_UPDATE_WATCHTOWER_URL</span> and{' '}
-                            <span class="font-mono">ALLOY_UPDATE_WATCHTOWER_TOKEN</span> on{' '}
+                            <span class="font-mono">ALLOY_UPDATE_WATCHTOWER_URL</span>
+                            {' '}on{' '}
                             <span class="font-mono">alloy-control</span>.
                           </div>
                         </Show>

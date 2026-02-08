@@ -49,6 +49,8 @@ services:
       - alloy-agent-data:/data
       # Required for per-instance `docker run` sandbox mode.
       - /var/run/docker.sock:/var/run/docker.sock
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
     restart: unless-stopped
 
   alloy-control:
@@ -67,9 +69,16 @@ services:
       - DATABASE_URL=postgres://postgres:postgres@postgres:5432/alloy
       # Used by CSRF/Origin middleware for browser requests.
       - ALLOY_ALLOWED_ORIGINS=http://localhost:3000,http://localhost:5173,http://127.0.0.1:5173
+      # One-click updates (optional): control triggers Watchtower's HTTP API.
+      - ALLOY_UPDATE_WATCHTOWER_URL=http://watchtower:8080
+      - ALLOY_UPDATE_WATCHTOWER_TOKEN=${ALLOY_WATCHTOWER_TOKEN:-}
+      # Optional update manifest for component-specific versions (control/agent).
+      - ALLOY_UPDATE_MANIFEST_URL=${ALLOY_UPDATE_MANIFEST_URL:-https://raw.githubusercontent.com/Ign1x/Alloy/main/deploy/update-manifest.json}
     depends_on:
       - postgres
       - alloy-agent
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
     restart: unless-stopped
 
   web:
@@ -80,6 +89,25 @@ services:
       - "3000:80"
     depends_on:
       - alloy-control
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+    restart: unless-stopped
+
+  watchtower:
+    # This is a fork that is actively maintained (unlike `containrrr/watchtower`).
+    image: nickfedor/watchtower:latest
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      # Only update containers with the `com.centurylinklabs.watchtower.enable=true` label.
+      - WATCHTOWER_LABEL_ENABLE=true
+      # Enable HTTP API mode (updates are triggered via `/v1/update`).
+      - WATCHTOWER_HTTP_API_UPDATE=true
+      - WATCHTOWER_HTTP_API_TOKEN=${ALLOY_WATCHTOWER_TOKEN:-}
+      # Optional: remove old images after updating to save disk.
+      - WATCHTOWER_CLEANUP=true
+    labels:
+      - "com.centurylinklabs.watchtower.enable=false"
     restart: unless-stopped
 
 volumes:

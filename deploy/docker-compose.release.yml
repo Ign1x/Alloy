@@ -67,6 +67,8 @@ services:
       # One-click updates (optional): control triggers Watchtower's HTTP API.
       - ALLOY_UPDATE_WATCHTOWER_URL=http://watchtower:8080
       - ALLOY_UPDATE_WATCHTOWER_TOKEN=${ALLOY_WATCHTOWER_TOKEN:-}
+      # Optional update manifest for component-specific versions (control/agent).
+      - ALLOY_UPDATE_MANIFEST_URL=${ALLOY_UPDATE_MANIFEST_URL:-https://raw.githubusercontent.com/Ign1x/Alloy/main/deploy/update-manifest.json}
     depends_on:
       - postgres
       - alloy-agent
