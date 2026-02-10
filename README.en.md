@@ -28,25 +28,10 @@ alloy-agent (download / lifecycle / files / logs / updates)
 - Docker
 - Docker Compose
 
-### 2) Clone the repository
+### 2) One-command install (release only)
 
 ```bash
-git clone https://github.com/Ign1x/Alloy.git
-cd Alloy
-```
-
-### 3) One-command install (auto `.env` + compose)
-
-Linux / macOS:
-
-```bash
-bash deploy/install.sh --mode release
-```
-
-Windows PowerShell:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\deploy\install.ps1 -Mode release
+curl -fsSL https://raw.githubusercontent.com/Ign1x/Alloy/alloy/deploy/install.sh | bash -s -- --mode release
 ```
 
 The installer auto-generates:
@@ -54,15 +39,7 @@ The installer auto-generates:
 - `.env` (missing keys are auto-filled, including random secrets)
 - `deploy/docker-compose.generated.release.yml`
 
-### 4) Start (already handled by installer)
-
-If you prefer to run manually:
-
-```bash
-docker compose --env-file .env -f deploy/docker-compose.generated.release.yml up -d
-```
-
-### 5) Access
+### 3) Access
 
 - Panel: `http://127.0.0.1:10043`
 - Control ping: `http://127.0.0.1:10043/rspc/control.ping?input=null`
@@ -77,13 +54,13 @@ To run game instances, deploy `alloy-agent` on node hosts separately and connect
 Upgrade to latest images:
 
 ```bash
-bash deploy/install.sh --mode release
+curl -fsSL https://raw.githubusercontent.com/Ign1x/Alloy/alloy/deploy/install.sh | bash -s -- --mode release
 ```
 
 Pin a specific version:
 
 ```bash
-ALLOY_IMAGE_TAG=v0.2.7 bash deploy/install.sh --mode release
+curl -fsSL https://raw.githubusercontent.com/Ign1x/Alloy/alloy/deploy/install.sh | ALLOY_IMAGE_TAG=v0.2.7 bash -s -- --mode release
 ```
 
 ---
