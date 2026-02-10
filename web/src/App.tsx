@@ -1922,6 +1922,15 @@ function App() {
   const [createNodeFormError, setCreateNodeFormError] = createSignal<string | null>(null)
   const [createNodeResult, setCreateNodeResult] = createSignal<NodeCreateResult | null>(null)
 
+  const createNodeWatchtowerPort = createMemo(() => {
+    const nodeId = createNodeResult()?.node?.id ?? ''
+    let h = 0
+    for (let i = 0; i < nodeId.length; i++) {
+      h = (h * 33 + nodeId.charCodeAt(i)) >>> 0
+    }
+    return 45000 + (h % 20000)
+  })
+
   const createNodeComposeYaml = createMemo(() => {
     const r = createNodeResult()
     if (!r) return ''
@@ -1942,7 +1951,7 @@ function App() {
       `      - ALLOY_CONTROL_WS_URL=${url}`,
       `      - ALLOY_NODE_NAME=${name}`,
       `      - ALLOY_NODE_TOKEN=${token}`,
-      '      - ALLOY_AGENT_SELF_UPDATE_WATCHTOWER_URL=http://watchtower:8080',
+      `      - ALLOY_AGENT_SELF_UPDATE_WATCHTOWER_URL=http://watchtower:${createNodeWatchtowerPort()}`,
       '      - ALLOY_AGENT_SELF_UPDATE_WATCHTOWER_TOKEN=${ALLOY_AGENT_WATCHTOWER_TOKEN:-change-me}',
       '    volumes:',
       '      - alloy-agent-data:/data',
@@ -1952,6 +1961,8 @@ function App() {
       '  watchtower:',
       '    image: nickfedor/watchtower:latest',
       '    restart: unless-stopped',
+      '    ports:',
+      `      - "${createNodeWatchtowerPort()}:8080"`,
       '    volumes:',
       '      - /var/run/docker.sock:/var/run/docker.sock',
       '    environment:',

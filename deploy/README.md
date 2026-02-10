@@ -15,7 +15,7 @@ Alloy supports two agent transport modes:
 
 Default host ports (via compose):
 - web: `http://localhost:3000`
-- control: `http://localhost:8080`
+- control: `http://localhost:10043`
 - games: depends on instance `port` (e.g. Minecraft `25565`, Terraria `7777`)
 
 ## Quick start
@@ -91,7 +91,7 @@ docker compose up -d --build
 
 Security defaults in these control-only compose files:
 
-- Control binds to loopback by default (`127.0.0.1:8080`).
+- Control binds to loopback by default (`127.0.0.1:10043`).
 - `ALLOY_COOKIE_SECURE=false` by default for local HTTP testing only.
 - No `watchtower` service and no docker socket mount.
 - `alloy-control` runs as a non-root user, with read-only rootfs, dropped Linux capabilities, and `no-new-privileges`.

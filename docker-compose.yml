@@ -20,7 +20,7 @@ services:
       context: .
       dockerfile: deploy/control.Dockerfile
     ports:
-      - "${ALLOY_CONTROL_BIND_ADDR:-127.0.0.1}:8080:8080"
+      - "${ALLOY_CONTROL_BIND_ADDR:-127.0.0.1}:10043:8080"
     user: "10001:10001"
     read_only: true
     tmpfs:
