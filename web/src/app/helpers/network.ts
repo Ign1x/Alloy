@@ -22,7 +22,36 @@ export function connectHost() {
   }
 }
 
-export function defaultControlWsUrl() {
+function normalizeControlWsUrl(value: string | null | undefined): string | null {
+  const raw = (value ?? '').trim()
+  if (!raw) return null
+
+  const [proto, rest] = raw.startsWith('wss://')
+    ? ['wss', raw.slice('wss://'.length)]
+    : raw.startsWith('ws://')
+      ? ['ws', raw.slice('ws://'.length)]
+      : raw.startsWith('https://')
+        ? ['wss', raw.slice('https://'.length)]
+        : raw.startsWith('http://')
+          ? ['ws', raw.slice('http://'.length)]
+          : ['', '']
+
+  if (!proto || !rest) return null
+
+  const sanitized = rest.split('#')[0]?.split('?')[0]?.trim().replace(/\/+$/, '')
+  if (!sanitized) return null
+
+  const authority = sanitized.split('/')[0]?.trim()
+  if (!authority) return null
+
+  const path = sanitized.endsWith('/agent/ws') ? sanitized : `${sanitized}/agent/ws`
+  return `${proto}://${path}`
+}
+
+export function defaultControlWsUrl(preferred?: string | null) {
+  const suggested = normalizeControlWsUrl(preferred)
+  if (suggested) return suggested
+
   try {
     const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
     const host = window.location.host || 'localhost'

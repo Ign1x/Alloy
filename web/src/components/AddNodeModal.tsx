@@ -1,6 +1,5 @@
 import { Show } from 'solid-js'
 import { isAlloyApiError } from '../rspc'
-import { defaultControlWsUrl } from '../app/helpers/network'
 import { safeCopy } from '../app/helpers/misc'
 import { LabelTip } from '../app/primitives/LabelTip'
 import { Button } from './ui/Button'
@@ -27,6 +26,7 @@ export default function AddNodeModal(props: AddNodeModalProps) {
     createNodeFormError,
     setCreateNodeFormError,
     createNodeControlWsUrl,
+    defaultCreateNodeControlWsUrl,
     setCreateNodeControlWsUrl,
     setCreateNodeResult,
     pushToast,
@@ -112,7 +112,7 @@ export default function AddNodeModal(props: AddNodeModalProps) {
                   <Input
                     value={createNodeControlWsUrl()}
                     onInput={(e) => setCreateNodeControlWsUrl(e.currentTarget.value)}
-                    placeholder={defaultControlWsUrl()}
+                    placeholder={defaultCreateNodeControlWsUrl()}
                     spellcheck={false}
                   />
                 </Field>
@@ -175,7 +175,7 @@ export default function AddNodeModal(props: AddNodeModalProps) {
                       <Input
                         value={createNodeControlWsUrl()}
                         onInput={(e) => setCreateNodeControlWsUrl(e.currentTarget.value)}
-                        placeholder={defaultControlWsUrl()}
+                        placeholder={defaultCreateNodeControlWsUrl()}
                         spellcheck={false}
                       />
                     </Field>

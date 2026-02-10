@@ -305,6 +305,11 @@ To enable **reverse tunnel** (agent -> control) on a remote `alloy-agent` host, 
 - `ALLOY_NODE_NAME=<node-name>` (optional; defaults to `$ALLOY_NODE_NAME` or `$HOSTNAME`)
 - `ALLOY_NODE_TOKEN=<token>` (required when node access is token-protected)
 
+For panel `Nodes -> Add node` default URL, set on `alloy-control` (optional):
+- `ALLOY_CONTROL_WS_URL_DEFAULT=https://<public-control-host>/agent/ws`
+
+If `ALLOY_CONTROL_WS_URL_DEFAULT` is unset, control falls back to the first non-loopback origin in `ALLOY_ALLOWED_ORIGINS`, then browser current origin.
+
 For panel one-click updates, set on `alloy-control`:
 
 - `ALLOY_UPDATE_WATCHTOWER_URL=http://watchtower:8080` (required)

@@ -701,6 +701,110 @@ fn is_read_only() -> bool {
     )
 }
 
+fn hostname_from_url_like(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    let rest = trimmed
+        .strip_prefix("https://")
+        .or_else(|| trimmed.strip_prefix("http://"))
+        .or_else(|| trimmed.strip_prefix("wss://"))
+        .or_else(|| trimmed.strip_prefix("ws://"))?;
+
+    let authority = rest.split('/').next()?.trim();
+    if authority.is_empty() {
+        return None;
+    }
+
+    let host = if let Some(rest) = authority.strip_prefix('[') {
+        rest.split(']').next().unwrap_or_default().trim().to_string()
+    } else {
+        authority
+            .split(':')
+            .next()
+            .unwrap_or_default()
+            .trim()
+            .to_string()
+    };
+
+    if host.is_empty() {
+        None
+    } else {
+        Some(host.to_ascii_lowercase())
+    }
+}
+
+fn is_loopback_host(host: &str) -> bool {
+    matches!(host, "localhost" | "127.0.0.1" | "::1" | "0.0.0.0")
+}
+
+fn normalize_control_ws_url(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let (scheme, rest) = if let Some(rest) = trimmed.strip_prefix("wss://") {
+        ("wss", rest)
+    } else if let Some(rest) = trimmed.strip_prefix("ws://") {
+        ("ws", rest)
+    } else if let Some(rest) = trimmed.strip_prefix("https://") {
+        ("wss", rest)
+    } else if let Some(rest) = trimmed.strip_prefix("http://") {
+        ("ws", rest)
+    } else {
+        return None;
+    };
+
+    let raw = rest
+        .split('#')
+        .next()
+        .unwrap_or_default()
+        .split('?')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .trim_end_matches('/');
+    if raw.is_empty() {
+        return None;
+    }
+
+    let authority = raw.split('/').next().unwrap_or_default().trim();
+    if authority.is_empty() {
+        return None;
+    }
+
+    let path = if raw.ends_with("/agent/ws") {
+        raw.to_string()
+    } else {
+        format!("{raw}/agent/ws")
+    };
+
+    Some(format!("{scheme}://{path}"))
+}
+
+fn suggested_control_ws_url() -> Option<String> {
+    if let Some(v) = std::env::var("ALLOY_CONTROL_WS_URL_DEFAULT")
+        .ok()
+        .and_then(|raw| normalize_control_ws_url(&raw))
+    {
+        return Some(v);
+    }
+
+    let raw = std::env::var("ALLOY_ALLOWED_ORIGINS").unwrap_or_default();
+    for origin in raw.split(',').map(|v| v.trim()).filter(|v| !v.is_empty()) {
+        let Some(host) = hostname_from_url_like(origin) else {
+            continue;
+        };
+        if is_loopback_host(&host) {
+            continue;
+        }
+        if let Some(v) = normalize_control_ws_url(origin) {
+            return Some(v);
+        }
+    }
+
+    None
+}
+
 fn ensure_writable(ctx: &Ctx) -> Result<(), ApiError> {
     if is_read_only() {
         return Err(api_error(ctx, "read_only", "control is in read-only mode"));
@@ -1054,6 +1158,7 @@ pub struct ControlDiagnosticsOutput {
     pub request_id: String,
     pub control_version: String,
     pub read_only: bool,
+    pub suggested_control_ws_url: Option<String>,
     pub agent: AgentHealthFullDto,
     pub fs: FsCapabilitiesOutput,
     pub cache: CacheStatsOutput,
@@ -2793,6 +2898,7 @@ pub fn router() -> Router<Ctx> {
                     request_id: ctx.request_id.clone(),
                     control_version: env!("CARGO_PKG_VERSION").to_string(),
                     read_only: is_read_only(),
+                    suggested_control_ws_url: suggested_control_ws_url(),
                     agent: health,
                     fs: fs_caps,
                     cache,

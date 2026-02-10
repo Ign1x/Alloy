@@ -83,7 +83,8 @@ export default function InstancesCreatePanel(props: InstancesCreatePanelProps) {
     warmCache,
   } = props as any
 
-  const noTemplateHint = '暂无可用节点，请先连接 agent'
+  const noTemplateHint = 'No templates available.'
+  const noNodesHint = 'No nodes available. Add one in Nodes tab first.'
 
   return (
                     <div class="space-y-3">
@@ -120,8 +121,19 @@ export default function InstancesCreatePanel(props: InstancesCreatePanelProps) {
                             label=""
                             value={createNodeId()}
                             options={createNodeDropdownOptions()}
-                            placeholder="Default agent"
-                            onChange={setCreateNodeId}
+                            disabled={createNodeDropdownOptions().length === 0}
+                            placeholder={createNodeDropdownOptions().length === 0 ? 'No nodes' : 'Select node…'}
+                            title={createNodeDropdownOptions().length === 0 ? noNodesHint : undefined}
+                            onChange={(value) => {
+                              setCreateNodeId(value)
+                              if (createFieldErrors().node_id) {
+                                setCreateFieldErrors((prev: Record<string, string>) => {
+                                  const next = { ...prev }
+                                  delete next.node_id
+                                  return next
+                                })
+                              }
+                            }}
                           />
                         </div>
                       </Field>
@@ -335,8 +347,18 @@ export default function InstancesCreatePanel(props: InstancesCreatePanelProps) {
                               return
                             }
 
+                            const node_id = createNodeId().trim()
+                            if (!node_id) {
+                              localErrors.node_id = 'Select node…'
+                            }
+
+                            if (Object.keys(localErrors).length > 0) {
+                              setCreateFieldErrors(localErrors)
+                              queueMicrotask(() => focusFirstCreateError(localErrors))
+                              return
+                            }
+
                             try {
-                              const node_id = createNodeId().trim() || null
                               const out = await createInstance.mutateAsync({ template_id, params, display_name, node_id })
                               pushToast('success', 'Instance created', display_name ?? undefined)
                               await invalidateInstances()

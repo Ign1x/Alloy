@@ -1238,7 +1238,7 @@ function App() {
       templateId: createTemplateId(),
       templateLabel: templateDisplayName(createTemplateId()),
       instanceName: instanceName(),
-      nodeName: createNodeId().trim() ? 'Manual node' : 'Auto schedule',
+      nodeName: createNodeDisplayName(),
       sleepSeconds: sleepSeconds(),
       createAdvanced: createAdvanced(),
       createAdvancedDirty: createAdvancedDirty(),
@@ -1811,21 +1811,26 @@ function App() {
 
   const createNodeDropdownOptions = createMemo(() => {
     const list = (nodes.data ?? []) as NodeDto[]
-    const selectable = list.filter((n) => n.enabled)
-    const out: { value: string; label: string; meta?: string }[] = []
-    out.push({
-      value: '',
-      label: selectable.length > 0 ? 'Auto schedule' : 'Default agent',
-      meta: selectable.length > 0 ? 'Least-loaded across available nodes' : 'Use control default routing',
-    })
-    for (const n of selectable) {
-      out.push({
+    return list
+      .filter((n) => n.enabled)
+      .map((n) => ({
         value: n.id,
         label: n.name,
         meta: n.endpoint?.trim() || undefined,
-      })
-    }
-    return out
+      }))
+  })
+
+  const createNodeDisplayName = createMemo(() => {
+    const id = createNodeId().trim()
+    if (!id) return ''
+    return createNodeDropdownOptions().find((opt) => opt.value === id)?.label ?? ''
+  })
+
+  createEffect(() => {
+    const id = createNodeId().trim()
+    if (!id) return
+    const valid = createNodeDropdownOptions().some((opt) => opt.value === id)
+    if (!valid) setCreateNodeId('')
   })
 
   type FrpNodeDto = {
@@ -1908,7 +1913,10 @@ function App() {
   const createNode = rspc.createMutation(() => 'node.create')
   const [showCreateNodeModal, setShowCreateNodeModal] = createSignal(false)
   const [createNodeName, setCreateNodeName] = createSignal('')
-  const [createNodeControlWsUrl, setCreateNodeControlWsUrl] = createSignal(defaultControlWsUrl())
+  const defaultCreateNodeControlWsUrl = createMemo(() =>
+    defaultControlWsUrl(controlDiagnostics.data?.suggested_control_ws_url ?? null),
+  )
+  const [createNodeControlWsUrl, setCreateNodeControlWsUrl] = createSignal(defaultCreateNodeControlWsUrl())
   const [createNodeFieldErrors, setCreateNodeFieldErrors] = createSignal<Record<string, string>>({})
   const [createNodeFormError, setCreateNodeFormError] = createSignal<string | null>(null)
   const [createNodeResult, setCreateNodeResult] = createSignal<NodeCreateResult | null>(null)
@@ -1925,7 +1933,7 @@ function App() {
   const createNodeComposeYaml = createMemo(() => {
     const r = createNodeResult()
     if (!r) return ''
-    const url = createNodeControlWsUrl().trim() || defaultControlWsUrl()
+    const url = createNodeControlWsUrl().trim() || defaultCreateNodeControlWsUrl()
     const name = r.node.name
     const token = r.connect_token
     const watchtowerToken = r.watchtower_token
@@ -1984,7 +1992,7 @@ function App() {
 
   function openCreateNode() {
     setCreateNodeName('')
-    setCreateNodeControlWsUrl(defaultControlWsUrl())
+    setCreateNodeControlWsUrl(defaultCreateNodeControlWsUrl())
     setCreateNodeFieldErrors({})
     setCreateNodeFormError(null)
     setCreateNodeResult(null)
@@ -2467,6 +2475,7 @@ function App() {
     createNodeFormError,
     setCreateNodeFormError,
     createNodeControlWsUrl,
+    defaultCreateNodeControlWsUrl,
     setCreateNodeControlWsUrl,
     setCreateNodeResult,
     pushToast,

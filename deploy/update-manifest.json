@@ -3,20 +3,20 @@
   "channel": "stable",
   "published_at": "2026-02-10T05:14:24Z",
   "control": {
-    "tag": "v0.2.7",
-    "version": "0.2.7",
-    "url": "https://github.com/Ign1x/Alloy/releases/tag/v0.2.7",
+    "tag": "v0.2.8",
+    "version": "0.2.8",
+    "url": "https://github.com/Ign1x/Alloy/releases/tag/v0.2.8",
     "images": {
-      "ghcr": "ghcr.io/ign1x/alloy-control:v0.2.7",
+      "ghcr": "ghcr.io/ign1x/alloy-control:v0.2.8",
       "dockerhub": null
     }
   },
   "agent": {
-    "tag": "v0.2.7",
-    "version": "0.2.7",
-    "url": "https://github.com/Ign1x/Alloy/releases/tag/v0.2.7",
+    "tag": "v0.2.8",
+    "version": "0.2.8",
+    "url": "https://github.com/Ign1x/Alloy/releases/tag/v0.2.8",
     "images": {
-      "ghcr": "ghcr.io/ign1x/alloy-agent:v0.2.7",
+      "ghcr": "ghcr.io/ign1x/alloy-agent:v0.2.8",
       "dockerhub": null
     }
   },
