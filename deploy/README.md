@@ -61,6 +61,16 @@ docker compose -f deploy/docker-compose.release.yml pull
 docker compose -f deploy/docker-compose.release.yml up -d
 ```
 
+Release compose defaults to **manual node registration** (no auto-created direct `default` node):
+
+1. Open panel `Nodes` and create a node.
+2. Copy node connect token and set `.env`: `ALLOY_NODE_TOKEN=...`
+3. Restart `alloy-agent`:
+
+```bash
+docker compose -f deploy/docker-compose.release.yml up -d alloy-agent
+```
+
 ### Control-only compose
 
 If you only need the control plane (plus Postgres) and an external/remote agent,
@@ -319,13 +329,15 @@ curl -fsS -X POST -H 'content-type: application/json' \
 - `ALLOY_AGENT_TRANSPORT=tunnel`: only use reverse tunnel.
 - `ALLOY_AGENT_TRANSPORT=direct`: only use direct gRPC.
 
+In `deploy/docker-compose.release.yml`, we set `ALLOY_AGENT_TRANSPORT=tunnel` by default to avoid auto-fallback to direct gRPC.
+
 - Local dev default: `http://127.0.0.1:50051`
 - docker-compose (host-networked agent): `http://host.docker.internal:50051` (via `extra_hosts: host-gateway`)
 
 To enable **reverse tunnel** (agent -> control), set on `alloy-agent`:
 - `ALLOY_CONTROL_WS_URL=http://<control-host>:10043/agent/ws` (release compose default)
 - `ALLOY_NODE_NAME=<node-name>` (optional; defaults to `$ALLOY_NODE_NAME` or `$HOSTNAME`)
-- `ALLOY_NODE_TOKEN=<token>` (optional; required if the node is created via the Nodes UI)
+- `ALLOY_NODE_TOKEN=<token>` (required for release compose manual node mode)
 
 For panel one-click updates, set on `alloy-control`:
 

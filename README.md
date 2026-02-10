@@ -55,6 +55,9 @@ ALLOY_ADMIN_PASS=请填写管理员密码
 
 # 可选：用于 watchtower HTTP API
 ALLOY_WATCHTOWER_TOKEN=
+
+# 节点连接 token（在面板 Nodes 里创建节点后填入）
+ALLOY_NODE_TOKEN=
 ```
 
 ### 4) 启动
@@ -68,6 +71,14 @@ docker compose up -d
 
 - Panel: `http://127.0.0.1:10043`
 - Control ping: `http://127.0.0.1:10043/rspc/control.ping?input=null`
+
+### 6) 手动创建并连接节点
+
+release compose 默认不自动注册直连 `default` 节点。
+
+1. 打开面板 `Nodes` 页面，创建一个节点并复制 connect token。
+2. 把 token 写入 `.env`：`ALLOY_NODE_TOKEN=...`
+3. 重启 agent：`docker compose up -d alloy-agent`
 
 ---
 
