@@ -60,7 +60,7 @@ curl -fsSL https://raw.githubusercontent.com/Ign1x/Alloy/alloy/deploy/install.sh
 Pin a specific version:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Ign1x/Alloy/alloy/deploy/install.sh | ALLOY_IMAGE_TAG=v0.2.8 bash -s -- --mode release
+curl -fsSL https://raw.githubusercontent.com/Ign1x/Alloy/alloy/deploy/install.sh | ALLOY_IMAGE_TAG=v0.2.9 bash -s -- --mode release
 ```
 
 ---

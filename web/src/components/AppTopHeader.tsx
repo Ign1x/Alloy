@@ -566,6 +566,13 @@ export default function AppTopHeader(props: AppTopHeaderProps) {
                             <div class="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
                               {props.me!.is_admin ? props.t('header.roleAdministrator') : props.t('header.roleUser')}
                             </div>
+                            <Show when={props.controlVersion}>
+                              {(version) => (
+                                <div class="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+                                  {props.t('header.control')} <span class="font-mono">v{version()}</span>
+                                </div>
+                              )}
+                            </Show>
                           </div>
                         </div>
                       </div>

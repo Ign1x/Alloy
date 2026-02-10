@@ -1238,7 +1238,12 @@ function App() {
       templateId: createTemplateId(),
       templateLabel: templateDisplayName(createTemplateId()),
       instanceName: instanceName(),
-      nodeName: createNodeDisplayName(),
+      nodeName: (() => {
+        const id = createNodeId().trim()
+        if (!id) return ''
+        return ((nodes.data ?? []) as { id: string; name: string; enabled: boolean }[]).find((n) => n.id === id && n.enabled)
+          ?.name ?? ''
+      })(),
       sleepSeconds: sleepSeconds(),
       createAdvanced: createAdvanced(),
       createAdvancedDirty: createAdvancedDirty(),
@@ -1818,12 +1823,6 @@ function App() {
         label: n.name,
         meta: n.endpoint?.trim() || undefined,
       }))
-  })
-
-  const createNodeDisplayName = createMemo(() => {
-    const id = createNodeId().trim()
-    if (!id) return ''
-    return createNodeDropdownOptions().find((opt) => opt.value === id)?.label ?? ''
   })
 
   createEffect(() => {
