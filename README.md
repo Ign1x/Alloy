@@ -28,7 +28,7 @@ alloy-agent (下载 / 启停 / 文件 / 日志 / 更新)
 - Docker
 - Docker Compose
 
-### 2) 一条命令安装（仅 release）
+### 2) 一条命令安装
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Ign1x/Alloy/alloy/deploy/install.sh | bash -s -- --mode release
