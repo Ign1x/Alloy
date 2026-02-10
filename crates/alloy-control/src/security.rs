@@ -38,11 +38,7 @@ fn is_unsafe_method(method: &Method) -> bool {
 }
 
 fn parse_allowed_origins() -> Vec<String> {
-    // Dev-friendly defaults. Production should set `ALLOY_ALLOWED_ORIGINS` explicitly.
-    //
-    // Examples:
-    // - ALLOY_ALLOWED_ORIGINS=http://localhost:5173
-    // - ALLOY_ALLOWED_ORIGINS=https://panel.example.com,https://control.example.com
+    // Comma-separated origin allowlist from `ALLOY_ALLOWED_ORIGINS`.
     let raw = std::env::var("ALLOY_ALLOWED_ORIGINS").unwrap_or_else(|_| {
         "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000"
             .to_string()

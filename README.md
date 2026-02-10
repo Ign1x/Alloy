@@ -1,0 +1,130 @@
+# Alloy
+
+> 面向自托管游戏服务器的控制平面：`Web + Control + Agent`。
+
+Alloy 提供统一面板来管理实例、节点与更新流程，适合单机和多节点场景。
+
+---
+
+## 架构
+
+```text
+Web (SolidJS)
+   │
+   ▼
+alloy-control (Axum + rspc)
+   │
+   └─ /agent/ws (反向连接)
+   ▼
+alloy-agent (下载 / 启停 / 文件 / 日志 / 更新)
+```
+
+---
+
+## 快速开始（镜像部署）
+
+### 1) 环境要求
+
+- Docker
+- Docker Compose
+
+### 2) 下载 compose 文件
+
+使用 `curl`：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Ign1x/Alloy/alloy/deploy/docker-compose.release.yml -o docker-compose.yml
+```
+
+或使用 `wget`：
+
+```bash
+wget -O docker-compose.yml https://raw.githubusercontent.com/Ign1x/Alloy/alloy/deploy/docker-compose.release.yml
+```
+
+### 3) 准备 `.env`
+
+在当前目录创建 `.env`（至少包含以下变量）：
+
+```env
+ALLOY_JWT_SECRET=请填写高强度随机字符串
+
+# 首次启动可设置管理员账号
+ALLOY_ADMIN_USER=admin
+ALLOY_ADMIN_PASS=请填写管理员密码
+
+# 可选：用于 watchtower HTTP API
+ALLOY_WATCHTOWER_TOKEN=
+```
+
+### 4) 启动
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
+### 5) 访问
+
+- Panel: `http://127.0.0.1:3000`
+- Control health: `http://127.0.0.1:8080/healthz`
+
+---
+
+## 更新
+
+升级到最新镜像：
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
+指定版本：
+
+```bash
+ALLOY_IMAGE_TAG=v0.2.6 docker compose up -d
+```
+
+---
+
+## 数据目录
+
+默认使用 Docker volumes 持久化：
+
+- `alloy-agent-data`
+- `alloy-postgres`
+
+删除容器但保留数据：
+
+```bash
+docker compose down
+```
+
+删除容器和数据卷：
+
+```bash
+docker compose down -v
+```
+
+---
+
+## 目录
+
+```text
+crates/
+  alloy-agent/
+  alloy-control/
+  alloy-db/
+  alloy-migration/
+  alloy-proto/
+web/
+deploy/
+```
+
+---
+
+## 文档
+
+- Deployment details: `deploy/README.md`
+- Workflow: `WORKFLOW.md`

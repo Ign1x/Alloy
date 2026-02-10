@@ -5,7 +5,7 @@ This directory contains the Dockerized deployment for the current vertical slice
 
 Alloy supports two agent transport modes:
 - **Direct gRPC**: control dials `ALLOY_AGENT_ENDPOINT` (works when the agent is reachable inbound).
-- **Reverse tunnel (recommended)**: agent dials back to control over WebSocket (`ALLOY_CONTROL_WS_URL`), so it works behind NAT / without a public IP.
+- **Reverse tunnel**: agent dials back to control over WebSocket (`ALLOY_CONTROL_WS_URL`), so it works behind NAT / without a public IP.
 
 ## Services
 - `alloy-agent` (gRPC): container port `50051`
@@ -26,21 +26,6 @@ Build and start:
 docker compose up -d --build
 ```
 
-## Security env (required/recommended)
-
-Before first production boot, set these env vars for `alloy-control`:
-
-- `ALLOY_JWT_SECRET` (**required**): JWT signing secret; control refuses to start if missing/empty.
-- `ALLOY_ADMIN_USER` (**required on first boot**): initial admin username when users table is empty.
-- `ALLOY_ADMIN_PASS` (**required on first boot**): initial admin password when users table is empty.
-
-Hardening toggles:
-
-- `ALLOY_COOKIE_SECURE` (default: `true`): secure cookies; set `false` only for local HTTP dev.
-- `ALLOY_AGENT_CONNECT_TOKEN` (recommended): shared token for `/agent/ws` reverse tunnel auth.
-- `ALLOY_ALLOW_UNAUTHENTICATED_AGENT_WS` (default: `false`): unsafe compatibility toggle to allow unauthenticated agent WS.
-- `ALLOY_IMPORT_URL_ALLOW_HOSTS` (agent, optional): comma-separated host allowlist for private/local IP import URLs, e.g. `192.168.1.10,10.0.0.5`.
-
 ## Updates
 
 Alloy stores persistent data in Docker volumes (not the container filesystem), so updating containers does **not** wipe worlds/configs as long as you keep the same volumes.
@@ -54,7 +39,7 @@ git pull
 docker compose up -d --build
 ```
 
-### Release images (recommended)
+### Release images
 
 Use the prebuilt image-based compose file:
 
@@ -73,7 +58,7 @@ docker compose -f deploy/docker-compose.release.yml pull
 docker compose -f deploy/docker-compose.release.yml up -d
 ```
 
-### Control-only compose (minimal and safer)
+### Control-only compose
 
 If you only need the control plane (plus Postgres) and an external/remote agent,
 use the control-only compose:
@@ -88,23 +73,6 @@ Local source-build variant (build `alloy-control` from this repo):
 ```bash
 docker compose up -d --build
 ```
-
-Security defaults in these control-only compose files:
-
-- Control binds to loopback by default (`127.0.0.1:10043`).
-- `ALLOY_COOKIE_SECURE=false` by default for local HTTP testing only.
-- No `watchtower` service and no docker socket mount.
-- `alloy-control` runs as a non-root user, with read-only rootfs, dropped Linux capabilities, and `no-new-privileges`.
-- `ALLOY_POSTGRES_PASSWORD` is required (no weak hardcoded default).
-
-Before exposing to a public network, set at least:
-
-- `ALLOY_CONTROL_BIND_ADDR=0.0.0.0` (only when you really need remote access)
-- `ALLOY_COOKIE_SECURE=true` (with HTTPS/TLS termination)
-- `ALLOY_ALLOWED_ORIGINS=https://<your-panel-domain>`
-- `ALLOY_AGENT_CONNECT_TOKEN=<strong-random-token>` (for `/agent/ws` auth)
-- `ALLOY_JWT_SECRET=<strong-random-secret>`
-- `ALLOY_POSTGRES_PASSWORD=<strong-random-password>`
 
 ### Local full-stack testing compose
 
@@ -123,7 +91,6 @@ Required env vars for this file:
 
 - `ALLOY_JWT_SECRET`
 - `ALLOY_POSTGRES_PASSWORD`
-- `ALLOY_AGENT_CONNECT_TOKEN`
 
 ### One-click updates (optional)
 
@@ -174,14 +141,13 @@ Alloy now supports per-instance sandboxing with resource limits:
 
 - **One instance = one isolated runtime** (preferred: per-instance `docker run` container; fallback: `bwrap`/native)
 - **Resource limits** (memory / cpu / pids / open files)
-- **Least privilege defaults** (`no-new-privileges`, `cap-drop=ALL`, read-only rootfs, bounded FD/process counts)
 
 Global defaults (agent env):
 
 - `ALLOY_SANDBOX_DEFAULT_ENABLED=true`
 - `ALLOY_SANDBOX_MODE=auto` (`auto|docker|bwrap|native|off`)
 - `ALLOY_SANDBOX_DOCKER_ENABLED=true`
-- `ALLOY_SANDBOX_FORCE_MODE=docker` (recommended: fail fast instead of silently falling back)
+- `ALLOY_SANDBOX_FORCE_MODE=docker` (fail if docker sandbox is unavailable)
 - `ALLOY_SANDBOX_DOCKER_DATA_VOLUME=alloy-agent-data` (for compose named-volume `/data`)
 - `ALLOY_SANDBOX_DOCKER_IMAGE=ghcr.io/ign1x/alloy-agent:latest` (required for docker sandbox; in local `docker-compose.yml` use `alloy-agent-local:latest`)
 - `ALLOY_SANDBOX_ENABLE_CGROUPS=true`
@@ -332,9 +298,9 @@ curl -fsS -X POST -H 'content-type: application/json' \
 | What you see | Likely cause | Fix |
 | --- | --- | --- |
 | `download_failed` | No network / upstream blocked | Check DNS + outbound HTTPS connectivity, then retry. |
-| `java_major_mismatch` | Minecraft requires Java X but runtime has Y | Install the required Java (Temurin recommended) or use the provided `alloy-agent` Docker image. |
+| `java_major_mismatch` | Minecraft requires Java X but runtime has Y | Install the required Java (Temurin) or use the provided `alloy-agent` Docker image. |
 | `insufficient_disk` | Low free space under `ALLOY_DATA_ROOT` | Free disk space or mount a larger volume for `/data`. |
-| `spawn_failed` | Missing deps / non-executable server binary | Use Docker image (recommended) or install runtime deps (see `deploy/agent.Dockerfile`: `libicu`, `libssl`, `zlib`, etc). |
+| `spawn_failed` | Missing deps / non-executable server binary | Use Docker image or install runtime deps (see `deploy/agent.Dockerfile`: `libicu`, `libssl`, `zlib`, etc). |
 | `read_only` | Control is in read-only mode | Unset `ALLOY_READ_ONLY` and restart `alloy-control`. |
 | FS write operations unavailable | FS write is disabled by default | Set `ALLOY_FS_WRITE_ENABLED=true` on `alloy-agent` (still scoped to `ALLOY_DATA_ROOT`). |
 
