@@ -55,9 +55,6 @@ ALLOY_ADMIN_PASS=set-admin-password
 
 # Optional: watchtower HTTP API token
 ALLOY_WATCHTOWER_TOKEN=
-
-# Node connect token (set this after creating a node in the panel)
-ALLOY_NODE_TOKEN=
 ```
 
 ### 4) Start
@@ -72,13 +69,7 @@ docker compose up -d
 - Panel: `http://127.0.0.1:10043`
 - Control ping: `http://127.0.0.1:10043/rspc/control.ping?input=null`
 
-### 6) Create and connect node manually
-
-Release compose no longer auto-registers a direct `default` node.
-
-1. Open `Nodes` in the panel, create a node, and copy its connect token.
-2. Put it in `.env`: `ALLOY_NODE_TOKEN=...`
-3. Restart agent: `docker compose up -d alloy-agent`
+To run game instances, deploy `alloy-agent` on node hosts separately and connect them via panel `Nodes`.
 
 ---
 
@@ -103,7 +94,6 @@ ALLOY_IMAGE_TAG=v0.2.6 docker compose up -d
 
 By default, data is stored in Docker volumes bound to the current directory:
 
-- `./alloy-agent-data`
 - `./alloy-postgres`
 
 Stop containers and keep data:
@@ -116,13 +106,13 @@ Stop containers and remove persisted data directories:
 
 ```bash
 docker compose down
-rm -rf alloy-agent-data alloy-postgres
+rm -rf alloy-postgres
 ```
 
 If you want to pre-create directories (to avoid first-run permission surprises):
 
 ```bash
-mkdir -p alloy-agent-data alloy-postgres
+mkdir -p alloy-postgres
 ```
 
 ---

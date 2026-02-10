@@ -13,6 +13,8 @@ Alloy supports two agent transport modes:
 - `alloy-control` (HTTP): container port `8080` (serves `/healthz` and `/rspc`)
 - `web` (nginx): container port `80` (serves SPA + proxies `/rspc` to control)
 
+Note: `deploy/docker-compose.release.yml` is control-plane only and does not include a local `alloy-agent` service.
+
 Default host ports (via compose):
 - release compose entrypoint (web + API): `http://localhost:10043`
 - control-only compose API: `http://localhost:10043`
@@ -31,7 +33,7 @@ docker compose up -d --build
 
 Alloy stores persistent data outside the container filesystem, so updating containers does **not** wipe worlds/configs as long as you keep the same mounts/volumes.
 
-For `deploy/docker-compose.release.yml`, named volumes are used with local bind backing (`driver_opts`), so data is visible in the compose directory and still keeps a stable Docker volume name for sandbox integration.
+For `deploy/docker-compose.release.yml`, Postgres data uses a named volume with local bind backing (`driver_opts`), so control-plane data is visible in the compose directory.
 
 ### Source build (this repo)
 
@@ -61,15 +63,9 @@ docker compose -f deploy/docker-compose.release.yml pull
 docker compose -f deploy/docker-compose.release.yml up -d
 ```
 
-Release compose defaults to **manual node registration** (no auto-created direct `default` node):
+Release compose is now **control-plane only** (`web + alloy-control + postgres + watchtower`) and does not start a local `alloy-agent`.
 
-1. Open panel `Nodes` and create a node.
-2. Copy node connect token and set `.env`: `ALLOY_NODE_TOKEN=...`
-3. Restart `alloy-agent`:
-
-```bash
-docker compose -f deploy/docker-compose.release.yml up -d alloy-agent
-```
+For game nodes, deploy `alloy-agent` on remote hosts and connect them from the panel (`Nodes`).
 
 ### Control-only compose
 
@@ -122,36 +118,24 @@ Stop (keep data):
 docker compose down
 ```
 
-Reset release-compose data (⚠️ wipes `./alloy-agent-data` + `./alloy-postgres`):
+Reset release-compose data (⚠️ wipes `./alloy-postgres`):
 
 ```bash
 docker compose down
-rm -rf alloy-agent-data alloy-postgres
+rm -rf alloy-postgres
 ```
 
 For local/control-only compose files that use named volumes, use `docker compose down -v`.
 
-## Persistent data (`/data`)
+## Persistent data (release compose)
 
-The agent stores **everything** under `ALLOY_DATA_ROOT` (default: `/data` in the Docker image):
-- `instances/<instance_id>/` (worlds/config/logs for each instance)
-- `cache/` (downloaded Minecraft jars / Terraria zips + extracted server roots)
-- `logs/agent.log*` (agent tracing logs)
+`deploy/docker-compose.release.yml` persists control-plane Postgres data via:
 
-In `deploy/docker-compose.release.yml`, `/data` is backed by named volume `alloy-agent-data`, and that volume is bind-backed to `./alloy-agent-data`, so it **persists across container restarts/upgrades** and is visible in the compose directory.
-
-`postgres` data uses the same pattern via `alloy-postgres` -> `./alloy-postgres`.
+- `alloy-postgres` volume bind-backed to `./alloy-postgres`
 
 Important:
-- `docker compose down -v` removes the Docker volumes, but bind-backed host data may still exist on disk depending on Docker behavior and filesystem permissions.
-- If you want a custom data location, point bind-backed volume paths to your own host path, e.g.:
-
-```yaml
-services:
-  alloy-agent:
-    volumes:
-      - ./alloy-data:/data
-```
+- `docker compose down -v` removes named volumes, but bind-backed host data may still exist depending on Docker behavior and filesystem permissions.
+- If you run `alloy-agent` on remote hosts, their game data is persisted on those hosts under that node's own `ALLOY_DATA_ROOT`.
 
 ## Instance isolation (sandbox)
 
@@ -198,7 +182,7 @@ Release entrypoint check (single port):
 curl -fsS http://localhost:10043/ > /dev/null
 ```
 
-rspc endpoints:
+rspc endpoints (`agent.*` calls require at least one connected node):
 
 ```bash
 curl -fsS "http://localhost:10043/rspc/control.ping?input=null"
@@ -329,15 +313,15 @@ curl -fsS -X POST -H 'content-type: application/json' \
 - `ALLOY_AGENT_TRANSPORT=tunnel`: only use reverse tunnel.
 - `ALLOY_AGENT_TRANSPORT=direct`: only use direct gRPC.
 
-In `deploy/docker-compose.release.yml`, we set `ALLOY_AGENT_TRANSPORT=tunnel` by default to avoid auto-fallback to direct gRPC.
+In `deploy/docker-compose.release.yml`, we set `ALLOY_AGENT_TRANSPORT=tunnel` by default (control-plane only, no local direct agent endpoint).
 
 - Local dev default: `http://127.0.0.1:50051`
 - docker-compose (host-networked agent): `http://host.docker.internal:50051` (via `extra_hosts: host-gateway`)
 
-To enable **reverse tunnel** (agent -> control), set on `alloy-agent`:
-- `ALLOY_CONTROL_WS_URL=http://<control-host>:10043/agent/ws` (release compose default)
+To enable **reverse tunnel** (agent -> control) on a remote `alloy-agent` host, set:
+- `ALLOY_CONTROL_WS_URL=http://<control-host>:10043/agent/ws`
 - `ALLOY_NODE_NAME=<node-name>` (optional; defaults to `$ALLOY_NODE_NAME` or `$HOSTNAME`)
-- `ALLOY_NODE_TOKEN=<token>` (required for release compose manual node mode)
+- `ALLOY_NODE_TOKEN=<token>` (required when node access is token-protected)
 
 For panel one-click updates, set on `alloy-control`:
 

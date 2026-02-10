@@ -55,9 +55,6 @@ ALLOY_ADMIN_PASS=请填写管理员密码
 
 # 可选：用于 watchtower HTTP API
 ALLOY_WATCHTOWER_TOKEN=
-
-# 节点连接 token（在面板 Nodes 里创建节点后填入）
-ALLOY_NODE_TOKEN=
 ```
 
 ### 4) 启动
@@ -72,13 +69,7 @@ docker compose up -d
 - Panel: `http://127.0.0.1:10043`
 - Control ping: `http://127.0.0.1:10043/rspc/control.ping?input=null`
 
-### 6) 手动创建并连接节点
-
-release compose 默认不自动注册直连 `default` 节点。
-
-1. 打开面板 `Nodes` 页面，创建一个节点并复制 connect token。
-2. 把 token 写入 `.env`：`ALLOY_NODE_TOKEN=...`
-3. 重启 agent：`docker compose up -d alloy-agent`
+如需运行游戏实例，请在节点机器单独部署 `alloy-agent`，并在面板 `Nodes` 中接入。
 
 ---
 
@@ -103,7 +94,6 @@ ALLOY_IMAGE_TAG=v0.2.6 docker compose up -d
 
 默认使用“绑定到当前目录的 Docker volume”持久化：
 
-- `./alloy-agent-data`
 - `./alloy-postgres`
 
 删除容器但保留数据：
@@ -116,13 +106,13 @@ docker compose down
 
 ```bash
 docker compose down
-rm -rf alloy-agent-data alloy-postgres
+rm -rf alloy-postgres
 ```
 
 如果要先创建目录（避免首次启动权限问题）：
 
 ```bash
-mkdir -p alloy-agent-data alloy-postgres
+mkdir -p alloy-postgres
 ```
 
 ---
