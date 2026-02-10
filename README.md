@@ -37,7 +37,7 @@ curl -fsSL https://raw.githubusercontent.com/Ign1x/Alloy/alloy/deploy/install.sh
 脚本会自动生成：
 
 - `.env`（缺失变量自动补齐，含随机密钥）
-- `deploy/docker-compose.generated.release.yml`
+- `docker-compose.generated.release.yml`
 
 ### 3) 访问
 
@@ -74,13 +74,13 @@ curl -fsSL https://raw.githubusercontent.com/Ign1x/Alloy/alloy/deploy/install.sh
 删除容器但保留数据：
 
 ```bash
-docker compose --env-file .env -f deploy/docker-compose.generated.release.yml down
+docker compose --env-file .env -f docker-compose.generated.release.yml down
 ```
 
 删除容器和数据卷：
 
 ```bash
-docker compose --env-file .env -f deploy/docker-compose.generated.release.yml down
+docker compose --env-file .env -f docker-compose.generated.release.yml down
 rm -rf alloy-postgres
 ```
 

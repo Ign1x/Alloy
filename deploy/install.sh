@@ -53,18 +53,26 @@ case "$MODE" in
     ;;
 esac
 
+RUN_MODE="stdin"
 SCRIPT_SOURCE="${BASH_SOURCE[0]-}"
 if [[ -n "$SCRIPT_SOURCE" && -f "$SCRIPT_SOURCE" ]]; then
+  RUN_MODE="file"
   SCRIPT_DIR="$(cd -- "$(dirname -- "$SCRIPT_SOURCE")" && pwd)"
   INSTALL_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 else
   INSTALL_ROOT="$(pwd)"
-  SCRIPT_DIR="$INSTALL_ROOT/deploy"
-  mkdir -p "$SCRIPT_DIR"
+  SCRIPT_DIR="$INSTALL_ROOT"
 fi
 
 ENV_FILE="$INSTALL_ROOT/.env"
-TEMPLATE_LOCAL="$SCRIPT_DIR/docker-compose.${MODE}.yml"
+if [[ "$RUN_MODE" == "file" ]]; then
+  TEMPLATE_LOCAL="$SCRIPT_DIR/docker-compose.${MODE}.yml"
+else
+  TEMPLATE_LOCAL="$INSTALL_ROOT/docker-compose.${MODE}.yml"
+  if [[ ! -f "$TEMPLATE_LOCAL" && -f "$INSTALL_ROOT/deploy/docker-compose.${MODE}.yml" ]]; then
+    TEMPLATE_LOCAL="$INSTALL_ROOT/deploy/docker-compose.${MODE}.yml"
+  fi
+fi
 TEMPLATE="$TEMPLATE_LOCAL"
 TEMP_TEMPLATE=""
 
@@ -95,7 +103,11 @@ if [[ ! -f "$TEMPLATE_LOCAL" ]]; then
 fi
 
 if [[ -z "$OUTPUT" ]]; then
-  OUTPUT="$SCRIPT_DIR/docker-compose.generated.${MODE}.yml"
+  if [[ "$RUN_MODE" == "stdin" ]]; then
+    OUTPUT="$INSTALL_ROOT/docker-compose.generated.${MODE}.yml"
+  else
+    OUTPUT="$SCRIPT_DIR/docker-compose.generated.${MODE}.yml"
+  fi
 fi
 mkdir -p "$(dirname -- "$OUTPUT")"
 
@@ -184,6 +196,11 @@ if [[ "$MODE" == "local" ]]; then
 fi
 
 cp "$TEMPLATE" "$OUTPUT"
+
+if [[ "$MODE" == "release" ]]; then
+  COMPOSE_DIR="$(cd -- "$(dirname -- "$OUTPUT")" && pwd)"
+  mkdir -p "$COMPOSE_DIR/alloy-postgres"
+fi
 
 echo "Generated compose: $OUTPUT"
 echo "Env file: $ENV_FILE"

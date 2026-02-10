@@ -37,7 +37,7 @@ curl -fsSL https://raw.githubusercontent.com/Ign1x/Alloy/alloy/deploy/install.sh
 The installer auto-generates:
 
 - `.env` (missing keys are auto-filled, including random secrets)
-- `deploy/docker-compose.generated.release.yml`
+- `docker-compose.generated.release.yml`
 
 ### 3) Access
 
@@ -74,13 +74,13 @@ By default, data is stored in Docker volumes bound to the current directory:
 Stop containers and keep data:
 
 ```bash
-docker compose --env-file .env -f deploy/docker-compose.generated.release.yml down
+docker compose --env-file .env -f docker-compose.generated.release.yml down
 ```
 
 Stop containers and remove persisted data directories:
 
 ```bash
-docker compose --env-file .env -f deploy/docker-compose.generated.release.yml down
+docker compose --env-file .env -f docker-compose.generated.release.yml down
 rm -rf alloy-postgres
 ```
 
