@@ -1,0 +1,95 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_DB=alloy
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=${ALLOY_POSTGRES_PASSWORD:?set ALLOY_POSTGRES_PASSWORD in .env}
+    volumes:
+      - alloy-control-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d alloy"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  alloy-agent:
+    image: alloy-agent-local:latest
+    build:
+      context: ..
+      dockerfile: deploy/agent.Dockerfile
+    network_mode: "host"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 512
+    environment:
+      - RUST_LOG=${RUST_LOG:-info}
+      - ALLOY_DATA_ROOT=/data
+      - ALLOY_FS_WRITE_ENABLED=true
+      - ALLOY_CONTROL_WS_URL=http://127.0.0.1:10043/agent/ws
+      - ALLOY_NODE_NAME=${ALLOY_NODE_NAME:-default}
+      - ALLOY_NODE_TOKEN=${ALLOY_AGENT_CONNECT_TOKEN:?set ALLOY_AGENT_CONNECT_TOKEN in .env}
+      - ALLOY_SANDBOX_DEFAULT_ENABLED=true
+      - ALLOY_SANDBOX_MODE=${ALLOY_SANDBOX_MODE:-native}
+      - ALLOY_SANDBOX_DOCKER_ENABLED=false
+      - ALLOY_SANDBOX_FORCE_MODE=${ALLOY_SANDBOX_FORCE_MODE:-native}
+    volumes:
+      - alloy-agent-data:/data
+    restart: unless-stopped
+
+  alloy-control:
+    image: alloy-control-local:latest
+    build:
+      context: ..
+      dockerfile: deploy/control.Dockerfile
+    ports:
+      - "${ALLOY_CONTROL_BIND_ADDR:-127.0.0.1}:10043:8080"
+    user: "10001:10001"
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 256
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      - RUST_LOG=${RUST_LOG:-info}
+      - DATABASE_URL=postgres://postgres:${ALLOY_POSTGRES_PASSWORD:?set ALLOY_POSTGRES_PASSWORD in .env}@postgres:5432/alloy
+      - ALLOY_JWT_SECRET=${ALLOY_JWT_SECRET:?set ALLOY_JWT_SECRET in .env}
+      - ALLOY_ADMIN_USER=${ALLOY_ADMIN_USER:-}
+      - ALLOY_ADMIN_PASS=${ALLOY_ADMIN_PASS:-}
+      - ALLOY_COOKIE_SECURE=${ALLOY_COOKIE_SECURE:-false}
+      - ALLOY_ALLOWED_ORIGINS=${ALLOY_ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
+      - ALLOY_AGENT_ENDPOINT=${ALLOY_AGENT_ENDPOINT:-http://host.docker.internal:50051}
+      - ALLOY_AGENT_TRANSPORT=${ALLOY_AGENT_TRANSPORT:-auto}
+      - ALLOY_AGENT_CONNECT_TOKEN=${ALLOY_AGENT_CONNECT_TOKEN:?set ALLOY_AGENT_CONNECT_TOKEN in .env}
+      - ALLOY_ALLOW_UNAUTHENTICATED_AGENT_WS=false
+      - ALLOY_UPDATE_MANIFEST_URL=${ALLOY_UPDATE_MANIFEST_URL:-https://github.com/Ign1x/Alloy/releases/latest/download/update-manifest.json}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      alloy-agent:
+        condition: service_started
+    restart: unless-stopped
+
+  web:
+    image: alloy-web-local:latest
+    build:
+      context: ..
+      dockerfile: deploy/web.Dockerfile
+    ports:
+      - "${ALLOY_WEB_BIND_ADDR:-127.0.0.1}:3000:80"
+    depends_on:
+      alloy-control:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  alloy-agent-data:
+  alloy-control-postgres:

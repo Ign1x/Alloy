@@ -106,6 +106,25 @@ Before exposing to a public network, set at least:
 - `ALLOY_JWT_SECRET=<strong-random-secret>`
 - `ALLOY_POSTGRES_PASSWORD=<strong-random-password>`
 
+### Local full-stack testing compose
+
+If you want to test the full stack on your own machine (`web + control + agent`), use:
+
+```bash
+docker compose -f deploy/docker-compose.local.yml up -d --build
+```
+
+Default local endpoints:
+
+- web: `http://127.0.0.1:3000`
+- control API: `http://127.0.0.1:10043`
+
+Required env vars for this file:
+
+- `ALLOY_JWT_SECRET`
+- `ALLOY_POSTGRES_PASSWORD`
+- `ALLOY_AGENT_CONNECT_TOKEN`
+
 ### One-click updates (optional)
 
 `deploy/docker-compose.release.yml` includes a `watchtower` service with an HTTP API and a default manifest URL:
