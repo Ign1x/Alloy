@@ -2782,7 +2782,7 @@ function App() {
     updateCheck,
     triggerUpdate,
     get controlVersion() {
-      return controlDiagnostics.data?.control_version ?? null
+      return controlDiagnostics.data?.control_version ?? updateCheck.data?.current_version ?? ping.data?.version ?? null
     },
     get agentOutdatedCount() {
       return nodeAgentOutdatedCount()
