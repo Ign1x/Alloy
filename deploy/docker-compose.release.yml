@@ -39,8 +39,8 @@ services:
       # Without this, the UI can only browse/read files.
       - ALLOY_FS_WRITE_ENABLED=true
       # Reverse-connect back to the control plane over WebSocket.
-      # This avoids fragile host-network -> container networking (and enables NAT'd nodes).
-      - ALLOY_CONTROL_WS_URL=http://127.0.0.1:8080/agent/ws
+      # Route through the web entrypoint so release compose only needs one host port.
+      - ALLOY_CONTROL_WS_URL=http://127.0.0.1:10043/agent/ws
       - ALLOY_NODE_NAME=default
     volumes:
       - alloy-agent-data:/data
@@ -52,8 +52,6 @@ services:
 
   alloy-control:
     image: ${ALLOY_IMAGE_REPO_PREFIX:-ghcr.io/ign1x}/alloy-control:${ALLOY_IMAGE_TAG:-latest}
-    ports:
-      - "8080:8080"
     extra_hosts:
       # Allow reaching the host network (and host-networked alloy-agent) from this container.
       - "host.docker.internal:host-gateway"
@@ -68,7 +66,7 @@ services:
       - ALLOY_ADMIN_USER=${ALLOY_ADMIN_USER:-}
       - ALLOY_ADMIN_PASS=${ALLOY_ADMIN_PASS:-}
       # Used by CSRF/Origin middleware for browser requests.
-      - ALLOY_ALLOWED_ORIGINS=http://localhost:3000,http://localhost:5173,http://127.0.0.1:5173
+      - ALLOY_ALLOWED_ORIGINS=http://localhost:10043,http://127.0.0.1:10043,http://localhost:5173,http://127.0.0.1:5173
       # One-click updates (optional): control triggers Watchtower's HTTP API.
       - ALLOY_UPDATE_WATCHTOWER_URL=http://watchtower:8080
       - ALLOY_UPDATE_WATCHTOWER_TOKEN=${ALLOY_WATCHTOWER_TOKEN:-}
@@ -84,7 +82,7 @@ services:
   web:
     image: ${ALLOY_IMAGE_REPO_PREFIX:-ghcr.io/ign1x}/alloy-web:${ALLOY_IMAGE_TAG:-latest}
     ports:
-      - "3000:80"
+      - "10043:80"
     depends_on:
       - alloy-control
     labels:
@@ -110,4 +108,14 @@ services:
 
 volumes:
   alloy-agent-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./alloy-agent-data
   alloy-postgres:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./alloy-postgres

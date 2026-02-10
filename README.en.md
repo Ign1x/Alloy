@@ -66,8 +66,8 @@ docker compose up -d
 
 ### 5) Access
 
-- Panel: `http://127.0.0.1:3000`
-- Control health: `http://127.0.0.1:8080/healthz`
+- Panel: `http://127.0.0.1:10043`
+- Control ping: `http://127.0.0.1:10043/rspc/control.ping?input=null`
 
 ---
 
@@ -90,10 +90,10 @@ ALLOY_IMAGE_TAG=v0.2.6 docker compose up -d
 
 ## Data Persistence
 
-By default, data is stored in Docker volumes:
+By default, data is stored in Docker volumes bound to the current directory:
 
-- `alloy-agent-data`
-- `alloy-postgres`
+- `./alloy-agent-data`
+- `./alloy-postgres`
 
 Stop containers and keep data:
 
@@ -101,10 +101,17 @@ Stop containers and keep data:
 docker compose down
 ```
 
-Stop containers and remove volumes:
+Stop containers and remove persisted data directories:
 
 ```bash
-docker compose down -v
+docker compose down
+rm -rf alloy-agent-data alloy-postgres
+```
+
+If you want to pre-create directories (to avoid first-run permission surprises):
+
+```bash
+mkdir -p alloy-agent-data alloy-postgres
 ```
 
 ---

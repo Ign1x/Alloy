@@ -66,8 +66,8 @@ docker compose up -d
 
 ### 5) 访问
 
-- Panel: `http://127.0.0.1:3000`
-- Control health: `http://127.0.0.1:8080/healthz`
+- Panel: `http://127.0.0.1:10043`
+- Control ping: `http://127.0.0.1:10043/rspc/control.ping?input=null`
 
 ---
 
@@ -90,10 +90,10 @@ ALLOY_IMAGE_TAG=v0.2.6 docker compose up -d
 
 ## 数据目录
 
-默认使用 Docker volumes 持久化：
+默认使用“绑定到当前目录的 Docker volume”持久化：
 
-- `alloy-agent-data`
-- `alloy-postgres`
+- `./alloy-agent-data`
+- `./alloy-postgres`
 
 删除容器但保留数据：
 
@@ -104,7 +104,14 @@ docker compose down
 删除容器和数据卷：
 
 ```bash
-docker compose down -v
+docker compose down
+rm -rf alloy-agent-data alloy-postgres
+```
+
+如果要先创建目录（避免首次启动权限问题）：
+
+```bash
+mkdir -p alloy-agent-data alloy-postgres
 ```
 
 ---

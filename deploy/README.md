@@ -14,8 +14,9 @@ Alloy supports two agent transport modes:
 - `web` (nginx): container port `80` (serves SPA + proxies `/rspc` to control)
 
 Default host ports (via compose):
-- web: `http://localhost:3000`
-- control: `http://localhost:10043`
+- release compose entrypoint (web + API): `http://localhost:10043`
+- control-only compose API: `http://localhost:10043`
+- local full-stack compose web: `http://localhost:3000`
 - games: depends on instance `port` (e.g. Minecraft `25565`, Terraria `7777`)
 
 ## Quick start
@@ -28,7 +29,9 @@ docker compose up -d --build
 
 ## Updates
 
-Alloy stores persistent data in Docker volumes (not the container filesystem), so updating containers does **not** wipe worlds/configs as long as you keep the same volumes.
+Alloy stores persistent data outside the container filesystem, so updating containers does **not** wipe worlds/configs as long as you keep the same mounts/volumes.
+
+For `deploy/docker-compose.release.yml`, named volumes are used with local bind backing (`driver_opts`), so data is visible in the compose directory and still keeps a stable Docker volume name for sandbox integration.
 
 ### Source build (this repo)
 
@@ -109,11 +112,14 @@ Stop (keep data):
 docker compose down
 ```
 
-Reset (⚠️ wipes `alloy-agent` `/data` + Postgres volume):
+Reset release-compose data (⚠️ wipes `./alloy-agent-data` + `./alloy-postgres`):
 
 ```bash
-docker compose down -v
+docker compose down
+rm -rf alloy-agent-data alloy-postgres
 ```
+
+For local/control-only compose files that use named volumes, use `docker compose down -v`.
 
 ## Persistent data (`/data`)
 
@@ -122,11 +128,13 @@ The agent stores **everything** under `ALLOY_DATA_ROOT` (default: `/data` in the
 - `cache/` (downloaded Minecraft jars / Terraria zips + extracted server roots)
 - `logs/agent.log*` (agent tracing logs)
 
-In `docker-compose.yml`, `/data` is backed by the `alloy-agent-data` volume, so it **persists across container restarts/upgrades**.
+In `deploy/docker-compose.release.yml`, `/data` is backed by named volume `alloy-agent-data`, and that volume is bind-backed to `./alloy-agent-data`, so it **persists across container restarts/upgrades** and is visible in the compose directory.
+
+`postgres` data uses the same pattern via `alloy-postgres` -> `./alloy-postgres`.
 
 Important:
-- `docker compose down -v` deletes volumes, including `alloy-agent-data`, and will permanently remove worlds/instances/cache.
-- For explicit persistence/backups, bind-mount a host directory instead of a named volume, e.g.:
+- `docker compose down -v` removes the Docker volumes, but bind-backed host data may still exist on disk depending on Docker behavior and filesystem permissions.
+- If you want a custom data location, point bind-backed volume paths to your own host path, e.g.:
 
 ```yaml
 services:
@@ -148,7 +156,6 @@ Global defaults (agent env):
 - `ALLOY_SANDBOX_MODE=auto` (`auto|docker|bwrap|native|off`)
 - `ALLOY_SANDBOX_DOCKER_ENABLED=true`
 - `ALLOY_SANDBOX_FORCE_MODE=docker` (fail if docker sandbox is unavailable)
-- `ALLOY_SANDBOX_DOCKER_DATA_VOLUME=alloy-agent-data` (for compose named-volume `/data`)
 - `ALLOY_SANDBOX_DOCKER_IMAGE=ghcr.io/ign1x/alloy-agent:latest` (required for docker sandbox; in local `docker-compose.yml` use `alloy-agent-local:latest`)
 - `ALLOY_SANDBOX_ENABLE_CGROUPS=true`
 - `ALLOY_SANDBOX_MEMORY_MB_DEFAULT=4096`
@@ -175,18 +182,18 @@ Notes:
 
 ## Verification
 
-Control health:
+Release entrypoint check (single port):
 
 ```bash
-curl -fsS http://localhost:8080/healthz
+curl -fsS http://localhost:10043/ > /dev/null
 ```
 
 rspc endpoints:
 
 ```bash
-curl -fsS "http://localhost:8080/rspc/control.ping?input=null"
-curl -fsS "http://localhost:8080/rspc/agent.health?input=null"
-curl -fsS "http://localhost:8080/rspc/process.templates?input=null"
+curl -fsS "http://localhost:10043/rspc/control.ping?input=null"
+curl -fsS "http://localhost:10043/rspc/agent.health?input=null"
+curl -fsS "http://localhost:10043/rspc/process.templates?input=null"
 ```
 
 ## Minecraft (vanilla)
@@ -206,16 +213,16 @@ Start (rspc):
 ```bash
 curl -fsS -X POST -H 'content-type: application/json' \
   --data '{"template_id":"minecraft:vanilla","params":{"accept_eula":"true","version":"latest_release","memory_mb":"2048","port":"25565"}}' \
-  http://localhost:8080/rspc/process.start
+  http://localhost:10043/rspc/process.start
 ```
 
 Note: The agent will download the server jar from Mojang (piston-meta), verify sha1, cache it under `/data`, and run it with Java 21.
 
-Web (same-origin `/rspc`):
+Web (same-origin `/rspc`, release compose):
 
 ```bash
-curl -fsS http://localhost:3000/ > /dev/null
-curl -fsS "http://localhost:3000/rspc/control.ping?input=null"
+curl -fsS http://localhost:10043/ > /dev/null
+curl -fsS "http://localhost:10043/rspc/control.ping?input=null"
 ```
 
 ## Terraria (vanilla)
@@ -245,7 +252,7 @@ Start (rspc):
 ```bash
 curl -fsS -X POST -H 'content-type: application/json' \
   --data '{"template_id":"terraria:vanilla","params":{"version":"1453","port":"7777","max_players":"8","world_name":"world","world_size":"1"}}' \
-  http://localhost:8080/rspc/process.start
+  http://localhost:10043/rspc/process.start
 ```
 
 ## Palworld (vanilla)
@@ -267,7 +274,7 @@ Start (rspc):
 ```bash
 curl -fsS -X POST -H 'content-type: application/json' \
   --data '{"template_id":"palworld:vanilla","params":{"server_name":"Alloy Palworld server","max_players":"32","port":"8211","query_port":"27015","public":"false"}}' \
-  http://localhost:8080/rspc/process.start
+  http://localhost:10043/rspc/process.start
 ```
 
 ## Factorio (vanilla)
@@ -290,7 +297,7 @@ Start (rspc):
 ```bash
 curl -fsS -X POST -H 'content-type: application/json' \
   --data '{"template_id":"factorio:vanilla","params":{"version":"stable","server_name":"Alloy Factorio server","max_players":"8","port":"34197","public":"false"}}' \
-  http://localhost:8080/rspc/process.start
+  http://localhost:10043/rspc/process.start
 ```
 
 ## Troubleshooting (common)
@@ -316,7 +323,7 @@ curl -fsS -X POST -H 'content-type: application/json' \
 - docker-compose (host-networked agent): `http://host.docker.internal:50051` (via `extra_hosts: host-gateway`)
 
 To enable **reverse tunnel** (agent -> control), set on `alloy-agent`:
-- `ALLOY_CONTROL_WS_URL=http://<control-host>:8080/agent/ws`
+- `ALLOY_CONTROL_WS_URL=http://<control-host>:10043/agent/ws` (release compose default)
 - `ALLOY_NODE_NAME=<node-name>` (optional; defaults to `$ALLOY_NODE_NAME` or `$HOSTNAME`)
 - `ALLOY_NODE_TOKEN=<token>` (optional; required if the node is created via the Nodes UI)
 
