@@ -6,6 +6,7 @@
 node_modules/
 dist/
 .env
+deploy/docker-compose.generated.*.yml
 
 ## OS / tooling
 .DS_Store

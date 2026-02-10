@@ -14,7 +14,6 @@ use axum::{
     Extension, Json, Router,
     routing::{get, post},
 };
-use sea_orm::EntityTrait;
 use sea_orm_migration::MigratorTrait;
 use serde::Serialize;
 
@@ -424,6 +423,55 @@ async fn upload_instance_save(
     }))
 }
 
+async fn cleanup_legacy_default_node(db: &sea_orm::DatabaseConnection) -> anyhow::Result<()> {
+    use alloy_db::entities::{instance_nodes, nodes};
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+
+    let Some(endpoint) = std::env::var("ALLOY_AGENT_ENDPOINT")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+    else {
+        return Ok(());
+    };
+
+    let legacy_rows = nodes::Entity::find()
+        .filter(nodes::Column::Name.eq("default"))
+        .filter(nodes::Column::Endpoint.eq(endpoint.clone()))
+        .filter(nodes::Column::ConnectTokenHash.is_null())
+        .all(db)
+        .await?;
+
+    for row in legacy_rows {
+        let in_use = instance_nodes::Entity::find()
+            .filter(instance_nodes::Column::NodeId.eq(row.id))
+            .one(db)
+            .await?
+            .is_some();
+
+        if in_use {
+            tracing::info!(
+                node_id = %row.id,
+                node_name = %row.name,
+                "keeping legacy auto-seeded default node because it is referenced by instances"
+            );
+            continue;
+        }
+
+        let deleted = nodes::Entity::delete_by_id(row.id).exec(db).await?;
+        if deleted.rows_affected > 0 {
+            tracing::info!(
+                node_id = %row.id,
+                node_name = %row.name,
+                endpoint = %row.endpoint,
+                "removed legacy auto-seeded default node"
+            );
+        }
+    }
+
+    Ok(())
+}
+
 async fn init_db_and_migrate() -> anyhow::Result<AppState> {
     let database_url =
         std::env::var("DATABASE_URL").map_err(|_| anyhow::anyhow!("DATABASE_URL is required"))?;
@@ -436,32 +484,10 @@ async fn init_db_and_migrate() -> anyhow::Result<AppState> {
     auth::ensure_jwt_secret_configured()?;
     auth::bootstrap_initial_admin(&db).await?;
 
-    // Ensure the default node exists so the UI has something to show.
-    // This is idempotent and safe to run on every boot.
-    if let Ok(endpoint) = std::env::var("ALLOY_AGENT_ENDPOINT") {
-        let _ = alloy_db::entities::nodes::Entity::insert(alloy_db::entities::nodes::ActiveModel {
-            id: sea_orm::Set(sea_orm::prelude::Uuid::new_v4()),
-            name: sea_orm::Set("default".to_string()),
-            endpoint: sea_orm::Set(endpoint),
-            connect_token_hash: sea_orm::Set(None),
-            enabled: sea_orm::Set(true),
-            last_seen_at: sea_orm::Set(None),
-            agent_version: sea_orm::Set(None),
-            last_error: sea_orm::Set(None),
-            created_at: sea_orm::Set(chrono::Utc::now().into()),
-            updated_at: sea_orm::Set(chrono::Utc::now().into()),
-        })
-        .on_conflict(
-            sea_orm::sea_query::OnConflict::columns([alloy_db::entities::nodes::Column::Name])
-                .update_columns([
-                    alloy_db::entities::nodes::Column::Endpoint,
-                    alloy_db::entities::nodes::Column::Enabled,
-                    alloy_db::entities::nodes::Column::UpdatedAt,
-                ])
-                .to_owned(),
-        )
-        .exec(&db)
-        .await;
+    // Legacy cleanup: old versions auto-seeded a local `default` node from ALLOY_AGENT_ENDPOINT.
+    // Keep user-created nodes untouched and only remove the exact auto-seeded shape.
+    if let Err(err) = cleanup_legacy_default_node(&db).await {
+        tracing::warn!(error = %err, "failed to cleanup legacy default node");
     }
 
     Ok(AppState {

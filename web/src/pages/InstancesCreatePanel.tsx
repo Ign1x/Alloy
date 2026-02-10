@@ -83,6 +83,8 @@ export default function InstancesCreatePanel(props: InstancesCreatePanelProps) {
     warmCache,
   } = props as any
 
+  const noTemplateHint = '暂无可用节点，请先连接 agent'
+
   return (
                     <div class="space-y-3">
 	                      <Field
@@ -106,7 +108,8 @@ export default function InstancesCreatePanel(props: InstancesCreatePanelProps) {
                           value={selectedTemplate()}
                           options={templateOptions()}
                           disabled={templates.isPending || templateOptions().length === 0}
-                          placeholder={templates.isPending ? 'Loading templates...' : 'No templates'}
+                          placeholder={templates.isPending ? 'Loading templates...' : '暂无模板'}
+                          title={!templates.isPending && templateOptions().length === 0 ? noTemplateHint : undefined}
                           onChange={setSelectedTemplate}
                         />
                       </Field>

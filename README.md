@@ -28,46 +28,45 @@ alloy-agent (下载 / 启停 / 文件 / 日志 / 更新)
 - Docker
 - Docker Compose
 
-### 2) 下载 compose 文件
-
-使用 `curl`：
+### 2) 获取仓库
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Ign1x/Alloy/alloy/deploy/docker-compose.release.yml -o docker-compose.yml
+git clone https://github.com/Ign1x/Alloy.git
+cd Alloy
 ```
 
-或使用 `wget`：
+### 3) 一键安装（自动生成 `.env` + compose）
+
+Linux / macOS：
 
 ```bash
-wget -O docker-compose.yml https://raw.githubusercontent.com/Ign1x/Alloy/alloy/deploy/docker-compose.release.yml
+bash deploy/install.sh --mode release
 ```
 
-### 3) 准备 `.env`
+Windows PowerShell：
 
-在当前目录创建 `.env`（至少包含以下变量）：
-
-```env
-ALLOY_JWT_SECRET=请填写高强度随机字符串
-
-# 首次启动可设置管理员账号
-ALLOY_ADMIN_USER=admin
-ALLOY_ADMIN_PASS=请填写管理员密码
-
-# 可选：用于 watchtower HTTP API
-ALLOY_WATCHTOWER_TOKEN=
+```powershell
+powershell -ExecutionPolicy Bypass -File .\deploy\install.ps1 -Mode release
 ```
 
-### 4) 启动
+脚本会自动生成：
+
+- `.env`（缺失变量自动补齐，含随机密钥）
+- `deploy/docker-compose.generated.release.yml`
+
+### 4) 启动（已由脚本执行）
+
+如需手动启动：
 
 ```bash
-docker compose pull
-docker compose up -d
+docker compose --env-file .env -f deploy/docker-compose.generated.release.yml up -d
 ```
 
 ### 5) 访问
 
 - Panel: `http://127.0.0.1:10043`
 - Control ping: `http://127.0.0.1:10043/rspc/control.ping?input=null`
+- 首次默认登录（若 `.env` 中为空）：`admin / admin123456`
 
 如需运行游戏实例，请在节点机器单独部署 `alloy-agent`，并在面板 `Nodes` 中接入。
 
@@ -78,14 +77,13 @@ docker compose up -d
 升级到最新镜像：
 
 ```bash
-docker compose pull
-docker compose up -d
+bash deploy/install.sh --mode release
 ```
 
 指定版本：
 
 ```bash
-ALLOY_IMAGE_TAG=v0.2.6 docker compose up -d
+ALLOY_IMAGE_TAG=v0.2.7 bash deploy/install.sh --mode release
 ```
 
 ---
@@ -99,13 +97,13 @@ ALLOY_IMAGE_TAG=v0.2.6 docker compose up -d
 删除容器但保留数据：
 
 ```bash
-docker compose down
+docker compose --env-file .env -f deploy/docker-compose.generated.release.yml down
 ```
 
 删除容器和数据卷：
 
 ```bash
-docker compose down
+docker compose --env-file .env -f deploy/docker-compose.generated.release.yml down
 rm -rf alloy-postgres
 ```
 

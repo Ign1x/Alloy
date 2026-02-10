@@ -54,8 +54,6 @@ interface AppTopHeaderProps {
   setMobileNavOpen: Setter<boolean>
   backendPending: boolean
   backendError: boolean
-  agentPending: boolean
-  agentError: boolean
   isReadOnly: boolean
   themeButtonTitle: string
   themePref: ThemePreference
@@ -160,11 +158,6 @@ export default function AppTopHeader(props: AppTopHeaderProps) {
             label={props.t('status.backend')}
             state={{ loading: props.backendPending, error: props.backendError }}
             status={props.backendError ? props.t('status.offline') : props.backendPending ? '...' : props.t('status.ok')}
-          />
-          <StatusPill
-            label={props.t('status.agent')}
-            state={{ loading: props.agentPending, error: props.agentError }}
-            status={props.agentError ? props.t('status.offline') : props.agentPending ? '...' : props.t('status.ok')}
           />
         </div>
       </div>

@@ -1155,6 +1155,7 @@ pub struct NodeCreateInput {
 pub struct NodeCreateOutput {
     pub node: NodeDto,
     pub connect_token: String,
+    pub watchtower_token: String,
 }
 
 #[derive(Debug, Clone, serde::Deserialize, Type)]
@@ -4535,6 +4536,7 @@ pub fn router() -> Router<Ctx> {
 
                     let token = random_token(32);
                     let token_hash = hash_token(&token);
+                    let watchtower_token = random_token(32);
                     let endpoint = format!("tunnel://{name}");
 
                     let model = nodes::ActiveModel {
@@ -4569,6 +4571,7 @@ pub fn router() -> Router<Ctx> {
                             last_error: inserted.last_error,
                         },
                         connect_token: token,
+                        watchtower_token,
                     })
                 },
             ),
@@ -4734,7 +4737,7 @@ pub fn router() -> Router<Ctx> {
                             "node self updater is not configured",
                         );
                         err.hint = Some(
-                            "Set ALLOY_AGENT_SELF_UPDATE_WATCHTOWER_TOKEN on that node and restart alloy-agent."
+                            "Re-generate node install compose/command from Control and redeploy alloy-agent on that node."
                                 .to_string(),
                         );
                         return Err(err);

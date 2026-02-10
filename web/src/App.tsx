@@ -237,22 +237,13 @@ function App() {
   const isAuthed = createMemo(() => !!me())
 
   const ping = rspc.createQuery(() => ['control.ping', null])
-  const agentHealth = rspc.createQuery(() => ['agent.health', null])
 
   const [lastBackendOkAtUnixMs, setLastBackendOkAtUnixMs] = createSignal<number | null>(null)
-  const [lastAgentOkAtUnixMs, setLastAgentOkAtUnixMs] = createSignal<number | null>(null)
 
   createEffect(() => {
     if (ping.isError) return
     if (!ping.data) return
     setLastBackendOkAtUnixMs(Date.now())
-  })
-
-  createEffect(() => {
-    if (agentHealth.isError) return
-    if (!agentHealth.data) return
-    if (agentHealth.data.status !== 'ok') return
-    setLastAgentOkAtUnixMs(Date.now())
   })
 
   const templates = rspc.createQuery(
@@ -1816,7 +1807,7 @@ function App() {
     last_error: string | null
     has_connect_token?: boolean
   }
-  type NodeCreateResult = { node: NodeDto; connect_token: string }
+  type NodeCreateResult = { node: NodeDto; connect_token: string; watchtower_token: string }
 
   const createNodeDropdownOptions = createMemo(() => {
     const list = (nodes.data ?? []) as NodeDto[]
@@ -1937,6 +1928,7 @@ function App() {
     const url = createNodeControlWsUrl().trim() || defaultControlWsUrl()
     const name = r.node.name
     const token = r.connect_token
+    const watchtowerToken = r.watchtower_token
 
     return [
       'services:',
@@ -1952,7 +1944,7 @@ function App() {
       `      - ALLOY_NODE_NAME=${name}`,
       `      - ALLOY_NODE_TOKEN=${token}`,
       `      - ALLOY_AGENT_SELF_UPDATE_WATCHTOWER_URL=http://watchtower:${createNodeWatchtowerPort()}`,
-      '      - ALLOY_AGENT_SELF_UPDATE_WATCHTOWER_TOKEN=${ALLOY_AGENT_WATCHTOWER_TOKEN:-change-me}',
+      `      - ALLOY_AGENT_SELF_UPDATE_WATCHTOWER_TOKEN=${watchtowerToken}`,
       '    volumes:',
       '      - alloy-agent-data:/data',
       '      - /var/run/docker.sock:/var/run/docker.sock',
@@ -1968,7 +1960,7 @@ function App() {
       '    environment:',
       '      - WATCHTOWER_LABEL_ENABLE=true',
       '      - WATCHTOWER_HTTP_API_UPDATE=true',
-      '      - WATCHTOWER_HTTP_API_TOKEN=${ALLOY_AGENT_WATCHTOWER_TOKEN:-change-me}',
+      `      - WATCHTOWER_HTTP_API_TOKEN=${watchtowerToken}`,
       '      - WATCHTOWER_CLEANUP=true',
       '    labels:',
       '      - "com.centurylinklabs.watchtower.enable=false"',
@@ -1976,6 +1968,18 @@ function App() {
       '  alloy-agent-data:',
       '',
     ].join('\n')
+  })
+
+  const createNodeInstallCommand = createMemo(() => {
+    const compose = createNodeComposeYaml()
+    if (!compose) return ''
+
+    const bytes = new TextEncoder().encode(compose)
+    let binary = ''
+    for (const byte of bytes) binary += String.fromCharCode(byte)
+    const b64 = window.btoa(binary)
+
+    return `mkdir -p alloy-node && cd alloy-node && printf '%s' '${b64}' | base64 -d > docker-compose.yml && docker compose up -d`
   })
 
   function openCreateNode() {
@@ -2469,6 +2473,7 @@ function App() {
     invalidateNodes,
     setSelectedNodeId,
     createNodeComposeYaml,
+    createNodeInstallCommand,
   }
 
   const frpNodeModalProps = {
@@ -2679,7 +2684,6 @@ function App() {
 
   const openDiagnostics = () => setShowDiagnosticsModal(true)
   const retryBackend = () => void queryClient.invalidateQueries({ queryKey: ['control.ping', null] })
-  const retryAgent = () => void queryClient.invalidateQueries({ queryKey: ['agent.health', null] })
   const copyFsWriteEnv = () => {
     void safeCopy('ALLOY_FS_WRITE_ENABLED=true')
     pushToast('success', t('toast.copied'), t('toast.fsWriteEnvCopied'))
@@ -2714,12 +2718,6 @@ function App() {
     },
     get backendError() {
       return ping.isError
-    },
-    get agentPending() {
-      return agentHealth.isPending
-    },
-    get agentError() {
-      return agentHealth.isError
     },
     get isReadOnly() {
       return isReadOnly()
@@ -2813,9 +2811,6 @@ function App() {
     get pingError() {
       return ping.isError
     },
-    get agentError() {
-      return agentHealth.isError
-    },
     get isReadOnly() {
       return isReadOnly()
     },
@@ -2828,11 +2823,7 @@ function App() {
     get lastBackendOkAtUnixMs() {
       return lastBackendOkAtUnixMs()
     },
-    get lastAgentOkAtUnixMs() {
-      return lastAgentOkAtUnixMs()
-    },
     retryBackend,
-    retryAgent,
     openDiagnostics,
     copyFsWriteEnv,
     t,

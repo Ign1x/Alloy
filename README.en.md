@@ -28,46 +28,45 @@ alloy-agent (download / lifecycle / files / logs / updates)
 - Docker
 - Docker Compose
 
-### 2) Download the compose file
-
-Using `curl`:
+### 2) Clone the repository
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Ign1x/Alloy/alloy/deploy/docker-compose.release.yml -o docker-compose.yml
+git clone https://github.com/Ign1x/Alloy.git
+cd Alloy
 ```
 
-Or with `wget`:
+### 3) One-command install (auto `.env` + compose)
+
+Linux / macOS:
 
 ```bash
-wget -O docker-compose.yml https://raw.githubusercontent.com/Ign1x/Alloy/alloy/deploy/docker-compose.release.yml
+bash deploy/install.sh --mode release
 ```
 
-### 3) Create `.env`
+Windows PowerShell:
 
-Create `.env` in the current directory (minimum variables):
-
-```env
-ALLOY_JWT_SECRET=use-a-strong-random-string
-
-# Optional for first boot
-ALLOY_ADMIN_USER=admin
-ALLOY_ADMIN_PASS=set-admin-password
-
-# Optional: watchtower HTTP API token
-ALLOY_WATCHTOWER_TOKEN=
+```powershell
+powershell -ExecutionPolicy Bypass -File .\deploy\install.ps1 -Mode release
 ```
 
-### 4) Start
+The installer auto-generates:
+
+- `.env` (missing keys are auto-filled, including random secrets)
+- `deploy/docker-compose.generated.release.yml`
+
+### 4) Start (already handled by installer)
+
+If you prefer to run manually:
 
 ```bash
-docker compose pull
-docker compose up -d
+docker compose --env-file .env -f deploy/docker-compose.generated.release.yml up -d
 ```
 
 ### 5) Access
 
 - Panel: `http://127.0.0.1:10043`
 - Control ping: `http://127.0.0.1:10043/rspc/control.ping?input=null`
+- First-login default (when missing in `.env`): `admin / admin123456`
 
 To run game instances, deploy `alloy-agent` on node hosts separately and connect them via panel `Nodes`.
 
@@ -78,14 +77,13 @@ To run game instances, deploy `alloy-agent` on node hosts separately and connect
 Upgrade to latest images:
 
 ```bash
-docker compose pull
-docker compose up -d
+bash deploy/install.sh --mode release
 ```
 
 Pin a specific version:
 
 ```bash
-ALLOY_IMAGE_TAG=v0.2.6 docker compose up -d
+ALLOY_IMAGE_TAG=v0.2.7 bash deploy/install.sh --mode release
 ```
 
 ---
@@ -99,13 +97,13 @@ By default, data is stored in Docker volumes bound to the current directory:
 Stop containers and keep data:
 
 ```bash
-docker compose down
+docker compose --env-file .env -f deploy/docker-compose.generated.release.yml down
 ```
 
 Stop containers and remove persisted data directories:
 
 ```bash
-docker compose down
+docker compose --env-file .env -f deploy/docker-compose.generated.release.yml down
 rm -rf alloy-postgres
 ```
 

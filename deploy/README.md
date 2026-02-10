@@ -1,15 +1,13 @@
 # Deployment (Docker)
 
 This directory contains the Dockerized deployment for the current vertical slice
-(web -> rspc -> alloy-control -> alloy-agent).
+(web -> rspc -> alloy-control).
 
 Alloy supports two agent transport modes:
 - **Direct gRPC**: control dials `ALLOY_AGENT_ENDPOINT` (works when the agent is reachable inbound).
 - **Reverse tunnel**: agent dials back to control over WebSocket (`ALLOY_CONTROL_WS_URL`), so it works behind NAT / without a public IP.
 
 ## Services
-- `alloy-agent` (gRPC): container port `50051`
-- `alloy-agent` (Game servers): bind directly on the host (host networking)
 - `alloy-control` (HTTP): container port `8080` (serves `/healthz` and `/rspc`)
 - `web` (nginx): container port `80` (serves SPA + proxies `/rspc` to control)
 
@@ -17,17 +15,33 @@ Note: `deploy/docker-compose.release.yml` is control-plane only and does not inc
 
 Default host ports (via compose):
 - release compose entrypoint (web + API): `http://localhost:10043`
-- control-only compose API: `http://localhost:10043`
-- local full-stack compose web: `http://localhost:3000`
-- games: depends on instance `port` (e.g. Minecraft `25565`, Terraria `7777`)
+- local compose web: `http://localhost:3000`
 
 ## Quick start
 
-Build and start:
+Local mode (source build):
 
 ```bash
-docker compose up -d --build
+bash deploy/install.sh --mode local
 ```
+
+Release mode (prebuilt images):
+
+```bash
+bash deploy/install.sh --mode release
+```
+
+Windows PowerShell:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\deploy\install.ps1 -Mode local
+powershell -ExecutionPolicy Bypass -File .\deploy\install.ps1 -Mode release
+```
+
+Default first-login credential (if `.env` is empty): `admin / admin123456`.
+
+Installer scripts also re-load values from `.env` into process env before running Docker Compose,
+so accidentally exported empty shell vars will not break startup.
 
 ## Updates
 
@@ -35,75 +49,39 @@ Alloy stores persistent data outside the container filesystem, so updating conta
 
 For `deploy/docker-compose.release.yml`, Postgres data uses a named volume with local bind backing (`driver_opts`), so control-plane data is visible in the compose directory.
 
-### Source build (this repo)
+### Generated compose files
 
-Pull latest code and rebuild:
+Installer scripts generate and use:
+
+- local: `deploy/docker-compose.generated.local.yml`
+- release: `deploy/docker-compose.generated.release.yml`
+
+Templates kept in repo:
+
+- `deploy/docker-compose.local.yml`
+- `deploy/docker-compose.release.yml`
+
+To only generate files (without starting containers):
 
 ```bash
-git pull
-docker compose up -d --build
+bash deploy/install.sh --mode local --no-up
+bash deploy/install.sh --mode release --no-up
 ```
 
-### Release images
-
-Use the prebuilt image-based compose file:
-
-```bash
-docker compose -f deploy/docker-compose.release.yml pull
-docker compose -f deploy/docker-compose.release.yml up -d
-```
-
-By default, release compose pulls from GHCR (`ghcr.io/ign1x`).
-You can switch to another registry namespace (for example DockerHub mirror) without editing YAML:
+By default, release mode pulls from GHCR (`ghcr.io/ign1x`). You can switch registry namespace without editing YAML:
 
 ```bash
 export ALLOY_IMAGE_REPO_PREFIX=docker.io/<your-namespace>
 export ALLOY_IMAGE_TAG=latest
-docker compose -f deploy/docker-compose.release.yml pull
-docker compose -f deploy/docker-compose.release.yml up -d
+bash deploy/install.sh --mode release
 ```
 
-Release compose is now **control-plane only** (`web + alloy-control + postgres + watchtower`) and does not start a local `alloy-agent`.
-
-For game nodes, deploy `alloy-agent` on remote hosts and connect them from the panel (`Nodes`).
-
-### Control-only compose
-
-If you only need the control plane (plus Postgres) and an external/remote agent,
-use the control-only compose:
-
-```bash
-docker compose -f deploy/docker-compose.control.yml pull
-docker compose -f deploy/docker-compose.control.yml up -d
-```
-
-Local source-build variant (build `alloy-control` from this repo):
-
-```bash
-docker compose up -d --build
-```
-
-### Local full-stack testing compose
-
-If you want to test the full stack on your own machine (`web + control + agent`), use:
-
-```bash
-docker compose -f deploy/docker-compose.local.yml up -d --build
-```
-
-Default local endpoints:
-
-- web: `http://127.0.0.1:3000`
-- control API: `http://127.0.0.1:10043`
-
-Required env vars for this file:
-
-- `ALLOY_JWT_SECRET`
-- `ALLOY_POSTGRES_PASSWORD`
+Release compose is **control-plane only** (`web + alloy-control + postgres + watchtower`) and does not start a local `alloy-agent`.
+For game nodes, deploy `alloy-agent` on remote hosts and connect them from panel `Nodes`.
 
 ### One-click updates (optional)
 
-`deploy/docker-compose.release.yml` includes a `watchtower` service with an HTTP API and a default manifest URL:
+`deploy/docker-compose.release.yml` (generated to `deploy/docker-compose.generated.release.yml`) includes a `watchtower` service with an HTTP API and a default manifest URL:
 
 - `https://github.com/Ign1x/Alloy/releases/latest/download/update-manifest.json`
 
@@ -115,17 +93,21 @@ If you set `ALLOY_WATCHTOWER_TOKEN` (compose `.env`) and keep the panel admin-on
 Stop (keep data):
 
 ```bash
-docker compose down
+docker compose --env-file .env -f deploy/docker-compose.generated.release.yml down
 ```
 
-Reset release-compose data (⚠️ wipes `./alloy-postgres`):
+Reset release data (⚠️ wipes `./alloy-postgres`):
 
 ```bash
-docker compose down
+docker compose --env-file .env -f deploy/docker-compose.generated.release.yml down
 rm -rf alloy-postgres
 ```
 
-For local/control-only compose files that use named volumes, use `docker compose down -v`.
+For local mode volumes, use:
+
+```bash
+docker compose --env-file .env -f deploy/docker-compose.generated.local.yml down -v
+```
 
 ## Persistent data (release compose)
 
@@ -150,7 +132,7 @@ Global defaults (agent env):
 - `ALLOY_SANDBOX_MODE=auto` (`auto|docker|bwrap|native|off`)
 - `ALLOY_SANDBOX_DOCKER_ENABLED=true`
 - `ALLOY_SANDBOX_FORCE_MODE=docker` (fail if docker sandbox is unavailable)
-- `ALLOY_SANDBOX_DOCKER_IMAGE=ghcr.io/ign1x/alloy-agent:latest` (required for docker sandbox; in local `docker-compose.yml` use `alloy-agent-local:latest`)
+- `ALLOY_SANDBOX_DOCKER_IMAGE=ghcr.io/ign1x/alloy-agent:latest` (required for docker sandbox on remote nodes)
 - `ALLOY_SANDBOX_ENABLE_CGROUPS=true`
 - `ALLOY_SANDBOX_MEMORY_MB_DEFAULT=4096`
 - `ALLOY_SANDBOX_PIDS_LIMIT_DEFAULT=512`

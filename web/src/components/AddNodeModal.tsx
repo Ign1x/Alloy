@@ -33,6 +33,7 @@ export default function AddNodeModal(props: AddNodeModalProps) {
     invalidateNodes,
     setSelectedNodeId,
     createNodeComposeYaml,
+    createNodeInstallCommand,
   } = props as any
 
   return (
@@ -40,7 +41,7 @@ export default function AddNodeModal(props: AddNodeModalProps) {
           open={showCreateNodeModal()}
           onClose={() => closeCreateNode()}
           title="Add node"
-          description="Creates a one-time token and a docker-compose snippet for an agent to connect back."
+          description="Create a node and copy one install command. No manual token edits needed."
           size="lg"
           footer={
             <Show
@@ -130,14 +131,14 @@ export default function AddNodeModal(props: AddNodeModalProps) {
               <div class="space-y-4">
                 <div class="rounded-2xl border border-slate-200 bg-white/60 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
                   <div class="flex items-center justify-between gap-3">
-                    <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Token</div>
+                    <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">One-command install</div>
                     <IconButton
                       type="button"
-                      label="Copy token"
+                      label="Copy command"
                       variant="secondary"
                       onClick={() => {
-                        void safeCopy(r().connect_token)
-                        pushToast('success', 'Copied', 'Token copied.')
+                        void safeCopy(createNodeInstallCommand())
+                        pushToast('success', 'Copied', `Install command copied for ${r().node.name}.`)
                       }}
                     >
                       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
@@ -146,13 +147,13 @@ export default function AddNodeModal(props: AddNodeModalProps) {
                       </svg>
                     </IconButton>
                   </div>
-                  <Input value={r().connect_token} readOnly class="mt-2 font-mono text-[11px]" />
-                  <div class="mt-2 text-[11px] text-slate-500 dark:text-slate-400">Save it now — it’s only shown once.</div>
+                  <Textarea value={createNodeInstallCommand()} readOnly class="mt-2 font-mono text-[11px]" />
+                  <div class="mt-2 text-[11px] text-slate-500 dark:text-slate-400">Run this on the target host. It writes docker-compose.yml and starts the services.</div>
                 </div>
 
                 <div class="rounded-2xl border border-slate-200 bg-white/60 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
                   <div class="flex items-center justify-between gap-3">
-                    <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">docker-compose.yml</div>
+                    <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">docker-compose.yml (advanced)</div>
                     <IconButton
                       type="button"
                       label="Copy compose"

@@ -9,14 +9,11 @@ import { IconButton } from './ui/IconButton'
 
 interface AppStatusBannersProps {
   pingError: boolean
-  agentError: boolean
   isReadOnly: boolean
   fsWriteEnabled: boolean
   tab: UiTab
   lastBackendOkAtUnixMs: number | null
-  lastAgentOkAtUnixMs: number | null
   retryBackend: () => void
-  retryAgent: () => void
   openDiagnostics: () => void
   copyFsWriteEnv: () => void
   t: I18nTranslate
@@ -32,18 +29,6 @@ export default function AppStatusBanners(props: AppStatusBannersProps) {
           message={props.t('banner.lastOk', { value: formatRelativeTime(props.lastBackendOkAtUnixMs) })}
           actions={
             <Button size="xs" variant="secondary" onClick={props.retryBackend}>
-              {props.t('banner.retry')}
-            </Button>
-          }
-        />
-      </Show>
-      <Show when={props.agentError}>
-        <Banner
-          variant="danger"
-          title={props.t('banner.agentUnreachable')}
-          message={props.t('banner.lastOk', { value: formatRelativeTime(props.lastAgentOkAtUnixMs) })}
-          actions={
-            <Button size="xs" variant="secondary" onClick={props.retryAgent}>
               {props.t('banner.retry')}
             </Button>
           }
