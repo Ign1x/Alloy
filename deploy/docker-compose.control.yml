@@ -15,10 +15,7 @@ services:
     restart: unless-stopped
 
   alloy-control:
-    image: alloy-control-local:latest
-    build:
-      context: .
-      dockerfile: deploy/control.Dockerfile
+    image: ${ALLOY_IMAGE_REPO_PREFIX:-ghcr.io/ign1x}/alloy-control:${ALLOY_IMAGE_TAG:-latest}
     ports:
       - "${ALLOY_CONTROL_BIND_ADDR:-127.0.0.1}:8080:8080"
     user: "10001:10001"

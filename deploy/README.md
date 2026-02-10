@@ -73,6 +73,39 @@ docker compose -f deploy/docker-compose.release.yml pull
 docker compose -f deploy/docker-compose.release.yml up -d
 ```
 
+### Control-only compose (minimal and safer)
+
+If you only need the control plane (plus Postgres) and an external/remote agent,
+use the control-only compose:
+
+```bash
+docker compose -f deploy/docker-compose.control.yml pull
+docker compose -f deploy/docker-compose.control.yml up -d
+```
+
+Local source-build variant (build `alloy-control` from this repo):
+
+```bash
+docker compose up -d --build
+```
+
+Security defaults in these control-only compose files:
+
+- Control binds to loopback by default (`127.0.0.1:8080`).
+- `ALLOY_COOKIE_SECURE=false` by default for local HTTP testing only.
+- No `watchtower` service and no docker socket mount.
+- `alloy-control` runs as a non-root user, with read-only rootfs, dropped Linux capabilities, and `no-new-privileges`.
+- `ALLOY_POSTGRES_PASSWORD` is required (no weak hardcoded default).
+
+Before exposing to a public network, set at least:
+
+- `ALLOY_CONTROL_BIND_ADDR=0.0.0.0` (only when you really need remote access)
+- `ALLOY_COOKIE_SECURE=true` (with HTTPS/TLS termination)
+- `ALLOY_ALLOWED_ORIGINS=https://<your-panel-domain>`
+- `ALLOY_AGENT_CONNECT_TOKEN=<strong-random-token>` (for `/agent/ws` auth)
+- `ALLOY_JWT_SECRET=<strong-random-secret>`
+- `ALLOY_POSTGRES_PASSWORD=<strong-random-password>`
+
 ### One-click updates (optional)
 
 `deploy/docker-compose.release.yml` includes a `watchtower` service with an HTTP API and a default manifest URL:
