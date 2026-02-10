@@ -251,20 +251,38 @@ function App() {
     () => ({ enabled: isAuthed() }),
   )
 
+  type TemplateCatalogItem = { template_id: string; display_name: string }
+  const FALLBACK_TEMPLATE_CATALOG: TemplateCatalogItem[] = [
+    { template_id: 'demo:sleep', display_name: 'Demo: sleep' },
+    { template_id: 'minecraft:vanilla', display_name: 'Minecraft: Vanilla' },
+    { template_id: 'minecraft:modrinth', display_name: 'Minecraft: Modrinth Pack' },
+    { template_id: 'minecraft:import', display_name: 'Minecraft: Import Pack' },
+    { template_id: 'minecraft:curseforge', display_name: 'Minecraft: CurseForge Pack' },
+    { template_id: 'terraria:vanilla', display_name: 'Terraria: Vanilla' },
+    { template_id: 'dst:vanilla', display_name: "Don't Starve Together" },
+    { template_id: 'palworld:vanilla', display_name: 'Palworld: Vanilla' },
+    { template_id: 'factorio:vanilla', display_name: 'Factorio: Vanilla' },
+    { template_id: 'core_keeper:vanilla', display_name: 'Core Keeper: Dedicated' },
+    { template_id: 'seven_days:vanilla', display_name: '7 Days to Die: Dedicated' },
+    { template_id: 'the_forest:vanilla', display_name: 'The Forest: Dedicated' },
+    { template_id: 'sons_of_the_forest:vanilla', display_name: 'Sons of the Forest: Dedicated' },
+  ]
+
+  const templateCatalog = createMemo<TemplateCatalogItem[]>(() => {
+    const live = (templates.data ?? []) as TemplateCatalogItem[]
+    return live.length > 0 ? live : FALLBACK_TEMPLATE_CATALOG
+  })
+
   const templateDisplayName = (templateId: string) => {
     const id = templateId.trim()
     if (!id) return templateId
-    return (
-      (templates.data ?? []).find(
-        (t: { template_id: string; display_name: string }) => t.template_id === id,
-      )?.display_name ?? templateId
-    )
+    return templateCatalog().find((t) => t.template_id === id)?.display_name ?? templateId
   }
 
   type TemplateOption = { value: string; label: string; meta: string }
   const templateOptions = createMemo<TemplateOption[]>(() => {
     const out: TemplateOption[] = []
-    const list = (templates.data ?? []) as Array<{ template_id: string; display_name: string }>
+    const list = templateCatalog()
     const groupedMinecraft = new Set(Object.values(MINECRAFT_TEMPLATE_ID_BY_MODE))
     let insertedMinecraft = false
 
@@ -290,7 +308,7 @@ function App() {
   })
 
   const availableMinecraftCreateModes = createMemo<MinecraftCreateMode[]>(() => {
-    const ids = new Set((templates.data ?? []).map((t: { template_id: string }) => t.template_id))
+    const ids = new Set(templateCatalog().map((t) => t.template_id))
     const out: MinecraftCreateMode[] = []
     if (ids.has(MINECRAFT_TEMPLATE_ID_BY_MODE.vanilla)) out.push('vanilla')
     if (ids.has(MINECRAFT_TEMPLATE_ID_BY_MODE.modrinth)) out.push('modrinth')

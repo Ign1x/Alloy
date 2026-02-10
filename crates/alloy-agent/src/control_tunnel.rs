@@ -321,6 +321,22 @@ fn parse_ws_url(raw: &str) -> Option<String> {
     Some(trimmed.to_string())
 }
 
+fn ws_ping_interval() -> Duration {
+    const DEFAULT_MS: u64 = 10_000;
+    const MIN_MS: u64 = 1_000;
+    const MAX_MS: u64 = 120_000;
+
+    let raw = std::env::var("ALLOY_CONTROL_WS_PING_INTERVAL_MS").ok();
+    let ms = raw
+        .as_deref()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(DEFAULT_MS)
+        .clamp(MIN_MS, MAX_MS);
+
+    Duration::from_millis(ms)
+}
+
 fn node_name() -> String {
     std::env::var("ALLOY_NODE_NAME")
         .ok()
@@ -413,82 +429,98 @@ async fn run_once(
         }
     });
 
-    while let Some(msg) = stream.next().await {
-        let msg = msg?;
-        match msg {
-            WsMessage::Text(text) => {
-                let frame = serde_json::from_str::<ControlToAgentFrame>(&text)
-                    .unwrap_or(ControlToAgentFrame::Unknown);
-                match frame {
-                    ControlToAgentFrame::Req {
-                        id,
-                        method,
-                        payload_b64,
-                    } => {
-                        let payload = match b64.decode(payload_b64.as_bytes()) {
-                            Ok(v) => v,
-                            Err(_) => {
-                                let resp = AgentToControlFrame::Resp {
-                                    id,
-                                    ok: false,
-                                    payload_b64: None,
-                                    status_code: Some(
-                                        Status::invalid_argument("invalid base64").code() as i32,
-                                    ),
-                                    status_message: Some("invalid base64 payload".to_string()),
-                                };
-                                let _ = out_tx
-                                    .send(WsMessage::Text(serde_json::to_string(&resp)?.into()))
-                                    .await;
-                                continue;
-                            }
-                        };
+    let mut ping = tokio::time::interval(ws_ping_interval());
+    ping.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    // Skip the immediate first tick; send heartbeats only after the configured interval.
+    ping.tick().await;
 
-                        let rpc = rpc.clone();
-                        let out_tx = out_tx.clone();
-                        let span = info_span!("control_tunnel_req", id = %id, method = %method);
-                        tokio::spawn(
-                            async move {
-                                let out = match rpc.dispatch(&method, &payload).await {
-                                    Ok(bytes) => AgentToControlFrame::Resp {
-                                        id,
-                                        ok: true,
-                                        payload_b64: Some(
-                                            base64::engine::general_purpose::STANDARD.encode(bytes),
-                                        ),
-                                        status_code: None,
-                                        status_message: None,
-                                    },
-                                    Err(status) => AgentToControlFrame::Resp {
-                                        id,
-                                        ok: false,
-                                        payload_b64: None,
-                                        status_code: Some(status.code() as i32),
-                                        status_message: Some(status.message().to_string()),
-                                    },
-                                };
-
-                                // Best-effort: if the tunnel is gone, just drop the response.
-                                let _ = out_tx
-                                    .send(WsMessage::Text(
-                                        serde_json::to_string(&out)
-                                            .unwrap_or_else(|_| "{}".to_string())
-                                            .into(),
-                                    ))
-                                    .await;
-                            }
-                            .instrument(span),
-                        );
-                    }
-                    ControlToAgentFrame::Unknown => {}
+    loop {
+        tokio::select! {
+            _ = ping.tick() => {
+                // Keep-alive frames for flaky proxies / long-RTT links.
+                if out_tx.send(WsMessage::Ping(Vec::new().into())).await.is_err() {
+                    break;
                 }
             }
-            WsMessage::Ping(payload) => {
-                // Keep-alive / intermediaries may send Ping frames.
-                let _ = out_tx.send(WsMessage::Pong(payload)).await;
+            msg = stream.next() => {
+                let Some(msg) = msg else { break };
+                let msg = msg?;
+                match msg {
+                    WsMessage::Text(text) => {
+                        let frame = serde_json::from_str::<ControlToAgentFrame>(&text)
+                            .unwrap_or(ControlToAgentFrame::Unknown);
+                        match frame {
+                            ControlToAgentFrame::Req {
+                                id,
+                                method,
+                                payload_b64,
+                            } => {
+                                let payload = match b64.decode(payload_b64.as_bytes()) {
+                                    Ok(v) => v,
+                                    Err(_) => {
+                                        let resp = AgentToControlFrame::Resp {
+                                            id,
+                                            ok: false,
+                                            payload_b64: None,
+                                            status_code: Some(
+                                                Status::invalid_argument("invalid base64").code() as i32,
+                                            ),
+                                            status_message: Some("invalid base64 payload".to_string()),
+                                        };
+                                        let _ = out_tx
+                                            .send(WsMessage::Text(serde_json::to_string(&resp)?.into()))
+                                            .await;
+                                        continue;
+                                    }
+                                };
+
+                                let rpc = rpc.clone();
+                                let out_tx = out_tx.clone();
+                                let span = info_span!("control_tunnel_req", id = %id, method = %method);
+                                tokio::spawn(
+                                    async move {
+                                        let out = match rpc.dispatch(&method, &payload).await {
+                                            Ok(bytes) => AgentToControlFrame::Resp {
+                                                id,
+                                                ok: true,
+                                                payload_b64: Some(
+                                                    base64::engine::general_purpose::STANDARD.encode(bytes),
+                                                ),
+                                                status_code: None,
+                                                status_message: None,
+                                            },
+                                            Err(status) => AgentToControlFrame::Resp {
+                                                id,
+                                                ok: false,
+                                                payload_b64: None,
+                                                status_code: Some(status.code() as i32),
+                                                status_message: Some(status.message().to_string()),
+                                            },
+                                        };
+
+                                        // Best-effort: if the tunnel is gone, just drop the response.
+                                        let _ = out_tx
+                                            .send(WsMessage::Text(
+                                                serde_json::to_string(&out)
+                                                    .unwrap_or_else(|_| "{}".to_string())
+                                                    .into(),
+                                            ))
+                                            .await;
+                                    }
+                                    .instrument(span),
+                                );
+                            }
+                            ControlToAgentFrame::Unknown => {}
+                        }
+                    }
+                    WsMessage::Ping(payload) => {
+                        // Keep-alive / intermediaries may send Ping frames.
+                        let _ = out_tx.send(WsMessage::Pong(payload)).await;
+                    }
+                    WsMessage::Close(_) => break,
+                    _ => {}
+                }
             }
-            WsMessage::Close(_) => break,
-            _ => {}
         }
     }
 
