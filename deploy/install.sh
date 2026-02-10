@@ -53,19 +53,51 @@ case "$MODE" in
     ;;
 esac
 
-SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
-TEMPLATE="$SCRIPT_DIR/docker-compose.${MODE}.yml"
-ENV_FILE="$REPO_ROOT/.env"
+SCRIPT_SOURCE="${BASH_SOURCE[0]-}"
+if [[ -n "$SCRIPT_SOURCE" && -f "$SCRIPT_SOURCE" ]]; then
+  SCRIPT_DIR="$(cd -- "$(dirname -- "$SCRIPT_SOURCE")" && pwd)"
+  INSTALL_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
+else
+  INSTALL_ROOT="$(pwd)"
+  SCRIPT_DIR="$INSTALL_ROOT/deploy"
+  mkdir -p "$SCRIPT_DIR"
+fi
 
-if [[ ! -f "$TEMPLATE" ]]; then
-  echo "Template not found: $TEMPLATE" >&2
-  exit 1
+ENV_FILE="$INSTALL_ROOT/.env"
+TEMPLATE_LOCAL="$SCRIPT_DIR/docker-compose.${MODE}.yml"
+TEMPLATE="$TEMPLATE_LOCAL"
+TEMP_TEMPLATE=""
+
+cleanup_temp_template() {
+  if [[ -n "$TEMP_TEMPLATE" && -f "$TEMP_TEMPLATE" ]]; then
+    rm -f "$TEMP_TEMPLATE"
+  fi
+}
+trap cleanup_temp_template EXIT
+
+if [[ ! -f "$TEMPLATE_LOCAL" ]]; then
+  if ! command -v curl >/dev/null 2>&1; then
+    echo "Template not found locally: $TEMPLATE_LOCAL" >&2
+    echo "curl is required to download compose template in stdin mode." >&2
+    exit 1
+  fi
+
+  BASE_URL="${ALLOY_INSTALL_BASE_URL:-https://raw.githubusercontent.com/Ign1x/Alloy/alloy/deploy}"
+  TEMPLATE_URL="${BASE_URL}/docker-compose.${MODE}.yml"
+  TEMP_TEMPLATE="$(mktemp)"
+
+  if ! curl -fsSL "$TEMPLATE_URL" -o "$TEMP_TEMPLATE"; then
+    echo "Template not found locally and failed to download: $TEMPLATE_URL" >&2
+    exit 1
+  fi
+
+  TEMPLATE="$TEMP_TEMPLATE"
 fi
 
 if [[ -z "$OUTPUT" ]]; then
   OUTPUT="$SCRIPT_DIR/docker-compose.generated.${MODE}.yml"
 fi
+mkdir -p "$(dirname -- "$OUTPUT")"
 
 rand_hex() {
   local bytes="$1"
