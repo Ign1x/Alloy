@@ -5,7 +5,8 @@ use serde::{Deserialize, Serialize};
 use base64::Engine;
 
 use alloy_db::sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set,
+    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter,
+    Set,
 };
 use sea_orm::prelude::Expr;
 use sea_orm::prelude::Uuid;
@@ -19,6 +20,33 @@ const REFRESH_COOKIE_NAME: &str = "refresh";
 #[derive(Debug, Serialize)]
 pub struct ErrorBody {
     pub message: String,
+}
+
+fn parse_bool_flag(raw: &str) -> Option<bool> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Some(true),
+        "0" | "false" | "no" | "off" => Some(false),
+        _ => None,
+    }
+}
+
+fn env_bool_flag(name: &str, default: bool) -> bool {
+    std::env::var(name)
+        .ok()
+        .as_deref()
+        .and_then(parse_bool_flag)
+        .unwrap_or(default)
+}
+
+fn secure_cookies_enabled() -> bool {
+    env_bool_flag("ALLOY_COOKIE_SECURE", true)
+}
+
+fn required_env_non_empty(name: &str) -> Option<String> {
+    std::env::var(name)
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
 }
 
 fn json_error(code: StatusCode, message: impl Into<String>) -> impl IntoResponse {
@@ -35,6 +63,7 @@ fn cookie_base(name: &'static str, value: String, path: &'static str) -> Cookie<
     c.set_http_only(true);
     c.set_same_site(SameSite::Lax);
     c.set_path(path);
+    c.set_secure(secure_cookies_enabled());
     c
 }
 
@@ -52,12 +81,14 @@ fn csrf_cookie(value: String) -> Cookie<'static> {
     c.set_http_only(false);
     c.set_same_site(SameSite::Lax);
     c.set_path("/");
+    c.set_secure(secure_cookies_enabled());
     c
 }
 
 fn clear_cookie(name: &'static str, path: &'static str) -> Cookie<'static> {
     let mut c = Cookie::new(name, "");
     c.set_path(path);
+    c.set_secure(secure_cookies_enabled());
     c.make_removal();
     c
 }
@@ -79,6 +110,13 @@ pub async fn csrf(jar: CookieJar) -> impl IntoResponse {
 pub struct LoginRequest {
     pub username: String,
     pub password: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ChangeCredentialsRequest {
+    pub current_password: String,
+    pub new_username: Option<String>,
+    pub new_password: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -107,30 +145,34 @@ fn hash_password(password: &str) -> Result<String, argon2::password_hash::Error>
 
 fn verify_password(hash: &str, password: &str) -> bool {
     use argon2::password_hash::{PasswordHash, PasswordVerifier};
-    let parsed = PasswordHash::new(hash);
-    if parsed.is_err() {
+    let Ok(parsed) = PasswordHash::new(hash) else {
         return false;
-    }
+    };
     let argon2 = argon2::Argon2::default();
-    argon2
-        .verify_password(password.as_bytes(), &parsed.unwrap())
-        .is_ok()
+    argon2.verify_password(password.as_bytes(), &parsed).is_ok()
 }
 
-async fn ensure_admin_user(db: &DatabaseConnection) -> Result<(), String> {
-    let username = std::env::var("ALLOY_ADMIN_USER").unwrap_or_else(|_| "admin".to_string());
-    let password = std::env::var("ALLOY_ADMIN_PASS").unwrap_or_else(|_| "admin".to_string());
+pub fn ensure_jwt_secret_configured() -> anyhow::Result<()> {
+    let _ = jwt_secret()?;
+    Ok(())
+}
 
-    let existing = alloy_db::entities::users::Entity::find()
-        .filter(alloy_db::entities::users::Column::Username.eq(username.clone()))
-        .one(db)
+pub async fn bootstrap_initial_admin(db: &DatabaseConnection) -> anyhow::Result<()> {
+    let existing_user_count = alloy_db::entities::users::Entity::find()
+        .count(db)
         .await
-        .map_err(|e| format!("db error: {e}"))?;
-    if existing.is_some() {
+        .map_err(|e| anyhow::anyhow!("db error: {e}"))?;
+    if existing_user_count > 0 {
         return Ok(());
     }
 
-    let ph = hash_password(&password).map_err(|e| format!("hash error: {e}"))?;
+    let username = required_env_non_empty("ALLOY_ADMIN_USER")
+        .ok_or_else(|| anyhow::anyhow!("ALLOY_ADMIN_USER is required when no users exist"))?;
+    let password = required_env_non_empty("ALLOY_ADMIN_PASS")
+        .ok_or_else(|| anyhow::anyhow!("ALLOY_ADMIN_PASS is required when no users exist"))?;
+
+    let ph = hash_password(&password)
+        .map_err(|e| anyhow::anyhow!("failed to hash ALLOY_ADMIN_PASS: {e}"))?;
     let model = alloy_db::entities::users::ActiveModel {
         id: Set(Uuid::new_v4()),
         username: Set(username),
@@ -140,9 +182,14 @@ async fn ensure_admin_user(db: &DatabaseConnection) -> Result<(), String> {
     };
 
     alloy_db::entities::users::Entity::insert(model)
+        .on_conflict(
+            sea_orm::sea_query::OnConflict::column(alloy_db::entities::users::Column::Username)
+                .do_nothing()
+                .to_owned(),
+        )
         .exec(db)
         .await
-        .map_err(|e| format!("db error: {e}"))?;
+        .map_err(|e| anyhow::anyhow!("db error: {e}"))?;
     Ok(())
 }
 
@@ -160,10 +207,21 @@ fn build_refresh_cookie(refresh: String) -> Cookie<'static> {
     c
 }
 
-fn jwt_secret() -> Vec<u8> {
-    std::env::var("ALLOY_JWT_SECRET")
-        .unwrap_or_else(|_| "dev-insecure-change-me".to_string())
-        .into_bytes()
+fn jwt_secret() -> anyhow::Result<Vec<u8>> {
+    let secret = required_env_non_empty("ALLOY_JWT_SECRET")
+        .ok_or_else(|| anyhow::anyhow!("ALLOY_JWT_SECRET is required and cannot be empty"))?;
+    Ok(secret.into_bytes())
+}
+
+fn is_read_only() -> bool {
+    matches!(
+        std::env::var("ALLOY_READ_ONLY")
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase()
+            .as_str(),
+        "1" | "true" | "yes" | "on"
+    )
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -184,7 +242,7 @@ pub fn validate_access_jwt(token: &str) -> anyhow::Result<WhoamiResponse> {
 
     let data = jsonwebtoken::decode::<Claims>(
         token,
-        &jsonwebtoken::DecodingKey::from_secret(&jwt_secret()),
+        &jsonwebtoken::DecodingKey::from_secret(&jwt_secret()?),
         &validation,
     )?;
 
@@ -213,7 +271,7 @@ fn make_access_jwt(user: &alloy_db::entities::users::Model) -> anyhow::Result<St
     Ok(jsonwebtoken::encode(
         &jsonwebtoken::Header::new(jsonwebtoken::Algorithm::HS256),
         &claims,
-        &jsonwebtoken::EncodingKey::from_secret(&jwt_secret()),
+        &jsonwebtoken::EncodingKey::from_secret(&jwt_secret()?),
     )?)
 }
 
@@ -223,14 +281,6 @@ pub async fn login(
     Json(input): Json<LoginRequest>,
 ) -> impl IntoResponse {
     let db = &*state.db;
-    if let Err(e) = ensure_admin_user(db).await {
-        return json_error(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("bootstrap failed: {e}"),
-        )
-        .into_response();
-    }
-
     let user = match alloy_db::entities::users::Entity::find()
         .filter(alloy_db::entities::users::Column::Username.eq(input.username.clone()))
         .one(db)
@@ -306,6 +356,154 @@ pub async fn whoami(State(_state): State<AppState>, jar: CookieJar) -> impl Into
         Ok(me) => (StatusCode::OK, Json(me)).into_response(),
         Err(_) => json_error(StatusCode::UNAUTHORIZED, "invalid access token").into_response(),
     }
+}
+
+pub async fn change_credentials(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Json(input): Json<ChangeCredentialsRequest>,
+) -> impl IntoResponse {
+    if is_read_only() {
+        return json_error(StatusCode::FORBIDDEN, "control is in read-only mode").into_response();
+    }
+
+    let token = match jar.get(ACCESS_COOKIE_NAME) {
+        Some(c) => c.value().to_string(),
+        None => {
+            return json_error(StatusCode::UNAUTHORIZED, "missing access token").into_response();
+        }
+    };
+
+    let me = match validate_access_jwt(&token) {
+        Ok(me) => me,
+        Err(_) => {
+            return json_error(StatusCode::UNAUTHORIZED, "invalid access token").into_response();
+        }
+    };
+
+    let current_password = input.current_password;
+    if current_password.trim().is_empty() {
+        return json_error(StatusCode::BAD_REQUEST, "current password is required").into_response();
+    }
+
+    let next_username = input
+        .new_username
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty());
+    let next_password = input.new_password.filter(|v| !v.is_empty());
+
+    if next_username.is_none() && next_password.is_none() {
+        return json_error(
+            StatusCode::BAD_REQUEST,
+            "new username or password is required",
+        )
+        .into_response();
+    }
+
+    let user_id = match Uuid::parse_str(&me.user_id) {
+        Ok(v) => v,
+        Err(_) => {
+            return json_error(StatusCode::UNAUTHORIZED, "invalid access token").into_response();
+        }
+    };
+
+    let db = &*state.db;
+    let user = match alloy_db::entities::users::Entity::find_by_id(user_id)
+        .one(db)
+        .await
+    {
+        Ok(Some(u)) => u,
+        Ok(None) => return json_error(StatusCode::UNAUTHORIZED, "user not found").into_response(),
+        Err(e) => {
+            return json_error(StatusCode::INTERNAL_SERVER_ERROR, format!("db error: {e}"))
+                .into_response();
+        }
+    };
+
+    if !verify_password(&user.password_hash, &current_password) {
+        return json_error(StatusCode::UNAUTHORIZED, "invalid current password").into_response();
+    }
+
+    let mut active: alloy_db::entities::users::ActiveModel = user.clone().into();
+    let mut changed = false;
+
+    if let Some(username) = next_username {
+        if username != user.username {
+            let exists = match alloy_db::entities::users::Entity::find()
+                .filter(alloy_db::entities::users::Column::Username.eq(username.clone()))
+                .filter(alloy_db::entities::users::Column::Id.ne(user.id))
+                .one(db)
+                .await
+            {
+                Ok(v) => v.is_some(),
+                Err(e) => {
+                    return json_error(StatusCode::INTERNAL_SERVER_ERROR, format!("db error: {e}"))
+                        .into_response();
+                }
+            };
+
+            if exists {
+                return json_error(StatusCode::CONFLICT, "username already exists").into_response();
+            }
+
+            active.username = Set(username);
+            changed = true;
+        }
+    }
+
+    if let Some(password) = next_password {
+        let hash = match hash_password(&password) {
+            Ok(v) => v,
+            Err(e) => {
+                return json_error(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("hash error: {e}"),
+                )
+                .into_response();
+            }
+        };
+        active.password_hash = Set(hash);
+        changed = true;
+    }
+
+    if !changed {
+        return json_error(StatusCode::BAD_REQUEST, "no credential changes detected")
+            .into_response();
+    }
+
+    let updated = match active.update(db).await {
+        Ok(v) => v,
+        Err(e) => {
+            let message = e.to_string();
+            if message.contains("idx_users_username_unique")
+                || message.contains("UNIQUE constraint failed: users.username")
+            {
+                return json_error(StatusCode::CONFLICT, "username already exists").into_response();
+            }
+            return json_error(StatusCode::INTERNAL_SERVER_ERROR, format!("db error: {e}"))
+                .into_response();
+        }
+    };
+
+    let access = match make_access_jwt(&updated) {
+        Ok(v) => v,
+        Err(e) => {
+            return json_error(StatusCode::INTERNAL_SERVER_ERROR, format!("jwt error: {e}"))
+                .into_response();
+        }
+    };
+
+    let jar = jar.add(build_access_cookie(access));
+
+    (
+        jar,
+        Json(WhoamiResponse {
+            user_id: updated.id.to_string(),
+            username: updated.username,
+            is_admin: updated.is_admin,
+        }),
+    )
+        .into_response()
 }
 
 pub async fn logout(State(state): State<AppState>, jar: CookieJar) -> impl IntoResponse {

@@ -13,7 +13,10 @@ use alloy_proto::agent_v1::{
 use tonic::{Request, Response, Status};
 
 use crate::process_manager::ProcessManager;
-use crate::{dst_download, factorio_download, minecraft_download, palworld_download, terraria_download};
+use crate::{
+    core_keeper_download, dst_download, factorio_download, minecraft_download, palworld_download,
+    seven_days_download, sons_of_the_forest_download, terraria_download, the_forest_download,
+};
 
 #[derive(Debug, Clone)]
 pub struct ProcessApi {
@@ -372,34 +375,26 @@ impl ProcessService for ProcessApi {
                     );
                 }
 
-                let installed = dst_download::ensure_dst_server()
-                    .await
-                    .map_err(|e| {
-                        if progress_set {
-                            crate::download_progress::fail(
-                                &progress_id,
-                                format!("failed to install dst dedicated server: {e}"),
-                            );
-                        }
-                        Status::internal(crate::error_payload::encode(
-                            "download_failed",
+                let installed = dst_download::ensure_dst_server().await.map_err(|e| {
+                    if progress_set {
+                        crate::download_progress::fail(
+                            &progress_id,
                             format!("failed to install dst dedicated server: {e}"),
-                            None,
-                            Some(
-                                "SteamCMD install failed. Check network and runtime dependencies."
-                                    .to_string(),
-                            ),
-                        ))
-                    })?;
+                        );
+                    }
+                    Status::internal(crate::error_payload::encode(
+                        "download_failed",
+                        format!("failed to install dst dedicated server: {e}"),
+                        None,
+                        Some(
+                            "SteamCMD install failed. Check network and runtime dependencies."
+                                .to_string(),
+                        ),
+                    ))
+                })?;
 
                 if progress_set {
-                    crate::download_progress::finish(
-                        &progress_id,
-                        "dst cache warmed",
-                        0,
-                        0,
-                        0,
-                    );
+                    crate::download_progress::finish(&progress_id, "dst cache warmed", 0, 0, 0);
                 }
 
                 format!(
@@ -553,6 +548,190 @@ impl ProcessService for ProcessApi {
                     resolved.version_id,
                     package_path.display(),
                     extracted.server_root.display()
+                )
+            }
+            "core_keeper:vanilla" => {
+                if progress_set {
+                    crate::download_progress::start(
+                        &progress_id,
+                        "install",
+                        "installing core keeper dedicated server...",
+                        None,
+                    );
+                }
+
+                let installed = core_keeper_download::ensure_core_keeper_server()
+                    .await
+                    .map_err(|e| {
+                        if progress_set {
+                            crate::download_progress::fail(
+                                &progress_id,
+                                format!("failed to install core keeper server: {e}"),
+                            );
+                        }
+                        Status::internal(crate::error_payload::encode(
+                            "download_failed",
+                            format!("failed to install core keeper server: {e}"),
+                            None,
+                            Some(
+                                "SteamCMD install failed. Check network and 32-bit runtime dependencies in agent image."
+                                    .to_string(),
+                            ),
+                        ))
+                    })?;
+
+                if progress_set {
+                    crate::download_progress::finish(
+                        &progress_id,
+                        "core keeper cache warmed",
+                        0,
+                        0,
+                        0,
+                    );
+                }
+
+                format!(
+                    "core keeper cache warmed: server_root={} launcher={}",
+                    installed.server_root.display(),
+                    installed.launcher.display()
+                )
+            }
+            "seven_days:vanilla" => {
+                if progress_set {
+                    crate::download_progress::start(
+                        &progress_id,
+                        "install",
+                        "installing 7 days to die dedicated server...",
+                        None,
+                    );
+                }
+
+                let installed = seven_days_download::ensure_seven_days_server()
+                    .await
+                    .map_err(|e| {
+                        if progress_set {
+                            crate::download_progress::fail(
+                                &progress_id,
+                                format!("failed to install 7 days to die server: {e}"),
+                            );
+                        }
+                        Status::internal(crate::error_payload::encode(
+                            "download_failed",
+                            format!("failed to install 7 days to die server: {e}"),
+                            None,
+                            Some(
+                                "SteamCMD install failed. Check network and 32-bit runtime dependencies in agent image."
+                                    .to_string(),
+                            ),
+                        ))
+                    })?;
+
+                if progress_set {
+                    crate::download_progress::finish(
+                        &progress_id,
+                        "7 days to die cache warmed",
+                        0,
+                        0,
+                        0,
+                    );
+                }
+
+                format!(
+                    "7 days to die cache warmed: server_root={} launcher={}",
+                    installed.server_root.display(),
+                    installed.launcher.display()
+                )
+            }
+            "the_forest:vanilla" => {
+                if progress_set {
+                    crate::download_progress::start(
+                        &progress_id,
+                        "install",
+                        "installing the forest dedicated server...",
+                        None,
+                    );
+                }
+
+                let installed = the_forest_download::ensure_the_forest_server()
+                    .await
+                    .map_err(|e| {
+                        if progress_set {
+                            crate::download_progress::fail(
+                                &progress_id,
+                                format!("failed to install the forest server: {e}"),
+                            );
+                        }
+                        Status::internal(crate::error_payload::encode(
+                            "download_failed",
+                            format!("failed to install the forest server: {e}"),
+                            None,
+                            Some(
+                                "SteamCMD install failed. Check network and 32-bit runtime dependencies in agent image."
+                                    .to_string(),
+                            ),
+                        ))
+                    })?;
+
+                if progress_set {
+                    crate::download_progress::finish(
+                        &progress_id,
+                        "the forest cache warmed",
+                        0,
+                        0,
+                        0,
+                    );
+                }
+
+                format!(
+                    "the forest cache warmed: server_root={} launcher={}",
+                    installed.server_root.display(),
+                    installed.launcher.display()
+                )
+            }
+            "sons_of_the_forest:vanilla" => {
+                if progress_set {
+                    crate::download_progress::start(
+                        &progress_id,
+                        "install",
+                        "installing sons of the forest dedicated server...",
+                        None,
+                    );
+                }
+
+                let installed = sons_of_the_forest_download::ensure_sons_of_the_forest_server()
+                    .await
+                    .map_err(|e| {
+                        if progress_set {
+                            crate::download_progress::fail(
+                                &progress_id,
+                                format!("failed to install sons of the forest server: {e}"),
+                            );
+                        }
+                        Status::internal(crate::error_payload::encode(
+                            "download_failed",
+                            format!("failed to install sons of the forest server: {e}"),
+                            None,
+                            Some(
+                                "SteamCMD install failed. Check network and 32-bit runtime dependencies in agent image."
+                                    .to_string(),
+                            ),
+                        ))
+                    })?;
+
+                if progress_set {
+                    crate::download_progress::finish(
+                        &progress_id,
+                        "sons of the forest cache warmed",
+                        0,
+                        0,
+                        0,
+                    );
+                }
+
+                format!(
+                    "sons of the forest cache warmed: server_root={} launcher={}",
+                    installed.server_root.display(),
+                    installed.launcher.display()
                 )
             }
             "demo:sleep" => {
@@ -900,6 +1079,65 @@ impl ProcessService for ProcessApi {
             ));
             out.extend(fx_entries);
 
+            // Steam app based caches: latest install directory entries.
+            for (template, root) in [
+                (
+                    "core_keeper:vanilla",
+                    crate::core_keeper::data_root()
+                        .join("cache")
+                        .join("core_keeper")
+                        .join("vanilla"),
+                ),
+                (
+                    "seven_days:vanilla",
+                    crate::seven_days::data_root()
+                        .join("cache")
+                        .join("seven_days")
+                        .join("vanilla"),
+                ),
+                (
+                    "the_forest:vanilla",
+                    crate::the_forest::data_root()
+                        .join("cache")
+                        .join("the_forest")
+                        .join("vanilla"),
+                ),
+                (
+                    "sons_of_the_forest:vanilla",
+                    crate::sons_of_the_forest::data_root()
+                        .join("cache")
+                        .join("sons_of_the_forest")
+                        .join("vanilla"),
+                ),
+            ] {
+                let mut entries: Vec<(String, std::path::PathBuf, u64, u64)> = Vec::new();
+                if let Ok(rd) = std::fs::read_dir(&root) {
+                    for entry in rd.flatten() {
+                        let path = entry.path();
+                        let Ok(ft) = entry.file_type() else {
+                            continue;
+                        };
+                        if !ft.is_dir() {
+                            continue;
+                        }
+                        let version = entry.file_name().to_string_lossy().to_string();
+                        if version.trim().is_empty() {
+                            continue;
+                        }
+
+                        let (size, last_modified) = dir_stats(&path);
+                        let last_used = read_last_used_marker(&path).max(last_modified);
+                        let key = format!("{template}@{version}");
+                        entries.push((key, path, size, last_used));
+                    }
+                }
+                entries.sort_by(|a, b| b.3.cmp(&a.3).then_with(|| a.0.cmp(&b.0)));
+                let total_size = entries.iter().map(|e| e.2).sum::<u64>();
+                let total_last = entries.iter().map(|e| e.3).max().unwrap_or(0);
+                out.push((template.to_string(), root.clone(), total_size, total_last));
+                out.extend(entries);
+            }
+
             out
         })
         .await
@@ -936,6 +1174,19 @@ impl ProcessService for ProcessApi {
             if key == "factorio:vanilla" || key.starts_with("factorio:vanilla@") {
                 return Some("factorio:vanilla");
             }
+            if key == "core_keeper:vanilla" || key.starts_with("core_keeper:vanilla@") {
+                return Some("core_keeper:vanilla");
+            }
+            if key == "seven_days:vanilla" || key.starts_with("seven_days:vanilla@") {
+                return Some("seven_days:vanilla");
+            }
+            if key == "the_forest:vanilla" || key.starts_with("the_forest:vanilla@") {
+                return Some("the_forest:vanilla");
+            }
+            if key == "sons_of_the_forest:vanilla" || key.starts_with("sons_of_the_forest:vanilla@")
+            {
+                return Some("sons_of_the_forest:vanilla");
+            }
             None
         }
 
@@ -951,6 +1202,10 @@ impl ProcessService for ProcessApi {
                 "dst:vanilla".to_string(),
                 "palworld:vanilla".to_string(),
                 "factorio:vanilla".to_string(),
+                "core_keeper:vanilla".to_string(),
+                "seven_days:vanilla".to_string(),
+                "the_forest:vanilla".to_string(),
+                "sons_of_the_forest:vanilla".to_string(),
             ]
         } else {
             req.keys
@@ -1056,6 +1311,70 @@ impl ProcessService for ProcessApi {
                 crate::factorio::data_root()
                     .join("cache")
                     .join("factorio")
+                    .join("vanilla")
+                    .join(version)
+            } else if key == "core_keeper:vanilla" {
+                crate::core_keeper::data_root()
+                    .join("cache")
+                    .join("core_keeper")
+                    .join("vanilla")
+            } else if let Some(version) = key.strip_prefix("core_keeper:vanilla@") {
+                if version.trim().is_empty() {
+                    return Err(Status::invalid_argument(format!(
+                        "invalid core keeper cache key: {key}"
+                    )));
+                }
+                crate::core_keeper::data_root()
+                    .join("cache")
+                    .join("core_keeper")
+                    .join("vanilla")
+                    .join(version)
+            } else if key == "seven_days:vanilla" {
+                crate::seven_days::data_root()
+                    .join("cache")
+                    .join("seven_days")
+                    .join("vanilla")
+            } else if let Some(version) = key.strip_prefix("seven_days:vanilla@") {
+                if version.trim().is_empty() {
+                    return Err(Status::invalid_argument(format!(
+                        "invalid seven days cache key: {key}"
+                    )));
+                }
+                crate::seven_days::data_root()
+                    .join("cache")
+                    .join("seven_days")
+                    .join("vanilla")
+                    .join(version)
+            } else if key == "the_forest:vanilla" {
+                crate::the_forest::data_root()
+                    .join("cache")
+                    .join("the_forest")
+                    .join("vanilla")
+            } else if let Some(version) = key.strip_prefix("the_forest:vanilla@") {
+                if version.trim().is_empty() {
+                    return Err(Status::invalid_argument(format!(
+                        "invalid the forest cache key: {key}"
+                    )));
+                }
+                crate::the_forest::data_root()
+                    .join("cache")
+                    .join("the_forest")
+                    .join("vanilla")
+                    .join(version)
+            } else if key == "sons_of_the_forest:vanilla" {
+                crate::sons_of_the_forest::data_root()
+                    .join("cache")
+                    .join("sons_of_the_forest")
+                    .join("vanilla")
+            } else if let Some(version) = key.strip_prefix("sons_of_the_forest:vanilla@") {
+                if version.trim().is_empty() {
+                    return Err(Status::invalid_argument(format!(
+                        "invalid sons of the forest cache key: {key}"
+                    )));
+                }
+                crate::sons_of_the_forest::data_root()
+                    .join("cache")
+                    .join("sons_of_the_forest")
                     .join("vanilla")
                     .join(version)
             } else {

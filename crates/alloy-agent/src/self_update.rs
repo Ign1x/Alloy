@@ -1,6 +1,5 @@
 use std::{sync::OnceLock, time::Duration};
 
-use anyhow::Context;
 use alloy_proto::agent_v1::agent_update_service_server::{
     AgentUpdateService, AgentUpdateServiceServer,
 };
@@ -8,6 +7,7 @@ use alloy_proto::agent_v1::{
     GetSelfUpdateStatusRequest, GetSelfUpdateStatusResponse, TriggerSelfUpdateRequest,
     TriggerSelfUpdateResponse,
 };
+use anyhow::Context;
 use tonic::{Request, Response, Status};
 
 const DEFAULT_WATCHTOWER_URL: &str = "http://watchtower:8080";
@@ -169,4 +169,3 @@ impl AgentUpdateService for SelfUpdateApi {
 pub fn server() -> AgentUpdateServiceServer<SelfUpdateApi> {
     AgentUpdateServiceServer::new(SelfUpdateApi)
 }
-

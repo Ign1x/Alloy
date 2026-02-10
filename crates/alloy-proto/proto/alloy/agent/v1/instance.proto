@@ -20,6 +20,8 @@ service InstanceService {
   // This is intentionally agent-side to avoid control-plane file uploads and to
   // keep large downloads/extracts close to the data root.
   rpc ImportSaveFromUrl(ImportSaveFromUrlRequest) returns (ImportSaveFromUrlResponse);
+  // Import/replace an instance save from an existing file under agent data root.
+  rpc ImportSaveFromPath(ImportSaveFromPathRequest) returns (ImportSaveFromUrlResponse);
   rpc DeletePreview(DeleteInstancePreviewRequest) returns (DeleteInstancePreviewResponse);
   rpc Delete(DeleteInstanceRequest) returns (DeleteInstanceResponse);
 }
@@ -120,4 +122,10 @@ message ImportSaveFromUrlResponse {
   string installed_path = 3;
   // Path under the agent data root where the previous save was backed up (if any).
   string backup_path = 4;
+}
+
+message ImportSaveFromPathRequest {
+  string instance_id = 1;
+  // Relative path under agent data root, e.g. instances/<id>/imports/upload.zip
+  string path = 2;
 }

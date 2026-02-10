@@ -70,6 +70,10 @@ message WriteFileRequest {
   // Relative path under the scoped root.
   string path = 1;
   bytes data = 2;
+  // Write offset. Default 0.
+  uint64 offset = 3;
+  // If true, truncate file before writing this chunk.
+  bool truncate = 4;
 }
 
 message WriteFileResponse {

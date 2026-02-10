@@ -772,6 +772,207 @@ pub fn list_templates() -> Vec<ProcessTemplate> {
             ],
             graceful_stdin: Some("/quit\n".to_string()),
         },
+        ProcessTemplate {
+            template_id: "core_keeper:vanilla".to_string(),
+            display_name: "Core Keeper: Dedicated".to_string(),
+            command: "./CoreKeeperServer".to_string(),
+            args: vec![],
+            params: vec![],
+            graceful_stdin: None,
+        },
+        ProcessTemplate {
+            template_id: "seven_days:vanilla".to_string(),
+            display_name: "7 Days to Die: Dedicated".to_string(),
+            command: "./startserver.sh".to_string(),
+            args: vec![],
+            params: vec![
+                param_string(
+                    "server_name",
+                    "Server name",
+                    false,
+                    "Alloy 7 Days to Die server",
+                    Vec::new(),
+                    "Alloy 7 Days to Die server",
+                    "Shown in the server browser.",
+                ),
+                param_string(
+                    "world",
+                    "World",
+                    false,
+                    "Navezgane",
+                    Vec::new(),
+                    "Navezgane",
+                    "World name (Navezgane or generated world id).",
+                ),
+                param_string(
+                    "game_name",
+                    "Save name",
+                    false,
+                    "alloy",
+                    Vec::new(),
+                    "alloy",
+                    "Save game name (folder under save data).",
+                ),
+                param_int(
+                    "port",
+                    "Game port (UDP)",
+                    false,
+                    "26900",
+                    0,
+                    65535,
+                    "26900 (0 = auto)",
+                    "Main game UDP port. Use 0 to auto-assign.",
+                ),
+                param_int(
+                    "query_port",
+                    "Query port (UDP)",
+                    false,
+                    "26901",
+                    0,
+                    65535,
+                    "26901 (0 = auto)",
+                    "Steam query UDP port. Use 0 to auto-assign.",
+                ),
+                param_int(
+                    "control_panel_port",
+                    "Control panel port (TCP)",
+                    false,
+                    "8080",
+                    0,
+                    65535,
+                    "8080 (0 = auto)",
+                    "Web control panel port. Use 0 to auto-assign.",
+                ),
+                param_int(
+                    "max_players",
+                    "Max players",
+                    false,
+                    "8",
+                    1,
+                    128,
+                    "8",
+                    "Maximum number of players.",
+                ),
+                param_secret(
+                    "password",
+                    "Password",
+                    false,
+                    "",
+                    "Optional server password.",
+                ),
+            ],
+            graceful_stdin: None,
+        },
+        ProcessTemplate {
+            template_id: "the_forest:vanilla".to_string(),
+            display_name: "The Forest: Dedicated".to_string(),
+            command: "./TheForestDedicatedServer.x86_64".to_string(),
+            args: vec![],
+            params: vec![
+                param_string(
+                    "server_name",
+                    "Server name",
+                    false,
+                    "Alloy The Forest server",
+                    Vec::new(),
+                    "Alloy The Forest server",
+                    "Shown in the server browser.",
+                ),
+                param_int(
+                    "port",
+                    "Game port (UDP)",
+                    false,
+                    "27015",
+                    0,
+                    65535,
+                    "27015 (0 = auto)",
+                    "Main game UDP port. Use 0 to auto-assign.",
+                ),
+                param_int(
+                    "query_port",
+                    "Query port (UDP)",
+                    false,
+                    "27016",
+                    0,
+                    65535,
+                    "27016 (0 = auto)",
+                    "Steam query UDP port. Use 0 to auto-assign.",
+                ),
+                param_int(
+                    "max_players",
+                    "Max players",
+                    false,
+                    "8",
+                    1,
+                    32,
+                    "8",
+                    "Maximum number of players.",
+                ),
+                param_secret(
+                    "password",
+                    "Password",
+                    false,
+                    "",
+                    "Optional server password.",
+                ),
+            ],
+            graceful_stdin: None,
+        },
+        ProcessTemplate {
+            template_id: "sons_of_the_forest:vanilla".to_string(),
+            display_name: "Sons of the Forest: Dedicated".to_string(),
+            command: "./SonsOfTheForestDS".to_string(),
+            args: vec![],
+            params: vec![
+                param_string(
+                    "server_name",
+                    "Server name",
+                    false,
+                    "Alloy Sons of the Forest server",
+                    Vec::new(),
+                    "Alloy Sons of the Forest server",
+                    "Shown in the server browser.",
+                ),
+                param_int(
+                    "port",
+                    "Game port (UDP)",
+                    false,
+                    "8766",
+                    0,
+                    65535,
+                    "8766 (0 = auto)",
+                    "Main game UDP port. Use 0 to auto-assign.",
+                ),
+                param_int(
+                    "query_port",
+                    "Query port (UDP)",
+                    false,
+                    "27016",
+                    0,
+                    65535,
+                    "27016 (0 = auto)",
+                    "Steam query UDP port. Use 0 to auto-assign.",
+                ),
+                param_int(
+                    "max_players",
+                    "Max players",
+                    false,
+                    "8",
+                    1,
+                    16,
+                    "8",
+                    "Maximum number of players.",
+                ),
+                param_secret(
+                    "password",
+                    "Password",
+                    false,
+                    "",
+                    "Optional server password.",
+                ),
+            ],
+            graceful_stdin: None,
+        },
     ];
 
     for t in &mut templates {
@@ -861,6 +1062,22 @@ pub fn apply_params(
 
     if t.template_id == "factorio:vanilla" {
         let _ = crate::factorio::validate_vanilla_params(params)?;
+    }
+
+    if t.template_id == "core_keeper:vanilla" {
+        let _ = crate::core_keeper::validate_vanilla_params(params)?;
+    }
+
+    if t.template_id == "seven_days:vanilla" {
+        let _ = crate::seven_days::validate_vanilla_params(params)?;
+    }
+
+    if t.template_id == "the_forest:vanilla" {
+        let _ = crate::the_forest::validate_vanilla_params(params)?;
+    }
+
+    if t.template_id == "sons_of_the_forest:vanilla" {
+        let _ = crate::sons_of_the_forest::validate_vanilla_params(params)?;
     }
 
     Ok(t)

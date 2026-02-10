@@ -345,17 +345,41 @@ impl FilesystemService for FilesystemApi {
             }
         }
 
-        let tmp = path.with_extension("tmp");
-        let mut f = tokio::fs::File::create(&tmp)
+        if req.offset == 0 && !req.truncate {
+            let tmp = path.with_extension("tmp");
+            let mut f = tokio::fs::File::create(&tmp)
+                .await
+                .map_err(|e| status_from_io("failed to create temp file", e))?;
+            f.write_all(&req.data)
+                .await
+                .map_err(|e| Status::internal(format!("failed to write: {e}")))?;
+            f.flush().await.ok();
+            tokio::fs::rename(&tmp, &path)
+                .await
+                .map_err(|e| status_from_io("failed to persist file", e))?;
+            return Ok(Response::new(WriteFileResponse { ok: true }));
+        }
+
+        let mut f = tokio::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .open(&path)
             .await
-            .map_err(|e| status_from_io("failed to create temp file", e))?;
+            .map_err(|e| status_from_io("failed to open file", e))?;
+
+        if req.truncate {
+            f.set_len(0)
+                .await
+                .map_err(|e| Status::internal(format!("failed to truncate: {e}")))?;
+        }
+
+        f.seek(std::io::SeekFrom::Start(req.offset))
+            .await
+            .map_err(|e| Status::internal(format!("failed to seek: {e}")))?;
         f.write_all(&req.data)
             .await
             .map_err(|e| Status::internal(format!("failed to write: {e}")))?;
         f.flush().await.ok();
-        tokio::fs::rename(&tmp, &path)
-            .await
-            .map_err(|e| status_from_io("failed to persist file", e))?;
 
         Ok(Response::new(WriteFileResponse { ok: true }))
     }

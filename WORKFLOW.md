@@ -178,8 +178,12 @@ TODO:
 
 ### Phase 5.2 - Worlds / saves
 TODO:
-- [ ] World/saves import & replace (Minecraft + Terraria)
-- [ ] Backup + restore flow (download/upload or URL import)
+- [ ] Replace unsafe `instance.importSaveFromUrl` user flow with curated search->download flow
+- [ ] Add control-plane save search API (Minecraft first) with provider-side filtering
+- [ ] Add control-plane import-by-search-result API (no arbitrary URL input from UI)
+- [ ] Web: instance details modal supports keyword search + pick result + import
+- [ ] Keep backup/replace semantics unchanged while removing direct URL paste from default UX
+- [ ] Follow-up: backup + restore flow (download/upload)
 
 ### Phase 5.3 - Minecraft modpacks
 TODO:

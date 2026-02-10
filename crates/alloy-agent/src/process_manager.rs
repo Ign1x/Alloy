@@ -15,6 +15,8 @@ use tokio::{
     sync::mpsc,
 };
 
+use crate::core_keeper;
+use crate::core_keeper_download;
 use crate::dst;
 use crate::dst_download;
 use crate::factorio;
@@ -34,9 +36,15 @@ use crate::process_manager_support::{
     read_proc_cpu_ticks, read_proc_rss_bytes, resource_sample_interval, ticks_per_sec,
 };
 use crate::sandbox;
+use crate::seven_days;
+use crate::seven_days_download;
+use crate::sons_of_the_forest;
+use crate::sons_of_the_forest_download;
 use crate::templates;
 use crate::terraria;
 use crate::terraria_download;
+use crate::the_forest;
+use crate::the_forest_download;
 
 #[cfg(target_os = "linux")]
 async fn read_proc_io_bytes(pid: u32) -> Option<(u64, u64)> {
@@ -1454,6 +1462,10 @@ impl ProcessManager {
             || t.template_id == "terraria:vanilla"
             || t.template_id == "palworld:vanilla"
             || t.template_id == "factorio:vanilla"
+            || t.template_id == "core_keeper:vanilla"
+            || t.template_id == "seven_days:vanilla"
+            || t.template_id == "the_forest:vanilla"
+            || t.template_id == "sons_of_the_forest:vanilla"
         {
             minecraft::instance_dir(&id.0)
         } else {
@@ -1511,6 +1523,13 @@ impl ProcessManager {
         }
 
         let result: anyhow::Result<ProcessStatus> = async {
+            let mut exec_override: Option<String> = None;
+            let mut args_override: Option<Vec<String>> = None;
+            let mut cwd_override: Option<PathBuf> = None;
+            let mut extra_rw_paths_override: Vec<PathBuf> = Vec::new();
+            let mut pre_spawn_message: Option<String> = None;
+            let mut pre_spawn_log: Option<String> = None;
+
             if t.template_id == "minecraft:vanilla" {
                 ensure_min_free_space(&minecraft::data_root()).map_err(|e| {
                     crate::error_payload::anyhow(
@@ -5160,10 +5179,409 @@ impl ProcessManager {
                 });
             }
 
-            let exec = t.command.clone();
-            let raw_args = t.args.clone();
+            if t.template_id == "core_keeper:vanilla" {
+                ensure_min_free_space(&core_keeper::data_root()).map_err(|e| {
+                    crate::error_payload::anyhow(
+                        "insufficient_disk",
+                        e.to_string(),
+                        None,
+                        Some("Free up disk space under ALLOY_DATA_ROOT and try again.".to_string()),
+                    )
+                })?;
+
+                let _ck = core_keeper::validate_vanilla_params(&params)?;
+                let dir = core_keeper::instance_dir(&id.0);
+                core_keeper::ensure_vanilla_instance_layout(&dir)?;
+
+                set_entry_message(
+                    &self.inner,
+                    &id.0,
+                    Some("installing core keeper server files...".to_string()),
+                )
+                .await;
+                sink.emit("[alloy-agent] installing core keeper server files".to_string())
+                    .await;
+
+                let installed = core_keeper_download::ensure_core_keeper_server()
+                    .await
+                    .map_err(|e| {
+                        crate::error_payload::anyhow(
+                            "download_failed",
+                            format!("failed to install core keeper server: {e}"),
+                            None,
+                            Some(
+                                "SteamCMD install failed. Check network and 32-bit runtime dependencies in agent image."
+                                    .to_string(),
+                            ),
+                        )
+                    })?;
+
+                exec_override = Some(installed.launcher.display().to_string());
+                args_override = Some(vec![
+                    "-batchmode".to_string(),
+                    "-nographics".to_string(),
+                    "-logfile".to_string(),
+                    dir.join("logs").join("core_keeper.log").display().to_string(),
+                ]);
+                cwd_override = Some(
+                    installed
+                        .launcher
+                        .parent()
+                        .map(|p| p.to_path_buf())
+                        .unwrap_or(installed.server_root.clone()),
+                );
+                extra_rw_paths_override.push(installed.server_root.clone());
+                pre_spawn_message = Some("spawning core keeper server...".to_string());
+                pre_spawn_log = Some("[alloy-agent] core keeper launch prepared".to_string());
+            }
+
+            if t.template_id == "seven_days:vanilla" {
+                ensure_min_free_space(&seven_days::data_root()).map_err(|e| {
+                    crate::error_payload::anyhow(
+                        "insufficient_disk",
+                        e.to_string(),
+                        None,
+                        Some("Free up disk space under ALLOY_DATA_ROOT and try again.".to_string()),
+                    )
+                })?;
+
+                let sv = seven_days::validate_vanilla_params(&params)?;
+                let game_port = port_alloc::allocate_udp_port(sv.port).map_err(|e| {
+                    let mut fields = BTreeMap::new();
+                    fields.insert("port".to_string(), e.to_string());
+                    crate::error_payload::anyhow(
+                        "invalid_param",
+                        "invalid port",
+                        Some(fields),
+                        Some("Pick another port (or use 0 to auto-assign).".to_string()),
+                    )
+                })?;
+                let query_port = port_alloc::allocate_udp_port(sv.query_port).map_err(|e| {
+                    let mut fields = BTreeMap::new();
+                    fields.insert("query_port".to_string(), e.to_string());
+                    crate::error_payload::anyhow(
+                        "invalid_param",
+                        "invalid query_port",
+                        Some(fields),
+                        Some("Pick another port (or use 0 to auto-assign).".to_string()),
+                    )
+                })?;
+                let panel_port = port_alloc::allocate_tcp_port(sv.control_panel_port).map_err(|e| {
+                    let mut fields = BTreeMap::new();
+                    fields.insert("control_panel_port".to_string(), e.to_string());
+                    crate::error_payload::anyhow(
+                        "invalid_param",
+                        "invalid control_panel_port",
+                        Some(fields),
+                        Some("Pick another port (or use 0 to auto-assign).".to_string()),
+                    )
+                })?;
+                if game_port == query_port || game_port == panel_port || query_port == panel_port {
+                    return Err(crate::error_payload::anyhow(
+                        "invalid_param",
+                        "ports must be distinct",
+                        None,
+                        Some("Use different ports or set conflicting ones to 0 (auto).".to_string()),
+                    ));
+                }
+
+                params.insert("port".to_string(), game_port.to_string());
+                params.insert("query_port".to_string(), query_port.to_string());
+                params.insert("control_panel_port".to_string(), panel_port.to_string());
+
+                let sv = seven_days::VanillaParams {
+                    port: game_port,
+                    query_port,
+                    control_panel_port: panel_port,
+                    ..sv
+                };
+
+                let dir = seven_days::instance_dir(&id.0);
+                seven_days::ensure_vanilla_instance_layout(&dir, &sv)?;
+
+                set_entry_message(
+                    &self.inner,
+                    &id.0,
+                    Some("installing 7 days to die server files...".to_string()),
+                )
+                .await;
+                sink.emit("[alloy-agent] installing 7 days to die server files".to_string())
+                    .await;
+
+                let installed = seven_days_download::ensure_seven_days_server()
+                    .await
+                    .map_err(|e| {
+                        crate::error_payload::anyhow(
+                            "download_failed",
+                            format!("failed to install 7 days to die server: {e}"),
+                            None,
+                            Some(
+                                "SteamCMD install failed. Check network and 32-bit runtime dependencies in agent image."
+                                    .to_string(),
+                            ),
+                        )
+                    })?;
+
+                let preferred_binary = installed
+                    .server_root
+                    .join("7DaysToDieServer.x86_64");
+                if preferred_binary.is_file() {
+                    exec_override = Some(preferred_binary.display().to_string());
+                    args_override = Some(vec![
+                        "-quit".to_string(),
+                        "-batchmode".to_string(),
+                        "-nographics".to_string(),
+                        "-dedicated".to_string(),
+                        "-configfile".to_string(),
+                        dir.join("config")
+                            .join("serverconfig.xml")
+                            .display()
+                            .to_string(),
+                    ]);
+                } else {
+                    exec_override = Some("/bin/bash".to_string());
+                    args_override = Some(vec![
+                        installed.launcher.display().to_string(),
+                        "-configfile".to_string(),
+                        dir.join("config")
+                            .join("serverconfig.xml")
+                            .display()
+                            .to_string(),
+                    ]);
+                }
+                cwd_override = Some(
+                    installed
+                        .launcher
+                        .parent()
+                        .map(|p| p.to_path_buf())
+                        .unwrap_or(installed.server_root.clone()),
+                );
+                extra_rw_paths_override.push(installed.server_root.clone());
+                pre_spawn_message = Some(format!(
+                    "spawning 7 days to die server (udp {} / {} tcp {})...",
+                    sv.port, sv.query_port, sv.control_panel_port
+                ));
+                pre_spawn_log = Some(format!(
+                    "[alloy-agent] seven days launch prepared ports=udp:{} query:{} panel={}",
+                    sv.port, sv.query_port, sv.control_panel_port
+                ));
+            }
+
+            if t.template_id == "the_forest:vanilla" {
+                ensure_min_free_space(&the_forest::data_root()).map_err(|e| {
+                    crate::error_payload::anyhow(
+                        "insufficient_disk",
+                        e.to_string(),
+                        None,
+                        Some("Free up disk space under ALLOY_DATA_ROOT and try again.".to_string()),
+                    )
+                })?;
+
+                let tf = the_forest::validate_vanilla_params(&params)?;
+                let game_port = port_alloc::allocate_udp_port(tf.port).map_err(|e| {
+                    let mut fields = BTreeMap::new();
+                    fields.insert("port".to_string(), e.to_string());
+                    crate::error_payload::anyhow(
+                        "invalid_param",
+                        "invalid port",
+                        Some(fields),
+                        Some("Pick another port (or use 0 to auto-assign).".to_string()),
+                    )
+                })?;
+                let query_port = port_alloc::allocate_udp_port(tf.query_port).map_err(|e| {
+                    let mut fields = BTreeMap::new();
+                    fields.insert("query_port".to_string(), e.to_string());
+                    crate::error_payload::anyhow(
+                        "invalid_param",
+                        "invalid query_port",
+                        Some(fields),
+                        Some("Pick another port (or use 0 to auto-assign).".to_string()),
+                    )
+                })?;
+                if game_port == query_port {
+                    return Err(crate::error_payload::anyhow(
+                        "invalid_param",
+                        "port and query_port must be different",
+                        None,
+                        Some("Use different values or set one of them to 0 (auto).".to_string()),
+                    ));
+                }
+                params.insert("port".to_string(), game_port.to_string());
+                params.insert("query_port".to_string(), query_port.to_string());
+
+                let tf = the_forest::VanillaParams {
+                    port: game_port,
+                    query_port,
+                    ..tf
+                };
+
+                let dir = the_forest::instance_dir(&id.0);
+                the_forest::ensure_vanilla_instance_layout(&dir, &tf)?;
+
+                set_entry_message(
+                    &self.inner,
+                    &id.0,
+                    Some("installing the forest server files...".to_string()),
+                )
+                .await;
+                sink.emit("[alloy-agent] installing the forest server files".to_string())
+                    .await;
+
+                let installed = the_forest_download::ensure_the_forest_server()
+                    .await
+                    .map_err(|e| {
+                        crate::error_payload::anyhow(
+                            "download_failed",
+                            format!("failed to install the forest server: {e}"),
+                            None,
+                            Some(
+                                "SteamCMD install failed. Check network and 32-bit runtime dependencies in agent image."
+                                    .to_string(),
+                            ),
+                        )
+                    })?;
+
+                let launcher_name = installed
+                    .launcher
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("")
+                    .to_ascii_lowercase();
+                if launcher_name == "start.sh" {
+                    exec_override = Some("/bin/bash".to_string());
+                    args_override = Some(vec![installed.launcher.display().to_string()]);
+                } else {
+                    exec_override = Some(installed.launcher.display().to_string());
+                    args_override = Some(vec!["-batchmode".to_string(), "-nographics".to_string()]);
+                }
+                cwd_override = Some(
+                    installed
+                        .launcher
+                        .parent()
+                        .map(|p| p.to_path_buf())
+                        .unwrap_or(installed.server_root.clone()),
+                );
+                extra_rw_paths_override.push(installed.server_root.clone());
+                pre_spawn_message = Some(format!(
+                    "spawning the forest server (udp {} / {})...",
+                    tf.port, tf.query_port
+                ));
+                pre_spawn_log = Some(format!(
+                    "[alloy-agent] the forest launch prepared ports=udp:{} query={}",
+                    tf.port, tf.query_port
+                ));
+            }
+
+            if t.template_id == "sons_of_the_forest:vanilla" {
+                ensure_min_free_space(&sons_of_the_forest::data_root()).map_err(|e| {
+                    crate::error_payload::anyhow(
+                        "insufficient_disk",
+                        e.to_string(),
+                        None,
+                        Some("Free up disk space under ALLOY_DATA_ROOT and try again.".to_string()),
+                    )
+                })?;
+
+                let sf = sons_of_the_forest::validate_vanilla_params(&params)?;
+                let game_port = port_alloc::allocate_udp_port(sf.port).map_err(|e| {
+                    let mut fields = BTreeMap::new();
+                    fields.insert("port".to_string(), e.to_string());
+                    crate::error_payload::anyhow(
+                        "invalid_param",
+                        "invalid port",
+                        Some(fields),
+                        Some("Pick another port (or use 0 to auto-assign).".to_string()),
+                    )
+                })?;
+                let query_port = port_alloc::allocate_udp_port(sf.query_port).map_err(|e| {
+                    let mut fields = BTreeMap::new();
+                    fields.insert("query_port".to_string(), e.to_string());
+                    crate::error_payload::anyhow(
+                        "invalid_param",
+                        "invalid query_port",
+                        Some(fields),
+                        Some("Pick another port (or use 0 to auto-assign).".to_string()),
+                    )
+                })?;
+                if game_port == query_port {
+                    return Err(crate::error_payload::anyhow(
+                        "invalid_param",
+                        "port and query_port must be different",
+                        None,
+                        Some("Use different values or set one of them to 0 (auto).".to_string()),
+                    ));
+                }
+                params.insert("port".to_string(), game_port.to_string());
+                params.insert("query_port".to_string(), query_port.to_string());
+
+                let sf = sons_of_the_forest::VanillaParams {
+                    port: game_port,
+                    query_port,
+                    ..sf
+                };
+
+                let dir = sons_of_the_forest::instance_dir(&id.0);
+                sons_of_the_forest::ensure_vanilla_instance_layout(&dir, &sf)?;
+
+                set_entry_message(
+                    &self.inner,
+                    &id.0,
+                    Some("installing sons of the forest server files...".to_string()),
+                )
+                .await;
+                sink.emit("[alloy-agent] installing sons of the forest server files".to_string())
+                    .await;
+
+                let installed = sons_of_the_forest_download::ensure_sons_of_the_forest_server()
+                    .await
+                    .map_err(|e| {
+                        crate::error_payload::anyhow(
+                            "download_failed",
+                            format!("failed to install sons of the forest server: {e}"),
+                            None,
+                            Some(
+                                "SteamCMD install failed. Check network and 32-bit runtime dependencies in agent image."
+                                    .to_string(),
+                            ),
+                        )
+                    })?;
+
+                let launcher_name = installed
+                    .launcher
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("")
+                    .to_ascii_lowercase();
+                if launcher_name == "start.sh" {
+                    exec_override = Some("/bin/bash".to_string());
+                    args_override = Some(vec![installed.launcher.display().to_string()]);
+                } else {
+                    exec_override = Some(installed.launcher.display().to_string());
+                    args_override = Some(vec!["-batchmode".to_string(), "-nographics".to_string()]);
+                }
+                cwd_override = Some(
+                    installed
+                        .launcher
+                        .parent()
+                        .map(|p| p.to_path_buf())
+                        .unwrap_or(installed.server_root.clone()),
+                );
+                extra_rw_paths_override.push(installed.server_root.clone());
+                pre_spawn_message = Some(format!(
+                    "spawning sons of the forest server (udp {} / {})...",
+                    sf.port, sf.query_port
+                ));
+                pre_spawn_log = Some(format!(
+                    "[alloy-agent] sons of the forest launch prepared ports=udp:{} query={}",
+                    sf.port, sf.query_port
+                ));
+            }
+
+            let exec = exec_override.unwrap_or_else(|| t.command.clone());
+            let raw_args = args_override.unwrap_or_else(|| t.args.clone());
             let restart = parse_restart_config(&params);
-            let cwd_path = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+            let cwd_path = cwd_override
+                .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
 
             let (mut cmd, sandbox_launch) = prepare_instance_command(
                 &id.0,
@@ -5173,7 +5591,7 @@ impl ProcessManager {
                 &cwd_path,
                 &exec,
                 &raw_args,
-                &[],
+                &extra_rw_paths_override,
             )?;
 
             let started_at_unix_ms = std::time::SystemTime::now()
@@ -5202,6 +5620,13 @@ impl ProcessManager {
             for warning in sandbox_launch.warnings() {
                 sink.emit(format!("[alloy-agent] sandbox warning: {warning}"))
                     .await;
+            }
+            if let Some(line) = pre_spawn_log {
+                sink.emit(line).await;
+            }
+
+            if let Some(message) = pre_spawn_message {
+                set_entry_message(&self.inner, &id.0, Some(message)).await;
             }
 
             sink.emit(format!(
@@ -5677,6 +6102,10 @@ impl ProcessManager {
                 "saving players",
             ],
             "terraria:vanilla" => &["saving world", "world saved"],
+            "core_keeper:vanilla" => &["saving", "saved"],
+            "seven_days:vanilla" => &["saving", "save complete"],
+            "the_forest:vanilla" => &["save", "saving"],
+            "sons_of_the_forest:vanilla" => &["save", "saving"],
             _ => &[],
         };
 

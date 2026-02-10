@@ -7,10 +7,11 @@ use alloy_control::request_meta::RequestMeta;
 use alloy_control::rpc;
 use alloy_control::security;
 use alloy_control::state::AppState;
-use axum::extract::State;
+use axum::extract::{DefaultBodyLimit, Multipart, State};
+use axum::http::StatusCode;
 use axum::middleware;
 use axum::{
-    Json, Router,
+    Extension, Json, Router,
     routing::{get, post},
 };
 use sea_orm::EntityTrait;
@@ -107,6 +108,322 @@ async fn healthz(State(_state): State<AppState>) -> Json<HealthzResponse> {
     })
 }
 
+#[derive(Debug, Serialize)]
+struct UploadSaveErrorBody {
+    message: String,
+    request_id: String,
+}
+
+#[derive(Debug, Serialize)]
+struct UploadSaveResponse {
+    ok: bool,
+    message: String,
+    installed_path: String,
+    backup_path: String,
+}
+
+fn upload_error(
+    status: StatusCode,
+    request_id: &str,
+    message: impl Into<String>,
+) -> (StatusCode, Json<UploadSaveErrorBody>) {
+    (
+        status,
+        Json(UploadSaveErrorBody {
+            message: message.into(),
+            request_id: request_id.to_string(),
+        }),
+    )
+}
+
+fn status_code_from_agent(status: &tonic::Status) -> StatusCode {
+    match status.code() {
+        tonic::Code::InvalidArgument
+        | tonic::Code::FailedPrecondition
+        | tonic::Code::OutOfRange
+        | tonic::Code::AlreadyExists => StatusCode::BAD_REQUEST,
+        tonic::Code::NotFound => StatusCode::NOT_FOUND,
+        tonic::Code::PermissionDenied | tonic::Code::Unauthenticated => StatusCode::FORBIDDEN,
+        tonic::Code::Unavailable | tonic::Code::DeadlineExceeded => StatusCode::SERVICE_UNAVAILABLE,
+        _ => StatusCode::INTERNAL_SERVER_ERROR,
+    }
+}
+
+async fn upload_instance_save(
+    State(state): State<AppState>,
+    Extension(meta): Extension<RequestMeta>,
+    Extension(_user): Extension<rpc::AuthUser>,
+    mut multipart: Multipart,
+) -> Result<Json<UploadSaveResponse>, (StatusCode, Json<UploadSaveErrorBody>)> {
+    if std::env::var("ALLOY_READ_ONLY").is_ok_and(|v| {
+        matches!(
+            v.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes" | "on"
+        )
+    }) {
+        return Err(upload_error(
+            StatusCode::FORBIDDEN,
+            &meta.request_id,
+            "control is in read-only mode",
+        ));
+    }
+
+    let mut instance_id: Option<String> = None;
+    let mut upload_rel_path: Option<String> = None;
+    let mut upload_started = false;
+    let mut wrote_any_chunk = false;
+    let mut total_size: u64 = 0;
+    let mut offset: u64 = 0;
+    const MAX_UPLOAD_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+    const CHUNK_SIZE: usize = 512 * 1024;
+
+    let mut transport_opt: Option<alloy_control::agent_transport::AgentTransport> = None;
+
+    while let Some(mut field) = multipart.next_field().await.map_err(|e| {
+        upload_error(
+            StatusCode::BAD_REQUEST,
+            &meta.request_id,
+            format!("invalid multipart: {e}"),
+        )
+    })? {
+        let Some(name) = field.name() else {
+            continue;
+        };
+
+        if name == "instance_id" {
+            let text = field.text().await.map_err(|e| {
+                upload_error(
+                    StatusCode::BAD_REQUEST,
+                    &meta.request_id,
+                    format!("invalid instance_id field: {e}"),
+                )
+            })?;
+            let trimmed = text.trim();
+            if trimmed.is_empty() {
+                return Err(upload_error(
+                    StatusCode::BAD_REQUEST,
+                    &meta.request_id,
+                    "instance_id is required",
+                ));
+            }
+            instance_id = Some(trimmed.to_string());
+            continue;
+        }
+
+        if name != "file" {
+            continue;
+        }
+
+        if upload_started {
+            return Err(upload_error(
+                StatusCode::BAD_REQUEST,
+                &meta.request_id,
+                "only one file is allowed",
+            ));
+        }
+        upload_started = true;
+
+        let instance_id_val = instance_id.clone().ok_or_else(|| {
+            upload_error(
+                StatusCode::BAD_REQUEST,
+                &meta.request_id,
+                "instance_id must be provided before file field",
+            )
+        })?;
+
+        let ctx = rpc::Ctx {
+            db: state.db.clone(),
+            agent_hub: state.agent_hub.clone(),
+            user: Some(_user.clone()),
+            request_id: meta.request_id.clone(),
+        };
+        let transport = rpc::instance_transport_for_external(&ctx, &instance_id_val)
+            .await
+            .map_err(|e| {
+                upload_error(
+                    StatusCode::BAD_REQUEST,
+                    &meta.request_id,
+                    format!("failed to resolve target node: {}", e.message),
+                )
+            })?;
+
+        let info: alloy_proto::agent_v1::GetInstanceResponse = transport
+            .call(
+                "/alloy.agent.v1.InstanceService/Get",
+                alloy_proto::agent_v1::GetInstanceRequest {
+                    instance_id: instance_id_val.clone(),
+                },
+            )
+            .await
+            .map_err(|status| {
+                upload_error(
+                    status_code_from_agent(&status),
+                    &meta.request_id,
+                    format!("instance.get failed: {}", status.message()),
+                )
+            })?;
+
+        let template_id = info
+            .info
+            .and_then(|v| v.config)
+            .map(|cfg| cfg.template_id)
+            .unwrap_or_default();
+        if !matches!(
+            template_id.as_str(),
+            "minecraft:vanilla"
+                | "minecraft:modrinth"
+                | "minecraft:import"
+                | "minecraft:curseforge"
+        ) {
+            return Err(upload_error(
+                StatusCode::BAD_REQUEST,
+                &meta.request_id,
+                "file upload import is currently supported for Minecraft instances only",
+            ));
+        }
+
+        let filename = field
+            .file_name()
+            .map(|s| s.trim().to_string())
+            .unwrap_or_else(|| "save.zip".to_string());
+        let safe_filename = {
+            let s = filename
+                .chars()
+                .map(|c| {
+                    if c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_') {
+                        c
+                    } else {
+                        '_'
+                    }
+                })
+                .collect::<String>();
+            if s.is_empty() {
+                "save.zip".to_string()
+            } else {
+                s
+            }
+        };
+
+        let nonce = alloy_process::ProcessId::new().0;
+        let upload_rel =
+            format!("instances/{instance_id_val}/imports/upload-{nonce}-{safe_filename}");
+
+        let _mkdir_resp: alloy_proto::agent_v1::MkdirResponse = transport
+            .call(
+                "/alloy.agent.v1.FilesystemService/Mkdir",
+                alloy_proto::agent_v1::MkdirRequest {
+                    path: format!("instances/{instance_id_val}/imports"),
+                    recursive: true,
+                },
+            )
+            .await
+            .map_err(|status| {
+                upload_error(
+                    status_code_from_agent(&status),
+                    &meta.request_id,
+                    format!("failed to prepare upload dir: {}", status.message()),
+                )
+            })?;
+
+        while let Some(chunk) = field.chunk().await.map_err(|e| {
+            upload_error(
+                StatusCode::BAD_REQUEST,
+                &meta.request_id,
+                format!("failed to read upload stream: {e}"),
+            )
+        })? {
+            let mut consumed = 0usize;
+            while consumed < chunk.len() {
+                let end = (consumed + CHUNK_SIZE).min(chunk.len());
+                let part = &chunk[consumed..end];
+                total_size = total_size.saturating_add(part.len() as u64);
+                if total_size > MAX_UPLOAD_BYTES {
+                    return Err(upload_error(
+                        StatusCode::BAD_REQUEST,
+                        &meta.request_id,
+                        "upload too large",
+                    ));
+                }
+
+                let _write_resp: alloy_proto::agent_v1::WriteFileResponse = transport
+                    .call(
+                        "/alloy.agent.v1.FilesystemService/WriteFile",
+                        alloy_proto::agent_v1::WriteFileRequest {
+                            path: upload_rel.clone(),
+                            data: part.to_vec(),
+                            offset,
+                            truncate: offset == 0,
+                        },
+                    )
+                    .await
+                    .map_err(|status| {
+                        upload_error(
+                            status_code_from_agent(&status),
+                            &meta.request_id,
+                            format!("upload failed: {}", status.message()),
+                        )
+                    })?;
+
+                offset = offset.saturating_add(part.len() as u64);
+                consumed = end;
+                wrote_any_chunk = true;
+            }
+        }
+
+        transport_opt = Some(transport);
+        upload_rel_path = Some(upload_rel);
+    }
+
+    if instance_id.is_none() {
+        return Err(upload_error(
+            StatusCode::BAD_REQUEST,
+            &meta.request_id,
+            "instance_id is required",
+        ));
+    }
+    if !upload_started || !wrote_any_chunk {
+        return Err(upload_error(
+            StatusCode::BAD_REQUEST,
+            &meta.request_id,
+            "file is required",
+        ));
+    }
+
+    let instance_id_val = instance_id.unwrap_or_default();
+    let upload_rel = upload_rel_path.unwrap_or_default();
+    let transport = transport_opt.ok_or_else(|| {
+        upload_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            &meta.request_id,
+            "upload transport unavailable",
+        )
+    })?;
+
+    let resp: alloy_proto::agent_v1::ImportSaveFromUrlResponse = transport
+        .call(
+            "/alloy.agent.v1.InstanceService/ImportSaveFromPath",
+            alloy_proto::agent_v1::ImportSaveFromPathRequest {
+                instance_id: instance_id_val,
+                path: upload_rel,
+            },
+        )
+        .await
+        .map_err(|status| {
+            upload_error(
+                status_code_from_agent(&status),
+                &meta.request_id,
+                format!("import failed: {}", status.message()),
+            )
+        })?;
+
+    Ok(Json(UploadSaveResponse {
+        ok: resp.ok,
+        message: resp.message,
+        installed_path: resp.installed_path,
+        backup_path: resp.backup_path,
+    }))
+}
+
 async fn init_db_and_migrate() -> anyhow::Result<AppState> {
     let database_url =
         std::env::var("DATABASE_URL").map_err(|_| anyhow::anyhow!("DATABASE_URL is required"))?;
@@ -114,6 +431,10 @@ async fn init_db_and_migrate() -> anyhow::Result<AppState> {
 
     // Apply migrations on boot (idempotent).
     alloy_migration::Migrator::up(&db, None).await?;
+
+    // Security bootstrap: require strong JWT secret and initialize first admin account.
+    auth::ensure_jwt_secret_configured()?;
+    auth::bootstrap_initial_admin(&db).await?;
 
     // Ensure the default node exists so the UI has something to show.
     // This is idempotent and safe to run on every boot.
@@ -169,6 +490,7 @@ async fn main() -> anyhow::Result<()> {
     let auth_router = Router::new()
         .route("/csrf", get(auth::csrf))
         .route("/login", post(auth::login))
+        .route("/change-credentials", post(auth::change_credentials))
         .route("/refresh", post(auth::refresh))
         .route("/logout", post(auth::logout))
         .layer(middleware::from_fn(security::csrf_and_origin))
@@ -190,11 +512,19 @@ async fn main() -> anyhow::Result<()> {
     )
     .layer(middleware::from_fn(security::rspc_auth_guard));
 
+    let instance_router = Router::new()
+        .route("/upload-save", post(upload_instance_save))
+        .layer(DefaultBodyLimit::max(512 * 1024 * 1024))
+        .layer(middleware::from_fn(security::csrf_and_origin))
+        .layer(middleware::from_fn(security::rspc_auth_guard))
+        .with_state(state.clone());
+
     let app = Router::new()
         .route("/healthz", get(healthz))
         .route("/auth/whoami", get(auth::whoami))
         .route("/agent/ws", get(agent_tunnel::agent_ws))
         .nest("/auth", auth_router)
+        .nest("/instance", instance_router)
         .nest("/rspc", rspc_router)
         .layer(middleware::from_fn(security::request_id))
         .with_state(state);

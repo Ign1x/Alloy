@@ -201,6 +201,8 @@ async fn cleanup_orphan_processes() {
 async fn cleanup_orphan_processes() {}
 
 mod control_tunnel;
+mod core_keeper;
+mod core_keeper_download;
 mod download_progress;
 mod dst;
 mod dst_download;
@@ -225,9 +227,16 @@ mod process_manager_support;
 mod process_service;
 mod sandbox;
 mod self_update;
+mod seven_days;
+mod seven_days_download;
+mod sons_of_the_forest;
+mod sons_of_the_forest_download;
+mod steam_download;
 mod templates;
 mod terraria;
 mod terraria_download;
+mod the_forest;
+mod the_forest_download;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

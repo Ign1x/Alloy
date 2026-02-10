@@ -99,6 +99,17 @@ fn configured_agent_token() -> Option<String> {
         .filter(|v| !v.is_empty())
 }
 
+fn allow_unsafe_agent_ws_without_token() -> bool {
+    matches!(
+        std::env::var("ALLOY_ALLOW_UNAUTHENTICATED_AGENT_WS")
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase()
+            .as_str(),
+        "1" | "true" | "yes" | "on"
+    )
+}
+
 fn hash_token(raw: &str) -> String {
     use sha2::Digest;
     let mut hasher = sha2::Sha256::new();
@@ -142,6 +153,9 @@ async fn authorize(
     }
 
     let Some(token) = bearer_token(headers) else {
+        if !allow_unsafe_agent_ws_without_token() {
+            return Err(StatusCode::UNAUTHORIZED);
+        }
         return Ok(WsAuth::NoToken);
     };
 

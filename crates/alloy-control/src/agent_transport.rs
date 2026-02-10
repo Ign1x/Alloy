@@ -109,6 +109,7 @@ fn is_long_running_method(method: &str) -> bool {
             | "/alloy.agent.v1.ProcessService/StartFromTemplate"
             | "/alloy.agent.v1.InstanceService/Start"
             | "/alloy.agent.v1.InstanceService/ImportSaveFromUrl"
+            | "/alloy.agent.v1.InstanceService/ImportSaveFromPath"
             | "/alloy.agent.v1.AgentUpdateService/TriggerSelfUpdate"
     )
 }

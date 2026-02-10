@@ -11,13 +11,12 @@ use alloy_proto::agent_v1::{
     ClearCacheRequest, CreateInstanceRequest, DeleteInstancePreviewRequest, DeleteInstanceRequest,
     GetCacheStatsRequest, GetCapabilitiesRequest, GetInstanceRequest, GetSelfUpdateStatusRequest,
     GetStatusRequest, GetWarmTemplateProgressRequest, HealthCheckRequest,
-    ImportSaveFromUrlRequest, ListDirRequest, ListInstancesRequest, ListProcessesRequest,
-    ListTemplatesRequest, MkdirRequest, ReadFileRequest, RenameRequest,
+    ImportSaveFromPathRequest, ImportSaveFromUrlRequest, ListDirRequest, ListInstancesRequest,
+    ListProcessesRequest, ListTemplatesRequest, MkdirRequest, ReadFileRequest, RenameRequest,
     StartFromTemplateRequest, StartInstanceRequest, StopInstanceRequest, StopProcessRequest,
     TailFileRequest, TailLogsRequest, TriggerSelfUpdateRequest, UpdateInstanceRequest,
-    WarmTemplateCacheRequest, WriteFileRequest,
-    agent_update_service_server::AgentUpdateService,
-    agent_health_service_server::AgentHealthService, filesystem_service_server::FilesystemService,
+    WarmTemplateCacheRequest, WriteFileRequest, agent_health_service_server::AgentHealthService,
+    agent_update_service_server::AgentUpdateService, filesystem_service_server::FilesystemService,
     instance_service_server::InstanceService, logs_service_server::LogsService,
     process_service_server::ProcessService,
 };
@@ -273,6 +272,15 @@ impl AgentRpc {
                 let resp = self
                     .instance
                     .import_save_from_url(Request::new(req))
+                    .await?
+                    .into_inner();
+                Ok(resp.encode_to_vec())
+            }
+            "/alloy.agent.v1.InstanceService/ImportSaveFromPath" => {
+                let req: ImportSaveFromPathRequest = self.decode_req(payload)?;
+                let resp = self
+                    .instance
+                    .import_save_from_path(Request::new(req))
                     .await?
                     .into_inner();
                 Ok(resp.encode_to_vec())

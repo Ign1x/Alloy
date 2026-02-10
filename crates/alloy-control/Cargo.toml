@@ -9,7 +9,7 @@ alloy-process = { path = "../alloy-process" }
 alloy-db = { path = "../alloy-db" }
 alloy-migration = { path = "../alloy-migration" }
 anyhow = { workspace = true }
-axum = { workspace = true, features = ["ws"] }
+axum = { workspace = true, features = ["ws", "multipart"] }
 futures-util = "0.3"
 axum-extra = { workspace = true }
 argon2 = { workspace = true }

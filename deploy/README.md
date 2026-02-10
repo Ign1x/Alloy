@@ -26,6 +26,21 @@ Build and start:
 docker compose up -d --build
 ```
 
+## Security env (required/recommended)
+
+Before first production boot, set these env vars for `alloy-control`:
+
+- `ALLOY_JWT_SECRET` (**required**): JWT signing secret; control refuses to start if missing/empty.
+- `ALLOY_ADMIN_USER` (**required on first boot**): initial admin username when users table is empty.
+- `ALLOY_ADMIN_PASS` (**required on first boot**): initial admin password when users table is empty.
+
+Hardening toggles:
+
+- `ALLOY_COOKIE_SECURE` (default: `true`): secure cookies; set `false` only for local HTTP dev.
+- `ALLOY_AGENT_CONNECT_TOKEN` (recommended): shared token for `/agent/ws` reverse tunnel auth.
+- `ALLOY_ALLOW_UNAUTHENTICATED_AGENT_WS` (default: `false`): unsafe compatibility toggle to allow unauthenticated agent WS.
+- `ALLOY_IMPORT_URL_ALLOW_HOSTS` (agent, optional): comma-separated host allowlist for private/local IP import URLs, e.g. `192.168.1.10,10.0.0.5`.
+
 ## Updates
 
 Alloy stores persistent data in Docker volumes (not the container filesystem), so updating containers does **not** wipe worlds/configs as long as you keep the same volumes.

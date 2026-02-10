@@ -1306,6 +1306,41 @@ pub struct ImportSaveFromUrlOutput {
     pub backup_path: String,
 }
 
+#[derive(Debug, Clone, serde::Deserialize, Type)]
+pub struct SearchInstanceSavesInput {
+    pub instance_id: String,
+    pub query: String,
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, Type)]
+pub struct SaveSearchResultDto {
+    pub provider: String,
+    pub project_id: String,
+    pub version_id: String,
+    pub title: String,
+    pub author: String,
+    pub summary: Option<String>,
+    pub page_url: String,
+    pub icon_url: Option<String>,
+    pub game_versions: Vec<String>,
+    pub downloads: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, Type)]
+pub struct SearchInstanceSavesOutput {
+    pub provider: String,
+    pub results: Vec<SaveSearchResultDto>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize, Type)]
+pub struct ImportSaveFromSearchInput {
+    pub instance_id: String,
+    pub provider: String,
+    pub project_id: String,
+    pub version_id: String,
+}
+
 #[derive(Debug, Clone, serde::Serialize, Type)]
 pub struct DeleteInstanceOutput {
     pub ok: bool,
@@ -1889,6 +1924,14 @@ async fn instance_transport_for_id(
     Ok((agent_transport(ctx), None))
 }
 
+pub async fn instance_transport_for_external(
+    ctx: &Ctx,
+    instance_id: &str,
+) -> Result<AgentTransport, ApiError> {
+    let (transport, _node_target) = instance_transport_for_id(ctx, instance_id).await?;
+    Ok(transport)
+}
+
 async fn node_target_for_response(
     ctx: &Ctx,
     instance_id: &str,
@@ -2019,6 +2062,10 @@ fn normalize_download_target(raw: &str) -> Option<&'static str> {
         "dst_vanilla" => Some("dst_vanilla"),
         "palworld_vanilla" => Some("palworld_vanilla"),
         "factorio_vanilla" => Some("factorio_vanilla"),
+        "core_keeper_vanilla" => Some("core_keeper_vanilla"),
+        "seven_days_vanilla" => Some("seven_days_vanilla"),
+        "the_forest_vanilla" => Some("the_forest_vanilla"),
+        "sons_of_the_forest_vanilla" => Some("sons_of_the_forest_vanilla"),
         _ => None,
     }
 }
@@ -2030,6 +2077,10 @@ fn expected_template_id_for_target(target: &str) -> Option<&'static str> {
         "dst_vanilla" => Some("dst:vanilla"),
         "palworld_vanilla" => Some("palworld:vanilla"),
         "factorio_vanilla" => Some("factorio:vanilla"),
+        "core_keeper_vanilla" => Some("core_keeper:vanilla"),
+        "seven_days_vanilla" => Some("seven_days:vanilla"),
+        "the_forest_vanilla" => Some("the_forest:vanilla"),
+        "sons_of_the_forest_vanilla" => Some("sons_of_the_forest:vanilla"),
         _ => None,
     }
 }
@@ -2041,8 +2092,19 @@ fn normalize_download_template_id(raw: &str) -> Option<&'static str> {
         "dst:vanilla" => Some("dst:vanilla"),
         "palworld:vanilla" => Some("palworld:vanilla"),
         "factorio:vanilla" => Some("factorio:vanilla"),
+        "core_keeper:vanilla" => Some("core_keeper:vanilla"),
+        "seven_days:vanilla" => Some("seven_days:vanilla"),
+        "the_forest:vanilla" => Some("the_forest:vanilla"),
+        "sons_of_the_forest:vanilla" => Some("sons_of_the_forest:vanilla"),
         _ => None,
     }
+}
+
+fn template_supports_save_search(template_id: &str) -> bool {
+    matches!(
+        template_id,
+        "minecraft:vanilla" | "minecraft:modrinth" | "minecraft:import" | "minecraft:curseforge"
+    )
 }
 
 fn download_state_rank(state: &str) -> i32 {
@@ -4144,6 +4206,27 @@ pub fn router() -> Router<Ctx> {
 
                     let (transport, _node_target) =
                         instance_transport_for_id(&ctx, &input.instance_id).await?;
+                    let info: alloy_proto::agent_v1::GetInstanceResponse = transport
+                        .call(
+                            "/alloy.agent.v1.InstanceService/Get",
+                            GetInstanceRequest {
+                                instance_id: input.instance_id.clone(),
+                            },
+                        )
+                        .await
+                        .map_err(|status| api_error_from_agent_status(&ctx, "instance.get", status))?;
+                    let cfg = info
+                        .info
+                        .and_then(|v| v.config)
+                        .ok_or_else(|| api_error(&ctx, "internal", "missing instance config"))?;
+                    if template_supports_save_search(&cfg.template_id) {
+                        return Err(api_error(
+                            &ctx,
+                            "not_supported",
+                            "direct URL import is disabled for Minecraft; use instance.importSaveFromSearch",
+                        ));
+                    }
+
                     let resp: alloy_proto::agent_v1::ImportSaveFromUrlResponse = transport
                         .call(
                             "/alloy.agent.v1.InstanceService/ImportSaveFromUrl",
@@ -4163,6 +4246,154 @@ pub fn router() -> Router<Ctx> {
                             "instance.import_save",
                             &input.instance_id,
                             Some(serde_json::json!({ "installed_path": resp.installed_path })),
+                        )
+                        .await;
+                    }
+
+                    Ok(ImportSaveFromUrlOutput {
+                        ok: resp.ok,
+                        message: resp.message,
+                        installed_path: resp.installed_path,
+                        backup_path: resp.backup_path,
+                    })
+                },
+            ),
+        )
+        .procedure(
+            "searchSaves",
+            Procedure::builder::<ApiError>().query(|ctx, input: SearchInstanceSavesInput| async move {
+                let (transport, _node_target) =
+                    instance_transport_for_id(&ctx, &input.instance_id).await?;
+                let info: alloy_proto::agent_v1::GetInstanceResponse = transport
+                    .call(
+                        "/alloy.agent.v1.InstanceService/Get",
+                        GetInstanceRequest {
+                            instance_id: input.instance_id.clone(),
+                        },
+                    )
+                    .await
+                    .map_err(|status| api_error_from_agent_status(&ctx, "instance.get", status))?;
+
+                let cfg = info
+                    .info
+                    .and_then(|v| v.config)
+                    .ok_or_else(|| api_error(&ctx, "internal", "missing instance config"))?;
+
+                if !template_supports_save_search(&cfg.template_id) {
+                    return Err(api_error(
+                        &ctx,
+                        "not_supported",
+                        "save search is currently supported for Minecraft instances only",
+                    ));
+                }
+
+                let results = crate::save_search::search_minecraft_worlds(
+                    input.query.as_str(),
+                    input.limit,
+                )
+                .await
+                .map_err(|e| {
+                    api_error(
+                        &ctx,
+                        "upstream_error",
+                        format!("instance.search_saves failed: {e}"),
+                    )
+                })?;
+
+                Ok(SearchInstanceSavesOutput {
+                    provider: "modrinth".to_string(),
+                    results: results
+                        .into_iter()
+                        .map(|v| SaveSearchResultDto {
+                            provider: v.provider,
+                            project_id: v.project_id,
+                            version_id: v.version_id,
+                            title: v.title,
+                            author: v.author,
+                            summary: v.summary,
+                            page_url: v.page_url,
+                            icon_url: v.icon_url,
+                            game_versions: v.game_versions,
+                            downloads: v.downloads.map(|n| n.to_string()),
+                        })
+                        .collect(),
+                })
+            }),
+        )
+        .procedure(
+            "importSaveFromSearch",
+            Procedure::builder::<ApiError>().mutation(
+                |ctx, input: ImportSaveFromSearchInput| async move {
+                    ensure_writable(&ctx)?;
+                    enforce_rate_limit(&ctx)?;
+
+                    let (transport, _node_target) =
+                        instance_transport_for_id(&ctx, &input.instance_id).await?;
+                    let info: alloy_proto::agent_v1::GetInstanceResponse = transport
+                        .call(
+                            "/alloy.agent.v1.InstanceService/Get",
+                            GetInstanceRequest {
+                                instance_id: input.instance_id.clone(),
+                            },
+                        )
+                        .await
+                        .map_err(|status| api_error_from_agent_status(&ctx, "instance.get", status))?;
+
+                    let cfg = info
+                        .info
+                        .and_then(|v| v.config)
+                        .ok_or_else(|| api_error(&ctx, "internal", "missing instance config"))?;
+
+                    if !template_supports_save_search(&cfg.template_id) {
+                        return Err(api_error(
+                            &ctx,
+                            "not_supported",
+                            "save import from search is currently supported for Minecraft instances only",
+                        ));
+                    }
+
+                    let resolved = crate::save_search::resolve_save_download(
+                        crate::save_search::ResolveSaveDownloadInput {
+                            provider: input.provider,
+                            project_id: input.project_id,
+                            version_id: input.version_id,
+                        },
+                    )
+                    .await
+                    .map_err(|e| {
+                        api_error(
+                            &ctx,
+                            "upstream_error",
+                            format!("instance.import_save.resolve failed: {e}"),
+                        )
+                    })?;
+
+                    let resp: alloy_proto::agent_v1::ImportSaveFromUrlResponse = transport
+                        .call(
+                            "/alloy.agent.v1.InstanceService/ImportSaveFromUrl",
+                            alloy_proto::agent_v1::ImportSaveFromUrlRequest {
+                                instance_id: input.instance_id.clone(),
+                                url: resolved.download_url,
+                            },
+                        )
+                        .await
+                        .map_err(|status| {
+                            api_error_from_agent_status(&ctx, "instance.import_save", status)
+                        })?;
+
+                    if resp.ok {
+                        audit::record(
+                            &ctx,
+                            "instance.import_save",
+                            &input.instance_id,
+                            Some(serde_json::json!({
+                                "installed_path": resp.installed_path,
+                                "provider": resolved.provider,
+                                "project_id": resolved.project_id,
+                                "version_id": resolved.version_id,
+                                "source_page": resolved.page_url,
+                                "source_title": resolved.title,
+                            })),
                         )
                         .await;
                     }

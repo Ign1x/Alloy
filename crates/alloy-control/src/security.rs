@@ -43,13 +43,44 @@ fn parse_allowed_origins() -> Vec<String> {
     // Examples:
     // - ALLOY_ALLOWED_ORIGINS=http://localhost:5173
     // - ALLOY_ALLOWED_ORIGINS=https://panel.example.com,https://control.example.com
-    let raw = std::env::var("ALLOY_ALLOWED_ORIGINS")
-        .unwrap_or_else(|_| "http://localhost:5173,http://127.0.0.1:5173".to_string());
+    let raw = std::env::var("ALLOY_ALLOWED_ORIGINS").unwrap_or_else(|_| {
+        "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000"
+            .to_string()
+    });
     raw.split(',')
         .map(|s| s.trim())
         .filter(|s| !s.is_empty())
         .map(|s| s.to_string())
         .collect()
+}
+
+fn host_port_from_origin(origin: &str) -> Option<String> {
+    let trimmed = origin.trim();
+    let rest = trimmed
+        .strip_prefix("https://")
+        .or_else(|| trimmed.strip_prefix("http://"))?;
+    let host_port = rest.split('/').next()?.trim();
+    if host_port.is_empty() {
+        return None;
+    }
+    Some(host_port.to_ascii_lowercase())
+}
+
+fn origin_is_same_host(headers: &HeaderMap, origin: &str) -> bool {
+    let Some(host) = headers
+        .get(axum::http::header::HOST)
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.trim().to_ascii_lowercase())
+        .filter(|s| !s.is_empty())
+    else {
+        return false;
+    };
+
+    let Some(origin_host) = host_port_from_origin(origin) else {
+        return false;
+    };
+
+    host == origin_host
 }
 
 fn origin_is_allowed(headers: &HeaderMap) -> bool {
@@ -62,6 +93,11 @@ fn origin_is_allowed(headers: &HeaderMap) -> bool {
         },
         None => return true,
     };
+
+    // Always allow same-origin unsafe requests.
+    if origin_is_same_host(headers, origin) {
+        return true;
+    }
 
     let allowed = parse_allowed_origins();
     allowed.iter().any(|a| a == origin)
