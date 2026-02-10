@@ -33,7 +33,6 @@ export default function LoginModal(props: LoginModalProps) {
           open={showLoginModal() && !me()}
           onClose={() => setShowLoginModal(false)}
           title="Sign in"
-          description="Enter your credentials to access the control plane."
           size="sm"
           initialFocus={() => usernameEl}
           footer={

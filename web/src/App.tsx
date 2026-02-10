@@ -1,7 +1,7 @@
 import { isAlloyApiError, onAuthEvent, queryClient, rspc } from './rspc'
 import { createEffect, createMemo, createSignal, onCleanup } from 'solid-js'
 import type { ProcessStatusDto } from './bindings'
-import { ensureCsrfCookie, logout, whoami } from './auth'
+import { changeCredentials, ensureCsrfCookie, logout, whoami } from './auth'
 import AppModals from './components/AppModals'
 import AppShell from './components/AppShell'
 import { parseAgentErrorPayload } from './app/helpers/agentErrors'
@@ -13,7 +13,9 @@ import {
 } from './app/helpers/formFocus'
 import { compactAllocatablePortsSpec, defaultControlWsUrl, detectFrpConfigFormat, formatLatencyMs, instancePort, parseFrpEndpoint } from './app/helpers/network'
 import { optionsWithCurrentValue, safeCopy } from './app/helpers/misc'
+import { isVersionLower } from './app/helpers/version'
 import { useSidebarState } from './app/hooks/useSidebarState'
+import { useAppLocale } from './app/hooks/useAppLocale'
 import { useThemePreference } from './app/hooks/useThemePreference'
 import { useToastBus } from './app/hooks/useToastBus'
 import {
@@ -46,6 +48,7 @@ function App() {
   const [editingInstanceId, setEditingInstanceId] = createSignal<string | null>(null)
   const [showDiagnosticsModal, setShowDiagnosticsModal] = createSignal(false)
   const [showAccountMenu, setShowAccountMenu] = createSignal(false)
+  const [showUpdateCenter, setShowUpdateCenter] = createSignal(false)
   const { toasts, setToasts, pushToast, toastError, friendlyErrorMessage } = useToastBus()
   // Account menu uses a fixed overlay; refs are not needed.
 
@@ -95,7 +98,8 @@ function App() {
   let editTrFrpConfigEl: HTMLTextAreaElement | undefined
   let editTrFrpNodeEl: HTMLDivElement | undefined
 
-  const { themePref, setThemePref, themeButtonTitle } = useThemePreference()
+  const { themePref, setThemePref, themeButtonTitle, theme } = useThemePreference()
+  const { locale, setLocale, localeOptions, localeShort, t } = useAppLocale()
   const { sidebarExpanded, setSidebarExpanded } = useSidebarState()
   const [mobileNavOpen, setMobileNavOpen] = createSignal(false)
 
@@ -134,6 +138,43 @@ function App() {
     }
   }
 
+  async function handleChangeCredentials() {
+    const current_password = settingsCurrentPassword()
+    const new_username = settingsNewUsername().trim()
+    const new_password = settingsNewPassword()
+
+    if (!current_password.trim()) {
+      pushToast('error', 'Missing field', 'Current password is required.')
+      return
+    }
+    if (!new_username && !new_password) {
+      pushToast('error', 'Missing field', 'Enter a new username or new password.')
+      return
+    }
+
+    setChangeCredentialsPending(true)
+    try {
+      const updated = await changeCredentials({
+        current_password,
+        new_username: new_username || null,
+        new_password: new_password || null,
+      })
+
+      setMe({ username: updated.username, is_admin: updated.is_admin })
+      setSettingsCurrentPassword('')
+      setSettingsNewUsername('')
+      setSettingsNewPassword('')
+      setSettingsCurrentPasswordVisible(false)
+      setSettingsNewPasswordVisible(false)
+
+      pushToast('success', 'Saved', 'Control account credentials updated')
+    } catch (e) {
+      toastError('Save failed', e)
+    } finally {
+      setChangeCredentialsPending(false)
+    }
+  }
+
   createEffect(() => {
     const off = onAuthEvent((e) => {
       if (e.type !== 'auth-expired') return
@@ -160,6 +201,15 @@ function App() {
     if (!showAccountMenu()) return
     const onKey = (ev: KeyboardEvent) => {
       if (ev.key === 'Escape') setShowAccountMenu(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  })
+
+  createEffect(() => {
+    if (!showUpdateCenter()) return
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key === 'Escape') setShowUpdateCenter(false)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -653,7 +703,7 @@ function App() {
 
   const createInstance = rspc.createMutation(() => 'instance.create')
   const updateInstance = rspc.createMutation(() => 'instance.update')
-  const importSaveFromUrl = rspc.createMutation(() => 'instance.importSaveFromUrl')
+  const importSaveFromSearch = rspc.createMutation(() => 'instance.importSaveFromSearch')
   const startInstance = rspc.createMutation(() => 'instance.start')
   const restartInstance = rspc.createMutation(() => 'instance.restart')
   const stopInstance = rspc.createMutation(() => 'instance.stop')
@@ -681,9 +731,19 @@ function App() {
 
   const updateCheck = rspc.createQuery(
     () => ['update.check', null],
-    () => ({ enabled: isAuthed() && (me()?.is_admin ?? false), refetchOnWindowFocus: false }),
+    () => ({
+      enabled: isAuthed() && (me()?.is_admin ?? false),
+      refetchOnWindowFocus: false,
+      refetchInterval: isAuthed() && (me()?.is_admin ?? false) ? 10 * 60_000 : false,
+    }),
   )
   const triggerUpdate = rspc.createMutation(() => 'update.trigger')
+
+  createEffect(() => {
+    if (!isAuthed()) return
+    if (!(me()?.is_admin ?? false)) return
+    void updateCheck.refetch()
+  })
 
   const mcVersions = rspc.createQuery(
     () => ['minecraft.versions', null],
@@ -712,7 +772,7 @@ function App() {
     out.push({
       value: '',
       label: list.length > 0 ? 'Select node…' : 'No nodes yet',
-      meta: list.length > 0 ? undefined : "Open FRP tab to add one.",
+      meta: list.length > 0 ? undefined : "Open Tunnels tab to add one.",
     })
     for (const n of list) {
       const endpoint =
@@ -788,6 +848,12 @@ function App() {
   const [settingsSteamcmdPasswordVisible, setSettingsSteamcmdPasswordVisible] = createSignal(false)
   const [settingsSteamcmdGuardCode, setSettingsSteamcmdGuardCode] = createSignal('')
   const [settingsSteamcmdMaFile, setSettingsSteamcmdMaFile] = createSignal('')
+  const [settingsCurrentPassword, setSettingsCurrentPassword] = createSignal('')
+  const [settingsCurrentPasswordVisible, setSettingsCurrentPasswordVisible] = createSignal(false)
+  const [settingsNewUsername, setSettingsNewUsername] = createSignal('')
+  const [settingsNewPassword, setSettingsNewPassword] = createSignal('')
+  const [settingsNewPasswordVisible, setSettingsNewPasswordVisible] = createSignal(false)
+  const [changeCredentialsPending, setChangeCredentialsPending] = createSignal(false)
 
   type InstanceOp = 'starting' | 'stopping' | 'restarting' | 'deleting' | 'updating'
   const [instanceOpById, setInstanceOpById] = createSignal<Record<string, InstanceOp | undefined>>({})
@@ -978,10 +1044,28 @@ function App() {
   const [downloadDstVersion, setDownloadDstVersion] = createSignal('latest')
   const [downloadPwVersion, setDownloadPwVersion] = createSignal('latest')
   const [downloadFxVersion, setDownloadFxVersion] = createSignal('stable')
+  const [downloadCoreKeeperVersion, setDownloadCoreKeeperVersion] = createSignal('latest')
+  const [downloadSevenDaysVersion, setDownloadSevenDaysVersion] = createSignal('latest')
+  const [downloadTheForestVersion, setDownloadTheForestVersion] = createSignal('latest')
+  const [downloadSonsOfTheForestVersion, setDownloadSonsOfTheForestVersion] = createSignal('latest')
   const [downloadCenterView, setDownloadCenterView] = createSignal<DownloadCenterView>((() => {
     try {
       const v = localStorage.getItem(DOWNLOAD_VIEW_STORAGE_KEY)
-      if (v === 'tasks' || v === 'minecraft' || v === 'terraria' || v === 'dst' || v === 'palworld' || v === 'factorio' || v === 'cache') return v
+      if (
+        v === 'tasks' ||
+        v === 'minecraft' ||
+        v === 'terraria' ||
+        v === 'dst' ||
+        v === 'palworld' ||
+        v === 'factorio' ||
+        v === 'core_keeper' ||
+        v === 'seven_days' ||
+        v === 'the_forest' ||
+        v === 'sons_of_the_forest' ||
+        v === 'cache'
+      ) {
+        return v
+      }
     } catch {
       // ignore
     }
@@ -1428,6 +1512,30 @@ function App() {
       return { templateId, version, params }
     }
 
+    if (target === 'core_keeper_vanilla') {
+      const templateId = 'core_keeper:vanilla'
+      const version = downloadCoreKeeperVersion().trim() || 'latest'
+      return { templateId, version, params: {} }
+    }
+
+    if (target === 'seven_days_vanilla') {
+      const templateId = 'seven_days:vanilla'
+      const version = downloadSevenDaysVersion().trim() || 'latest'
+      return { templateId, version, params: {} }
+    }
+
+    if (target === 'the_forest_vanilla') {
+      const templateId = 'the_forest:vanilla'
+      const version = downloadTheForestVersion().trim() || 'latest'
+      return { templateId, version, params: {} }
+    }
+
+    if (target === 'sons_of_the_forest_vanilla') {
+      const templateId = 'sons_of_the_forest:vanilla'
+      const version = downloadSonsOfTheForestVersion().trim() || 'latest'
+      return { templateId, version, params: {} }
+    }
+
     return null
   }
 
@@ -1514,6 +1622,10 @@ function App() {
 
   const pwVersionOptions = createMemo(() => [{ value: 'latest', label: 'Latest (SteamCMD app update)' }])
   const dstVersionOptions = createMemo(() => [{ value: 'latest', label: 'Latest (SteamCMD app update)' }])
+  const coreKeeperVersionOptions = createMemo(() => [{ value: 'latest', label: 'Latest (SteamCMD app update)' }])
+  const sevenDaysVersionOptions = createMemo(() => [{ value: 'latest', label: 'Latest (SteamCMD app update)' }])
+  const theForestVersionOptions = createMemo(() => [{ value: 'latest', label: 'Latest (SteamCMD app update)' }])
+  const sonsOfTheForestVersionOptions = createMemo(() => [{ value: 'latest', label: 'Latest (SteamCMD app update)' }])
 
   const mcVersionOptions = createMemo(() => {
     const data = mcVersions.data
@@ -1570,7 +1682,17 @@ function App() {
   type InstanceDetailTab = 'overview' | 'logs' | 'files' | 'config'
   const [instanceDetailTab, setInstanceDetailTab] = createSignal<InstanceDetailTab>('logs')
 
-  const [importSaveUrl, setImportSaveUrl] = createSignal('')
+  const selectedTemplateSupportsSaveSearch = createMemo(() => {
+    const templateId = selectedInstance()?.config?.template_id ?? ''
+    return (
+      templateId === 'minecraft:vanilla' ||
+      templateId === 'minecraft:modrinth' ||
+      templateId === 'minecraft:import' ||
+      templateId === 'minecraft:curseforge'
+    )
+  })
+
+  const [saveSearchQuery, setSaveSearchQuery] = createSignal('')
 
   type TailLine = { text: string; received_at_unix_ms: number }
   const MAX_PROCESS_LOG_LINES = 400
@@ -1584,8 +1706,28 @@ function App() {
     setProcessLogCursor(null)
     setProcessLogLines([])
     setProcessLogLive(true)
-    setImportSaveUrl('')
+    setSaveSearchQuery('')
   })
+
+  const instanceSaveSearch = rspc.createQuery(
+    () => [
+      'instance.searchSaves',
+      {
+        instance_id: selectedInstanceId() ?? '',
+        query: saveSearchQuery().trim(),
+        limit: 8,
+      },
+    ],
+    () => ({
+      enabled:
+        isAuthed() &&
+        showInstanceModal() &&
+        !!selectedInstanceId() &&
+        selectedTemplateSupportsSaveSearch() &&
+        saveSearchQuery().trim().length >= 2,
+      refetchOnWindowFocus: false,
+    }),
+  )
 
   const processLogsTail = rspc.createQuery(
     () => [
@@ -1629,7 +1771,16 @@ function App() {
 
   const nodes = rspc.createQuery(
     () => ['node.list', null],
-    () => ({ enabled: isAuthed() && (tab() === 'nodes' || tab() === 'instances'), refetchInterval: 5000, refetchOnWindowFocus: false }),
+    () => ({
+      enabled: isAuthed() && (tab() === 'nodes' || tab() === 'instances' || Boolean(me()?.is_admin)),
+      refetchInterval:
+        isAuthed() && (tab() === 'nodes' || tab() === 'instances')
+          ? 5000
+          : isAuthed() && Boolean(me()?.is_admin)
+            ? 30_000
+            : false,
+      refetchOnWindowFocus: false,
+    }),
   )
 
   const [nodesLastUpdatedAtUnixMs, setNodesLastUpdatedAtUnixMs] = createSignal<number | null>(null)
@@ -1851,6 +2002,22 @@ function App() {
     if (!id) return null
     return (nodes.data ?? []).find((n: { id: string }) => n.id === id) ?? null
   })
+
+  const nodeAgentOutdatedCount = createMemo(() => {
+    const latest = updateCheck.data?.agent_latest
+    const target = latest?.version ?? latest?.tag ?? null
+    if (!target) return 0
+
+    let count = 0
+    for (const node of (nodes.data ?? []) as NodeDto[]) {
+      if (isVersionLower(node.agent_version, target) === true) {
+        count += 1
+      }
+    }
+    return count
+  })
+
+  const nodeCount = createMemo(() => ((nodes.data ?? []) as NodeDto[]).length)
 
   const [fsPath, setFsPath] = createSignal<string>('')
   const [selectedFilePath, setSelectedFilePath] = createSignal<string | null>(null)
@@ -2146,6 +2313,18 @@ function App() {
     downloadFxVersion,
     setDownloadFxVersion,
     fxVersionOptions,
+    downloadCoreKeeperVersion,
+    setDownloadCoreKeeperVersion,
+    coreKeeperVersionOptions,
+    downloadSevenDaysVersion,
+    setDownloadSevenDaysVersion,
+    sevenDaysVersionOptions,
+    downloadTheForestVersion,
+    setDownloadTheForestVersion,
+    theForestVersionOptions,
+    downloadSonsOfTheForestVersion,
+    setDownloadSonsOfTheForestVersion,
+    sonsOfTheForestVersionOptions,
     downloadQueueEnqueue,
   }
 
@@ -2190,9 +2369,22 @@ function App() {
     settingsSteamcmdMaFile,
     setSettingsSteamcmdMaFile,
     setSteamcmdCredentials,
-    updateCheck,
-    triggerUpdate,
-    controlDiagnostics,
+    settingsCurrentPassword,
+    setSettingsCurrentPassword,
+    settingsCurrentPasswordVisible,
+    setSettingsCurrentPasswordVisible,
+    settingsNewUsername,
+    setSettingsNewUsername,
+    settingsNewPassword,
+    setSettingsNewPassword,
+    settingsNewPasswordVisible,
+    setSettingsNewPasswordVisible,
+    changeCredentialsPending,
+    handleChangeCredentials,
+    openUpdateCenter: () => {
+      setShowAccountMenu(false)
+      setShowUpdateCenter(true)
+    },
   }
 
   const nodesTabProps = {
@@ -2457,9 +2649,10 @@ function App() {
     instanceDetailTab,
     setInstanceDetailTab,
     selectedInstanceMessage,
-    importSaveUrl,
-    setImportSaveUrl,
-    importSaveFromUrl,
+    saveSearchQuery,
+    setSaveSearchQuery,
+    importSaveFromSearch,
+    instanceSaveSearch,
     processLogsTail,
     canTailProcessLogs,
     processLogLive,
@@ -2478,7 +2671,7 @@ function App() {
   const retryAgent = () => void queryClient.invalidateQueries({ queryKey: ['agent.health', null] })
   const copyFsWriteEnv = () => {
     void safeCopy('ALLOY_FS_WRITE_ENABLED=true')
-    pushToast('success', 'Copied', 'ALLOY_FS_WRITE_ENABLED=true')
+    pushToast('success', t('toast.copied'), t('toast.fsWriteEnvCopied'))
   }
 
   const sidebarNavProps = {
@@ -2500,6 +2693,7 @@ function App() {
     get themeButtonTitle() {
       return themeButtonTitle()
     },
+    t,
   }
 
   const topHeaderProps = {
@@ -2532,11 +2726,39 @@ function App() {
     get me() {
       return me()
     },
+    get locale() {
+      return locale()
+    },
+    setLocale,
+    localeOptions,
+    get localeShort() {
+      return localeShort()
+    },
+    t,
     openLoginModal,
     get showAccountMenu() {
       return showAccountMenu()
     },
     setShowAccountMenu,
+    get showUpdateCenter() {
+      return showUpdateCenter()
+    },
+    setShowUpdateCenter,
+    updateCheck,
+    triggerUpdate,
+    get controlVersion() {
+      return controlDiagnostics.data?.control_version ?? null
+    },
+    get agentOutdatedCount() {
+      return nodeAgentOutdatedCount()
+    },
+    get agentNodeCount() {
+      return nodeCount()
+    },
+    openNodesTab: () => setTab('nodes'),
+    openSettingsTab: () => setTab('settings'),
+    pushToast,
+    toastError,
     openDiagnostics,
     handleLogout,
   }
@@ -2560,6 +2782,10 @@ function App() {
     get isReadOnly() {
       return isReadOnly()
     },
+    get themeApplied() {
+      return theme()
+    },
+    t,
     openLoginModal,
     handleLogout,
   }
@@ -2568,6 +2794,7 @@ function App() {
     get authError() {
       return authError()
     },
+    t,
     openLoginModal,
   }
 
@@ -2597,6 +2824,7 @@ function App() {
     retryAgent,
     openDiagnostics,
     copyFsWriteEnv,
+    t,
   }
 
   const mainPanelsProps = {
@@ -2609,6 +2837,7 @@ function App() {
     frpTabProps,
     settingsTabProps,
     nodesTabProps,
+    t,
   }
 
   const appModalsProps = {

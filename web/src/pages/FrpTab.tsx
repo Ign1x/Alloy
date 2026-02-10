@@ -32,10 +32,7 @@ export default function FrpTab(props: FrpTabProps) {
                   <div class="mx-auto w-full max-w-3xl space-y-4">
                     <div class="flex items-start justify-between gap-3">
                       <div>
-                        <div class="text-sm font-semibold text-slate-900 dark:text-slate-100">FRP nodes</div>
-                        <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                          Manage FRP servers (IP/port/allocatable ports/token) and reusable configs (INI/TOML/YAML/JSON).
-                        </div>
+                        <div class="text-sm font-semibold text-slate-900 dark:text-slate-100">Tunnel nodes</div>
                       </div>
                       <div class="flex items-center gap-2">
                         <Show when={frpNodes.isPending}>
@@ -45,7 +42,7 @@ export default function FrpTab(props: FrpTabProps) {
                           size="sm"
                           variant="primary"
                           disabled={!isAuthed() || isReadOnly()}
-                          title={!isAuthed() ? 'Sign in required' : isReadOnly() ? 'Read-only mode' : 'Add FRP node'}
+                          title={!isAuthed() ? 'Sign in required' : isReadOnly() ? 'Read-only mode' : 'Add tunnel node'}
                           onClick={() => openCreateFrpNodeModal()}
                         >
                           New
@@ -53,7 +50,7 @@ export default function FrpTab(props: FrpTabProps) {
                       </div>
                     </div>
 
-                    <Show when={isAuthed()} fallback={<EmptyState title="Sign in required" description="Sign in to manage FRP nodes." />}>
+                    <Show when={isAuthed()} fallback={<EmptyState title="Sign in required" />}>
                       <Show
                         when={frpNodes.isError}
                         fallback={
@@ -61,11 +58,10 @@ export default function FrpTab(props: FrpTabProps) {
                             when={(frpNodes.data ?? []).length > 0}
                             fallback={
                               <EmptyState
-                                title="No FRP nodes"
-                                description="Add one FRP server profile and reuse it when creating Minecraft/Terraria instances."
+                                title="No tunnel nodes"
                                 actions={
                                   <Button variant="secondary" size="sm" onClick={() => openCreateFrpNodeModal()} disabled={isReadOnly()}>
-                                    Add node
+                                    Add tunnel node
                                   </Button>
                                 }
                               />
@@ -138,7 +134,7 @@ export default function FrpTab(props: FrpTabProps) {
                                             variant="danger"
                                             disabled={isReadOnly() || frpDeleteNode.isPending}
                                             onClick={async () => {
-                                              if (!window.confirm(`Delete FRP node “${n.name}”?`)) return
+                                              if (!window.confirm(`Delete tunnel node “${n.name}”?`)) return
                                               try {
                                                 await frpDeleteNode.mutateAsync({ id: n.id })
                                                 pushToast('success', 'Deleted', n.name)
@@ -163,7 +159,7 @@ export default function FrpTab(props: FrpTabProps) {
                           </Show>
                         }
                       >
-                        <ErrorState title="Failed to load FRP nodes" error={frpNodes.error} onRetry={() => void invalidateFrpNodes()} />
+                        <ErrorState title="Failed to load tunnel nodes" error={frpNodes.error} onRetry={() => void invalidateFrpNodes()} />
                       </Show>
                     </Show>
                   </div>

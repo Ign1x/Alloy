@@ -46,6 +46,12 @@ export type LoginRequest = {
   password: string
 }
 
+export type ChangeCredentialsRequest = {
+  current_password: string
+  new_username?: string | null
+  new_password?: string | null
+}
+
 async function authFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const csrf = await ensureCsrfCookie()
   const headers = new Headers(init?.headers)
@@ -73,6 +79,23 @@ export async function login(req: LoginRequest): Promise<WhoamiResponse> {
   })
   if (resp.status === 401) throw new Error('invalid username or password')
   if (!resp.ok) throw new Error(`login failed: ${resp.status}`)
+  return (await resp.json()) as WhoamiResponse
+}
+
+export async function changeCredentials(req: ChangeCredentialsRequest): Promise<WhoamiResponse> {
+  const resp = await authFetch('/auth/change-credentials', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(req),
+  })
+
+  if (resp.status === 401) throw new Error('invalid current password or session expired')
+
+  if (!resp.ok) {
+    const payload = (await resp.json().catch(() => null)) as { message?: string } | null
+    throw new Error(payload?.message || `change credentials failed: ${resp.status}`)
+  }
+
   return (await resp.json()) as WhoamiResponse
 }
 

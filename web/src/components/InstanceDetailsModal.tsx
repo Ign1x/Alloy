@@ -1,4 +1,5 @@
 import { createSignal, For, Show } from 'solid-js'
+import { ensureCsrfCookie } from '../auth'
 import { statusMessageParts } from '../app/helpers/agentErrors'
 import { formatBytes, formatCpuPercent, parseU64 } from '../app/helpers/format'
 import { canStartInstance, instanceStateLabel, isStopping } from '../app/helpers/instances'
@@ -45,9 +46,10 @@ export default function InstanceDetailsModal(props: InstanceDetailsModalProps) {
     instanceDetailTab,
     setInstanceDetailTab,
     selectedInstanceMessage,
-    importSaveUrl,
-    setImportSaveUrl,
-    importSaveFromUrl,
+    saveSearchQuery,
+    setSaveSearchQuery,
+    importSaveFromSearch,
+    instanceSaveSearch,
     processLogsTail,
     canTailProcessLogs: canTailProcessLogsProp,
     processLogLive,
@@ -104,6 +106,20 @@ export default function InstanceDetailsModal(props: InstanceDetailsModalProps) {
                 if (typeof raw !== 'string') return null
                 return parseFrpEndpoint(raw)
               }
+
+              const canSearchSaveImport = () => {
+                const templateId = inst().config.template_id
+                return (
+                  templateId === 'minecraft:vanilla' ||
+                  templateId === 'minecraft:modrinth' ||
+                  templateId === 'minecraft:import' ||
+                  templateId === 'minecraft:curseforge'
+                )
+              }
+
+              const [uploadSaveFile, setUploadSaveFile] = createSignal<File | null>(null)
+              const [uploadSavePending, setUploadSavePending] = createSignal(false)
+              let uploadSaveInputRef: HTMLInputElement | undefined
 
               const [revealedSecrets, setRevealedSecrets] = createSignal<Record<string, boolean>>({})
 
@@ -229,9 +245,9 @@ export default function InstanceDetailsModal(props: InstanceDetailsModalProps) {
                                 type="button"
                                 class="group inline-flex max-w-full cursor-pointer items-center gap-1 rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 font-mono text-[11px] text-slate-700 transition-all duration-150 hover:bg-white active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/35 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-50 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-200 dark:hover:bg-slate-900 dark:focus-visible:ring-amber-400/35 dark:focus-visible:ring-offset-slate-950"
                                 onClick={() => void copyFrp()}
-                                title="Copy public endpoint (FRP)"
+                                title="Copy public endpoint (Tunnel)"
                               >
-                                <span class="truncate">FRP {c()}</span>
+                                <span class="truncate">Tunnel {c()}</span>
                                 <svg
                                   xmlns="http://www.w3.org/2000/svg"
                                   viewBox="0 0 20 20"
@@ -540,67 +556,170 @@ export default function InstanceDetailsModal(props: InstanceDetailsModalProps) {
                               when={canStartInstance(status())}
                               fallback={<Badge variant="warning">Stop to import</Badge>}
                             >
-                              <Badge variant="neutral">Import from URL</Badge>
+                              <Badge variant="neutral">Search & Import</Badge>
                             </Show>
                           </div>
 
                           <div class="mt-2 text-[12px] text-slate-600 dark:text-slate-300">
                             <Show
-                              when={inst().config.template_id === 'terraria:vanilla'}
+                              when={canSearchSaveImport()}
                               fallback={
                                 <Show
                                   when={inst().config.template_id === 'dst:vanilla'}
-                                  fallback={<span>Paste a world .zip URL (must contain a single Minecraft world).</span>}
+                                  fallback={<span>Terraria search import is not available yet.</span>}
                                 >
-                                  <span>Paste a .zip URL containing a single DST cluster (Cluster_1/).</span>
+                                  <span>DST search import is not available yet.</span>
                                 </Show>
                               }
                             >
-                              <span>Paste a .zip (recommended) or direct .wld URL.</span>
+                              <span>Search and import a Minecraft world from curated sources.</span>
                             </Show>
                           </div>
 
-                          <div class="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
-                            <Input
-                              value={importSaveUrl()}
-                              onInput={(e) => setImportSaveUrl(e.currentTarget.value)}
-                              placeholder="https://..."
-                              spellcheck={false}
-                              class="flex-1"
-                              leftIcon={
-                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-                                  <path
-                                    fill-rule="evenodd"
-                                    d="M12.5 2.75a.75.75 0 01.75.75v2h1a3.25 3.25 0 013.25 3.25v5a3.25 3.25 0 01-3.25 3.25h-5A3.25 3.25 0 017 13.75v-1a.75.75 0 011.5 0v1c0 .966.784 1.75 1.75 1.75h5A1.75 1.75 0 0017 13.75v-5A1.75 1.75 0 0015.25 7h-1v2a.75.75 0 11-1.5 0V3.5a.75.75 0 01.75-.75z"
-                                    clip-rule="evenodd"
-                                  />
-                                  <path
-                                    fill-rule="evenodd"
-                                    d="M3.25 5.5A2.75 2.75 0 016 2.75h4A2.75 2.75 0 0112.75 5.5v8.5A2.75 2.75 0 0110 16.75H6A2.75 2.75 0 013.25 14V5.5zM6 4.25c-.69 0-1.25.56-1.25 1.25V14c0 .69.56 1.25 1.25 1.25h4c.69 0 1.25-.56 1.25-1.25V5.5c0-.69-.56-1.25-1.25-1.25H6z"
-                                    clip-rule="evenodd"
-                                  />
-                                </svg>
-                              }
-                            />
-                            <Button
-                              variant="secondary"
-                              disabled={isReadOnly() || !canStartInstance(status()) || importSaveFromUrl.isPending || !importSaveUrl().trim()}
-                              loading={importSaveFromUrl.isPending}
-                              onClick={async () => {
-                                const url = importSaveUrl().trim()
-                                if (!url) return
-                                try {
-                                  const out = await importSaveFromUrl.mutateAsync({ instance_id: id(), url })
-                                  pushToast('success', 'Imported', out.message || out.installed_path)
-                                  setImportSaveUrl('')
-                                } catch (e) {
-                                  toastError('Import failed', e)
+                          <Show
+                            when={canSearchSaveImport()}
+                            fallback={<div class="mt-3 text-[11px] text-slate-500 dark:text-slate-400">This template does not support save search/upload yet.</div>}
+                          >
+                            <div class="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
+                              <Input
+                                value={saveSearchQuery()}
+                                onInput={(e) => setSaveSearchQuery(e.currentTarget.value)}
+                                placeholder="Search worlds (e.g. skyblock, survival...)"
+                                spellcheck={false}
+                                class="flex-1"
+                                leftIcon={
+                                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
+                                    <path
+                                      fill-rule="evenodd"
+                                      d="M8.5 3a5.5 5.5 0 014.473 8.698l3.414 3.414a.75.75 0 11-1.06 1.06l-3.415-3.414A5.5 5.5 0 118.5 3zm0 1.5a4 4 0 100 8 4 4 0 000-8z"
+                                      clip-rule="evenodd"
+                                    />
+                                  </svg>
                                 }
-                              }}
+                              />
+                            </div>
+
+                            <Show when={saveSearchQuery().trim().length >= 2 && instanceSaveSearch.isPending}>
+                              <div class="mt-3 text-[11px] text-slate-500 dark:text-slate-400">Searching...</div>
+                            </Show>
+                            <Show when={saveSearchQuery().trim().length >= 2 && instanceSaveSearch.isError}>
+                              <div class="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/30 dark:text-rose-300">
+                                Search failed.
+                              </div>
+                            </Show>
+                            <Show when={(instanceSaveSearch.data?.results?.length ?? 0) > 0}>
+                              <div class="mt-3 max-h-56 space-y-2 overflow-auto pr-1">
+                                <For each={instanceSaveSearch.data?.results ?? []}>
+                                  {(result: any) => (
+                                    <div class="rounded-xl border border-slate-200 bg-white/80 px-3 py-2 dark:border-slate-800 dark:bg-slate-950/40">
+                                      <div class="flex items-start justify-between gap-3">
+                                        <div class="min-w-0">
+                                          <div class="truncate text-[12px] font-semibold text-slate-800 dark:text-slate-100">{result.title}</div>
+                                          <div class="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">by {result.author} · {result.provider}</div>
+                                          <Show when={result.summary}>
+                                            <div class="mt-1 line-clamp-2 text-[11px] text-slate-600 dark:text-slate-300">{result.summary}</div>
+                                          </Show>
+                                        </div>
+                                        <Button
+                                          size="xs"
+                                          variant="secondary"
+                                          disabled={isReadOnly() || !canStartInstance(status()) || importSaveFromSearch.isPending}
+                                          loading={importSaveFromSearch.isPending}
+                                          onClick={async () => {
+                                            try {
+                                              const out = await importSaveFromSearch.mutateAsync({
+                                                instance_id: id(),
+                                                provider: result.provider,
+                                                project_id: result.project_id,
+                                                version_id: result.version_id,
+                                              })
+                                              pushToast('success', 'Imported', out.message || out.installed_path)
+                                              setSaveSearchQuery('')
+                                            } catch (e) {
+                                              toastError('Import failed', e)
+                                            }
+                                          }}
+                                        >
+                                          Import
+                                        </Button>
+                                      </div>
+                                    </div>
+                                  )}
+                                </For>
+                              </div>
+                            </Show>
+                            <Show
+                              when={
+                                saveSearchQuery().trim().length >= 2 &&
+                                !instanceSaveSearch.isPending &&
+                                !instanceSaveSearch.isError &&
+                                (instanceSaveSearch.data?.results?.length ?? 0) === 0
+                              }
                             >
-                              Import
-                            </Button>
-                          </div>
+                              <div class="mt-3 text-[11px] text-slate-500 dark:text-slate-400">No matching worlds.</div>
+                            </Show>
+
+                            <div class="mt-4 border-t border-slate-200 pt-3 dark:border-slate-800">
+                              <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Upload .zip world</div>
+                              <div class="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center">
+                                <input
+                                  ref={(el) => {
+                                    uploadSaveInputRef = el
+                                  }}
+                                  type="file"
+                                  accept=".zip,application/zip,application/x-zip-compressed"
+                                  class="block w-full min-w-0 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-[12px] text-slate-700 file:mr-3 file:rounded-md file:border-0 file:bg-slate-100 file:px-2 file:py-1 file:text-[11px] file:font-medium file:text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:file:bg-slate-800 dark:file:text-slate-200"
+                                  onChange={(e) => {
+                                    const file = e.currentTarget.files?.[0] ?? null
+                                    setUploadSaveFile(file)
+                                  }}
+                                />
+                                <Button
+                                  variant="secondary"
+                                  disabled={
+                                    isReadOnly() ||
+                                    !canStartInstance(status()) ||
+                                    uploadSavePending() ||
+                                    !uploadSaveFile()
+                                  }
+                                  loading={uploadSavePending()}
+                                  onClick={async () => {
+                                    const file = uploadSaveFile()
+                                    if (!file) return
+                                    try {
+                                      setUploadSavePending(true)
+                                      const csrf = await ensureCsrfCookie()
+                                      const form = new FormData()
+                                      form.set('instance_id', id())
+                                      form.set('file', file, file.name || 'save.zip')
+
+                                      const resp = await fetch('/instance/upload-save', {
+                                        method: 'POST',
+                                        credentials: 'include',
+                                        headers: {
+                                          'x-csrf-token': csrf,
+                                        },
+                                        body: form,
+                                      })
+                                      const payload = (await resp.json().catch(() => null)) as any
+                                      if (!resp.ok) {
+                                        throw new Error(payload?.message || `upload failed: ${resp.status}`)
+                                      }
+                                      pushToast('success', 'Imported', payload?.message || payload?.installed_path || 'Save imported')
+                                      setUploadSaveFile(null)
+                                      if (uploadSaveInputRef) uploadSaveInputRef.value = ''
+                                    } catch (e) {
+                                      toastError('Import failed', e)
+                                    } finally {
+                                      setUploadSavePending(false)
+                                    }
+                                  }}
+                                >
+                                  Upload & Import
+                                </Button>
+                              </div>
+                            </div>
+                          </Show>
 
                           <div class="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
                             The instance must be stopped. Old save is backed up automatically.

@@ -21,7 +21,17 @@ export type DownloadsTabProps = {
 type CacheEntryRow = { key: string; path: string; size_bytes: string; last_used_unix_ms: string }
 
 type CacheDisplayRow = {
-  groupId: 'minecraft' | 'terraria' | 'dst' | 'palworld' | 'factorio' | 'other'
+  groupId:
+    | 'minecraft'
+    | 'terraria'
+    | 'dst'
+    | 'palworld'
+    | 'factorio'
+    | 'core_keeper'
+    | 'seven_days'
+    | 'the_forest'
+    | 'sons_of_the_forest'
+    | 'other'
   kind: 'aggregate' | 'version' | 'source' | 'marker' | 'other'
   title: string
   meta?: string
@@ -52,6 +62,10 @@ function groupTitle(groupId: CacheDisplayRow['groupId']): string {
   if (groupId === 'dst') return "Don't Starve Together"
   if (groupId === 'palworld') return 'Palworld'
   if (groupId === 'factorio') return 'Factorio'
+  if (groupId === 'core_keeper') return 'Core Keeper'
+  if (groupId === 'seven_days') return '7 Days to Die'
+  if (groupId === 'the_forest') return 'The Forest'
+  if (groupId === 'sons_of_the_forest') return 'Sons of the Forest'
   return 'Other'
 }
 
@@ -95,6 +109,18 @@ export default function DownloadsTab(props: DownloadsTabProps) {
     downloadFxVersion,
     setDownloadFxVersion,
     fxVersionOptions,
+    downloadCoreKeeperVersion,
+    setDownloadCoreKeeperVersion,
+    coreKeeperVersionOptions,
+    downloadSevenDaysVersion,
+    setDownloadSevenDaysVersion,
+    sevenDaysVersionOptions,
+    downloadTheForestVersion,
+    setDownloadTheForestVersion,
+    theForestVersionOptions,
+    downloadSonsOfTheForestVersion,
+    setDownloadSonsOfTheForestVersion,
+    sonsOfTheForestVersionOptions,
     downloadQueueEnqueue,
   } = props as any
 
@@ -225,6 +251,77 @@ export default function DownloadsTab(props: DownloadsTabProps) {
     return out
   })
 
+  const coreKeeperCachedVersions = createMemo(() => {
+    const out: CachedVersionRow[] = []
+    for (const e of cacheEntries()) {
+      if (!e.key.startsWith('core_keeper:vanilla@')) continue
+      const version = e.key.slice('core_keeper:vanilla@'.length)
+      if (!version) continue
+      out.push({
+        version,
+        key: e.key,
+        path: e.path,
+        sizeBytes: Number(e.size_bytes ?? 0),
+        lastUsedUnixMs: Number(e.last_used_unix_ms ?? 0),
+      })
+    }
+    out.sort((a, b) => compareVersionDesc(a.version, b.version) || b.lastUsedUnixMs - a.lastUsedUnixMs)
+    return out
+  })
+
+  const sevenDaysCachedVersions = createMemo(() => {
+    const out: CachedVersionRow[] = []
+    for (const e of cacheEntries()) {
+      if (!e.key.startsWith('seven_days:vanilla@')) continue
+      const version = e.key.slice('seven_days:vanilla@'.length)
+      if (!version) continue
+      out.push({
+        version,
+        key: e.key,
+        path: e.path,
+        sizeBytes: Number(e.size_bytes ?? 0),
+        lastUsedUnixMs: Number(e.last_used_unix_ms ?? 0),
+      })
+    }
+    out.sort((a, b) => compareVersionDesc(a.version, b.version) || b.lastUsedUnixMs - a.lastUsedUnixMs)
+    return out
+  })
+
+  const theForestCachedVersions = createMemo(() => {
+    const out: CachedVersionRow[] = []
+    for (const e of cacheEntries()) {
+      if (!e.key.startsWith('the_forest:vanilla@')) continue
+      const version = e.key.slice('the_forest:vanilla@'.length)
+      if (!version) continue
+      out.push({
+        version,
+        key: e.key,
+        path: e.path,
+        sizeBytes: Number(e.size_bytes ?? 0),
+        lastUsedUnixMs: Number(e.last_used_unix_ms ?? 0),
+      })
+    }
+    out.sort((a, b) => compareVersionDesc(a.version, b.version) || b.lastUsedUnixMs - a.lastUsedUnixMs)
+    return out
+  })
+
+  const sonsOfTheForestCachedVersions = createMemo(() => {
+    const out: CachedVersionRow[] = []
+    for (const e of cacheEntries()) {
+      if (!e.key.startsWith('sons_of_the_forest:vanilla@')) continue
+      const version = e.key.slice('sons_of_the_forest:vanilla@'.length)
+      if (!version) continue
+      out.push({
+        version,
+        key: e.key,
+        path: e.path,
+        sizeBytes: Number(e.size_bytes ?? 0),
+        lastUsedUnixMs: Number(e.last_used_unix_ms ?? 0),
+      })
+    }
+    out.sort((a, b) => compareVersionDesc(a.version, b.version) || b.lastUsedUnixMs - a.lastUsedUnixMs)
+    return out
+  })
 
   const [deletingKey, setDeletingKey] = createSignal<string | null>(null)
   const deleteDisabled = createMemo(() => isReadOnly() || Boolean(clearCache.isPending) || Boolean(deletingKey()))
@@ -369,6 +466,94 @@ export default function DownloadsTab(props: DownloadsTabProps) {
         continue
       }
 
+      if (key === 'core_keeper:vanilla') {
+        out.push({
+          groupId: 'core_keeper',
+          kind: 'aggregate',
+          title: 'All cached versions',
+          meta: 'aggregate',
+          ...base,
+        })
+        continue
+      }
+      if (key.startsWith('core_keeper:vanilla@')) {
+        const version = key.slice('core_keeper:vanilla@'.length)
+        out.push({
+          groupId: 'core_keeper',
+          kind: 'version',
+          title: version || key,
+          version: version || undefined,
+          ...base,
+        })
+        continue
+      }
+
+      if (key === 'seven_days:vanilla') {
+        out.push({
+          groupId: 'seven_days',
+          kind: 'aggregate',
+          title: 'All cached versions',
+          meta: 'aggregate',
+          ...base,
+        })
+        continue
+      }
+      if (key.startsWith('seven_days:vanilla@')) {
+        const version = key.slice('seven_days:vanilla@'.length)
+        out.push({
+          groupId: 'seven_days',
+          kind: 'version',
+          title: version || key,
+          version: version || undefined,
+          ...base,
+        })
+        continue
+      }
+
+      if (key === 'the_forest:vanilla') {
+        out.push({
+          groupId: 'the_forest',
+          kind: 'aggregate',
+          title: 'All cached versions',
+          meta: 'aggregate',
+          ...base,
+        })
+        continue
+      }
+      if (key.startsWith('the_forest:vanilla@')) {
+        const version = key.slice('the_forest:vanilla@'.length)
+        out.push({
+          groupId: 'the_forest',
+          kind: 'version',
+          title: version || key,
+          version: version || undefined,
+          ...base,
+        })
+        continue
+      }
+
+      if (key === 'sons_of_the_forest:vanilla') {
+        out.push({
+          groupId: 'sons_of_the_forest',
+          kind: 'aggregate',
+          title: 'All cached versions',
+          meta: 'aggregate',
+          ...base,
+        })
+        continue
+      }
+      if (key.startsWith('sons_of_the_forest:vanilla@')) {
+        const version = key.slice('sons_of_the_forest:vanilla@'.length)
+        out.push({
+          groupId: 'sons_of_the_forest',
+          kind: 'version',
+          title: version || key,
+          version: version || undefined,
+          ...base,
+        })
+        continue
+      }
+
       out.push({
         groupId: 'other',
         kind: 'other',
@@ -419,7 +604,18 @@ export default function DownloadsTab(props: DownloadsTabProps) {
       return b.lastUsedUnixMs - a.lastUsedUnixMs || a.key.localeCompare(b.key)
     }
 
-    const order: CacheDisplayRow['groupId'][] = ['minecraft', 'terraria', 'dst', 'palworld', 'factorio', 'other']
+    const order: CacheDisplayRow['groupId'][] = [
+      'minecraft',
+      'terraria',
+      'dst',
+      'palworld',
+      'factorio',
+      'core_keeper',
+      'seven_days',
+      'the_forest',
+      'sons_of_the_forest',
+      'other',
+    ]
     const groups: Array<{ id: CacheDisplayRow['groupId']; title: string; entries: CacheDisplayRow[]; totalBytes: number; lastUsedUnixMs: number }> = []
     for (const id of order) {
       const entries = byId.get(id) ?? []
@@ -437,6 +633,10 @@ export default function DownloadsTab(props: DownloadsTabProps) {
   const [dstSearch, setDstSearch] = createSignal('')
   const [pwSearch, setPwSearch] = createSignal('')
   const [fxSearch, setFxSearch] = createSignal('')
+  const [coreKeeperSearch, setCoreKeeperSearch] = createSignal('')
+  const [sevenDaysSearch, setSevenDaysSearch] = createSignal('')
+  const [theForestSearch, setTheForestSearch] = createSignal('')
+  const [sonsOfTheForestSearch, setSonsOfTheForestSearch] = createSignal('')
 
   const installPending = createMemo(() => Boolean(downloadQueueEnqueue.isPending))
   const installTarget = downloadEnqueueTarget as () => DownloadTarget | null
@@ -498,7 +698,7 @@ export default function DownloadsTab(props: DownloadsTabProps) {
               current={view}
               onSelect={setView}
               icon={<GameAvatar name={templateDisplayLabel('dst:vanilla')} src={templateLogoSrc('dst:vanilla')} />}
-              label="DST"
+              label="Don't Starve Together"
               meta={
                 dstCachedVersions().length > 0
                   ? `${dstCachedVersions().length} cached · latest ${dstCachedVersions()[0]?.version ?? ''}`.trim()
@@ -530,6 +730,54 @@ export default function DownloadsTab(props: DownloadsTabProps) {
               }
             />
             <NavItem
+              value="core_keeper"
+              current={view}
+              onSelect={setView}
+              icon={<GameAvatar name={templateDisplayLabel('core_keeper:vanilla')} src={templateLogoSrc('core_keeper:vanilla')} />}
+              label="Core Keeper"
+              meta={
+                coreKeeperCachedVersions().length > 0
+                  ? `${coreKeeperCachedVersions().length} cached · latest ${coreKeeperCachedVersions()[0]?.version ?? ''}`.trim()
+                  : 'Not cached'
+              }
+            />
+            <NavItem
+              value="seven_days"
+              current={view}
+              onSelect={setView}
+              icon={<GameAvatar name={templateDisplayLabel('seven_days:vanilla')} src={templateLogoSrc('seven_days:vanilla')} />}
+              label="7 Days to Die"
+              meta={
+                sevenDaysCachedVersions().length > 0
+                  ? `${sevenDaysCachedVersions().length} cached · latest ${sevenDaysCachedVersions()[0]?.version ?? ''}`.trim()
+                  : 'Not cached'
+              }
+            />
+            <NavItem
+              value="the_forest"
+              current={view}
+              onSelect={setView}
+              icon={<GameAvatar name={templateDisplayLabel('the_forest:vanilla')} src={templateLogoSrc('the_forest:vanilla')} />}
+              label="The Forest"
+              meta={
+                theForestCachedVersions().length > 0
+                  ? `${theForestCachedVersions().length} cached · latest ${theForestCachedVersions()[0]?.version ?? ''}`.trim()
+                  : 'Not cached'
+              }
+            />
+            <NavItem
+              value="sons_of_the_forest"
+              current={view}
+              onSelect={setView}
+              icon={<GameAvatar name={templateDisplayLabel('sons_of_the_forest:vanilla')} src={templateLogoSrc('sons_of_the_forest:vanilla')} />}
+              label="Sons of the Forest"
+              meta={
+                sonsOfTheForestCachedVersions().length > 0
+                  ? `${sonsOfTheForestCachedVersions().length} cached · latest ${sonsOfTheForestCachedVersions()[0]?.version ?? ''}`.trim()
+                  : 'Not cached'
+              }
+            />
+            <NavItem
               value="cache"
               current={view}
               onSelect={setView}
@@ -539,9 +787,6 @@ export default function DownloadsTab(props: DownloadsTabProps) {
             />
           </nav>
 
-          <div class="mt-auto px-2 pt-3 text-[11px] text-slate-500 dark:text-slate-400">
-            Tip: If Create returns HTTP 504, downloads may still continue in the background. Queue versions here first.
-          </div>
         </aside>
 
         <main class="min-w-0 flex-1 overflow-auto p-4">
@@ -550,7 +795,6 @@ export default function DownloadsTab(props: DownloadsTabProps) {
               <div class="space-y-4">
                 <Section
                   title="Tasks"
-                  description="Download queue and history. Reorder, pause, retry, and inspect job details."
                   right={
                     <>
                       <Badge variant={hasRunningDownloadJobs() ? 'warning' : 'neutral'}>
@@ -585,7 +829,6 @@ export default function DownloadsTab(props: DownloadsTabProps) {
                     fallback={
                       <EmptyState
                         title="No active tasks"
-                        description="Pick a version in Downloads to start downloading."
                       />
                     }
                   >
@@ -685,7 +928,7 @@ export default function DownloadsTab(props: DownloadsTabProps) {
             <Show when={view() === 'dst'}>
               <VersionManager
                 title="Don't Starve Together"
-                subtitle="DST dedicated server is installed via SteamCMD and cached per install target."
+                subtitle="Don't Starve Together dedicated server is installed via SteamCMD and cached per install target."
                 templateId="dst:vanilla"
                 aggregateCacheKey="dst:vanilla"
                 cachedVersions={dstCachedVersions}
@@ -748,6 +991,94 @@ export default function DownloadsTab(props: DownloadsTabProps) {
               />
             </Show>
 
+            <Show when={view() === 'core_keeper'}>
+              <VersionManager
+                title="Core Keeper"
+                subtitle="Core Keeper dedicated server is installed via SteamCMD and cached per install target."
+                templateId="core_keeper:vanilla"
+                aggregateCacheKey="core_keeper:vanilla"
+                cachedVersions={coreKeeperCachedVersions}
+                status={() => status('core_keeper_vanilla')}
+                options={() => (coreKeeperVersionOptions() as VersionOption[]) ?? []}
+                search={coreKeeperSearch}
+                setSearch={setCoreKeeperSearch}
+                value={downloadCoreKeeperVersion}
+                onSelect={setDownloadCoreKeeperVersion}
+                onInstall={() => void enqueueDownloadWarm('core_keeper_vanilla')}
+                installPending={() => installPending() && installTarget() === 'core_keeper_vanilla'}
+                installDisabled={() => isReadOnly()}
+                deleteDisabled={deleteDisabled}
+                deletingKey={deletingKey}
+                onDeleteCacheKey={(key, label) => void deleteCacheKey(key, label)}
+              />
+            </Show>
+
+            <Show when={view() === 'seven_days'}>
+              <VersionManager
+                title="7 Days to Die"
+                subtitle="7 Days to Die dedicated server is installed via SteamCMD and cached per install target."
+                templateId="seven_days:vanilla"
+                aggregateCacheKey="seven_days:vanilla"
+                cachedVersions={sevenDaysCachedVersions}
+                status={() => status('seven_days_vanilla')}
+                options={() => (sevenDaysVersionOptions() as VersionOption[]) ?? []}
+                search={sevenDaysSearch}
+                setSearch={setSevenDaysSearch}
+                value={downloadSevenDaysVersion}
+                onSelect={setDownloadSevenDaysVersion}
+                onInstall={() => void enqueueDownloadWarm('seven_days_vanilla')}
+                installPending={() => installPending() && installTarget() === 'seven_days_vanilla'}
+                installDisabled={() => isReadOnly()}
+                deleteDisabled={deleteDisabled}
+                deletingKey={deletingKey}
+                onDeleteCacheKey={(key, label) => void deleteCacheKey(key, label)}
+              />
+            </Show>
+
+            <Show when={view() === 'the_forest'}>
+              <VersionManager
+                title="The Forest"
+                subtitle="The Forest dedicated server is installed via SteamCMD and cached per install target."
+                templateId="the_forest:vanilla"
+                aggregateCacheKey="the_forest:vanilla"
+                cachedVersions={theForestCachedVersions}
+                status={() => status('the_forest_vanilla')}
+                options={() => (theForestVersionOptions() as VersionOption[]) ?? []}
+                search={theForestSearch}
+                setSearch={setTheForestSearch}
+                value={downloadTheForestVersion}
+                onSelect={setDownloadTheForestVersion}
+                onInstall={() => void enqueueDownloadWarm('the_forest_vanilla')}
+                installPending={() => installPending() && installTarget() === 'the_forest_vanilla'}
+                installDisabled={() => isReadOnly()}
+                deleteDisabled={deleteDisabled}
+                deletingKey={deletingKey}
+                onDeleteCacheKey={(key, label) => void deleteCacheKey(key, label)}
+              />
+            </Show>
+
+            <Show when={view() === 'sons_of_the_forest'}>
+              <VersionManager
+                title="Sons of the Forest"
+                subtitle="Sons of the Forest dedicated server is installed via SteamCMD and cached per install target."
+                templateId="sons_of_the_forest:vanilla"
+                aggregateCacheKey="sons_of_the_forest:vanilla"
+                cachedVersions={sonsOfTheForestCachedVersions}
+                status={() => status('sons_of_the_forest_vanilla')}
+                options={() => (sonsOfTheForestVersionOptions() as VersionOption[]) ?? []}
+                search={sonsOfTheForestSearch}
+                setSearch={setSonsOfTheForestSearch}
+                value={downloadSonsOfTheForestVersion}
+                onSelect={setDownloadSonsOfTheForestVersion}
+                onInstall={() => void enqueueDownloadWarm('sons_of_the_forest_vanilla')}
+                installPending={() => installPending() && installTarget() === 'sons_of_the_forest_vanilla'}
+                installDisabled={() => isReadOnly()}
+                deleteDisabled={deleteDisabled}
+                deletingKey={deletingKey}
+                onDeleteCacheKey={(key, label) => void deleteCacheKey(key, label)}
+              />
+            </Show>
+
             <Show when={view() === 'cache'}>
               <div class="space-y-4">
                 <div class="flex flex-wrap items-start justify-between gap-3">
@@ -782,7 +1113,7 @@ export default function DownloadsTab(props: DownloadsTabProps) {
 
                   <Show
                     when={cacheDisplayRows().length > 0}
-                    fallback={<EmptyState title="No cache entries" description="Queue a version to populate the cache." class="m-4" />}
+                    fallback={<EmptyState title="No cache entries" class="m-4" />}
                   >
                     <div class="space-y-4 p-4">
                       <For each={cacheGroups()}>

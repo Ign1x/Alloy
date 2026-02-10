@@ -29,7 +29,6 @@ export default function DeleteInstanceModal(props: DeleteInstanceModalProps) {
           open={confirmDeleteInstanceId() != null}
           onClose={() => setConfirmDeleteInstanceId(null)}
           title="Delete instance"
-          description="This permanently deletes the instance directory under /data."
           size="sm"
           footer={
             <div class="flex gap-3">
@@ -106,7 +105,6 @@ export default function DeleteInstanceModal(props: DeleteInstanceModalProps) {
             <Field
               label="Type the instance id to confirm"
               required
-              description="Tip: copy/paste the id to avoid typos."
               error={
                 confirmDeleteText().trim().length > 0 && confirmDeleteText().trim() !== (confirmDeleteInstanceId() ?? '')
                   ? 'Does not match.'

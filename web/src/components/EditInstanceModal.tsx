@@ -272,7 +272,7 @@ export default function EditInstanceModal(props: EditInstanceModalProps) {
                             </Field>
 
 	                          <Field
-	                            label={<LabelTip label="Public (FRP)" content="Optional. Paste an FRP config to expose this instance (auto-detects INI/TOML/YAML/JSON)." />}
+	                            label={<LabelTip label="Public (Tunnels)" content="Optional. Paste a tunnel config to expose this instance (auto-detects INI/TOML/YAML/JSON)." />}
 	                            error={editFieldErrors().frp_config}
 	                          >
 	                            <div class="space-y-2">
@@ -338,7 +338,7 @@ export default function EditInstanceModal(props: EditInstanceModalProps) {
 	                                      }}
 	                                      value={editMcFrpConfig()}
 	                                      onInput={(e) => setEditMcFrpConfig(e.currentTarget.value)}
-	                                      placeholder="Paste FRP config to set/replace (auto: INI/TOML/YAML/JSON)"
+	                                      placeholder="Paste tunnel config to set/replace (auto: INI/TOML/YAML/JSON)"
 	                                      spellcheck={false}
 	                                      class="font-mono text-[11px]"
 	                                      invalid={Boolean(editFieldErrors().frp_config)}
@@ -510,7 +510,7 @@ export default function EditInstanceModal(props: EditInstanceModalProps) {
 	                        </Field>
 
 	                        <Field
-	                          label={<LabelTip label="Public (FRP)" content="Optional. Paste an FRP config to expose this instance (auto-detects INI/TOML/YAML/JSON)." />}
+	                          label={<LabelTip label="Public (Tunnels)" content="Optional. Paste a tunnel config to expose this instance (auto-detects INI/TOML/YAML/JSON)." />}
 	                          error={editFieldErrors().frp_config}
 	                        >
 	                          <div class="space-y-2">
@@ -576,7 +576,7 @@ export default function EditInstanceModal(props: EditInstanceModalProps) {
 	                                    }}
 	                                    value={editTrFrpConfig()}
 	                                    onInput={(e) => setEditTrFrpConfig(e.currentTarget.value)}
-	                                    placeholder="Paste FRP config to set/replace (auto: INI/TOML/YAML/JSON)"
+	                                    placeholder="Paste tunnel config to set/replace (auto: INI/TOML/YAML/JSON)"
 	                                    spellcheck={false}
 	                                    class="font-mono text-[11px]"
 	                                    invalid={Boolean(editFieldErrors().frp_config)}
@@ -641,7 +641,7 @@ export default function EditInstanceModal(props: EditInstanceModalProps) {
                             ? frpNodeConfigById(editMcFrpNodeId()) ?? ''
                             : editMcFrpConfig().trim()
                         if (editMcFrpEnabled() && !existing && !nextCfg)
-                          localErrors.frp_config = editMcFrpMode() === 'node' ? 'Select an FRP node.' : 'Paste FRP config.'
+                          localErrors.frp_config = editMcFrpMode() === 'node' ? 'Select a tunnel node.' : 'Paste tunnel config.'
                       }
 
                       if (base.template_id === 'terraria:vanilla') {
@@ -651,7 +651,7 @@ export default function EditInstanceModal(props: EditInstanceModalProps) {
                             ? frpNodeConfigById(editTrFrpNodeId()) ?? ''
                             : editTrFrpConfig().trim()
                         if (editTrFrpEnabled() && !existing && !nextCfg)
-                          localErrors.frp_config = editTrFrpMode() === 'node' ? 'Select an FRP node.' : 'Paste FRP config.'
+                          localErrors.frp_config = editTrFrpMode() === 'node' ? 'Select a tunnel node.' : 'Paste tunnel config.'
                       }
 
                       if (Object.keys(localErrors).length > 0) {

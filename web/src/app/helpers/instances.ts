@@ -56,6 +56,10 @@ export function startProgressSteps(templateId: string): string[] {
   if (templateId === 'terraria:vanilla') return ['Resolve', 'Download', 'Extract', 'Spawn', 'Wait']
   if (templateId === 'palworld:vanilla') return ['Install', 'Spawn', 'Wait']
   if (templateId === 'factorio:vanilla') return ['Resolve', 'Download', 'Extract', 'Spawn', 'Wait']
+  if (templateId === 'core_keeper:vanilla') return ['Install', 'Spawn', 'Wait']
+  if (templateId === 'seven_days:vanilla') return ['Install', 'Spawn', 'Wait']
+  if (templateId === 'the_forest:vanilla') return ['Install', 'Spawn', 'Wait']
+  if (templateId === 'sons_of_the_forest:vanilla') return ['Install', 'Spawn', 'Wait']
   return ['Spawn', 'Wait']
 }
 

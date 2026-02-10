@@ -206,7 +206,7 @@ export default function TerrariaCreateSection(props: TerrariaCreateSectionProps)
 	                            </Field>
 
 	                            <Field
-	                              label={<LabelTip label="Public (FRP)" content="Optional. Paste an FRP config to expose this instance (auto-detects INI/TOML/YAML/JSON)." />}
+	                              label={<LabelTip label="Public (Tunnels)" content="Optional. Paste a tunnel config to expose this instance (auto-detects INI/TOML/YAML/JSON)." />}
 	                              error={createFieldErrors().frp_config}
 	                            >
 	                              <div class="space-y-2">
@@ -265,7 +265,7 @@ export default function TerrariaCreateSection(props: TerrariaCreateSectionProps)
 	                                        }}
 	                                        value={trFrpConfig()}
 	                                        onInput={(e) => setTrFrpConfig(e.currentTarget.value)}
-	                                        placeholder="Paste FRP config (auto: INI/TOML/YAML/JSON)"
+	                                        placeholder="Paste tunnel config (auto: INI/TOML/YAML/JSON)"
 	                                        spellcheck={false}
 	                                        class="font-mono text-[11px]"
 	                                        invalid={Boolean(createFieldErrors().frp_config)}

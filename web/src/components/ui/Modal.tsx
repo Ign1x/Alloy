@@ -149,9 +149,6 @@ export function Modal(props: ModalProps) {
           >
             <div class="border-b border-slate-200 px-5 py-4 dark:border-slate-800">
               <div class="text-base font-semibold text-slate-900 dark:text-slate-100">{props.title}</div>
-              <Show when={props.description}>
-                <div class="mt-1 text-[12px] text-slate-600 dark:text-slate-300">{props.description}</div>
-              </Show>
             </div>
             <div class="max-h-[80vh] overflow-auto px-5 py-4">{props.children}</div>
             <Show when={props.footer}>

@@ -1,13 +1,54 @@
-import { Moon, Monitor, Sun } from 'lucide-solid'
-import { Show, type Setter } from 'solid-js'
+import { Check, ChevronDown, Languages, Moon, Monitor, Sun } from 'lucide-solid'
+import { For, Show, createEffect, createMemo, createSignal, type Setter } from 'solid-js'
 import { Portal } from 'solid-js/web'
 
+import type { AppLocale, I18nTranslate } from '../app/i18n'
 import type { ThemePreference } from '../app/hooks/useThemePreference'
-import { Badge } from './ui/Badge'
-import { IconButton } from './ui/IconButton'
 import { StatusPill } from '../app/primitives/StatusPill'
+import { Badge } from './ui/Badge'
+import { Button } from './ui/Button'
+import { IconButton } from './ui/IconButton'
 
 type AuthUser = { username: string; is_admin: boolean } | null
+
+type LatestRelease = {
+  tag: string
+  version?: string | null
+  url: string
+  published_at?: string | null
+  body?: string | null
+}
+
+type UpdateCheckData = {
+  update_available?: boolean
+  can_trigger_update?: boolean
+  latest?: LatestRelease | null
+  agent_latest?: LatestRelease | null
+  compatibility?: {
+    control_min_agent?: string | null
+    control_max_agent?: string | null
+    note?: string | null
+  } | null
+  source?: {
+    kind?: string | null
+    channel?: string | null
+    manifest_url?: string | null
+    warning?: string | null
+  } | null
+}
+
+type UpdateCheckQuery = {
+  isPending: boolean
+  isError: boolean
+  error: unknown
+  data?: UpdateCheckData | null
+  refetch: () => Promise<unknown> | unknown
+}
+
+type TriggerUpdateMutation = {
+  isPending: boolean
+  mutateAsync: (input: null) => Promise<{ message?: string | null }>
+}
 
 interface AppTopHeaderProps {
   setMobileNavOpen: Setter<boolean>
@@ -21,18 +62,83 @@ interface AppTopHeaderProps {
   setThemePref: Setter<ThemePreference>
   authLoading: boolean
   me: AuthUser
+  locale: AppLocale
+  setLocale: (locale: AppLocale) => void
+  localeOptions: ReadonlyArray<{ value: AppLocale; label: string; shortLabel: string }>
+  localeShort: string
+  t: I18nTranslate
   openLoginModal: () => void
   showAccountMenu: boolean
   setShowAccountMenu: Setter<boolean>
+  showUpdateCenter: boolean
+  setShowUpdateCenter: Setter<boolean>
+  updateCheck: UpdateCheckQuery
+  triggerUpdate: TriggerUpdateMutation
+  controlVersion: string | null
+  agentOutdatedCount: number
+  agentNodeCount: number
+  openNodesTab: () => void
+  openSettingsTab: () => void
+  pushToast: (variant: 'info' | 'success' | 'error', title: string, message?: string, requestId?: string) => void
+  toastError: (title: string, error: unknown) => void
   openDiagnostics: () => void
   handleLogout: () => Promise<void>
 }
 
 export default function AppTopHeader(props: AppTopHeaderProps) {
+  const [showLanguageMenu, setShowLanguageMenu] = createSignal(false)
+  let languageMenuRoot: HTMLDivElement | undefined
+
+  const hasControlUpdate = () => Boolean(props.updateCheck.data?.update_available)
+  const hasAgentUpdate = () => props.agentOutdatedCount > 0
+  const hasAnyUpdate = () => hasControlUpdate() || hasAgentUpdate()
+
+  const currentLocaleLabel = createMemo(
+    () => props.localeOptions.find((item) => item.value === props.locale)?.label ?? props.localeOptions[0]?.label ?? props.locale,
+  )
+
+  createEffect(() => {
+    if (!showLanguageMenu()) return
+
+    const onDoc = (event: MouseEvent) => {
+      const target = event.target as Node | null
+      if (!target) return
+      if (languageMenuRoot && languageMenuRoot.contains(target)) return
+      setShowLanguageMenu(false)
+    }
+
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setShowLanguageMenu(false)
+    }
+
+    document.addEventListener('mousedown', onDoc)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDoc)
+      window.removeEventListener('keydown', onKey)
+    }
+  })
+
+  async function triggerControlUpdate() {
+    try {
+      const out = await props.triggerUpdate.mutateAsync(null)
+      props.pushToast('success', props.t('header.updateTriggered'), out.message || props.t('header.watchtowerUpdateRequested'))
+      setTimeout(() => {
+        try {
+          window.location.reload()
+        } catch {
+          // ignore
+        }
+      }, 3000)
+    } catch (error) {
+      props.toastError(props.t('header.updateFailed'), error)
+    }
+  }
+
   return (
     <header class="relative z-50 flex h-14 flex-none items-center justify-between border-b border-slate-200 bg-white/70 px-5 backdrop-blur dark:border-slate-800 dark:bg-slate-950/70">
       <div class="flex items-center gap-4">
-        <IconButton label="Open menu" class="sm:hidden" variant="secondary" onClick={() => props.setMobileNavOpen(true)}>
+        <IconButton label={props.t('header.openMenu')} class="sm:hidden" variant="secondary" onClick={() => props.setMobileNavOpen(true)}>
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
             <path
               fill-rule="evenodd"
@@ -45,35 +151,135 @@ export default function AppTopHeader(props: AppTopHeaderProps) {
           <img src="/logo.svg" class="h-7 w-7 rounded-lg" alt="Alloy" />
           <div class="leading-none">
             <div class="text-base font-semibold tracking-tight text-slate-900 dark:text-slate-100">ALLOY</div>
-            <div class="text-[10px] uppercase tracking-[0.2em] text-slate-500">control plane</div>
+            <div class="text-[10px] uppercase tracking-[0.2em] text-slate-500">{props.t('app.controlPlane')}</div>
           </div>
         </div>
 
         <div class="hidden md:flex items-center gap-2 text-[11px] text-slate-500">
           <StatusPill
-            label="Backend"
+            label={props.t('status.backend')}
             state={{ loading: props.backendPending, error: props.backendError }}
-            status={props.backendError ? 'offline' : props.backendPending ? '...' : 'ok'}
+            status={props.backendError ? props.t('status.offline') : props.backendPending ? '...' : props.t('status.ok')}
           />
           <StatusPill
-            label="Agent"
+            label={props.t('status.agent')}
             state={{ loading: props.agentPending, error: props.agentError }}
-            status={props.agentError ? 'offline' : props.agentPending ? '...' : 'ok'}
+            status={props.agentError ? props.t('status.offline') : props.agentPending ? '...' : props.t('status.ok')}
           />
         </div>
       </div>
 
       <div class="flex items-center gap-3">
         <Show when={import.meta.env.MODE !== 'production'}>
-          <Badge variant="warning" title="Environment">
+          <Badge variant="warning" title={props.t('header.environment')}>
             {import.meta.env.MODE.toUpperCase()}
           </Badge>
         </Show>
         <Show when={props.isReadOnly}>
-          <Badge variant="danger" title="Read-only mode">
-            READ-ONLY
+          <Badge variant="danger" title={props.t('header.readOnlyMode')}>
+            {props.t('header.readOnlyBadge')}
           </Badge>
         </Show>
+
+        <div class="relative" ref={(el) => (languageMenuRoot = el)}>
+          <button
+            type="button"
+            class="group inline-flex h-9 min-w-9 items-center justify-center gap-1.5 rounded-2xl border border-slate-200 bg-white/70 px-2.5 text-xs font-semibold text-slate-700 shadow-sm transition-all hover:bg-white hover:shadow dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:hover:bg-slate-900"
+            title={`${props.t('header.language')}: ${currentLocaleLabel()}`}
+            aria-label={`${props.t('header.language')}: ${currentLocaleLabel()}`}
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={() => {
+              props.setShowAccountMenu(false)
+              props.setShowUpdateCenter(false)
+              setShowLanguageMenu((value) => !value)
+            }}
+            aria-expanded={showLanguageMenu()}
+            aria-haspopup="menu"
+          >
+            <Languages class="h-3.5 w-3.5 text-slate-500 transition-colors group-hover:text-slate-700 dark:text-slate-400 dark:group-hover:text-slate-200" strokeWidth={2} />
+            <span class="rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-700 ring-1 ring-inset ring-slate-200 dark:bg-slate-900 dark:text-slate-200 dark:ring-slate-700">
+              {props.localeShort}
+            </span>
+            <ChevronDown class={`h-3.5 w-3.5 text-slate-500 transition-transform duration-150 dark:text-slate-400 ${showLanguageMenu() ? 'rotate-180' : ''}`} strokeWidth={2.25} />
+          </button>
+
+          <Show when={showLanguageMenu()}>
+            <div
+              class="absolute right-0 top-10 z-[9999] mt-1 w-56 overflow-hidden rounded-2xl border border-slate-200 bg-white/95 p-1.5 shadow-2xl shadow-slate-900/10 backdrop-blur dark:border-slate-800 dark:bg-slate-950/95"
+              onPointerDown={(event) => event.stopPropagation()}
+            >
+              <div class="px-2 pb-1 pt-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">{props.t('header.language')}</div>
+              <For each={props.localeOptions}>
+                {(opt) => {
+                  const active = () => opt.value === props.locale
+                  return (
+                    <button
+                      type="button"
+                      class={`group flex w-full items-center justify-between rounded-xl px-2.5 py-2 text-left text-sm transition-all ${
+                        active()
+                          ? 'bg-amber-500/10 text-slate-900 ring-1 ring-inset ring-amber-500/25 dark:bg-amber-500/15 dark:text-slate-100 dark:ring-amber-500/35'
+                          : 'text-slate-700 hover:bg-slate-100/80 dark:text-slate-200 dark:hover:bg-slate-900/60'
+                      }`}
+                      onClick={() => {
+                        props.setLocale(opt.value)
+                        setShowLanguageMenu(false)
+                      }}
+                    >
+                      <div class="flex min-w-0 items-center gap-2">
+                        <span
+                          class={`inline-flex h-5 min-w-5 items-center justify-center rounded-md px-1 text-[10px] font-bold ring-1 ring-inset ${
+                            active()
+                              ? 'bg-amber-500/20 text-amber-900 ring-amber-500/30 dark:bg-amber-500/25 dark:text-amber-100 dark:ring-amber-500/40'
+                              : 'bg-slate-100 text-slate-600 ring-slate-200 dark:bg-slate-900 dark:text-slate-300 dark:ring-slate-700'
+                          }`}
+                        >
+                          {opt.shortLabel}
+                        </span>
+                        <span class="truncate">{opt.label}</span>
+                      </div>
+
+                      <div class="flex items-center gap-1.5">
+                        <span class="rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium uppercase text-slate-500 dark:bg-slate-900 dark:text-slate-400">
+                          {opt.value}
+                        </span>
+                        <Show when={active()}>
+                          <Check class="h-4 w-4 text-amber-600 dark:text-amber-400" strokeWidth={2.5} />
+                        </Show>
+                      </div>
+                    </button>
+                  )
+                }}
+              </For>
+            </div>
+          </Show>
+        </div>
+
+        <Show when={props.me?.is_admin}>
+          <button
+            type="button"
+            class="relative inline-flex h-8 w-8 items-center justify-center rounded-xl border border-slate-200 bg-white/70 text-slate-700 shadow-sm transition-colors hover:bg-white dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:hover:bg-slate-900"
+            title={hasAnyUpdate() ? props.t('header.updatesAvailable') : props.t('header.updateCenter')}
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={() => {
+              setShowLanguageMenu(false)
+              props.setShowAccountMenu(false)
+              props.setShowUpdateCenter((value) => !value)
+            }}
+            aria-expanded={props.showUpdateCenter}
+            aria-haspopup="menu"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
+              <path d="M10 2.75a4.75 4.75 0 00-4.75 4.75v1.946l-.936 2.811A1.75 1.75 0 005.975 14.5h8.05a1.75 1.75 0 001.661-2.238l-.936-2.811V7.5A4.75 4.75 0 0010 2.75zM8.5 15.75a1.5 1.5 0 003 0h-3z" />
+            </svg>
+            <Show when={hasAnyUpdate()}>
+              <span class="absolute -right-0.5 -top-0.5 inline-flex h-2.5 w-2.5">
+                <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-rose-400 opacity-75" />
+                <span class="relative inline-flex h-2.5 w-2.5 rounded-full bg-rose-500" />
+              </span>
+            </Show>
+          </button>
+        </Show>
+
         <button
           class="sm:hidden rounded-xl border border-slate-200 bg-white/70 p-2 text-slate-700 shadow-sm transition-colors hover:bg-white dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-300 dark:hover:bg-slate-900"
           title={props.themeButtonTitle}
@@ -98,7 +304,7 @@ export default function AppTopHeader(props: AppTopHeaderProps) {
                 class="rounded-xl bg-amber-500/10 px-3 py-2 text-xs font-semibold text-amber-800 ring-1 ring-inset ring-amber-500/20 hover:bg-amber-500/15 dark:bg-amber-500/15 dark:text-amber-200 dark:hover:bg-amber-500/20"
                 onClick={props.openLoginModal}
               >
-                INITIALIZE_SESSION
+                {props.t('header.initializeSession')}
               </button>
             }
           >
@@ -107,7 +313,11 @@ export default function AppTopHeader(props: AppTopHeaderProps) {
                 type="button"
                 class="group inline-flex h-8 w-8 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white/70 p-1 shadow-sm backdrop-blur-sm transition-all duration-150 hover:bg-white hover:shadow active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/35 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-50 dark:border-slate-800 dark:bg-slate-950/60 dark:hover:bg-slate-950/80 dark:shadow-none dark:focus-visible:ring-amber-400/35 dark:focus-visible:ring-offset-slate-950 sm:w-auto sm:justify-start sm:px-2 sm:py-1"
                 onPointerDown={(ev) => ev.stopPropagation()}
-                onClick={() => props.setShowAccountMenu((value) => !value)}
+                onClick={() => {
+                  setShowLanguageMenu(false)
+                  props.setShowUpdateCenter(false)
+                  props.setShowAccountMenu((value) => !value)
+                }}
                 aria-expanded={props.showAccountMenu}
                 aria-haspopup="menu"
               >
@@ -131,6 +341,221 @@ export default function AppTopHeader(props: AppTopHeaderProps) {
                 </svg>
               </button>
 
+              <Show when={props.showUpdateCenter}>
+                <Portal>
+                  <div class="fixed inset-0 z-[9998]" onPointerDown={() => props.setShowUpdateCenter(false)}>
+                    <div
+                      class="absolute right-5 top-14 mt-2 w-[min(92vw,32rem)] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-900/10 backdrop-blur transition-all duration-150 animate-in fade-in zoom-in-95 dark:border-slate-800 dark:bg-slate-950"
+                      onPointerDown={(event) => event.stopPropagation()}
+                    >
+                      <div class="border-b border-slate-200 px-3 py-2.5 dark:border-slate-800">
+                        <div class="flex items-start justify-between gap-2">
+                          <div>
+                            <div class="text-sm font-semibold text-slate-900 dark:text-slate-100">{props.t('header.updateCenterTitle')}</div>
+                            <div class="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">{props.t('header.updateCenterDesc')}</div>
+                          </div>
+                          <div class="flex flex-wrap items-center justify-end gap-1.5">
+                            <Show when={props.updateCheck.isPending}>
+                              <Badge variant="neutral">{props.t('header.checking')}</Badge>
+                            </Show>
+                            <Show when={!props.updateCheck.isPending && !props.updateCheck.isError}>
+                              <Badge variant={hasAnyUpdate() ? 'warning' : 'success'}>
+                                {hasAnyUpdate() ? props.t('header.updateAvailable') : props.t('header.upToDate')}
+                              </Badge>
+                            </Show>
+                            <Show when={props.updateCheck.data?.source?.kind}>
+                              {(kind) => (
+                                <Badge variant="neutral">
+                                  {kind()}
+                                  {props.updateCheck.data?.source?.channel ? `:${props.updateCheck.data?.source?.channel}` : ''}
+                                </Badge>
+                              )}
+                            </Show>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div class="max-h-[70vh] overflow-auto p-3">
+                        <div class="space-y-3">
+                          <div class="rounded-xl border border-slate-200 bg-white/70 p-3 dark:border-slate-800 dark:bg-slate-950/40">
+                            <div class="flex items-center justify-between gap-2">
+                              <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">{props.t('header.control')}</div>
+                              <Badge variant={hasControlUpdate() ? 'warning' : 'success'}>
+                                {hasControlUpdate() ? props.t('header.updateAvailable') : props.t('header.upToDate')}
+                              </Badge>
+                            </div>
+                            <div class="mt-1 text-xs text-slate-600 dark:text-slate-300">
+                              {props.t('header.current')} <span class="font-mono">{props.controlVersion ?? '—'}</span>
+                            </div>
+                            <Show when={props.updateCheck.data?.latest}>
+                              {(latest) => (
+                                <div class="mt-1 text-xs text-slate-600 dark:text-slate-300">
+                                  {props.t('header.latest')}{' '}
+                                  <a
+                                    href={latest().url}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    class="font-mono text-slate-900 underline decoration-slate-300 underline-offset-2 hover:decoration-slate-500 dark:text-slate-100 dark:decoration-slate-700 dark:hover:decoration-slate-500"
+                                  >
+                                    {latest().tag}
+                                  </a>
+                                </div>
+                              )}
+                            </Show>
+                            <Show when={props.updateCheck.data?.latest?.published_at}>
+                              {(publishedAt) => (
+                                <div class="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                                  {props.t('header.published')} <span class="font-mono">{publishedAt()}</span>
+                                </div>
+                              )}
+                            </Show>
+                          </div>
+
+                          <div class="rounded-xl border border-slate-200 bg-white/70 p-3 dark:border-slate-800 dark:bg-slate-950/40">
+                            <div class="flex items-center justify-between gap-2">
+                              <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">{props.t('header.agent')}</div>
+                              <Badge variant={hasAgentUpdate() ? 'warning' : 'success'}>
+                                {hasAgentUpdate()
+                                  ? props.t('header.nodesOutdated', { count: props.agentOutdatedCount })
+                                  : props.t('header.nodesUpToDate')}
+                              </Badge>
+                            </div>
+                            <Show when={props.updateCheck.data?.agent_latest}>
+                              {(latest) => (
+                                <div class="mt-1 text-xs text-slate-600 dark:text-slate-300">
+                                  {props.t('header.latest')}{' '}
+                                  <a
+                                    href={latest().url}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    class="font-mono text-slate-900 underline decoration-slate-300 underline-offset-2 hover:decoration-slate-500 dark:text-slate-100 dark:decoration-slate-700 dark:hover:decoration-slate-500"
+                                  >
+                                    {latest().tag}
+                                  </a>
+                                </div>
+                              )}
+                            </Show>
+                            <div class="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                              {props.t('header.nodesManageUpdates', { count: props.agentNodeCount })}
+                            </div>
+                          </div>
+
+                          <Show when={props.updateCheck.data?.source?.kind === 'manifest' ? props.updateCheck.data?.source?.manifest_url : null}>
+                            {(manifestUrl) => (
+                              <div class="text-[11px] text-slate-500 dark:text-slate-400">
+                                {props.t('header.manifestSource')}{' '}
+                                <a
+                                  href={manifestUrl()}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  class="font-mono text-slate-900 underline decoration-slate-300 underline-offset-2 hover:decoration-slate-500 dark:text-slate-100 dark:decoration-slate-700 dark:hover:decoration-slate-500"
+                                >
+                                  {manifestUrl()}
+                                </a>
+                              </div>
+                            )}
+                          </Show>
+
+                          <Show when={props.updateCheck.data?.compatibility}>
+                            {(compat) => (
+                              <div class="rounded-xl border border-slate-200 bg-slate-50 p-3 text-[11px] text-slate-600 dark:border-slate-800 dark:bg-slate-900/40 dark:text-slate-300">
+                                {props.t('header.compatibility')}
+                                <Show when={compat().control_min_agent}>
+                                  {(min) => (
+                                    <>
+                                      {' '}· agent ≥ <span class="font-mono">{min()}</span>
+                                    </>
+                                  )}
+                                </Show>
+                                <Show when={compat().control_max_agent}>
+                                  {(max) => (
+                                    <>
+                                      {' '}· agent ≤ <span class="font-mono">{max()}</span>
+                                    </>
+                                  )}
+                                </Show>
+                                <Show when={compat().note}>
+                                  {(note) => <div class="mt-1">{note()}</div>}
+                                </Show>
+                              </div>
+                            )}
+                          </Show>
+
+                          <Show when={props.updateCheck.data?.source?.warning}>
+                            {(warning) => (
+                              <div class="rounded-xl border border-amber-200 bg-amber-50 p-3 text-[11px] text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
+                                {warning()}
+                              </div>
+                            )}
+                          </Show>
+
+                          <Show when={props.updateCheck.isError}>
+                            <div class="rounded-xl border border-rose-200 bg-rose-50 p-3 text-[11px] text-rose-800 dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-200">
+                              {props.t('header.failedCheckUpdates')}
+                            </div>
+                          </Show>
+
+                          <div class="flex flex-wrap items-center gap-2 pt-1">
+                            <Button size="sm" variant="secondary" disabled={props.updateCheck.isPending} onClick={() => void props.updateCheck.refetch()}>
+                              {props.t('header.checkNow')}
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              onClick={() => {
+                                props.setShowUpdateCenter(false)
+                                props.openNodesTab()
+                              }}
+                            >
+                              {props.t('header.openNodes')}
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="primary"
+                              loading={props.triggerUpdate.isPending}
+                              disabled={
+                                props.isReadOnly ||
+                                props.triggerUpdate.isPending ||
+                                props.updateCheck.isPending ||
+                                !props.updateCheck.data?.can_trigger_update ||
+                                !hasControlUpdate()
+                              }
+                              title={
+                                props.isReadOnly
+                                  ? props.t('header.readOnlyMode')
+                                  : !props.updateCheck.data?.can_trigger_update
+                                    ? props.t('header.updaterNotConfigured')
+                                    : !hasControlUpdate()
+                                      ? props.t('header.alreadyUpToDate')
+                                      : props.t('header.triggerControlUpdate')
+                              }
+                              onClick={async () => {
+                                await triggerControlUpdate()
+                              }}
+                            >
+                              {props.t('header.updateControl')}
+                            </Button>
+                          </div>
+
+                          <Show when={props.updateCheck.data && !props.updateCheck.data.can_trigger_update}>
+                            <div class="text-[11px] text-slate-500 dark:text-slate-400">{props.t('header.oneClickWatchtowerHint')}</div>
+                          </Show>
+
+                          <Show when={props.updateCheck.data?.latest?.body}>
+                            {(body) => (
+                              <details class="rounded-xl border border-slate-200 bg-slate-50 p-3 text-[11px] text-slate-700 dark:border-slate-800 dark:bg-slate-900/40 dark:text-slate-200">
+                                <summary class="cursor-pointer select-none font-medium">{props.t('header.controlReleaseNotes')}</summary>
+                                <pre class="mt-2 max-h-56 overflow-auto whitespace-pre-wrap">{body()}</pre>
+                              </details>
+                            )}
+                          </Show>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </Portal>
+              </Show>
+
               <Show when={props.showAccountMenu}>
                 <Portal>
                   <div class="fixed inset-0 z-[9999]" onPointerDown={() => props.setShowAccountMenu(false)}>
@@ -146,7 +571,7 @@ export default function AppTopHeader(props: AppTopHeaderProps) {
                           <div class="min-w-0">
                             <div class="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">{props.me!.username}</div>
                             <div class="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
-                              {props.me!.is_admin ? 'Administrator' : 'User'}
+                              {props.me!.is_admin ? props.t('header.roleAdministrator') : props.t('header.roleUser')}
                             </div>
                           </div>
                         </div>
@@ -160,8 +585,21 @@ export default function AppTopHeader(props: AppTopHeaderProps) {
                           props.openDiagnostics()
                         }}
                       >
-                        <span>Diagnostics</span>
+                        <span>{props.t('header.diagnostics')}</span>
                       </button>
+                      <Show when={props.me?.is_admin}>
+                        <button
+                          type="button"
+                          class="flex w-full items-center px-3 py-2 text-sm text-slate-700 transition-colors hover:bg-slate-50 active:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-900/50 dark:active:bg-slate-900"
+                          onPointerDown={(e) => e.stopPropagation()}
+                          onClick={() => {
+                            props.setShowAccountMenu(false)
+                            props.openSettingsTab()
+                          }}
+                        >
+                          <span>{props.t('tab.settings')}</span>
+                        </button>
+                      </Show>
                       <button
                         type="button"
                         class="flex w-full items-center px-3 py-2 text-sm text-slate-700 transition-colors hover:bg-slate-50 active:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-900/50 dark:active:bg-slate-900"
@@ -171,7 +609,7 @@ export default function AppTopHeader(props: AppTopHeaderProps) {
                           await props.handleLogout()
                         }}
                       >
-                        <span>Logout</span>
+                        <span>{props.t('header.logout')}</span>
                       </button>
                     </div>
                   </div>

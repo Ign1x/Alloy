@@ -87,6 +87,7 @@ export function VirtualLines(props: VirtualLinesProps) {
   return (
     <div
       ref={(el) => (scrollEl = el)}
+      data-no-auto-translate
       class={cn('relative overflow-auto rounded-xl border border-slate-200 bg-slate-50 text-slate-900 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200', props.class)}
       style={{
         'font-size': `${fontSize()}px`,

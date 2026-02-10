@@ -60,8 +60,8 @@ export default function FrpNodeModal(props: FrpNodeModalProps) {
         <Modal
           open={showFrpNodeModal()}
           onClose={() => closeFrpNodeModal()}
-          title={editingFrpNodeId() ? 'Edit FRP node' : 'Add FRP node'}
-          description="Store FRP server info and optional config. Config format is auto-detected (INI/TOML/YAML/JSON)."
+          title={editingFrpNodeId() ? 'Edit tunnel node' : 'Add tunnel node'}
+          description="Store tunnel server info and optional config. Config format is auto-detected (INI/TOML/YAML/JSON)."
           size="lg"
           initialFocus={() => nameEl}
           footer={
@@ -139,7 +139,7 @@ export default function FrpNodeModal(props: FrpNodeModalProps) {
             </Field>
 
             <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <Field label="FRP Server" required error={frpNodeFieldErrors().server_addr}>
+              <Field label="Tunnel server" required error={frpNodeFieldErrors().server_addr}>
                 <Input
                   ref={(el) => {
                     serverAddrEl = el
@@ -185,7 +185,7 @@ export default function FrpNodeModal(props: FrpNodeModalProps) {
                 type={frpNodeTokenVisible() ? 'text' : 'password'}
                 value={frpNodeToken()}
                 onInput={(e) => setFrpNodeToken(e.currentTarget.value)}
-                placeholder="FRP token"
+                placeholder="Tunnel token"
                 spellcheck={false}
                 class="font-mono text-[11px]"
                 invalid={Boolean(frpNodeFieldErrors().token)}
@@ -210,7 +210,7 @@ export default function FrpNodeModal(props: FrpNodeModalProps) {
                 }}
                 value={frpNodeConfig()}
                 onInput={(e) => setFrpNodeConfig(e.currentTarget.value)}
-                placeholder="Paste FRP config (INI/TOML/YAML/JSON)"
+                placeholder="Paste tunnel config (INI/TOML/YAML/JSON)"
                 spellcheck={false}
                 class="font-mono text-[11px]"
                 invalid={Boolean(frpNodeFieldErrors().config)}

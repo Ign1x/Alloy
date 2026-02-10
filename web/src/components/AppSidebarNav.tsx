@@ -1,6 +1,7 @@
 import { Moon, Monitor, Sun } from 'lucide-solid'
 import { Show, type Setter } from 'solid-js'
 
+import type { I18nTranslate } from '../app/i18n'
 import type { ThemePreference } from '../app/hooks/useThemePreference'
 import type { UiTab } from '../app/types'
 import { IconButton } from './ui/IconButton'
@@ -16,13 +17,14 @@ interface AppSidebarNavProps {
   themePref: ThemePreference
   setThemePref: Setter<ThemePreference>
   themeButtonTitle: string
+  t: I18nTranslate
 }
 
 export default function AppSidebarNav(props: AppSidebarNavProps) {
   return (
     <nav
       class={`hidden sm:flex ${props.sidebarExpanded ? 'w-56' : 'w-16'} flex-none flex-col gap-3 border-r border-slate-200 bg-white px-2 py-4 dark:border-slate-800 dark:bg-slate-950`}
-      aria-label="Primary navigation"
+      aria-label={props.t('nav.primary')}
     >
       <button
         type="button"
@@ -30,14 +32,14 @@ export default function AppSidebarNav(props: AppSidebarNavProps) {
           props.sidebarExpanded ? '' : 'justify-center'
         }`}
         onClick={() => props.setTab('instances')}
-        aria-label="Go to Instances"
+        aria-label={props.t('nav.goToInstances')}
         title="Alloy"
       >
         <img src="/logo.svg" class="h-9 w-9 rounded-xl" alt="Alloy" />
         <Show when={props.sidebarExpanded}>
           <div class="min-w-0">
             <div class="truncate font-display text-sm font-semibold text-slate-900 dark:text-slate-100">Alloy</div>
-            <div class="text-[10px] uppercase tracking-[0.2em] text-slate-500">control plane</div>
+            <div class="text-[10px] uppercase tracking-[0.2em] text-slate-500">{props.t('app.controlPlane')}</div>
           </div>
         </Show>
       </button>
@@ -51,14 +53,14 @@ export default function AppSidebarNav(props: AppSidebarNavProps) {
               : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-900/60 dark:hover:text-slate-100'
           } ${props.sidebarExpanded ? '' : 'justify-center'}`}
           onClick={() => props.setTab('instances')}
-          aria-label="Instances"
-          title="Instances"
+          aria-label={props.t('tab.instances')}
+          title={props.t('tab.instances')}
         >
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-5 w-5">
             <path d="M3 4.75A1.75 1.75 0 014.75 3h2.5A1.75 1.75 0 019 4.75v2.5A1.75 1.75 0 017.25 9h-2.5A1.75 1.75 0 013 7.25v-2.5zM11 4.75A1.75 1.75 0 0112.75 3h2.5A1.75 1.75 0 0117 4.75v2.5A1.75 1.75 0 0115.25 9h-2.5A1.75 1.75 0 0111 7.25v-2.5zM3 12.75A1.75 1.75 0 014.75 11h2.5A1.75 1.75 0 019 12.75v2.5A1.75 1.75 0 017.25 17h-2.5A1.75 1.75 0 013 15.25v-2.5zM11 12.75A1.75 1.75 0 0112.75 11h2.5A1.75 1.75 0 0117 12.75v2.5A1.75 1.75 0 0115.25 17h-2.5A1.75 1.75 0 0111 15.25v-2.5z" />
           </svg>
           <Show when={props.sidebarExpanded}>
-            <span class="text-sm font-medium">Instances</span>
+            <span class="text-sm font-medium">{props.t('tab.instances')}</span>
           </Show>
         </button>
 
@@ -70,8 +72,8 @@ export default function AppSidebarNav(props: AppSidebarNavProps) {
               : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-900/60 dark:hover:text-slate-100'
           } ${props.sidebarExpanded ? '' : 'justify-center'}`}
           onClick={() => props.setTab('downloads')}
-          aria-label="Downloads"
-          title="Downloads"
+          aria-label={props.t('tab.downloads')}
+          title={props.t('tab.downloads')}
         >
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-5 w-5">
             <path
@@ -81,7 +83,7 @@ export default function AppSidebarNav(props: AppSidebarNavProps) {
             />
           </svg>
           <Show when={props.sidebarExpanded}>
-            <span class="text-sm font-medium">Downloads</span>
+            <span class="text-sm font-medium">{props.t('tab.downloads')}</span>
           </Show>
         </button>
 
@@ -93,14 +95,14 @@ export default function AppSidebarNav(props: AppSidebarNavProps) {
               : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-900/60 dark:hover:text-slate-100'
           } ${props.sidebarExpanded ? '' : 'justify-center'}`}
           onClick={() => props.setTab('files')}
-          aria-label="Files"
-          title="Files"
+          aria-label={props.t('tab.files')}
+          title={props.t('tab.files')}
         >
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-5 w-5">
             <path d="M2 5.75A2.75 2.75 0 014.75 3h4.19a2.75 2.75 0 011.944.806l.56.56c.215.215.507.334.812.334h2.994A2.75 2.75 0 0118 7.45v6.8A2.75 2.75 0 0115.25 17H4.75A2.75 2.75 0 012 14.25v-8.5z" />
           </svg>
           <Show when={props.sidebarExpanded}>
-            <span class="text-sm font-medium">Files</span>
+            <span class="text-sm font-medium">{props.t('tab.files')}</span>
           </Show>
         </button>
 
@@ -112,15 +114,15 @@ export default function AppSidebarNav(props: AppSidebarNavProps) {
               : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-900/60 dark:hover:text-slate-100'
           } ${props.sidebarExpanded ? '' : 'justify-center'}`}
           onClick={() => props.setTab('nodes')}
-          aria-label="Nodes"
-          title="Nodes"
+          aria-label={props.t('tab.nodes')}
+          title={props.t('tab.nodes')}
         >
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-5 w-5">
             <path d="M4.75 3A2.75 2.75 0 002 5.75v.5A2.75 2.75 0 004.75 9h10.5A2.75 2.75 0 0018 6.25v-.5A2.75 2.75 0 0015.25 3H4.75z" />
             <path d="M4.75 11A2.75 2.75 0 002 13.75v.5A2.75 2.75 0 004.75 17h10.5A2.75 2.75 0 0018 14.25v-.5A2.75 2.75 0 0015.25 11H4.75z" />
           </svg>
           <Show when={props.sidebarExpanded}>
-            <span class="text-sm font-medium">Nodes</span>
+            <span class="text-sm font-medium">{props.t('tab.nodes')}</span>
           </Show>
         </button>
 
@@ -132,14 +134,14 @@ export default function AppSidebarNav(props: AppSidebarNavProps) {
               : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-900/60 dark:hover:text-slate-100'
           } ${props.sidebarExpanded ? '' : 'justify-center'}`}
           onClick={() => props.setTab('frp')}
-          aria-label="FRP"
-          title="FRP"
+          aria-label={props.t('tab.frp')}
+          title={props.t('tab.frp')}
         >
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-5 w-5">
             <path d="M4.75 4A1.75 1.75 0 003 5.75v8.5C3 15.216 3.784 16 4.75 16h1.5C7.216 16 8 15.216 8 14.25V11h4v3.25c0 .966.784 1.75 1.75 1.75h1.5c.966 0 1.75-.784 1.75-1.75v-8.5A1.75 1.75 0 0015.25 4h-1.5A1.75 1.75 0 0012 5.75V9H8V5.75A1.75 1.75 0 006.25 4h-1.5z" />
           </svg>
           <Show when={props.sidebarExpanded}>
-            <span class="text-sm font-medium">FRP</span>
+            <span class="text-sm font-medium">{props.t('tab.frp')}</span>
           </Show>
         </button>
 
@@ -152,8 +154,8 @@ export default function AppSidebarNav(props: AppSidebarNavProps) {
                 : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-900/60 dark:hover:text-slate-100'
             } ${props.sidebarExpanded ? '' : 'justify-center'}`}
             onClick={() => props.setTab('settings')}
-            aria-label="Settings"
-            title="Settings"
+            aria-label={props.t('tab.settings')}
+            title={props.t('tab.settings')}
           >
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-5 w-5" aria-hidden="true">
               <path
@@ -163,7 +165,7 @@ export default function AppSidebarNav(props: AppSidebarNavProps) {
               />
             </svg>
             <Show when={props.sidebarExpanded}>
-              <span class="text-sm font-medium">Settings</span>
+              <span class="text-sm font-medium">{props.t('tab.settings')}</span>
             </Show>
           </button>
         </Show>
@@ -171,7 +173,7 @@ export default function AppSidebarNav(props: AppSidebarNavProps) {
 
       <div class={`mt-auto flex w-full flex-col items-center gap-2 pb-2 ${props.sidebarExpanded ? 'px-1' : ''}`}>
         <IconButton
-          label={props.sidebarExpanded ? 'Collapse sidebar' : 'Expand sidebar'}
+          label={props.sidebarExpanded ? props.t('sidebar.collapse') : props.t('sidebar.expand')}
           variant="ghost"
           onClick={() => props.setSidebarExpanded((value) => !value)}
         >

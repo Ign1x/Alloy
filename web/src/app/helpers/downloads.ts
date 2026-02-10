@@ -31,7 +31,11 @@ export function mapDownloadJobFromServer(raw: unknown): DownloadJob | null {
     targetRaw !== 'terraria_vanilla' &&
     targetRaw !== 'dst_vanilla' &&
     targetRaw !== 'palworld_vanilla' &&
-    targetRaw !== 'factorio_vanilla'
+    targetRaw !== 'factorio_vanilla' &&
+    targetRaw !== 'core_keeper_vanilla' &&
+    targetRaw !== 'seven_days_vanilla' &&
+    targetRaw !== 'the_forest_vanilla' &&
+    targetRaw !== 'sons_of_the_forest_vanilla'
   ) {
     return null
   }
@@ -80,7 +84,11 @@ export function downloadTargetLabel(target: DownloadTarget): string {
   if (target === 'terraria_vanilla') return 'Terraria (Vanilla)'
   if (target === 'dst_vanilla') return "Don't Starve Together (Vanilla)"
   if (target === 'palworld_vanilla') return 'Palworld (Vanilla)'
-  return 'Factorio (Vanilla)'
+  if (target === 'factorio_vanilla') return 'Factorio (Vanilla)'
+  if (target === 'core_keeper_vanilla') return 'Core Keeper (Vanilla)'
+  if (target === 'seven_days_vanilla') return '7 Days to Die (Vanilla)'
+  if (target === 'the_forest_vanilla') return 'The Forest (Vanilla)'
+  return 'Sons of the Forest (Vanilla)'
 }
 
 export function downloadProgressSteps(templateId: string): string[] {
@@ -89,6 +97,10 @@ export function downloadProgressSteps(templateId: string): string[] {
   if (templateId === 'dst:vanilla') return ['Install', 'Ready']
   if (templateId === 'palworld:vanilla') return ['Install', 'Ready']
   if (templateId === 'factorio:vanilla') return ['Resolve', 'Download', 'Extract', 'Ready']
+  if (templateId === 'core_keeper:vanilla') return ['Install', 'Ready']
+  if (templateId === 'seven_days:vanilla') return ['Install', 'Ready']
+  if (templateId === 'the_forest:vanilla') return ['Install', 'Ready']
+  if (templateId === 'sons_of_the_forest:vanilla') return ['Install', 'Ready']
   return ['Queue', 'Run', 'Ready']
 }
 
@@ -132,6 +144,22 @@ export function downloadEstimatedMessage(templateId: string, elapsedMs: number):
     if (elapsedMs < 2_000) return 'resolving factorio package…'
     if (elapsedMs < 20_000) return 'downloading factorio headless package…'
     return 'extracting factorio server files…'
+  }
+  if (templateId === 'core_keeper:vanilla') {
+    if (elapsedMs < 3_000) return 'installing core keeper server via steamcmd…'
+    return 'verifying core keeper install files…'
+  }
+  if (templateId === 'seven_days:vanilla') {
+    if (elapsedMs < 3_000) return 'installing 7 days to die server via steamcmd…'
+    return 'verifying 7 days to die install files…'
+  }
+  if (templateId === 'the_forest:vanilla') {
+    if (elapsedMs < 3_000) return 'installing the forest server via steamcmd…'
+    return 'verifying the forest install files…'
+  }
+  if (templateId === 'sons_of_the_forest:vanilla') {
+    if (elapsedMs < 3_000) return 'installing sons of the forest server via steamcmd…'
+    return 'verifying sons of the forest install files…'
   }
   return 'preparing files…'
 }

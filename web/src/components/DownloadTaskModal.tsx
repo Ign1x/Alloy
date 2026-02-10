@@ -30,7 +30,6 @@ export default function DownloadTaskModal(props: DownloadTaskModalProps) {
           open={Boolean(selectedDownloadJobId())}
           onClose={() => setSelectedDownloadJobId(null)}
           title="Download Task"
-          description="Task details, latest failure reason, and quick copy actions."
           size="md"
           footer={
             <div class="flex gap-3">

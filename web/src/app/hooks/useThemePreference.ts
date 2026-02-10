@@ -73,5 +73,6 @@ export function useThemePreference() {
     themePref,
     setThemePref,
     themeButtonTitle,
+    theme,
   }
 }

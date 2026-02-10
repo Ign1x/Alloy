@@ -1,5 +1,6 @@
 import { Show, type Setter } from 'solid-js'
 
+import type { I18nTranslate } from '../app/i18n'
 import type { ThemePreference } from '../app/hooks/useThemePreference'
 import type { UiTab } from '../app/types'
 import { Badge } from './ui/Badge'
@@ -17,13 +18,21 @@ interface AppMobileDrawerProps {
   themePref: ThemePreference
   setThemePref: Setter<ThemePreference>
   isReadOnly: boolean
+  themeApplied: 'light' | 'dark'
+  t: I18nTranslate
   openLoginModal: () => void
   handleLogout: () => Promise<void>
 }
 
 export default function AppMobileDrawer(props: AppMobileDrawerProps) {
+  const themeModeLabel = () => {
+    const pref = props.themePref
+    if (pref === 'system') return props.t('theme.system')
+    return props.themeApplied === 'dark' ? props.t('theme.dark') : props.t('theme.light')
+  }
+
   return (
-    <Drawer open={props.mobileNavOpen} onClose={() => props.setMobileNavOpen(false)} title="Menu">
+    <Drawer open={props.mobileNavOpen} onClose={() => props.setMobileNavOpen(false)} title={props.t('mobile.menu')}>
       <div class="space-y-2">
         <button
           type="button"
@@ -37,7 +46,7 @@ export default function AppMobileDrawer(props: AppMobileDrawerProps) {
             props.setMobileNavOpen(false)
           }}
         >
-          Instances
+          {props.t('tab.instances')}
         </button>
         <button
           type="button"
@@ -51,7 +60,7 @@ export default function AppMobileDrawer(props: AppMobileDrawerProps) {
             props.setMobileNavOpen(false)
           }}
         >
-          Downloads
+          {props.t('tab.downloads')}
         </button>
         <button
           type="button"
@@ -65,7 +74,7 @@ export default function AppMobileDrawer(props: AppMobileDrawerProps) {
             props.setMobileNavOpen(false)
           }}
         >
-          Files
+          {props.t('tab.files')}
         </button>
         <button
           type="button"
@@ -79,7 +88,7 @@ export default function AppMobileDrawer(props: AppMobileDrawerProps) {
             props.setMobileNavOpen(false)
           }}
         >
-          Nodes
+          {props.t('tab.nodes')}
         </button>
         <button
           type="button"
@@ -93,7 +102,7 @@ export default function AppMobileDrawer(props: AppMobileDrawerProps) {
             props.setMobileNavOpen(false)
           }}
         >
-          FRP
+          {props.t('tab.frp')}
         </button>
         <Show when={props.me?.is_admin}>
           <button
@@ -108,7 +117,7 @@ export default function AppMobileDrawer(props: AppMobileDrawerProps) {
               props.setMobileNavOpen(false)
             }}
           >
-            Settings
+            {props.t('tab.settings')}
           </button>
         </Show>
       </div>
@@ -119,13 +128,13 @@ export default function AppMobileDrawer(props: AppMobileDrawerProps) {
           size="sm"
           onClick={() => props.setThemePref((prev) => (prev === 'system' ? 'light' : prev === 'light' ? 'dark' : 'system'))}
         >
-          Theme: {props.themePref}
+          {props.t('mobile.theme', { mode: themeModeLabel() })}
         </Button>
         <Show when={import.meta.env.MODE !== 'production'}>
           <Badge variant="warning">{import.meta.env.MODE.toUpperCase()}</Badge>
         </Show>
         <Show when={props.isReadOnly}>
-          <Badge variant="danger">READ-ONLY</Badge>
+          <Badge variant="danger">{props.t('header.readOnlyBadge')}</Badge>
         </Show>
       </div>
 
@@ -142,7 +151,7 @@ export default function AppMobileDrawer(props: AppMobileDrawerProps) {
                 props.openLoginModal()
               }}
             >
-              Sign in
+              {props.t('mobile.signIn')}
             </Button>
           }
         >
@@ -155,7 +164,7 @@ export default function AppMobileDrawer(props: AppMobileDrawerProps) {
               await props.handleLogout()
             }}
           >
-            Logout
+            {props.t('header.logout')}
           </Button>
         </Show>
       </div>

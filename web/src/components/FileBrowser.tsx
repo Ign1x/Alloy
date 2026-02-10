@@ -117,28 +117,28 @@ function fileErrorSuggestion(err: unknown): { title: string; hints: string[] } |
   if (!isAlloyApiError(err)) return null
   const code = err.data.code
   if (code === 'not_found') {
-    return { title: 'Not found', hints: ['The path may have been moved or deleted.', 'Try refreshing the directory.'] }
+    return { title: 'Not found', hints: ['Refresh and retry.'] }
   }
   if (code === 'permission_denied') {
     return {
       title: 'Permission denied',
-      hints: ['The agent cannot read this path with current permissions.', 'Check the agent data root and file permissions.'],
+      hints: ['Check agent data root and file permissions.'],
     }
   }
   if (code === 'invalid_utf8') {
     return {
       title: 'Unsupported file type',
-      hints: ['Preview supports UTF‑8 text files only.', 'This is likely a binary file (zip/jar/db).'],
+      hints: ['Preview supports UTF‑8 text only.'],
     }
   }
   if (code === 'invalid_param') {
-    return { title: 'Invalid request', hints: ['The selected path may be a directory, not a file.', 'Try selecting a different entry.'] }
+    return { title: 'Invalid request', hints: ['Select a different entry.'] }
   }
   if (code === 'agent_unreachable') {
-    return { title: 'Agent offline', hints: ['Open Diagnostics to confirm agent health.', 'Retry after the agent reconnects.'] }
+    return { title: 'Agent offline', hints: ['Retry after reconnecting.'] }
   }
   if (code === 'timeout') {
-    return { title: 'Timed out', hints: ['Retry the request.', 'If this keeps happening, the agent may be overloaded.'] }
+    return { title: 'Timed out', hints: ['Retry the request.'] }
   }
   return null
 }
@@ -573,7 +573,6 @@ export function FileBrowser(props: FileBrowserProps) {
                   fallback={
                     <EmptyState
                       title="Empty directory"
-                      description="No files here yet."
                       actions={
                         <IconButton type="button" label="Refresh" variant="secondary" onClick={() => fsList.refetch()}>
                           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
@@ -662,7 +661,7 @@ export function FileBrowser(props: FileBrowserProps) {
             when={selectedFile()}
             fallback={
               <div class="flex flex-1 items-center justify-center">
-                <EmptyState title="Select a file" description="Pick a file from the left to preview its contents." />
+                <EmptyState title="Select a file" />
               </div>
             }
           >
@@ -770,7 +769,7 @@ export function FileBrowser(props: FileBrowserProps) {
                           </div>
                         }
                       >
-                        <EmptyState title="Preview not supported" description="This file can't be previewed." />
+                        <EmptyState title="Preview not supported" />
                       </Show>
                     }
                   >

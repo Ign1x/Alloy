@@ -2,11 +2,9 @@ import { Show } from 'solid-js'
 import { Badge } from '../components/ui/Badge'
 import { Button } from '../components/ui/Button'
 import { EmptyState } from '../components/ui/EmptyState'
-import { ErrorState } from '../components/ui/ErrorState'
 import { Input } from '../components/ui/Input'
 import { Textarea } from '../components/ui/Textarea'
 import { VisibilityToggle } from '../app/primitives/VisibilityToggle'
-import { safeCopy } from '../app/helpers/misc'
 import { queryClient } from '../rspc'
 
 export type SettingsTabProps = {
@@ -43,9 +41,18 @@ export default function SettingsTab(props: SettingsTabProps) {
     settingsSteamcmdMaFile,
     setSettingsSteamcmdMaFile,
     setSteamcmdCredentials,
-    updateCheck,
-    triggerUpdate,
-    controlDiagnostics,
+    settingsCurrentPassword,
+    setSettingsCurrentPassword,
+    settingsCurrentPasswordVisible,
+    setSettingsCurrentPasswordVisible,
+    settingsNewUsername,
+    setSettingsNewUsername,
+    settingsNewPassword,
+    setSettingsNewPassword,
+    settingsNewPasswordVisible,
+    setSettingsNewPasswordVisible,
+    changeCredentialsPending,
+    handleChangeCredentials,
   } = props as any
 
   let settingsSteamcmdMaFileInputEl: HTMLInputElement | undefined
@@ -57,19 +64,78 @@ export default function SettingsTab(props: SettingsTabProps) {
                     <div class="flex items-start justify-between gap-3">
                       <div>
                         <div class="text-sm font-semibold text-slate-900 dark:text-slate-100">Settings</div>
-                        <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                          Configure shared secrets used by templates.
-                        </div>
                       </div>
                       <Show when={settingsStatus.isPending}>
                         <Badge variant="neutral">Loading</Badge>
                       </Show>
                     </div>
 
-                    <Show
-                      when={me()?.is_admin}
-                      fallback={<EmptyState title="Forbidden" description="Administrator access required." />}
-                    >
+                    <Show when={me()?.is_admin} fallback={<EmptyState title="Forbidden" />}>
+                      <div class="rounded-2xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
+                        <div class="flex items-center justify-between gap-3">
+                          <div class="text-sm font-medium text-slate-900 dark:text-slate-100">Control account</div>
+                          <Badge variant="neutral">{me()?.username ?? 'current user'}</Badge>
+                        </div>
+                        <div class="mt-3 grid gap-2">
+                          <Input
+                            type={settingsCurrentPasswordVisible() ? 'text' : 'password'}
+                            value={settingsCurrentPassword()}
+                            onInput={(e) => setSettingsCurrentPassword(e.currentTarget.value)}
+                            placeholder="Current password…"
+                            autocomplete="current-password"
+                            class="w-full font-mono text-[11px]"
+                            rightIcon={
+                              <VisibilityToggle
+                                visible={settingsCurrentPasswordVisible()}
+                                labelWhenHidden="Show password"
+                                labelWhenVisible="Hide password"
+                                onToggle={() => setSettingsCurrentPasswordVisible((v: boolean) => !v)}
+                              />
+                            }
+                          />
+
+                          <Input
+                            value={settingsNewUsername()}
+                            onInput={(e) => setSettingsNewUsername(e.currentTarget.value)}
+                            placeholder={`New username… (current: ${me()?.username ?? 'admin'})`}
+                            autocomplete="username"
+                            spellcheck={false}
+                            class="font-mono text-[11px]"
+                          />
+
+                          <Input
+                            type={settingsNewPasswordVisible() ? 'text' : 'password'}
+                            value={settingsNewPassword()}
+                            onInput={(e) => setSettingsNewPassword(e.currentTarget.value)}
+                            placeholder="New password…"
+                            autocomplete="new-password"
+                            class="w-full font-mono text-[11px]"
+                            rightIcon={
+                              <VisibilityToggle
+                                visible={settingsNewPasswordVisible()}
+                                labelWhenHidden="Show password"
+                                labelWhenVisible="Hide password"
+                                onToggle={() => setSettingsNewPasswordVisible((v: boolean) => !v)}
+                              />
+                            }
+                          />
+                        </div>
+
+                        <div class="mt-3 flex flex-wrap items-center gap-2">
+                          <Button
+                            size="sm"
+                            variant="primary"
+                            loading={changeCredentialsPending()}
+                            disabled={isReadOnly()}
+                            onClick={async () => {
+                              await handleChangeCredentials()
+                            }}
+                          >
+                            Save account
+                          </Button>
+                        </div>
+                      </div>
+
                       <div class="rounded-2xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
                         <div class="flex items-center justify-between gap-3">
                           <div class="text-sm font-medium text-slate-900 dark:text-slate-100">DST default Klei key</div>
@@ -77,16 +143,12 @@ export default function SettingsTab(props: SettingsTabProps) {
                             {settingsStatus.data?.dst_default_klei_key_set ? 'Configured' : 'Not set'}
                           </Badge>
                         </div>
-                        <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                          Used as the default <span class="font-mono">cluster_token</span> when creating DST instances (if left blank).
-                        </div>
-
                         <div class="mt-3">
                           <Input
                             type={settingsDstKeyVisible() ? 'text' : 'password'}
                             value={settingsDstKey()}
                             onInput={(e) => setSettingsDstKey(e.currentTarget.value)}
-                            placeholder={settingsStatus.data?.dst_default_klei_key_set ? '(configured — paste to update, blank to clear)' : 'Paste key…'}
+                            placeholder="Paste key…"
                             spellcheck={false}
                             class="w-full font-mono text-[11px]"
                             rightIcon={
@@ -146,16 +208,12 @@ export default function SettingsTab(props: SettingsTabProps) {
                             {settingsStatus.data?.curseforge_api_key_set ? 'Configured' : 'Not set'}
                           </Badge>
                         </div>
-                        <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                          Required for resolving CurseForge modpacks and downloading the author-provided server pack.
-                        </div>
-
                         <div class="mt-3">
                           <Input
                             type={settingsCurseforgeKeyVisible() ? 'text' : 'password'}
                             value={settingsCurseforgeKey()}
                             onInput={(e) => setSettingsCurseforgeKey(e.currentTarget.value)}
-                            placeholder={settingsStatus.data?.curseforge_api_key_set ? '(configured — paste to update, blank to clear)' : 'Paste key…'}
+                            placeholder="Paste key…"
                             spellcheck={false}
                             class="w-full font-mono text-[11px]"
                             rightIcon={
@@ -215,9 +273,6 @@ export default function SettingsTab(props: SettingsTabProps) {
                             {settingsStatus.data?.steamcmd_username_set && settingsStatus.data?.steamcmd_password_set ? 'Configured' : 'Not set'}
                           </Badge>
                         </div>
-                        <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                          Shared by SteamCMD-based templates. Supports `maFile` import and automatic Steam Guard (2FA).
-                        </div>
                         <div class="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
                           <Badge variant={settingsStatus.data?.steamcmd_shared_secret_set ? 'success' : 'neutral'}>
                             {settingsStatus.data?.steamcmd_shared_secret_set ? 'Auto 2FA enabled' : 'Auto 2FA disabled'}
@@ -235,11 +290,7 @@ export default function SettingsTab(props: SettingsTabProps) {
                           <Input
                             value={settingsSteamcmdUsername()}
                             onInput={(e) => setSettingsSteamcmdUsername(e.currentTarget.value)}
-                            placeholder={
-                              settingsStatus.data?.steamcmd_username_set
-                                ? '(configured — paste to update, blank + clear to remove)'
-                                : 'Steam username…'
-                            }
+                            placeholder="Steam username…"
                             autocomplete="username"
                             spellcheck={false}
                             class="font-mono text-[11px]"
@@ -249,11 +300,7 @@ export default function SettingsTab(props: SettingsTabProps) {
                             type={settingsSteamcmdPasswordVisible() ? 'text' : 'password'}
                             value={settingsSteamcmdPassword()}
                             onInput={(e) => setSettingsSteamcmdPassword(e.currentTarget.value)}
-                            placeholder={
-                              settingsStatus.data?.steamcmd_password_set
-                                ? '(configured — paste to update, blank + clear to remove)'
-                                : 'Steam password…'
-                            }
+                            placeholder="Steam password…"
                             autocomplete="current-password"
                             class="w-full font-mono text-[11px]"
                             rightIcon={
@@ -269,7 +316,7 @@ export default function SettingsTab(props: SettingsTabProps) {
                           <Input
                             value={settingsSteamcmdGuardCode()}
                             onInput={(e) => setSettingsSteamcmdGuardCode(e.currentTarget.value)}
-                            placeholder="Steam Guard code (optional, usually not needed with maFile)…"
+                            placeholder="Steam Guard code…"
                             autocomplete="one-time-code"
                             class="font-mono text-[11px]"
                           />
@@ -277,7 +324,7 @@ export default function SettingsTab(props: SettingsTabProps) {
                           <Textarea
                             value={settingsSteamcmdMaFile()}
                             onInput={(e) => setSettingsSteamcmdMaFile(e.currentTarget.value)}
-                            placeholder="Paste Steam Desktop Authenticator maFile JSON here (optional)…"
+                            placeholder="maFile JSON…"
                             class="min-h-[96px] font-mono text-[11px]"
                           />
 
@@ -388,209 +435,6 @@ export default function SettingsTab(props: SettingsTabProps) {
                         </div>
                       </div>
 
-                      <div class="rounded-2xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
-                        <div class="flex flex-wrap items-start justify-between gap-3">
-                          <div class="min-w-0">
-                            <div class="text-sm font-medium text-slate-900 dark:text-slate-100">Updates</div>
-                            <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                              Control current <span class="font-mono">{controlDiagnostics.data?.control_version ?? '—'}</span>
-                              <Show when={updateCheck.data?.latest}>
-                                {(latest) => (
-                                  <>
-                                    {' '}
-                                    · latest{' '}
-                                    <a
-                                      href={latest().url}
-                                      target="_blank"
-                                      rel="noreferrer"
-                                      class="font-mono text-slate-900 underline decoration-slate-300 underline-offset-2 hover:decoration-slate-500 dark:text-slate-100 dark:decoration-slate-700 dark:hover:decoration-slate-500"
-                                    >
-                                      {latest().tag}
-                                    </a>
-                                  </>
-                                )}
-                              </Show>
-                            </div>
-
-                            <Show when={updateCheck.data?.agent_latest}>
-                              {(agentLatest) => (
-                                <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                                  Agent latest{' '}
-                                  <a
-                                    href={agentLatest().url}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    class="font-mono text-slate-900 underline decoration-slate-300 underline-offset-2 hover:decoration-slate-500 dark:text-slate-100 dark:decoration-slate-700 dark:hover:decoration-slate-500"
-                                  >
-                                    {agentLatest().tag}
-                                  </a>
-                                  {' '}· trigger agent updates from <span class="font-medium">Nodes</span>.
-                                </div>
-                              )}
-                            </Show>
-                          </div>
-
-                          <div class="flex flex-wrap items-center gap-2">
-                            <Show when={updateCheck.isPending}>
-                              <Badge variant="neutral">Checking</Badge>
-                            </Show>
-                            <Show when={updateCheck.data && !updateCheck.isPending && !updateCheck.isError}>
-                              <Badge variant={updateCheck.data?.update_available ? 'warning' : 'success'}>
-                                {updateCheck.data?.update_available ? 'Update available' : 'Up to date'}
-                              </Badge>
-                            </Show>
-                            <Show when={updateCheck.data?.source?.kind}>
-                              {(kind) => (
-                                <Badge variant="neutral">
-                                  {kind()}
-                                  {updateCheck.data?.source?.channel ? `:${updateCheck.data?.source?.channel}` : ''}
-                                </Badge>
-                              )}
-                            </Show>
-                          </div>
-                        </div>
-
-                        <Show when={updateCheck.data?.latest?.published_at}>
-                          {(publishedAt) => (
-                            <div class="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
-                              Published <span class="font-mono">{publishedAt()}</span>
-                            </div>
-                          )}
-                        </Show>
-
-                        <Show when={updateCheck.data?.source?.kind === 'manifest' ? updateCheck.data?.source?.manifest_url : null}>
-                          {(manifestUrl) => (
-                            <div class="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
-                              Manifest source{' '}
-                              <a
-                                href={manifestUrl()}
-                                target="_blank"
-                                rel="noreferrer"
-                                class="font-mono text-slate-900 underline decoration-slate-300 underline-offset-2 hover:decoration-slate-500 dark:text-slate-100 dark:decoration-slate-700 dark:hover:decoration-slate-500"
-                              >
-                                {manifestUrl()}
-                              </a>
-                            </div>
-                          )}
-                        </Show>
-
-                        <Show when={updateCheck.data?.compatibility}>
-                          {(compat) => (
-                            <div class="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
-                              Compatibility
-                              <Show when={compat().control_min_agent}>
-                                {(min) => (
-                                  <>
-                                    {' '}· agent ≥ <span class="font-mono">{min()}</span>
-                                  </>
-                                )}
-                              </Show>
-                              <Show when={compat().control_max_agent}>
-                                {(max) => (
-                                  <>
-                                    {' '}· agent ≤ <span class="font-mono">{max()}</span>
-                                  </>
-                                )}
-                              </Show>
-                              <Show when={compat().note}>
-                                {(note) => <div class="mt-1">{note()}</div>}
-                              </Show>
-                            </div>
-                          )}
-                        </Show>
-
-                        <Show when={updateCheck.data?.source?.warning}>
-                          {(warning) => (
-                            <div class="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-[11px] text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
-                              {warning()}
-                            </div>
-                          )}
-                        </Show>
-
-                        <Show when={updateCheck.data?.latest?.body}>
-                          {(body) => (
-                            <pre class="mt-3 max-h-56 overflow-auto rounded-xl border border-slate-200 bg-slate-50 p-3 text-[11px] leading-relaxed text-slate-700 dark:border-slate-800 dark:bg-slate-900/40 dark:text-slate-200">
-                              {body()}
-                            </pre>
-                          )}
-                        </Show>
-
-                        <Show when={updateCheck.isError}>
-                          <ErrorState title="Failed to check updates" error={updateCheck.error} onRetry={() => updateCheck.refetch()} class="mt-3" />
-                        </Show>
-
-                        <div class="mt-3 flex flex-wrap items-center gap-2">
-                          <Button size="sm" variant="secondary" disabled={updateCheck.isPending} onClick={() => updateCheck.refetch()}>
-                            Check
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="primary"
-                            loading={triggerUpdate.isPending}
-                            disabled={
-                              isReadOnly() ||
-                              triggerUpdate.isPending ||
-                              updateCheck.isPending ||
-                              !updateCheck.data?.can_trigger_update ||
-                              !updateCheck.data?.update_available
-                            }
-                            title={
-                              isReadOnly()
-                                ? 'Read-only mode'
-                                : !updateCheck.data?.can_trigger_update
-                                  ? 'Updater not configured'
-                                  : !updateCheck.data?.update_available
-                                    ? 'Already up to date'
-                                    : 'Trigger update'
-                            }
-                            onClick={async () => {
-                              try {
-                                const out = await triggerUpdate.mutateAsync(null)
-                                pushToast('success', 'Update triggered', out.message || 'Watchtower update requested.')
-                                setTimeout(() => {
-                                  try {
-                                    window.location.reload()
-                                  } catch {
-                                    // ignore
-                                  }
-                                }, 3000)
-                              } catch (e) {
-                                toastError('Update failed', e)
-                              }
-                            }}
-                          >
-                            Update now
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="secondary"
-                            onClick={async () => {
-                              const cmd = 'docker compose pull && docker compose up -d'
-                              try {
-                                await safeCopy(cmd)
-                                pushToast('success', 'Copied', cmd)
-                              } catch (e) {
-                                toastError('Copy failed', e)
-                              }
-                            }}
-                          >
-                            Copy docker command
-                          </Button>
-                        </div>
-
-                        <div class="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3 font-mono text-[11px] text-slate-700 dark:border-slate-800 dark:bg-slate-900/40 dark:text-slate-200">
-                          docker compose pull && docker compose up -d
-                        </div>
-
-                        <Show when={updateCheck.data && !updateCheck.data.can_trigger_update}>
-                          <div class="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
-                            One-click update requires Watchtower HTTP API. Set{' '}
-                            <span class="font-mono">ALLOY_UPDATE_WATCHTOWER_URL</span>
-                            {' '}on{' '}
-                            <span class="font-mono">alloy-control</span>.
-                          </div>
-                        </Show>
-                      </div>
                     </Show>
                   </div>
                 </div>

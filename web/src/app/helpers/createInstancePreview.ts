@@ -169,8 +169,8 @@ export function buildCreatePreview(input: BuildCreatePreviewInput): CreatePrevie
 
     if (input.mcFrpEnabled) {
       const ep = parseFrpEndpoint(input.mcEffectiveFrpConfig)
-      rows.push({ label: 'FRP', value: ep ?? '(enabled)' })
-      if (!input.mcEffectiveFrpConfig.trim()) warnings.push('Paste FRP config or disable FRP.')
+      rows.push({ label: 'Tunnel', value: ep ?? '(enabled)' })
+      if (!input.mcEffectiveFrpConfig.trim()) warnings.push('Paste tunnel config or disable tunnels.')
     }
 
     if (!input.mcEula) warnings.push('Accept the Minecraft EULA to start.')
@@ -187,8 +187,8 @@ export function buildCreatePreview(input: BuildCreatePreviewInput): CreatePrevie
 
     if (input.mcFrpEnabled) {
       const ep = parseFrpEndpoint(input.mcEffectiveFrpConfig)
-      rows.push({ label: 'FRP', value: ep ?? '(enabled)' })
-      if (!input.mcEffectiveFrpConfig.trim()) warnings.push('Paste FRP config or disable FRP.')
+      rows.push({ label: 'Tunnel', value: ep ?? '(enabled)' })
+      if (!input.mcEffectiveFrpConfig.trim()) warnings.push('Paste tunnel config or disable tunnels.')
     }
 
     if (!input.mcEula) warnings.push('Accept the Minecraft EULA to start.')
@@ -206,8 +206,8 @@ export function buildCreatePreview(input: BuildCreatePreviewInput): CreatePrevie
 
     if (input.mcFrpEnabled) {
       const ep = parseFrpEndpoint(input.mcEffectiveFrpConfig)
-      rows.push({ label: 'FRP', value: ep ?? '(enabled)' })
-      if (!input.mcEffectiveFrpConfig.trim()) warnings.push('Paste FRP config or disable FRP.')
+      rows.push({ label: 'Tunnel', value: ep ?? '(enabled)' })
+      if (!input.mcEffectiveFrpConfig.trim()) warnings.push('Paste tunnel config or disable tunnels.')
     }
 
     if (!input.mcEula) warnings.push('Accept the Minecraft EULA to start.')
@@ -225,8 +225,8 @@ export function buildCreatePreview(input: BuildCreatePreviewInput): CreatePrevie
 
     if (input.mcFrpEnabled) {
       const ep = parseFrpEndpoint(input.mcEffectiveFrpConfig)
-      rows.push({ label: 'FRP', value: ep ?? '(enabled)' })
-      if (!input.mcEffectiveFrpConfig.trim()) warnings.push('Paste FRP config or disable FRP.')
+      rows.push({ label: 'Tunnel', value: ep ?? '(enabled)' })
+      if (!input.mcEffectiveFrpConfig.trim()) warnings.push('Paste tunnel config or disable tunnels.')
     }
 
     if (!input.mcEula) warnings.push('Accept the Minecraft EULA to start.')
@@ -268,8 +268,8 @@ export function buildCreatePreview(input: BuildCreatePreviewInput): CreatePrevie
 
     if (input.trFrpEnabled) {
       const ep = parseFrpEndpoint(input.trEffectiveFrpConfig)
-      rows.push({ label: 'FRP', value: ep ?? '(enabled)' })
-      if (!input.trEffectiveFrpConfig.trim()) warnings.push('Paste FRP config or disable FRP.')
+      rows.push({ label: 'Tunnel', value: ep ?? '(enabled)' })
+      if (!input.trEffectiveFrpConfig.trim()) warnings.push('Paste tunnel config or disable tunnels.')
     }
 
     rows.push({ label: 'Max players', value: input.trMaxPlayers.trim() || '8' })

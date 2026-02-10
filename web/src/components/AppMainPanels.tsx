@@ -1,5 +1,6 @@
 import { Show } from 'solid-js'
 
+import type { I18nTranslate } from '../app/i18n'
 import type { UiTab } from '../app/types'
 import { FileBrowser } from './FileBrowser'
 import DownloadsTab, { type DownloadsTabProps } from '../pages/DownloadsTab'
@@ -18,6 +19,7 @@ interface AppMainPanelsProps {
   frpTabProps: FrpTabProps
   settingsTabProps: SettingsTabProps
   nodesTabProps: NodesTabProps
+  t: I18nTranslate
 }
 
 export default function AppMainPanels(props: AppMainPanelsProps) {
@@ -29,7 +31,7 @@ export default function AppMainPanels(props: AppMainPanelsProps) {
       <Show when={props.tab() === 'files'}>
         <FileBrowser
           enabled={props.isAuthed() && props.tab() === 'files'}
-          title="Files"
+          title={props.t('tab.files')}
           initialPath={props.fsPath()}
           initialSelectedFile={props.selectedFilePath()}
           rootLabel="/data"

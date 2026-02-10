@@ -243,7 +243,7 @@ export default function InstancesCreatePanel(props: InstancesCreatePanelProps) {
                             } else if (template_id === 'minecraft:vanilla') {
                               if (!mcEula()) localErrors.accept_eula = 'You must accept the EULA to start a Minecraft server.'
                               if (mcFrpEnabled() && !mcFrpCfg)
-                                localErrors.frp_config = mcFrpMode() === 'node' ? 'Select an FRP node.' : 'Paste FRP config.'
+                                localErrors.frp_config = mcFrpMode() === 'node' ? 'Select a tunnel node.' : 'Paste tunnel config.'
                               params.accept_eula = 'true'
                               const v = mcVersion().trim()
                               params.version = v || 'latest_release'
@@ -254,7 +254,7 @@ export default function InstancesCreatePanel(props: InstancesCreatePanelProps) {
                               if (!mcEula()) localErrors.accept_eula = 'You must accept the EULA to start a Minecraft server.'
                               if (!mcMrpack().trim()) localErrors.mrpack = 'Paste a Modrinth version link or a direct .mrpack URL.'
                               if (mcFrpEnabled() && !mcFrpCfg)
-                                localErrors.frp_config = mcFrpMode() === 'node' ? 'Select an FRP node.' : 'Paste FRP config.'
+                                localErrors.frp_config = mcFrpMode() === 'node' ? 'Select a tunnel node.' : 'Paste tunnel config.'
                               params.accept_eula = 'true'
                               params.mrpack = mcMrpack().trim()
                               params.memory_mb = mcMemory() || '2048'
@@ -264,7 +264,7 @@ export default function InstancesCreatePanel(props: InstancesCreatePanelProps) {
                               if (!mcEula()) localErrors.accept_eula = 'You must accept the EULA to start a Minecraft server.'
                               if (!mcImportPack().trim()) localErrors.pack = 'Provide a server pack zip URL, or a path under /data.'
                               if (mcFrpEnabled() && !mcFrpCfg)
-                                localErrors.frp_config = mcFrpMode() === 'node' ? 'Select an FRP node.' : 'Paste FRP config.'
+                                localErrors.frp_config = mcFrpMode() === 'node' ? 'Select a tunnel node.' : 'Paste tunnel config.'
                               params.accept_eula = 'true'
                               params.pack = mcImportPack().trim()
                               params.memory_mb = mcMemory() || '2048'
@@ -274,7 +274,7 @@ export default function InstancesCreatePanel(props: InstancesCreatePanelProps) {
                               if (!mcEula()) localErrors.accept_eula = 'You must accept the EULA to start a Minecraft server.'
                               if (!mcCurseforge().trim()) localErrors.curseforge = 'Paste a CurseForge file URL, or modId:fileId.'
                               if (mcFrpEnabled() && !mcFrpCfg)
-                                localErrors.frp_config = mcFrpMode() === 'node' ? 'Select an FRP node.' : 'Paste FRP config.'
+                                localErrors.frp_config = mcFrpMode() === 'node' ? 'Select a tunnel node.' : 'Paste tunnel config.'
                               params.accept_eula = 'true'
                               params.curseforge = mcCurseforge().trim()
                               params.memory_mb = mcMemory() || '2048'
@@ -289,7 +289,7 @@ export default function InstancesCreatePanel(props: InstancesCreatePanelProps) {
                               params.world_size = trWorldSize().trim() || '1'
                               if (trPassword().trim()) params.password = trPassword().trim()
                               if (trFrpEnabled() && !trFrpCfg)
-                                localErrors.frp_config = trFrpMode() === 'node' ? 'Select an FRP node.' : 'Paste FRP config.'
+                                localErrors.frp_config = trFrpMode() === 'node' ? 'Select a tunnel node.' : 'Paste tunnel config.'
                               if (trFrpEnabled() && trFrpCfg) params.frp_config = trFrpCfg
                             } else if (template_id === 'dst:vanilla') {
                               params.cluster_token = dstClusterToken().trim()
@@ -373,7 +373,16 @@ export default function InstancesCreatePanel(props: InstancesCreatePanelProps) {
                           disabled={
                             isReadOnly() ||
                             createInstance.isPending ||
-                            !['minecraft:vanilla', 'terraria:vanilla', 'palworld:vanilla', 'factorio:vanilla'].includes(createTemplateId())
+                            ![
+                              'minecraft:vanilla',
+                              'terraria:vanilla',
+                              'palworld:vanilla',
+                              'factorio:vanilla',
+                              'core_keeper:vanilla',
+                              'seven_days:vanilla',
+                              'the_forest:vanilla',
+                              'sons_of_the_forest:vanilla',
+                            ].includes(createTemplateId())
                           }
                           title={isReadOnly() ? 'Read-only mode' : 'Only download required files (no start)'}
 	                          onClick={async () => {

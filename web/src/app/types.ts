@@ -8,6 +8,10 @@ export type DownloadTarget =
   | 'dst_vanilla'
   | 'palworld_vanilla'
   | 'factorio_vanilla'
+  | 'core_keeper_vanilla'
+  | 'seven_days_vanilla'
+  | 'the_forest_vanilla'
+  | 'sons_of_the_forest_vanilla'
 export type DownloadCenterView =
   | 'tasks'
   | 'minecraft'
@@ -15,6 +19,10 @@ export type DownloadCenterView =
   | 'dst'
   | 'palworld'
   | 'factorio'
+  | 'core_keeper'
+  | 'seven_days'
+  | 'the_forest'
+  | 'sons_of_the_forest'
   | 'cache'
 export type DownloadJobState = 'queued' | 'running' | 'paused' | 'success' | 'error' | 'canceled'
 export type DownloadJob = {
