@@ -313,7 +313,7 @@ fn bearer_token(headers: &HeaderMap) -> Option<String> {
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
-struct AgentAuthQuery {
+pub struct AgentAuthQuery {
     token: Option<String>,
 }
 
@@ -380,7 +380,7 @@ pub async fn agent_ws(
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
-struct AgentPollQuery {
+pub struct AgentPollQuery {
     node: String,
     agent_version: Option<String>,
     token: Option<String>,
@@ -481,7 +481,7 @@ pub async fn agent_poll(
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
-struct AgentRespQuery {
+pub struct AgentRespQuery {
     node: String,
     token: Option<String>,
 }
