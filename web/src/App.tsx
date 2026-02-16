@@ -1975,6 +1975,7 @@ function App() {
       '      - ALLOY_FS_WRITE_ENABLED=true',
       `      - ALLOY_CONTROL_WS_URL=${primaryUrl}`,
       `      - ALLOY_CONTROL_WS_URLS=${wsUrlsEnv}`,
+      '      - ALLOY_CONTROL_TUNNEL_MODE=poll',
       '      - ALLOY_CONTROL_WS_PING_INTERVAL_MS=5000',
       '      - ALLOY_CONTROL_WS_APP_KEEPALIVE_MS=12000',
       '      - ALLOY_CONTROL_WS_CONNECT_TIMEOUT_MS=15000',

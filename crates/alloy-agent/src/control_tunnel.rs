@@ -3,6 +3,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use base64::Engine;
 use futures_util::{SinkExt, StreamExt};
 use prost::Message;
+use reqwest::{Client, StatusCode};
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::{Message as WsMessage, client::IntoClientRequest};
 use tracing::{Instrument, info_span};
@@ -496,6 +497,98 @@ fn node_token() -> Option<String> {
 }
 
 pub fn spawn(manager: ProcessManager) {
+    match control_tunnel_mode() {
+        ControlTunnelMode::Ws => spawn_ws(manager),
+        ControlTunnelMode::Poll => spawn_poll(manager),
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ControlTunnelMode {
+    Ws,
+    Poll,
+}
+
+fn control_tunnel_mode() -> ControlTunnelMode {
+    match std::env::var("ALLOY_CONTROL_TUNNEL_MODE")
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "poll" | "http" | "longpoll" | "long-poll" => ControlTunnelMode::Poll,
+        _ => ControlTunnelMode::Ws,
+    }
+}
+
+fn poll_wait() -> Duration {
+    const DEFAULT_MS: u64 = 25_000;
+    const MIN_MS: u64 = 1_000;
+    const MAX_MS: u64 = 90_000;
+
+    let raw = std::env::var("ALLOY_CONTROL_POLL_WAIT_MS").ok();
+    let ms = raw
+        .as_deref()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(DEFAULT_MS)
+        .clamp(MIN_MS, MAX_MS);
+
+    Duration::from_millis(ms)
+}
+
+fn parse_any_urls(raw: &str) -> Vec<String> {
+    let mut out = Vec::<String>::new();
+    for part in raw.split(|c: char| c == ',' || c == ';' || c.is_whitespace()) {
+        let trimmed = part.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if out.iter().any(|v| v == trimmed) {
+            continue;
+        }
+        out.push(trimmed.to_string());
+    }
+    out
+}
+
+fn control_poll_endpoints() -> Vec<(String, String)> {
+    let urls = std::env::var("ALLOY_CONTROL_POLL_URLS")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .map(|v| parse_any_urls(&v))
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(control_ws_urls);
+
+    let mut out = Vec::<(String, String)>::new();
+    for raw in urls {
+        let Ok(mut url) = reqwest::Url::parse(&raw) else {
+            continue;
+        };
+        let scheme = match url.scheme() {
+            "ws" => "http",
+            "wss" => "https",
+            "http" => "http",
+            "https" => "https",
+            _ => continue,
+        };
+        let _ = url.set_scheme(scheme);
+        url.set_query(None);
+        url.set_fragment(None);
+
+        let mut poll_url = url.clone();
+        poll_url.set_path("/agent/poll");
+
+        let mut resp_url = url;
+        resp_url.set_path("/agent/resp");
+
+        out.push((poll_url.to_string(), resp_url.to_string()));
+    }
+    out
+}
+
+fn spawn_ws(manager: ProcessManager) {
     let urls = control_ws_urls();
     if urls.is_empty() {
         return;
@@ -535,6 +628,188 @@ pub fn spawn(manager: ProcessManager) {
         .instrument(span)
         .await;
     });
+}
+
+fn spawn_poll(manager: ProcessManager) {
+    let endpoints = control_poll_endpoints();
+    if endpoints.is_empty() {
+        return;
+    }
+
+    let node = node_name();
+    let token = node_token();
+    let rpc = AgentRpc::new(manager);
+
+    tokio::spawn(async move {
+        let span = info_span!(
+            "control_poll",
+            node = %node,
+            urls = %endpoints.iter().map(|(a, _)| a.as_str()).collect::<Vec<_>>().join(",")
+        );
+        async move {
+            let connect_timeout = ws_connect_timeout();
+            let client = Client::builder()
+                .user_agent(format!("alloy-agent/{}", env!("CARGO_PKG_VERSION")))
+                .connect_timeout(connect_timeout)
+                .build()
+                .ok();
+
+            let Some(client) = client else {
+                tracing::warn!("control poll disabled: failed to build HTTP client");
+                return;
+            };
+
+            let reconnect_backoff_base = ws_reconnect_backoff_base();
+            let reconnect_backoff_max = ws_reconnect_backoff_max(reconnect_backoff_base);
+            let mut backoff = reconnect_backoff_base;
+            let mut endpoint_idx = 0usize;
+            loop {
+                let (poll_url, resp_url) = &endpoints[endpoint_idx % endpoints.len()];
+                let res = run_poll_loop(
+                    &client,
+                    poll_url,
+                    resp_url,
+                    &node,
+                    token.as_deref(),
+                    &rpc,
+                )
+                .await;
+                match res {
+                    Ok(()) => {
+                        backoff = reconnect_backoff_base;
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, poll_url = %poll_url, "control poll disconnected");
+                        backoff = (backoff * 2).min(reconnect_backoff_max);
+                    }
+                }
+                if endpoints.len() > 1 {
+                    endpoint_idx = (endpoint_idx + 1) % endpoints.len();
+                }
+                tokio::time::sleep(reconnect_sleep_with_jitter(backoff)).await;
+            }
+        }
+        .instrument(span)
+        .await;
+    });
+}
+
+async fn run_poll_loop(
+    client: &Client,
+    poll_url: &str,
+    resp_url: &str,
+    node: &str,
+    token: Option<&str>,
+    rpc: &AgentRpc,
+) -> anyhow::Result<()> {
+    let wait = poll_wait();
+    let b64 = base64::engine::general_purpose::STANDARD;
+    loop {
+        let mut req = client
+            .get(poll_url)
+            .query(&[("node", node), ("agent_version", env!("CARGO_PKG_VERSION"))])
+            .timeout(wait + Duration::from_secs(10));
+        if let Some(tok) = token {
+            req = req.bearer_auth(tok);
+        }
+
+        let resp = req.send().await?;
+        if resp.status() == StatusCode::NO_CONTENT {
+            continue;
+        }
+        if resp.status() != StatusCode::OK {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            let snippet = body.trim().lines().next().unwrap_or("").trim();
+            return Err(anyhow::anyhow!(
+                "control poll bad status {} ({})",
+                status.as_u16(),
+                snippet
+            ));
+        }
+
+        let text = resp.text().await?;
+        let frame = serde_json::from_str::<ControlToAgentFrame>(&text)
+            .unwrap_or(ControlToAgentFrame::Unknown);
+        match frame {
+            ControlToAgentFrame::Req {
+                id,
+                method,
+                payload_b64,
+            } => {
+                let payload = match b64.decode(payload_b64.as_bytes()) {
+                    Ok(v) => v,
+                    Err(_) => {
+                        let resp = AgentToControlFrame::Resp {
+                            id,
+                            ok: false,
+                            payload_b64: None,
+                            status_code: Some(
+                                Status::invalid_argument("invalid base64").code() as i32
+                            ),
+                            status_message: Some("invalid base64 payload".to_string()),
+                        };
+                        let _ = post_poll_resp(client, resp_url, node, token, &resp).await;
+                        continue;
+                    }
+                };
+
+                let rpc = rpc.clone();
+                let client = client.clone();
+                let resp_url = resp_url.to_string();
+                let node = node.to_string();
+                let token = token.map(|v| v.to_string());
+                let span = info_span!("control_poll_req", id = %id, method = %method);
+                tokio::spawn(
+                    async move {
+                        let out = match rpc.dispatch(&method, &payload).await {
+                            Ok(bytes) => AgentToControlFrame::Resp {
+                                id,
+                                ok: true,
+                                payload_b64: Some(
+                                    base64::engine::general_purpose::STANDARD.encode(bytes),
+                                ),
+                                status_code: None,
+                                status_message: None,
+                            },
+                            Err(status) => AgentToControlFrame::Resp {
+                                id,
+                                ok: false,
+                                payload_b64: None,
+                                status_code: Some(status.code() as i32),
+                                status_message: Some(status.message().to_string()),
+                            },
+                        };
+                        let _ =
+                            post_poll_resp(&client, &resp_url, &node, token.as_deref(), &out).await;
+                    }
+                    .instrument(span),
+                );
+            }
+            ControlToAgentFrame::Unknown => {}
+        }
+    }
+}
+
+async fn post_poll_resp(
+    client: &Client,
+    resp_url: &str,
+    node: &str,
+    token: Option<&str>,
+    frame: &AgentToControlFrame,
+) -> anyhow::Result<()> {
+    let mut req = client.post(resp_url).query(&[("node", node)]).json(frame);
+    if let Some(tok) = token {
+        req = req.bearer_auth(tok);
+    }
+    let resp = req.send().await?;
+    if resp.status() == StatusCode::NO_CONTENT {
+        return Ok(());
+    }
+    Err(anyhow::anyhow!(
+        "control resp bad status {}",
+        resp.status().as_u16()
+    ))
 }
 
 async fn run_once(

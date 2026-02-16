@@ -240,12 +240,7 @@ impl AgentTransport {
         let text = serde_json::to_string(&frame)
             .map_err(|e| tonic::Status::internal(format!("failed to encode request: {e}")))?;
 
-        if conn
-            .tx
-            .send(axum::extract::ws::Message::Text(text))
-            .await
-            .is_err()
-        {
+        if conn.tx.send_text(text).await.is_err() {
             let _ = conn.pending.lock().await.remove(&id);
             self.hub.remove(&conn.node).await;
             return Err(tonic::Status::unavailable("agent tunnel send failed"));

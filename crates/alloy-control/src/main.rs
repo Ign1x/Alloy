@@ -549,6 +549,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/healthz", get(healthz))
         .route("/auth/whoami", get(auth::whoami))
         .route("/agent/ws", get(agent_tunnel::agent_ws))
+        .route("/agent/poll", get(agent_tunnel::agent_poll))
+        .route("/agent/resp", post(agent_tunnel::agent_resp))
         .nest("/auth", auth_router)
         .nest("/instance", instance_router)
         .nest("/rspc", rspc_router)

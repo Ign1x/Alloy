@@ -303,6 +303,7 @@ In `deploy/docker-compose.release.yml`, we set `ALLOY_AGENT_TRANSPORT=tunnel` by
 To enable **reverse tunnel** (agent -> control) on a remote `alloy-agent` host, set:
 - `ALLOY_CONTROL_WS_URL=http://<control-host>:10043/agent/ws`
 - `ALLOY_CONTROL_WS_URLS=wss://<primary>/agent/ws,wss://<backup>/agent/ws` (optional; comma/space separated failover list, first URL is preferred)
+- `ALLOY_CONTROL_TUNNEL_MODE=ws` or `poll` (optional, set on `alloy-agent`; `poll` uses HTTPS long-poll `/agent/poll` and is usually more stable across CDNs/proxies; default `ws`)
 - `ALLOY_NODE_NAME=<node-name>` (optional; defaults to `$ALLOY_NODE_NAME` or `$HOSTNAME`)
 - `ALLOY_NODE_TOKEN=<token>` (required when node access is token-protected)
 - `ALLOY_CONTROL_WS_PING_INTERVAL_MS=10000` (optional, set on `alloy-agent`; tunnel heartbeat interval, clamp range `1000..120000`)
@@ -311,9 +312,13 @@ To enable **reverse tunnel** (agent -> control) on a remote `alloy-agent` host, 
 - `ALLOY_CONTROL_WS_IDLE_TIMEOUT_MS=60000` (optional, set on `alloy-agent`; default is disabled when unset/`0`; if enabled, clamp range `5000..900000` and auto-adjusted to at least `3 * ping interval`)
 - `ALLOY_CONTROL_WS_RECONNECT_BASE_MS=500` (optional, set on `alloy-agent`; reconnect base delay, clamp range `100..10000`)
 - `ALLOY_CONTROL_WS_RECONNECT_MAX_MS=8000` (optional, set on `alloy-agent`; reconnect max delay, clamp range `500..120000`)
+- `ALLOY_CONTROL_POLL_URLS=https://<public-control-host>/agent/poll` (optional, set on `alloy-agent`; override poll endpoints; if unset, derived from `ALLOY_CONTROL_WS_URL(S)`)
+- `ALLOY_CONTROL_POLL_WAIT_MS=25000` (optional, set on `alloy-agent`; long-poll client wait time; keep < Cloudflare proxy timeout)
 - `ALLOY_AGENT_WS_PING_INTERVAL_MS=10000` (optional, set on `alloy-control`; server-side Ping keepalive interval, clamp range `1000..120000`)
 - `ALLOY_AGENT_WS_APP_KEEPALIVE_MS=15000` (optional, set on `alloy-control`; server-side app keepalive, set `0` to disable)
 - `ALLOY_TUNNEL_DISCONNECT_GRACE_MS=90000` (optional, set on `alloy-control`; suppress transient "no active tunnel" errors shortly after reconnect flaps)
+- `ALLOY_AGENT_POLL_WAIT_MS=25000` (optional, set on `alloy-control`; long-poll server wait time)
+- `ALLOY_AGENT_POLL_STALE_MS=60000` (optional, set on `alloy-control`; consider poll nodes disconnected if no poll seen for this long)
 
 For panel `Nodes -> Add node` default URL, set on `alloy-control` (optional):
 - `ALLOY_CONTROL_WS_URL_DEFAULT=https://<public-control-host>/agent/ws`
