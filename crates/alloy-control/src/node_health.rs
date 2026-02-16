@@ -7,6 +7,19 @@ use alloy_proto::agent_v1::HealthCheckRequest;
 use alloy_proto::agent_v1::agent_health_service_client::AgentHealthServiceClient;
 use tonic::Request;
 
+fn tunnel_disconnect_grace() -> Duration {
+    const DEFAULT_MS: u64 = 90_000;
+    const MAX_MS: u64 = 900_000;
+
+    let raw = std::env::var("ALLOY_TUNNEL_DISCONNECT_GRACE_MS").ok();
+    let ms = raw
+        .as_deref()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .unwrap_or(DEFAULT_MS)
+        .min(MAX_MS);
+    Duration::from_millis(ms)
+}
+
 #[derive(Clone)]
 pub struct NodeHealthPoller {
     db: std::sync::Arc<DatabaseConnection>,
@@ -29,6 +42,7 @@ impl NodeHealthPoller {
 
     async fn tick(&self) {
         let db = &*self.db;
+        let tunnel_grace = tunnel_disconnect_grace();
 
         let rows = match nodes::Entity::find()
             .filter(nodes::Column::Enabled.eq(true))
@@ -42,6 +56,7 @@ impl NodeHealthPoller {
         for n in rows {
             let name = n.name.clone();
             let endpoint = n.endpoint.clone();
+            let last_seen_at = n.last_seen_at.map(|dt| dt.with_timezone(&chrono::Utc));
             let mut update: nodes::ActiveModel = n.into();
             update.updated_at = Set(chrono::Utc::now().into());
 
@@ -56,6 +71,16 @@ impl NodeHealthPoller {
             // "tunnel://" is a logical endpoint used for reverse-connected nodes.
             // If the node isn't currently tunnel-connected, there's nothing to dial.
             if !endpoint.trim().starts_with("http://") && !endpoint.trim().starts_with("https://") {
+                // Avoid noisy flapping when long-haul links reconnect quickly.
+                let recently_seen = last_seen_at
+                    .and_then(|seen| chrono::Utc::now().signed_duration_since(seen).to_std().ok())
+                    .is_some_and(|elapsed| elapsed <= tunnel_grace);
+                if recently_seen {
+                    update.last_error = Set(None);
+                    let _ = update.update(db).await;
+                    continue;
+                }
+
                 update.last_error = Set(Some(
                     "agent is not connected (no active tunnel to control; check ALLOY_CONTROL_WS_URL(S) / ALLOY_NODE_TOKEN)"
                         .to_string(),

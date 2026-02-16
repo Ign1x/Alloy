@@ -126,6 +126,30 @@ fn agent_ws_ping_interval() -> Duration {
     Duration::from_millis(ms)
 }
 
+fn agent_ws_app_keepalive_interval(ping_interval: Duration) -> Option<Duration> {
+    const DEFAULT_MS: u64 = 15_000;
+    const MIN_MS: u64 = 1_000;
+    const MAX_MS: u64 = 300_000;
+
+    let raw = std::env::var("ALLOY_AGENT_WS_APP_KEEPALIVE_MS").ok();
+    let ms = raw
+        .as_deref()
+        .and_then(|v| {
+            let trimmed = v.trim();
+            if trimmed.is_empty() {
+                return Some(DEFAULT_MS);
+            }
+            trimmed.parse::<u64>().ok()
+        })
+        .unwrap_or(DEFAULT_MS);
+
+    if ms == 0 {
+        return None;
+    }
+
+    Some(Duration::from_millis(ms.clamp(MIN_MS, MAX_MS)).max(ping_interval))
+}
+
 fn hash_token(raw: &str) -> String {
     use sha2::Digest;
     let mut hasher = sha2::Sha256::new();
@@ -318,19 +342,44 @@ async fn handle_agent_socket(state: AppState, socket: WebSocket, auth: WsAuth) {
 
         let heartbeat_tx = conn.tx.clone();
         let heartbeat_interval = agent_ws_ping_interval();
+        let app_keepalive_interval = agent_ws_app_keepalive_interval(heartbeat_interval);
         let heartbeat = tokio::spawn(async move {
-            let mut ticker = tokio::time::interval(heartbeat_interval);
-            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            let mut ping = tokio::time::interval(heartbeat_interval);
+            ping.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
             // Skip immediate tick so we only send periodic keepalive frames.
-            ticker.tick().await;
-            loop {
+            ping.tick().await;
+
+            let mut app_keepalive = app_keepalive_interval.map(tokio::time::interval);
+            if let Some(ticker) = app_keepalive.as_mut() {
+                ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
                 ticker.tick().await;
-                if heartbeat_tx
-                    .send(Message::Ping(Vec::new().into()))
-                    .await
-                    .is_err()
-                {
-                    break;
+            }
+
+            loop {
+                tokio::select! {
+                    _ = ping.tick() => {
+                        if heartbeat_tx
+                            .send(Message::Ping(Vec::new().into()))
+                            .await
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }
+                    _ = async {
+                        if let Some(ticker) = app_keepalive.as_mut() {
+                            ticker.tick().await;
+                        }
+                    }, if app_keepalive.is_some() => {
+                        // App-level keepalive survives some intermediaries that ignore WS control frames.
+                        if heartbeat_tx
+                            .send(Message::Text("{\"type\":\"keepalive\"}".into()))
+                            .await
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }
                 }
             }
         });

@@ -385,6 +385,61 @@ fn ws_connect_timeout() -> Duration {
     Duration::from_millis(ms)
 }
 
+fn ws_reconnect_backoff_base() -> Duration {
+    const DEFAULT_MS: u64 = 500;
+    const MIN_MS: u64 = 100;
+    const MAX_MS: u64 = 10_000;
+
+    let raw = std::env::var("ALLOY_CONTROL_WS_RECONNECT_BASE_MS").ok();
+    let ms = raw
+        .as_deref()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(DEFAULT_MS)
+        .clamp(MIN_MS, MAX_MS);
+
+    Duration::from_millis(ms)
+}
+
+fn ws_reconnect_backoff_max(base: Duration) -> Duration {
+    const DEFAULT_MS: u64 = 8_000;
+    const MIN_MS: u64 = 500;
+    const MAX_MS: u64 = 120_000;
+
+    let raw = std::env::var("ALLOY_CONTROL_WS_RECONNECT_MAX_MS").ok();
+    let ms = raw
+        .as_deref()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(DEFAULT_MS)
+        .clamp(MIN_MS, MAX_MS);
+    Duration::from_millis(ms).max(base)
+}
+
+fn ws_app_keepalive_interval(ping_interval: Duration) -> Option<Duration> {
+    const DEFAULT_MS: u64 = 15_000;
+    const MIN_MS: u64 = 1_000;
+    const MAX_MS: u64 = 300_000;
+
+    let raw = std::env::var("ALLOY_CONTROL_WS_APP_KEEPALIVE_MS").ok();
+    let ms = raw
+        .as_deref()
+        .and_then(|v| {
+            let trimmed = v.trim();
+            if trimmed.is_empty() {
+                return Some(DEFAULT_MS);
+            }
+            trimmed.parse::<u64>().ok()
+        })
+        .unwrap_or(DEFAULT_MS);
+
+    if ms == 0 {
+        return None;
+    }
+
+    Some(Duration::from_millis(ms.clamp(MIN_MS, MAX_MS)).max(ping_interval))
+}
+
 fn ws_idle_timeout(ping_interval: Duration) -> Option<Duration> {
     const MIN_MS: u64 = 5_000;
     const MAX_MS: u64 = 900_000;
@@ -453,7 +508,9 @@ pub fn spawn(manager: ProcessManager) {
     tokio::spawn(async move {
         let span = info_span!("control_tunnel", node = %node, urls = %urls.join(","));
         async move {
-            let mut backoff = Duration::from_millis(500);
+            let reconnect_backoff_base = ws_reconnect_backoff_base();
+            let reconnect_backoff_max = ws_reconnect_backoff_max(reconnect_backoff_base);
+            let mut backoff = reconnect_backoff_base;
             let mut endpoint_idx = 0usize;
             loop {
                 let url = &urls[endpoint_idx % urls.len()];
@@ -461,15 +518,16 @@ pub fn spawn(manager: ProcessManager) {
                 match res {
                     Ok(()) => {
                         // Clean close; reconnect with a small delay.
-                        backoff = Duration::from_millis(500);
+                        backoff = reconnect_backoff_base;
                     }
                     Err(e) => {
                         tracing::warn!(error = %e, ws_url = %url, "control tunnel disconnected");
-                        backoff = (backoff * 2).min(Duration::from_secs(30));
-                        if urls.len() > 1 {
-                            endpoint_idx = (endpoint_idx + 1) % urls.len();
-                        }
+                        backoff = (backoff * 2).min(reconnect_backoff_max);
                     }
+                }
+                if urls.len() > 1 {
+                    // Round-robin endpoints on every reconnect to avoid sticky bad edges.
+                    endpoint_idx = (endpoint_idx + 1) % urls.len();
                 }
                 tokio::time::sleep(reconnect_sleep_with_jitter(backoff)).await;
             }
@@ -497,6 +555,7 @@ async fn run_once(
 
     let connect_timeout = ws_connect_timeout();
     let ping_interval = ws_ping_interval();
+    let app_keepalive_interval = ws_app_keepalive_interval(ping_interval);
     let idle_timeout = ws_idle_timeout(ping_interval);
     let (ws, _) = tokio::time::timeout(connect_timeout, tokio_tungstenite::connect_async(req))
         .await
@@ -532,6 +591,11 @@ async fn run_once(
     ping.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     // Skip the immediate first tick; send heartbeats only after the configured interval.
     ping.tick().await;
+    let mut app_keepalive = app_keepalive_interval.map(tokio::time::interval);
+    if let Some(keepalive) = app_keepalive.as_mut() {
+        keepalive.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        keepalive.tick().await;
+    }
     let mut idle_watch = tokio::time::interval(Duration::from_secs(5));
     idle_watch.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     if idle_timeout.is_some() {
@@ -544,6 +608,20 @@ async fn run_once(
             _ = ping.tick() => {
                 // Keep-alive frames for flaky proxies / long-RTT links.
                 if out_tx.send(WsMessage::Ping(Vec::new().into())).await.is_err() {
+                    break;
+                }
+            }
+            _ = async {
+                if let Some(keepalive) = app_keepalive.as_mut() {
+                    keepalive.tick().await;
+                }
+            }, if app_keepalive.is_some() => {
+                // App-level keepalive survives some intermediaries that ignore WS control frames.
+                if out_tx
+                    .send(WsMessage::Text("{\"type\":\"keepalive\"}".into()))
+                    .await
+                    .is_err()
+                {
                     break;
                 }
             }

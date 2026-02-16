@@ -306,9 +306,14 @@ To enable **reverse tunnel** (agent -> control) on a remote `alloy-agent` host, 
 - `ALLOY_NODE_NAME=<node-name>` (optional; defaults to `$ALLOY_NODE_NAME` or `$HOSTNAME`)
 - `ALLOY_NODE_TOKEN=<token>` (required when node access is token-protected)
 - `ALLOY_CONTROL_WS_PING_INTERVAL_MS=10000` (optional, set on `alloy-agent`; tunnel heartbeat interval, clamp range `1000..120000`)
+- `ALLOY_CONTROL_WS_APP_KEEPALIVE_MS=15000` (optional, set on `alloy-agent`; app-level text keepalive, survives some proxies/CDNs that ignore WS Ping; set `0` to disable)
 - `ALLOY_CONTROL_WS_CONNECT_TIMEOUT_MS=15000` (optional, set on `alloy-agent`; handshake timeout, clamp range `1000..300000`)
 - `ALLOY_CONTROL_WS_IDLE_TIMEOUT_MS=60000` (optional, set on `alloy-agent`; default is disabled when unset/`0`; if enabled, clamp range `5000..900000` and auto-adjusted to at least `3 * ping interval`)
+- `ALLOY_CONTROL_WS_RECONNECT_BASE_MS=500` (optional, set on `alloy-agent`; reconnect base delay, clamp range `100..10000`)
+- `ALLOY_CONTROL_WS_RECONNECT_MAX_MS=8000` (optional, set on `alloy-agent`; reconnect max delay, clamp range `500..120000`)
 - `ALLOY_AGENT_WS_PING_INTERVAL_MS=10000` (optional, set on `alloy-control`; server-side Ping keepalive interval, clamp range `1000..120000`)
+- `ALLOY_AGENT_WS_APP_KEEPALIVE_MS=15000` (optional, set on `alloy-control`; server-side app keepalive, set `0` to disable)
+- `ALLOY_TUNNEL_DISCONNECT_GRACE_MS=90000` (optional, set on `alloy-control`; suppress transient "no active tunnel" errors shortly after reconnect flaps)
 
 For panel `Nodes -> Add node` default URL, set on `alloy-control` (optional):
 - `ALLOY_CONTROL_WS_URL_DEFAULT=https://<public-control-host>/agent/ws`
