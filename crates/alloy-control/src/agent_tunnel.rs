@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use axum::{
     extract::{
@@ -108,6 +108,22 @@ fn allow_unsafe_agent_ws_without_token() -> bool {
             .as_str(),
         "1" | "true" | "yes" | "on"
     )
+}
+
+fn agent_ws_ping_interval() -> Duration {
+    const DEFAULT_MS: u64 = 10_000;
+    const MIN_MS: u64 = 1_000;
+    const MAX_MS: u64 = 120_000;
+
+    let raw = std::env::var("ALLOY_AGENT_WS_PING_INTERVAL_MS").ok();
+    let ms = raw
+        .as_deref()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(DEFAULT_MS)
+        .clamp(MIN_MS, MAX_MS);
+
+    Duration::from_millis(ms)
 }
 
 fn hash_token(raw: &str) -> String {
@@ -300,6 +316,25 @@ async fn handle_agent_socket(state: AppState, socket: WebSocket, auth: WsAuth) {
             }
         });
 
+        let heartbeat_tx = conn.tx.clone();
+        let heartbeat_interval = agent_ws_ping_interval();
+        let heartbeat = tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(heartbeat_interval);
+            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            // Skip immediate tick so we only send periodic keepalive frames.
+            ticker.tick().await;
+            loop {
+                ticker.tick().await;
+                if heartbeat_tx
+                    .send(Message::Ping(Vec::new().into()))
+                    .await
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        });
+
         while let Some(msg) = receiver.next().await {
             let Ok(msg) = msg else { break };
             match msg {
@@ -340,6 +375,7 @@ async fn handle_agent_socket(state: AppState, socket: WebSocket, auth: WsAuth) {
         state.agent_hub.remove(&node).await;
         let _ = conn.pending.lock().await.drain();
 
+        heartbeat.abort();
         writer.abort();
     }
     .instrument(span)

@@ -60,7 +60,7 @@ curl -fsSL https://raw.githubusercontent.com/Ign1x/Alloy/alloy/deploy/install.sh
 指定版本：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Ign1x/Alloy/alloy/deploy/install.sh | ALLOY_IMAGE_TAG=v0.2.12 bash -s -- --mode release
+curl -fsSL https://raw.githubusercontent.com/Ign1x/Alloy/alloy/deploy/install.sh | ALLOY_IMAGE_TAG=v0.2.13 bash -s -- --mode release
 ```
 
 ---

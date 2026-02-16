@@ -1977,7 +1977,6 @@ function App() {
       `      - ALLOY_CONTROL_WS_URLS=${wsUrlsEnv}`,
       '      - ALLOY_CONTROL_WS_PING_INTERVAL_MS=5000',
       '      - ALLOY_CONTROL_WS_CONNECT_TIMEOUT_MS=15000',
-      '      - ALLOY_CONTROL_WS_IDLE_TIMEOUT_MS=45000',
       `      - ALLOY_NODE_NAME=${name}`,
       `      - ALLOY_NODE_TOKEN=${token}`,
       `      - ALLOY_AGENT_SELF_UPDATE_WATCHTOWER_URL=http://watchtower:${createNodeWatchtowerPort()}`,

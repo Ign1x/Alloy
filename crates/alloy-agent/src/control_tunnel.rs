@@ -385,17 +385,21 @@ fn ws_connect_timeout() -> Duration {
     Duration::from_millis(ms)
 }
 
-fn ws_idle_timeout(ping_interval: Duration) -> Duration {
-    const DEFAULT_MS: u64 = 45_000;
+fn ws_idle_timeout(ping_interval: Duration) -> Option<Duration> {
     const MIN_MS: u64 = 5_000;
     const MAX_MS: u64 = 900_000;
 
     let raw = std::env::var("ALLOY_CONTROL_WS_IDLE_TIMEOUT_MS").ok();
     let configured = raw
         .as_deref()
-        .and_then(|v| v.trim().parse::<u64>().ok())
-        .filter(|v| *v > 0)
-        .unwrap_or(DEFAULT_MS)
+        .and_then(|v| {
+            let trimmed = v.trim();
+            if trimmed.is_empty() {
+                return None;
+            }
+            trimmed.parse::<u64>().ok()
+        })
+        .filter(|v| *v > 0)?
         .clamp(MIN_MS, MAX_MS);
 
     let min_recommended_ms = ping_interval
@@ -403,7 +407,7 @@ fn ws_idle_timeout(ping_interval: Duration) -> Duration {
         .saturating_mul(3)
         .min(u64::MAX as u128) as u64;
     let min_recommended = Duration::from_millis(min_recommended_ms);
-    Duration::from_millis(configured).max(min_recommended)
+    Some(Duration::from_millis(configured).max(min_recommended))
 }
 
 fn reconnect_sleep_with_jitter(base: Duration) -> Duration {
@@ -530,7 +534,9 @@ async fn run_once(
     ping.tick().await;
     let mut idle_watch = tokio::time::interval(Duration::from_secs(5));
     idle_watch.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-    idle_watch.tick().await;
+    if idle_timeout.is_some() {
+        idle_watch.tick().await;
+    }
     let mut last_inbound = tokio::time::Instant::now();
 
     loop {
@@ -541,7 +547,8 @@ async fn run_once(
                     break;
                 }
             }
-            _ = idle_watch.tick() => {
+            _ = idle_watch.tick(), if idle_timeout.is_some() => {
+                let idle_timeout = idle_timeout.expect("idle timeout branch is guarded");
                 if last_inbound.elapsed() > idle_timeout {
                     return Err(anyhow::anyhow!(
                         "control ws idle timeout after {}ms",
