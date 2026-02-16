@@ -1804,6 +1804,7 @@ function App() {
   })
 
   const setNodeEnabled = rspc.createMutation(() => 'node.setEnabled')
+  const deleteNode = rspc.createMutation(() => 'node.delete')
   const triggerNodeSelfUpdate = rspc.createMutation(() => 'node.triggerSelfUpdate')
   const nodeSelfUpdateStatus = rspc.createQuery(
     () => [
@@ -1950,7 +1951,14 @@ function App() {
   const createNodeComposeYaml = createMemo(() => {
     const r = createNodeResult()
     if (!r) return ''
-    const url = createNodeControlWsUrl().trim() || defaultCreateNodeControlWsUrl()
+    const rawUrls = createNodeControlWsUrl().trim() || defaultCreateNodeControlWsUrl()
+    const parsedUrls = rawUrls
+      .split(/[,\s;]+/g)
+      .map((v) => v.trim())
+      .filter((v) => v.length > 0)
+    const wsUrls = parsedUrls.length > 0 ? parsedUrls : [rawUrls]
+    const primaryUrl = wsUrls[0]
+    const wsUrlsEnv = wsUrls.join(',')
     const name = r.node.name
     const token = r.connect_token
     const watchtowerToken = r.watchtower_token
@@ -1965,7 +1973,11 @@ function App() {
       '      - RUST_LOG=info',
       '      - ALLOY_DATA_ROOT=/data',
       '      - ALLOY_FS_WRITE_ENABLED=true',
-      `      - ALLOY_CONTROL_WS_URL=${url}`,
+      `      - ALLOY_CONTROL_WS_URL=${primaryUrl}`,
+      `      - ALLOY_CONTROL_WS_URLS=${wsUrlsEnv}`,
+      '      - ALLOY_CONTROL_WS_PING_INTERVAL_MS=5000',
+      '      - ALLOY_CONTROL_WS_CONNECT_TIMEOUT_MS=15000',
+      '      - ALLOY_CONTROL_WS_IDLE_TIMEOUT_MS=45000',
       `      - ALLOY_NODE_NAME=${name}`,
       `      - ALLOY_NODE_TOKEN=${token}`,
       `      - ALLOY_AGENT_SELF_UPDATE_WATCHTOWER_URL=http://watchtower:${createNodeWatchtowerPort()}`,
@@ -2438,6 +2450,7 @@ function App() {
     setSelectedNodeId,
     selectedNode,
     setNodeEnabled,
+    deleteNode,
     triggerNodeSelfUpdate,
     nodeSelfUpdateStatus,
     nodeEnabledOverride,

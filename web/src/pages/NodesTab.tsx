@@ -46,6 +46,7 @@ export default function NodesTab(props: NodesTabProps) {
     setSelectedNodeId,
     selectedNode,
     setNodeEnabled,
+    deleteNode,
     triggerNodeSelfUpdate,
     nodeSelfUpdateStatus,
     nodeEnabledOverride,
@@ -58,6 +59,7 @@ export default function NodesTab(props: NodesTabProps) {
   const [bulkSelection, setBulkSelection] = createSignal<Record<string, boolean>>({})
   const [bulkUpdatePending, setBulkUpdatePending] = createSignal(false)
   const [updatingNodeIds, setUpdatingNodeIds] = createSignal<Record<string, boolean>>({})
+  const [deletingNodeId, setDeletingNodeId] = createSignal<string | null>(null)
 
   const nodeList = createMemo(() => (nodes.data ?? []) as NodeRow[])
 
@@ -276,6 +278,59 @@ export default function NodesTab(props: NodesTabProps) {
 
     void invalidateNodes()
     void nodeSelfUpdateStatus.refetch()
+  }
+
+  function nodeDeleteDisabledReason(node: { id: string }): string | null {
+    if (batchActionsBusy()) return 'Another update is already running'
+    if (Boolean(deletingNodeId())) return 'Delete in progress'
+    if (Boolean(updatingNodeIds()[node.id])) return 'Update in progress'
+    if (selectedNodeId() !== node.id) return 'Select this node first'
+    return null
+  }
+
+  async function requestNodeDelete(node: NodeRow) {
+    if (nodeDeleteDisabledReason(node)) return
+
+    const confirmed = window.confirm(
+      `Delete node "${node.name}"?\n\nThis removes it from the control plane. If the agent is still running, it can re-register after reconnect.`,
+    )
+    if (!confirmed) return
+
+    setDeletingNodeId(node.id)
+    try {
+      await deleteNode.mutateAsync({ node_id: node.id })
+
+      pushToast('success', 'Node deleted', `${node.name} removed.`)
+      if (selectedNodeId() === node.id) setSelectedNodeId(null)
+
+      setBulkSelection((prev) => {
+        if (!prev[node.id]) return prev
+        const next = { ...prev }
+        delete next[node.id]
+        return next
+      })
+      setUpdatingNodeIds((prev) => {
+        if (!prev[node.id]) return prev
+        const next = { ...prev }
+        delete next[node.id]
+        return next
+      })
+      setNodeEnabledOverride((prev: Record<string, boolean>) => {
+        if (!Object.prototype.hasOwnProperty.call(prev, node.id)) return prev
+        const next = { ...prev }
+        delete next[node.id]
+        return next
+      })
+
+      await invalidateNodes()
+    } catch (error) {
+      if (isAlloyApiError(error) && error.data.hint) {
+        pushToast('info', 'Hint', error.data.hint, error.data.request_id)
+      }
+      toastError('Node delete failed', error)
+    } finally {
+      setDeletingNodeId(null)
+    }
   }
 
   function nodeUpdateDisabledReason(node: { id: string; enabled: boolean }): string | null {
@@ -553,9 +608,23 @@ export default function NodesTab(props: NodesTabProps) {
                                   {nodeUpdateButtonLabel(n())}
                                 </Button>
 
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="danger"
+                                  loading={deletingNodeId() === n().id}
+                                  disabled={Boolean(nodeDeleteDisabledReason(n()))}
+                                  title={nodeDeleteDisabledReason(n()) ?? `Delete node ${n().name}`}
+                                  onClick={async () => {
+                                    await requestNodeDelete(n())
+                                  }}
+                                >
+                                  Delete node
+                                </Button>
+
                                 <button
                                   type="button"
-                                  disabled={setNodeEnabled.isPending || batchActionsBusy()}
+                                  disabled={setNodeEnabled.isPending || batchActionsBusy() || Boolean(deletingNodeId())}
                                   class="group inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/60 px-2 py-1.5 text-[11px] text-slate-700 shadow-sm hover:bg-white disabled:opacity-50 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-300 dark:shadow-none dark:hover:bg-slate-900"
                                   onClick={async () => {
                                     const id = n().id

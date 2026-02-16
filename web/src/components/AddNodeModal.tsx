@@ -108,7 +108,7 @@ export default function AddNodeModal(props: AddNodeModalProps) {
                   />
                 </Field>
 
-                <Field label={<LabelTip label="Control WS URL" content="The agent connects to this websocket endpoint (usually your panel URL)." />}>
+                <Field label={<LabelTip label="Control WS URL" content="The agent connects to this websocket endpoint. You can provide multiple URLs separated by commas for failover." />}>
                   <Input
                     value={createNodeControlWsUrl()}
                     onInput={(e) => setCreateNodeControlWsUrl(e.currentTarget.value)}
@@ -171,7 +171,7 @@ export default function AddNodeModal(props: AddNodeModalProps) {
                   </div>
 
                   <div class="mt-3">
-                    <Field label={<LabelTip label="Control WS URL" content="If your agent can’t reach the panel, update this URL and copy again." />}>
+                    <Field label={<LabelTip label="Control WS URL" content="Use one or more websocket URLs (comma-separated). The agent will fail over in order." />}>
                       <Input
                         value={createNodeControlWsUrl()}
                         onInput={(e) => setCreateNodeControlWsUrl(e.currentTarget.value)}

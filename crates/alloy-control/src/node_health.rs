@@ -56,7 +56,10 @@ impl NodeHealthPoller {
             // "tunnel://" is a logical endpoint used for reverse-connected nodes.
             // If the node isn't currently tunnel-connected, there's nothing to dial.
             if !endpoint.trim().starts_with("http://") && !endpoint.trim().starts_with("https://") {
-                update.last_error = Set(Some("agent is not connected".to_string()));
+                update.last_error = Set(Some(
+                    "agent is not connected (no active tunnel to control; check ALLOY_CONTROL_WS_URL(S) / ALLOY_NODE_TOKEN)"
+                        .to_string(),
+                ));
                 let _ = update.update(db).await;
                 continue;
             }

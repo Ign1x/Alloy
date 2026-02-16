@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use base64::Engine;
 use futures_util::{SinkExt, StreamExt};
@@ -321,6 +321,38 @@ fn parse_ws_url(raw: &str) -> Option<String> {
     Some(trimmed.to_string())
 }
 
+fn parse_ws_urls(raw: &str) -> Vec<String> {
+    let mut out = Vec::<String>::new();
+    for part in raw.split(|c: char| c == ',' || c == ';' || c.is_whitespace()) {
+        let Some(url) = parse_ws_url(part) else {
+            continue;
+        };
+        if out.iter().any(|v| v == &url) {
+            continue;
+        }
+        out.push(url);
+    }
+    out
+}
+
+fn control_ws_urls() -> Vec<String> {
+    if let Some(raw) = std::env::var("ALLOY_CONTROL_WS_URLS")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+    {
+        let urls = parse_ws_urls(&raw);
+        if !urls.is_empty() {
+            return urls;
+        }
+    }
+
+    std::env::var("ALLOY_CONTROL_WS_URL")
+        .ok()
+        .map(|v| parse_ws_urls(&v))
+        .unwrap_or_default()
+}
+
 fn ws_ping_interval() -> Duration {
     const DEFAULT_MS: u64 = 10_000;
     const MIN_MS: u64 = 1_000;
@@ -335,6 +367,52 @@ fn ws_ping_interval() -> Duration {
         .clamp(MIN_MS, MAX_MS);
 
     Duration::from_millis(ms)
+}
+
+fn ws_connect_timeout() -> Duration {
+    const DEFAULT_MS: u64 = 15_000;
+    const MIN_MS: u64 = 1_000;
+    const MAX_MS: u64 = 300_000;
+
+    let raw = std::env::var("ALLOY_CONTROL_WS_CONNECT_TIMEOUT_MS").ok();
+    let ms = raw
+        .as_deref()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(DEFAULT_MS)
+        .clamp(MIN_MS, MAX_MS);
+
+    Duration::from_millis(ms)
+}
+
+fn ws_idle_timeout(ping_interval: Duration) -> Duration {
+    const DEFAULT_MS: u64 = 45_000;
+    const MIN_MS: u64 = 5_000;
+    const MAX_MS: u64 = 900_000;
+
+    let raw = std::env::var("ALLOY_CONTROL_WS_IDLE_TIMEOUT_MS").ok();
+    let configured = raw
+        .as_deref()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(DEFAULT_MS)
+        .clamp(MIN_MS, MAX_MS);
+
+    let min_recommended_ms = ping_interval
+        .as_millis()
+        .saturating_mul(3)
+        .min(u64::MAX as u128) as u64;
+    let min_recommended = Duration::from_millis(min_recommended_ms);
+    Duration::from_millis(configured).max(min_recommended)
+}
+
+fn reconnect_sleep_with_jitter(base: Duration) -> Duration {
+    let jitter_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .ok()
+        .map(|d| (d.as_millis() as u64) % 751)
+        .unwrap_or(0);
+    base + Duration::from_millis(jitter_ms)
 }
 
 fn node_name() -> String {
@@ -359,34 +437,37 @@ fn node_token() -> Option<String> {
 }
 
 pub fn spawn(manager: ProcessManager) {
-    let Some(url) = std::env::var("ALLOY_CONTROL_WS_URL")
-        .ok()
-        .and_then(|v| parse_ws_url(&v))
-    else {
+    let urls = control_ws_urls();
+    if urls.is_empty() {
         return;
-    };
+    }
 
     let node = node_name();
     let token = node_token();
     let rpc = AgentRpc::new(manager);
 
     tokio::spawn(async move {
-        let span = info_span!("control_tunnel", node = %node, url = %url);
+        let span = info_span!("control_tunnel", node = %node, urls = %urls.join(","));
         async move {
             let mut backoff = Duration::from_millis(500);
+            let mut endpoint_idx = 0usize;
             loop {
-                let res = run_once(&url, &node, token.as_deref(), &rpc).await;
+                let url = &urls[endpoint_idx % urls.len()];
+                let res = run_once(url, &node, token.as_deref(), &rpc).await;
                 match res {
                     Ok(()) => {
                         // Clean close; reconnect with a small delay.
                         backoff = Duration::from_millis(500);
                     }
                     Err(e) => {
-                        tracing::warn!(error = %e, "control tunnel disconnected");
+                        tracing::warn!(error = %e, ws_url = %url, "control tunnel disconnected");
                         backoff = (backoff * 2).min(Duration::from_secs(30));
+                        if urls.len() > 1 {
+                            endpoint_idx = (endpoint_idx + 1) % urls.len();
+                        }
                     }
                 }
-                tokio::time::sleep(backoff).await;
+                tokio::time::sleep(reconnect_sleep_with_jitter(backoff)).await;
             }
         }
         .instrument(span)
@@ -405,8 +486,22 @@ async fn run_once(
         let value = format!("Bearer {tok}");
         req.headers_mut().insert("Authorization", value.parse()?);
     }
+    req.headers_mut().insert(
+        "User-Agent",
+        format!("alloy-agent/{}", env!("CARGO_PKG_VERSION")).parse()?,
+    );
 
-    let (ws, _) = tokio_tungstenite::connect_async(req).await?;
+    let connect_timeout = ws_connect_timeout();
+    let ping_interval = ws_ping_interval();
+    let idle_timeout = ws_idle_timeout(ping_interval);
+    let (ws, _) = tokio::time::timeout(connect_timeout, tokio_tungstenite::connect_async(req))
+        .await
+        .map_err(|_| {
+            anyhow::anyhow!(
+                "control ws connect timeout after {}ms",
+                connect_timeout.as_millis()
+            )
+        })??;
     let (mut sink, mut stream) = ws.split();
 
     let hello = AgentToControlFrame::Hello {
@@ -429,10 +524,14 @@ async fn run_once(
         }
     });
 
-    let mut ping = tokio::time::interval(ws_ping_interval());
+    let mut ping = tokio::time::interval(ping_interval);
     ping.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     // Skip the immediate first tick; send heartbeats only after the configured interval.
     ping.tick().await;
+    let mut idle_watch = tokio::time::interval(Duration::from_secs(5));
+    idle_watch.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    idle_watch.tick().await;
+    let mut last_inbound = tokio::time::Instant::now();
 
     loop {
         tokio::select! {
@@ -442,9 +541,18 @@ async fn run_once(
                     break;
                 }
             }
+            _ = idle_watch.tick() => {
+                if last_inbound.elapsed() > idle_timeout {
+                    return Err(anyhow::anyhow!(
+                        "control ws idle timeout after {}ms",
+                        idle_timeout.as_millis()
+                    ));
+                }
+            }
             msg = stream.next() => {
                 let Some(msg) = msg else { break };
                 let msg = msg?;
+                last_inbound = tokio::time::Instant::now();
                 match msg {
                     WsMessage::Text(text) => {
                         let frame = serde_json::from_str::<ControlToAgentFrame>(&text)
@@ -517,6 +625,7 @@ async fn run_once(
                         // Keep-alive / intermediaries may send Ping frames.
                         let _ = out_tx.send(WsMessage::Pong(payload)).await;
                     }
+                    WsMessage::Pong(_) => {}
                     WsMessage::Close(_) => break,
                     _ => {}
                 }

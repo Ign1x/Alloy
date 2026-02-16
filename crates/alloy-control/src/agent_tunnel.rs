@@ -328,6 +328,10 @@ async fn handle_agent_socket(state: AppState, socket: WebSocket, auth: WsAuth) {
                         AgentToControlFrame::Hello { .. } | AgentToControlFrame::Unknown => {}
                     }
                 }
+                Message::Ping(payload) => {
+                    let _ = conn.tx.send(Message::Pong(payload)).await;
+                }
+                Message::Pong(_) => {}
                 Message::Close(_) => break,
                 _ => {}
             }

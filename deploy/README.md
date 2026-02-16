@@ -302,9 +302,12 @@ In `deploy/docker-compose.release.yml`, we set `ALLOY_AGENT_TRANSPORT=tunnel` by
 
 To enable **reverse tunnel** (agent -> control) on a remote `alloy-agent` host, set:
 - `ALLOY_CONTROL_WS_URL=http://<control-host>:10043/agent/ws`
+- `ALLOY_CONTROL_WS_URLS=wss://<primary>/agent/ws,wss://<backup>/agent/ws` (optional; comma/space separated failover list, first URL is preferred)
 - `ALLOY_NODE_NAME=<node-name>` (optional; defaults to `$ALLOY_NODE_NAME` or `$HOSTNAME`)
 - `ALLOY_NODE_TOKEN=<token>` (required when node access is token-protected)
 - `ALLOY_CONTROL_WS_PING_INTERVAL_MS=10000` (optional; tunnel heartbeat interval, clamp range `1000..120000`)
+- `ALLOY_CONTROL_WS_CONNECT_TIMEOUT_MS=15000` (optional; handshake timeout, clamp range `1000..300000`)
+- `ALLOY_CONTROL_WS_IDLE_TIMEOUT_MS=45000` (optional; force reconnect when tunnel is silent too long, clamp range `5000..900000`, and auto-adjusted to at least `3 * ping interval`)
 
 For panel `Nodes -> Add node` default URL, set on `alloy-control` (optional):
 - `ALLOY_CONTROL_WS_URL_DEFAULT=https://<public-control-host>/agent/ws`

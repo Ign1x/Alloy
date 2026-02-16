@@ -715,7 +715,11 @@ fn hostname_from_url_like(value: &str) -> Option<String> {
     }
 
     let host = if let Some(rest) = authority.strip_prefix('[') {
-        rest.split(']').next().unwrap_or_default().trim().to_string()
+        rest.split(']')
+            .next()
+            .unwrap_or_default()
+            .trim()
+            .to_string()
     } else {
         authority
             .split(':')
@@ -899,6 +903,52 @@ fn api_error_from_agent_status(ctx: &Ctx, action: &str, status: tonic::Status) -
         };
     }
 
+    let raw_message = status.message().trim();
+    let lower_message = raw_message.to_ascii_lowercase();
+
+    if status.code() == tonic::Code::Unavailable {
+        if lower_message.contains("no active tunnel") {
+            let mut err = api_error(
+                ctx,
+                "agent_unreachable",
+                format!("{action}: node is not connected to control (no active tunnel)"),
+            );
+            err.hint = Some(
+                "Start/restart alloy-agent on the node and ensure it can reach ALLOY_CONTROL_WS_URL (or ALLOY_CONTROL_WS_URLS) (.../agent/ws). If token auth is enabled, verify ALLOY_NODE_NAME and ALLOY_NODE_TOKEN match this node."
+                    .to_string(),
+            );
+            return err;
+        }
+
+        if lower_message.contains("tunnel send failed")
+            || lower_message.contains("tunnel disconnected")
+        {
+            let mut err = api_error(
+                ctx,
+                "agent_unreachable",
+                format!("{action}: node tunnel disconnected while sending request"),
+            );
+            err.hint = Some(
+                "The node disconnected during this request. Check alloy-agent/container health and network stability, then retry."
+                    .to_string(),
+            );
+            return err;
+        }
+
+        if lower_message.contains("connect failed (") {
+            let mut err = api_error(
+                ctx,
+                "agent_unreachable",
+                format!("{action}: failed to reach agent over direct gRPC"),
+            );
+            err.hint = Some(
+                "Verify ALLOY_AGENT_ENDPOINT is reachable from alloy-control, or use ALLOY_AGENT_TRANSPORT=tunnel with a connected agent."
+                    .to_string(),
+            );
+            return err;
+        }
+    }
+
     let code = match status.code() {
         tonic::Code::InvalidArgument => "invalid_param",
         tonic::Code::NotFound => "not_found",
@@ -912,7 +962,7 @@ fn api_error_from_agent_status(ctx: &Ctx, action: &str, status: tonic::Status) -
         _ => "agent_error",
     };
 
-    api_error(ctx, code, format!("{action}: {}", status.message()))
+    api_error(ctx, code, format!("{action}: {raw_message}"))
 }
 
 #[derive(Debug, Clone, serde::Serialize, Type)]
@@ -1456,6 +1506,16 @@ pub struct DeleteInstanceOutput {
 pub struct NodeSetEnabledInput {
     pub node_id: String,
     pub enabled: bool,
+}
+
+#[derive(Debug, Clone, serde::Deserialize, Type)]
+pub struct NodeDeleteInput {
+    pub node_id: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize, Type)]
+pub struct NodeDeleteOutput {
+    pub ok: bool,
 }
 
 #[derive(Debug, Clone, serde::Deserialize, Type)]
@@ -4734,6 +4794,74 @@ pub fn router() -> Router<Ctx> {
                         agent_version: updated.agent_version,
                         last_error: updated.last_error,
                     })
+                },
+            ),
+        )
+        .procedure(
+            "delete",
+            Procedure::builder::<ApiError>().mutation(
+                |ctx: Ctx, input: NodeDeleteInput| async move {
+                    use alloy_db::entities::{instance_nodes, nodes};
+                    use sea_orm::{
+                        ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set,
+                    };
+
+                    ensure_writable(&ctx)?;
+                    enforce_rate_limit(&ctx)?;
+
+                    let user = ctx
+                        .user
+                        .clone()
+                        .ok_or_else(|| api_error(&ctx, "unauthorized", "unauthorized"))?;
+                    if !user.is_admin {
+                        return Err(api_error(&ctx, "forbidden", "forbidden"));
+                    }
+
+                    let id = sea_orm::prelude::Uuid::parse_str(&input.node_id)
+                        .map_err(|_| api_error(&ctx, "invalid_param", "invalid node_id"))?;
+
+                    let model = nodes::Entity::find_by_id(id)
+                        .one(&*ctx.db)
+                        .await
+                        .map_err(|e| api_error(&ctx, "db_error", format!("db error: {e}")))?
+                        .ok_or_else(|| api_error(&ctx, "not_found", "node not found"))?;
+
+                    // Keep historical per-instance node_name but drop stale node_id references.
+                    let now: sea_orm::prelude::DateTimeWithTimeZone = chrono::Utc::now().into();
+                    let attached = instance_nodes::Entity::find()
+                        .filter(instance_nodes::Column::NodeId.eq(id))
+                        .all(&*ctx.db)
+                        .await
+                        .map_err(|e| api_error(&ctx, "db_error", format!("db error: {e}")))?;
+                    for row in attached {
+                        let mut active: instance_nodes::ActiveModel = row.into();
+                        active.node_id = Set(None);
+                        active.updated_at = Set(now.clone());
+                        active
+                            .update(&*ctx.db)
+                            .await
+                            .map_err(|e| api_error(&ctx, "db_error", format!("db error: {e}")))?;
+                    }
+
+                    let rows = nodes::Entity::delete_by_id(id)
+                        .exec(&*ctx.db)
+                        .await
+                        .map_err(|e| api_error(&ctx, "db_error", format!("db error: {e}")))?;
+                    if rows.rows_affected == 0 {
+                        return Err(api_error(&ctx, "not_found", "node not found"));
+                    }
+
+                    ctx.agent_hub.remove(&model.name).await;
+
+                    audit::record(
+                        &ctx,
+                        "node.delete",
+                        &id.to_string(),
+                        Some(serde_json::json!({ "name": model.name })),
+                    )
+                    .await;
+
+                    Ok(NodeDeleteOutput { ok: true })
                 },
             ),
         )
