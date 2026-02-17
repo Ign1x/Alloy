@@ -242,7 +242,7 @@ impl AgentTransport {
 
         if conn.tx.send_text(text).await.is_err() {
             let _ = conn.pending.lock().await.remove(&id);
-            self.hub.remove(&conn.node).await;
+            let _ = self.hub.remove_if_same(&conn.node, &conn).await;
             return Err(tonic::Status::unavailable("agent tunnel send failed"));
         }
 
@@ -250,7 +250,7 @@ impl AgentTransport {
             Ok(Ok(v)) => v,
             Ok(Err(_)) => {
                 let _ = conn.pending.lock().await.remove(&id);
-                self.hub.remove(&conn.node).await;
+                let _ = self.hub.remove_if_same(&conn.node, &conn).await;
                 return Err(tonic::Status::unavailable("agent tunnel disconnected"));
             }
             Err(_) => {

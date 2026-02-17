@@ -171,10 +171,8 @@ impl AgentHub {
             let now_ms = now_unix_ms();
             if now_ms.saturating_sub(last_ms) > stale_ms {
                 // Consider the node disconnected and drop the poll mailbox.
-                let removed = self.inner.write().await.remove(node);
-                if let Some(removed) = removed {
-                    let _ = removed.pending.lock().await.drain();
-                }
+                let _ = self.remove_if_same(node, &conn).await;
+                let _ = conn.pending.lock().await.drain();
                 return None;
             }
         }
@@ -187,7 +185,26 @@ impl AgentHub {
     }
 
     pub async fn insert(&self, conn: Arc<AgentConnection>) {
-        self.inner.write().await.insert(conn.node.clone(), conn);
+        let _ = self.inner.write().await.insert(conn.node.clone(), conn);
+    }
+
+    pub async fn insert_replace(
+        &self,
+        conn: Arc<AgentConnection>,
+    ) -> Option<Arc<AgentConnection>> {
+        self.inner.write().await.insert(conn.node.clone(), conn)
+    }
+
+    pub async fn remove_if_same(&self, node: &str, conn: &Arc<AgentConnection>) -> bool {
+        let mut inner = self.inner.write().await;
+        let Some(current) = inner.get(node) else {
+            return false;
+        };
+        if Arc::ptr_eq(current, conn) {
+            inner.remove(node);
+            return true;
+        }
+        false
     }
 
     pub async fn remove(&self, node: &str) {
@@ -668,7 +685,13 @@ async fn handle_agent_socket(state: AppState, socket: WebSocket, auth: WsAuth) {
             pending: Mutex::new(HashMap::new()),
         });
 
-        state.agent_hub.insert(conn.clone()).await;
+        let replaced = state.agent_hub.insert_replace(conn.clone()).await;
+        if let Some(old) = replaced {
+            let _ = old.pending.lock().await.drain();
+            if let AgentTx::Ws(tx) = &old.tx {
+                let _ = tx.try_send(Message::Close(None));
+            }
+        }
 
         let writer = tokio::spawn(async move {
             while let Some(msg) = rx.recv().await {
@@ -759,7 +782,7 @@ async fn handle_agent_socket(state: AppState, socket: WebSocket, auth: WsAuth) {
             }
         }
 
-        state.agent_hub.remove(&node).await;
+        let _ = state.agent_hub.remove_if_same(&node, &conn).await;
         let _ = conn.pending.lock().await.drain();
 
         heartbeat.abort();
