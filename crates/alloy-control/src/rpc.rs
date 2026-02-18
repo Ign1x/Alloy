@@ -5305,7 +5305,7 @@ pub fn router() -> Router<Ctx> {
             "delete",
             Procedure::builder::<ApiError>().mutation(
                 |ctx: Ctx, input: NodeDeleteInput| async move {
-                    use alloy_db::entities::{instance_nodes, nodes};
+                    use alloy_db::entities::{instance_nodes, instances, nodes};
                     use sea_orm::{
                         ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set,
                     };
