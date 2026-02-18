@@ -7,6 +7,7 @@ import { connectHost, instancePort, parseFrpEndpoint } from '../app/helpers/netw
 import { downloadJson, isSecretParamKey, safeCopy } from '../app/helpers/misc'
 import { templateDisplayLabel, templateLogoSrc } from '../app/helpers/templateBrand'
 import { StartProgress } from '../app/primitives/StartProgress'
+import { isAlloyApiError } from '../rspc'
 import { FileBrowser } from './FileBrowser'
 import { LogViewer } from './LogViewer'
 import { Badge } from './ui/Badge'
@@ -290,10 +291,13 @@ export default function InstanceDetailsModal(props: InstanceDetailsModalProps) {
 	                                )
 	                                await invalidateInstances()
 	                                pushToast('success', 'Stopped', uiName())
-	                              } catch (e) {
-	                                toastError('Stop failed', e)
-	                              }
-	                            }}
+                              } catch (e) {
+                                if (isAlloyApiError(e) && e.data.hint) {
+                                  pushToast('info', 'Hint', e.data.hint, e.data.request_id)
+                                }
+                                toastError('Stop failed', e)
+                              }
+                            }}
 	                          >
                               Stop
                             </Button>
@@ -315,10 +319,13 @@ export default function InstanceDetailsModal(props: InstanceDetailsModalProps) {
 	                                await runInstanceOp(id(), 'starting', () => startInstance.mutateAsync({ instance_id: id() }))
 	                                await invalidateInstances()
 	                                pushToast('success', 'Started', uiName())
-	                              } catch (e) {
-	                                toastError('Start failed', e)
-	                              }
-	                            }}
+                              } catch (e) {
+                                if (isAlloyApiError(e) && e.data.hint) {
+                                  pushToast('info', 'Hint', e.data.hint, e.data.request_id)
+                                }
+                                toastError('Start failed', e)
+                              }
+                            }}
 	                          >
                             Start
                           </Button>
@@ -338,10 +345,13 @@ export default function InstanceDetailsModal(props: InstanceDetailsModalProps) {
 	                                )
 	                                await invalidateInstances()
 	                                pushToast('success', 'Restarted', uiName())
-	                              } catch (e) {
-	                                toastError('Restart failed', e)
-	                              }
-	                            }}
+                              } catch (e) {
+                                if (isAlloyApiError(e) && e.data.hint) {
+                                  pushToast('info', 'Hint', e.data.hint, e.data.request_id)
+                                }
+                                toastError('Restart failed', e)
+                              }
+                            }}
 	                          >
 	                            <Show
 	                              when={instanceOpById()[id()] === 'restarting'}

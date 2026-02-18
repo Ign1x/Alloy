@@ -19,6 +19,7 @@ export default function InstancesCardsArea(props: InstancesCardsAreaProps) {
     instanceOpById,
     instanceStatusKeys,
     instances,
+    instancesPollErrorStreak,
     invalidateInstances,
     isReadOnly,
     openEditModal,
@@ -39,8 +40,19 @@ export default function InstancesCardsArea(props: InstancesCardsAreaProps) {
     togglePinnedInstance,
   } = props as any
 
+  const hasOfflineSnapshot = () =>
+    instances.isError &&
+    (instances.data ?? []).length > 0 &&
+    Number(instancesPollErrorStreak?.() ?? 0) > 0
+
   return (
     <>
+      <Show when={hasOfflineSnapshot()}>
+        <div class="mt-4 rounded-xl border border-amber-200 bg-amber-50/80 px-3 py-2 text-xs text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-200">
+          Control is temporarily disconnected from one or more nodes. Showing cached instances from Control storage.
+        </div>
+      </Show>
+
       <Show when={!instances.isError || instances.data != null}>
         <Show
           when={instances.isPending}

@@ -23,6 +23,9 @@ function friendlyErrorMessage(err: unknown): string {
   if (lower.includes('<html') && (lower.includes('bad gateway') || lower.includes('nginx'))) {
     return 'The server returned an HTML error page. Refresh the page and retry.'
   }
+  if (lower.includes('node is currently unreachable') || lower.includes('node tunnel disconnected')) {
+    return 'Node is currently reconnecting. Retry in a few seconds.'
+  }
   return raw
 }
 

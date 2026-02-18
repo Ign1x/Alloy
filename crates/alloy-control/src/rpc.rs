@@ -11,7 +11,7 @@ use rspc::{Procedure, ProcedureError, ResolverError, Router};
 
 use specta::Type;
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{BTreeMap, HashMap, VecDeque},
     sync::{Arc, OnceLock},
     time::{Duration, Instant},
 };
@@ -34,6 +34,8 @@ const DOWNLOAD_STATE_PAUSED: &str = "paused";
 const DOWNLOAD_STATE_SUCCESS: &str = "success";
 const DOWNLOAD_STATE_ERROR: &str = "error";
 const DOWNLOAD_STATE_CANCELED: &str = "canceled";
+const INSTANCE_CREATE_MAX_ATTEMPTS: usize = 3;
+const INSTANCE_START_MAX_ATTEMPTS: usize = 3;
 
 fn random_token(n: usize) -> String {
     use base64::Engine;
@@ -947,6 +949,29 @@ fn api_error_from_agent_status(ctx: &Ctx, action: &str, status: tonic::Status) -
             );
             return err;
         }
+
+        if lower_message.contains("agent call timeout") {
+            let mut err = api_error(
+                ctx,
+                "agent_unreachable",
+                format!("{action}: request timed out while waiting for node response"),
+            );
+            err.hint = Some(
+                "Node may be reconnecting. Retry in a few seconds. If it keeps happening, check node network stability and ALLOY_CONTROL_WS_URL(S)."
+                    .to_string(),
+            );
+            return err;
+        }
+    }
+
+    if status.code() == tonic::Code::DeadlineExceeded {
+        let mut err = api_error(
+            ctx,
+            "timeout",
+            format!("{action}: timed out waiting for agent response"),
+        );
+        err.hint = Some("Node may still be processing or reconnecting. Retry shortly.".to_string());
+        return err;
     }
 
     let code = match status.code() {
@@ -1703,6 +1728,218 @@ fn node_response_fields(node: Option<&NodeTarget>) -> (Option<String>, Option<St
     (None, None)
 }
 
+fn retry_backoff(attempt: usize) -> Duration {
+    let base_ms = 180_u64;
+    let step = 1_u64 << attempt.min(3);
+    Duration::from_millis((base_ms * step).min(1500))
+}
+
+fn should_retry_instance_create(status: &tonic::Status) -> bool {
+    if !matches!(
+        status.code(),
+        tonic::Code::Unavailable | tonic::Code::DeadlineExceeded
+    ) {
+        return false;
+    }
+
+    let msg = status.message().to_ascii_lowercase();
+    msg.contains("no active tunnel")
+        || msg.contains("connect failed (")
+        || msg.contains("agent is not ready")
+        || msg.contains("agent call timeout")
+}
+
+fn should_retry_instance_start(status: &tonic::Status) -> bool {
+    match status.code() {
+        tonic::Code::Unavailable | tonic::Code::DeadlineExceeded => true,
+        tonic::Code::NotFound => {
+            let msg = status.message().to_ascii_lowercase();
+            msg.contains("instance not found") || msg.contains("process not found")
+        }
+        _ => false,
+    }
+}
+
+fn normalized_display_name(raw: Option<String>) -> Option<String> {
+    raw.map(|v| v.trim().to_string()).filter(|v| !v.is_empty())
+}
+
+fn map_persisted_instance_model(row: alloy_db::entities::instances::Model) -> InstanceInfoDto {
+    let params =
+        serde_json::from_str::<BTreeMap<String, String>>(&row.params_json).unwrap_or_default();
+    InstanceInfoDto {
+        config: InstanceConfigDto {
+            instance_id: row.instance_id,
+            template_id: row.template_id,
+            params,
+            display_name: normalized_display_name(row.display_name),
+            node_id: row.node_id.map(|id| id.to_string()),
+            node_name: if row.node_name.trim().is_empty() {
+                None
+            } else {
+                Some(row.node_name)
+            },
+        },
+        status: None,
+    }
+}
+
+async fn upsert_persisted_instance_from_proto(
+    ctx: &Ctx,
+    cfg: &alloy_proto::agent_v1::InstanceConfig,
+    node: Option<&NodeTarget>,
+) -> Result<(), ApiError> {
+    use alloy_db::entities::instances;
+    use sea_orm::{EntityTrait, Set};
+
+    let existing = instances::Entity::find_by_id(cfg.instance_id.clone())
+        .one(&*ctx.db)
+        .await
+        .map_err(|e| api_error(ctx, "db_error", format!("db error: {e}")))?;
+
+    let resolved_node = if let Some(node) = node.cloned() {
+        node
+    } else if let Some(existing) = existing.as_ref() {
+        NodeTarget {
+            id: existing.node_id.map(|id| id.to_string()),
+            name: existing.node_name.clone(),
+        }
+    } else {
+        NodeTarget {
+            id: None,
+            name: default_instance_node_name(),
+        }
+    };
+
+    let mut params = BTreeMap::<String, String>::new();
+    for (k, v) in &cfg.params {
+        params.insert(k.clone(), v.clone());
+    }
+
+    let params_json = serde_json::to_string(&params)
+        .map_err(|e| api_error(ctx, "internal", format!("failed to serialize params: {e}")))?;
+
+    let now: sea_orm::prelude::DateTimeWithTimeZone = chrono::Utc::now().into();
+    let parsed_node_id = resolved_node
+        .id
+        .as_deref()
+        .and_then(|raw| sea_orm::prelude::Uuid::parse_str(raw).ok());
+
+    let model = instances::ActiveModel {
+        instance_id: Set(cfg.instance_id.clone()),
+        template_id: Set(cfg.template_id.clone()),
+        params_json: Set(params_json),
+        display_name: Set(normalized_display_name(Some(cfg.display_name.clone()))),
+        node_id: Set(parsed_node_id),
+        node_name: Set(resolved_node.name),
+        created_at: Set(now),
+        updated_at: Set(now),
+    };
+
+    instances::Entity::insert(model)
+        .on_conflict(
+            sea_orm::sea_query::OnConflict::column(instances::Column::InstanceId)
+                .update_columns([
+                    instances::Column::TemplateId,
+                    instances::Column::ParamsJson,
+                    instances::Column::DisplayName,
+                    instances::Column::NodeId,
+                    instances::Column::NodeName,
+                    instances::Column::UpdatedAt,
+                ])
+                .to_owned(),
+        )
+        .exec(&*ctx.db)
+        .await
+        .map_err(|e| api_error(ctx, "db_error", format!("db error: {e}")))?;
+
+    Ok(())
+}
+
+async fn load_persisted_instance_info(
+    ctx: &Ctx,
+    instance_id: &str,
+) -> Result<Option<InstanceInfoDto>, ApiError> {
+    use alloy_db::entities::instances;
+    use sea_orm::EntityTrait;
+
+    let row = instances::Entity::find_by_id(instance_id.to_string())
+        .one(&*ctx.db)
+        .await
+        .map_err(|e| api_error(ctx, "db_error", format!("db error: {e}")))?;
+
+    Ok(row.map(map_persisted_instance_model))
+}
+
+async fn list_persisted_instance_infos(ctx: &Ctx) -> Result<Vec<InstanceInfoDto>, ApiError> {
+    use alloy_db::entities::instances;
+    use sea_orm::EntityTrait;
+
+    let rows = instances::Entity::find()
+        .all(&*ctx.db)
+        .await
+        .map_err(|e| api_error(ctx, "db_error", format!("db error: {e}")))?;
+
+    Ok(rows.into_iter().map(map_persisted_instance_model).collect())
+}
+
+async fn delete_persisted_instance_record(ctx: &Ctx, instance_id: &str) -> Result<(), ApiError> {
+    use alloy_db::entities::instances;
+    use sea_orm::EntityTrait;
+
+    instances::Entity::delete_by_id(instance_id.to_string())
+        .exec(&*ctx.db)
+        .await
+        .map_err(|e| api_error(ctx, "db_error", format!("db error: {e}")))?;
+
+    Ok(())
+}
+
+async fn recover_persisted_instances_from_legacy_table(ctx: &Ctx) -> Result<(), ApiError> {
+    use alloy_db::entities::{instance_nodes, instances};
+    use sea_orm::EntityTrait;
+
+    let existing = instances::Entity::find()
+        .all(&*ctx.db)
+        .await
+        .map_err(|e| api_error(ctx, "db_error", format!("db error: {e}")))?;
+
+    if !existing.is_empty() {
+        return Ok(());
+    }
+
+    let legacy_rows = instance_nodes::Entity::find()
+        .all(&*ctx.db)
+        .await
+        .map_err(|e| api_error(ctx, "db_error", format!("db error: {e}")))?;
+
+    for row in legacy_rows {
+        let now: sea_orm::prelude::DateTimeWithTimeZone = chrono::Utc::now().into();
+        let model = instances::ActiveModel {
+            instance_id: sea_orm::Set(row.instance_id),
+            template_id: sea_orm::Set("unknown:legacy".to_string()),
+            params_json: sea_orm::Set("{}".to_string()),
+            display_name: sea_orm::Set(None),
+            node_id: sea_orm::Set(row.node_id),
+            node_name: sea_orm::Set(row.node_name),
+            created_at: sea_orm::Set(now.clone()),
+            updated_at: sea_orm::Set(now),
+        };
+
+        instances::Entity::insert(model)
+            .on_conflict(
+                sea_orm::sea_query::OnConflict::column(instances::Column::InstanceId)
+                    .do_nothing()
+                    .to_owned(),
+            )
+            .exec(&*ctx.db)
+            .await
+            .map_err(|e| api_error(ctx, "db_error", format!("db error: {e}")))?;
+    }
+
+    Ok(())
+}
+
 async fn list_registered_node_targets(
     ctx: &Ctx,
     enabled_only: bool,
@@ -1733,7 +1970,7 @@ async fn list_registered_node_targets(
 }
 
 async fn list_instance_scan_targets(ctx: &Ctx) -> Result<Vec<NodeTarget>, ApiError> {
-    use alloy_db::entities::instance_nodes;
+    use alloy_db::entities::{instance_nodes, instances};
     use sea_orm::EntityTrait;
 
     let mut by_name = std::collections::BTreeMap::<String, Option<String>>::new();
@@ -1757,6 +1994,21 @@ async fn list_instance_scan_targets(ctx: &Ctx) -> Result<Vec<NodeTarget>, ApiErr
         by_name
             .entry(owned.node_name)
             .or_insert_with(|| owned.node_id.map(|id| id.to_string()));
+    }
+
+    let persisted_rows = instances::Entity::find()
+        .all(&*ctx.db)
+        .await
+        .map_err(|e| api_error(ctx, "db_error", format!("db error: {e}")))?;
+
+    for row in persisted_rows {
+        let node_name = row.node_name.trim().to_string();
+        if node_name.is_empty() {
+            continue;
+        }
+        by_name
+            .entry(node_name)
+            .or_insert_with(|| row.node_id.map(|id| id.to_string()));
     }
 
     Ok(by_name
@@ -1892,11 +2144,11 @@ async fn schedule_node_for_create(ctx: &Ctx) -> Result<NodeTarget, ApiError> {
 }
 
 async fn count_instances_on_node_name(ctx: &Ctx, node_name: &str) -> Result<u64, ApiError> {
-    use alloy_db::entities::instance_nodes;
+    use alloy_db::entities::instances;
     use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter};
 
-    instance_nodes::Entity::find()
-        .filter(instance_nodes::Column::NodeName.eq(node_name.to_string()))
+    instances::Entity::find()
+        .filter(instances::Column::NodeName.eq(node_name.to_string()))
         .count(&*ctx.db)
         .await
         .map_err(|e| api_error(ctx, "db_error", format!("db error: {e}")))
@@ -1907,8 +2159,8 @@ async fn save_instance_node_target(
     instance_id: &str,
     node: &NodeTarget,
 ) -> Result<(), ApiError> {
-    use alloy_db::entities::instance_nodes;
-    use sea_orm::{EntityTrait, Set};
+    use alloy_db::entities::{instance_nodes, instances};
+    use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 
     let now: sea_orm::prelude::DateTimeWithTimeZone = chrono::Utc::now().into();
     let parsed_node_id = node
@@ -1920,8 +2172,8 @@ async fn save_instance_node_target(
         instance_id: Set(instance_id.to_string()),
         node_id: Set(parsed_node_id),
         node_name: Set(node.name.clone()),
-        created_at: Set(now),
-        updated_at: Set(now),
+        created_at: Set(now.clone()),
+        updated_at: Set(now.clone()),
     };
 
     instance_nodes::Entity::insert(model)
@@ -1937,6 +2189,21 @@ async fn save_instance_node_target(
         .exec(&*ctx.db)
         .await
         .map_err(|e| api_error(ctx, "db_error", format!("db error: {e}")))?;
+
+    if let Some(current) = instances::Entity::find_by_id(instance_id.to_string())
+        .one(&*ctx.db)
+        .await
+        .map_err(|e| api_error(ctx, "db_error", format!("db error: {e}")))?
+    {
+        let mut active: instances::ActiveModel = current.into();
+        active.node_id = Set(parsed_node_id);
+        active.node_name = Set(node.name.clone());
+        active.updated_at = Set(now);
+        active
+            .update(&*ctx.db)
+            .await
+            .map_err(|e| api_error(ctx, "db_error", format!("db error: {e}")))?;
+    }
 
     Ok(())
 }
@@ -1996,7 +2263,7 @@ async fn load_instance_node_target(
     ctx: &Ctx,
     instance_id: &str,
 ) -> Result<Option<NodeTarget>, ApiError> {
-    use alloy_db::entities::instance_nodes;
+    use alloy_db::entities::{instance_nodes, instances};
     use sea_orm::EntityTrait;
 
     if let Some(owned) = instance_nodes::Entity::find_by_id(instance_id.to_string())
@@ -2033,6 +2300,39 @@ async fn load_instance_node_target(
         let legacy_key = legacy_instance_node_setting_key(instance_id);
         let _ = setting_clear(&*ctx.db, &legacy_key).await;
         return Ok(Some(legacy_target));
+    }
+
+    if let Some(persisted) = instances::Entity::find_by_id(instance_id.to_string())
+        .one(&*ctx.db)
+        .await
+        .map_err(|e| api_error(ctx, "db_error", format!("db error: {e}")))?
+    {
+        if let Some(node_id) = persisted.node_id {
+            use alloy_db::entities::nodes;
+
+            if let Some(node) = nodes::Entity::find_by_id(node_id)
+                .one(&*ctx.db)
+                .await
+                .map_err(|e| api_error(ctx, "db_error", format!("db error: {e}")))?
+            {
+                let target = NodeTarget {
+                    id: Some(node.id.to_string()),
+                    name: node.name,
+                };
+                let _ = save_instance_node_target(ctx, instance_id, &target).await;
+                return Ok(Some(target));
+            }
+        }
+
+        let node_name = persisted.node_name.trim().to_string();
+        if !node_name.is_empty() {
+            let target = NodeTarget {
+                id: persisted.node_id.map(|id| id.to_string()),
+                name: node_name,
+            };
+            let _ = save_instance_node_target(ctx, instance_id, &target).await;
+            return Ok(Some(target));
+        }
     }
 
     Ok(None)
@@ -3908,25 +4208,69 @@ pub fn router() -> Router<Ctx> {
                         }
                     }
 
-                    let resp: alloy_proto::agent_v1::CreateInstanceResponse = transport
-                        .call(
-                            "/alloy.agent.v1.InstanceService/Create",
-                            CreateInstanceRequest {
-                                template_id,
-                                params: params.into_iter().collect(),
-                                display_name: display_name.unwrap_or_default(),
-                            },
-                        )
-                        .await
-                        .map_err(|status| {
-                            api_error_from_agent_status(&ctx, "instance.create", status)
-                        })?;
+                    let template_id_for_call = template_id;
+                    let params_for_call = params.clone();
+                    let display_name_for_call = display_name.unwrap_or_default();
+
+                    let mut response: Option<alloy_proto::agent_v1::CreateInstanceResponse> = None;
+                    let mut last_error: Option<tonic::Status> = None;
+                    for attempt in 0..INSTANCE_CREATE_MAX_ATTEMPTS {
+                        let call_result = transport
+                            .call(
+                                "/alloy.agent.v1.InstanceService/Create",
+                                CreateInstanceRequest {
+                                    template_id: template_id_for_call.clone(),
+                                    params: params_for_call.clone().into_iter().collect(),
+                                    display_name: display_name_for_call.clone(),
+                                },
+                            )
+                            .await;
+
+                        match call_result {
+                            Ok(resp) => {
+                                response = Some(resp);
+                                break;
+                            }
+                            Err(status) => {
+                                let retryable = should_retry_instance_create(&status);
+                                let last_attempt = attempt + 1 >= INSTANCE_CREATE_MAX_ATTEMPTS;
+                                if !retryable || last_attempt {
+                                    last_error = Some(status);
+                                    break;
+                                }
+                                tokio::time::sleep(retry_backoff(attempt)).await;
+                                continue;
+                            }
+                        }
+                    }
+
+                    let resp = if let Some(resp) = response {
+                        resp
+                    } else {
+                        let status = last_error
+                            .unwrap_or_else(|| tonic::Status::unknown("instance create failed"));
+                        let mut err = api_error_from_agent_status(&ctx, "instance.create", status);
+                        if err.code == "agent_unreachable" {
+                            err.field_errors.insert(
+                                "node_id".to_string(),
+                                "selected node is currently unreachable".to_string(),
+                            );
+                            if err.hint.is_none() {
+                                err.hint = Some(format!(
+                                    "Node '{}' is offline or reconnecting. Check node status and retry.",
+                                    requested_node.name
+                                ));
+                            }
+                        }
+                        return Err(err);
+                    };
 
                     let cfg = resp
                         .config
                         .ok_or_else(|| api_error(&ctx, "internal", "missing instance config"))?;
 
                     save_instance_node_target(&ctx, &cfg.instance_id, &requested_node).await?;
+                    upsert_persisted_instance_from_proto(&ctx, &cfg, Some(&requested_node)).await?;
 
                     let (node_id, node_name) = node_response_fields(Some(&requested_node));
 
@@ -3945,33 +4289,64 @@ pub fn router() -> Router<Ctx> {
         .procedure(
             "get",
             Procedure::builder::<ApiError>().query(|ctx, input: InstanceIdInput| async move {
+                recover_persisted_instances_from_legacy_table(&ctx).await?;
                 let (transport, node_target) =
                     instance_transport_for_id(&ctx, &input.instance_id).await?;
                 let response_node_target =
                     node_target_for_response(&ctx, &input.instance_id, node_target).await?;
-                let resp: alloy_proto::agent_v1::GetInstanceResponse = transport
+                let remote_result: Result<alloy_proto::agent_v1::GetInstanceResponse, tonic::Status> = transport
                     .call(
                         "/alloy.agent.v1.InstanceService/Get",
                         GetInstanceRequest {
-                            instance_id: input.instance_id,
+                            instance_id: input.instance_id.clone(),
                         },
                     )
-                    .await
-                    .map_err(|status| api_error_from_agent_status(&ctx, "instance.get", status))?;
+                    .await;
 
-                let info = resp
-                    .info
-                    .ok_or_else(|| api_error(&ctx, "internal", "missing instance info"))?;
+                match remote_result {
+                    Ok(resp) => {
+                        let info = resp
+                            .info
+                            .ok_or_else(|| api_error(&ctx, "internal", "missing instance info"))?;
 
-                let (node_id, node_name) = node_response_fields(response_node_target.as_ref());
-                map_instance_info(&ctx, info, node_id, node_name)
+                        let (node_id, node_name) = node_response_fields(response_node_target.as_ref());
+                        let mapped = map_instance_info(&ctx, info, node_id, node_name)?;
+                        let cfg = alloy_proto::agent_v1::InstanceConfig {
+                            instance_id: mapped.config.instance_id.clone(),
+                            template_id: mapped.config.template_id.clone(),
+                            params: mapped.config.params.clone().into_iter().collect(),
+                            display_name: mapped.config.display_name.clone().unwrap_or_default(),
+                        };
+                        let _ = upsert_persisted_instance_from_proto(
+                            &ctx,
+                            &cfg,
+                            response_node_target.as_ref(),
+                        )
+                        .await;
+                        Ok(mapped)
+                    }
+                    Err(status) => {
+                        if status.code() == tonic::Code::Unavailable
+                            && let Some(persisted) =
+                                load_persisted_instance_info(&ctx, &input.instance_id).await?
+                        {
+                            return Ok(persisted);
+                        }
+                        Err(api_error_from_agent_status(&ctx, "instance.get", status))
+                    }
+                }
             }),
         )
         .procedure(
             "list",
             Procedure::builder::<ApiError>().query(|ctx, _: ()| async move {
+                recover_persisted_instances_from_legacy_table(&ctx).await?;
                 let mut by_id = std::collections::BTreeMap::<String, (InstanceInfoDto, i32)>::new();
+                for persisted in list_persisted_instance_infos(&ctx).await? {
+                    by_id.insert(persisted.config.instance_id.clone(), (persisted, -1));
+                }
                 let nodes = list_instance_scan_targets(&ctx).await?;
+                let mut reachable_nodes = std::collections::BTreeSet::<String>::new();
 
                 for node in nodes {
                     let transport = agent_transport(&ctx).with_node(node.name.clone());
@@ -3990,6 +4365,7 @@ pub fn router() -> Router<Ctx> {
                             return Err(api_error_from_agent_status(&ctx, "instance.list", status));
                         }
                     };
+                    reachable_nodes.insert(node.name.clone());
 
                     let priority = if node.name == default_instance_node_name() {
                         1
@@ -4003,6 +4379,13 @@ pub fn router() -> Router<Ctx> {
                             map_instance_info(&ctx, info, node_id.clone(), node_name.clone())?;
                         let instance_id = mapped.config.instance_id.clone();
                         let _ = save_instance_node_target(&ctx, &instance_id, &node).await;
+                        let cfg = alloy_proto::agent_v1::InstanceConfig {
+                            instance_id: mapped.config.instance_id.clone(),
+                            template_id: mapped.config.template_id.clone(),
+                            params: mapped.config.params.clone().into_iter().collect(),
+                            display_name: mapped.config.display_name.clone().unwrap_or_default(),
+                        };
+                        let _ = upsert_persisted_instance_from_proto(&ctx, &cfg, Some(&node)).await;
                         let should_replace = match by_id.get(&instance_id) {
                             Some((_existing, existing_priority)) => priority > *existing_priority,
                             None => true,
@@ -4015,6 +4398,31 @@ pub fn router() -> Router<Ctx> {
 
                 let mut out = Vec::new();
                 for (_id, (info, _priority)) in by_id {
+                    let mut info = info;
+                    if info.status.is_none()
+                        && let Some(node_name) = info.config.node_name.clone()
+                        && !reachable_nodes.contains(&node_name)
+                    {
+                        info.status = Some(ProcessStatusDto {
+                            process_id: info.config.instance_id.clone(),
+                            template_id: info.config.template_id.clone(),
+                            state: "PROCESS_STATE_FAILED".to_string(),
+                            pid: None,
+                            exit_code: None,
+                            message: Some(format!(
+                                "ALLOY_ERROR_JSON:{}",
+                                serde_json::json!({
+                                    "code": "agent_unreachable",
+                                    "message": "node is currently offline (control is showing cached instance record)",
+                                    "hint": format!(
+                                        "Node '{}' is disconnected. Reconnect node, then start/retry.",
+                                        node_name
+                                    )
+                                })
+                            )),
+                            resources: None,
+                        });
+                    }
                     out.push(info);
                 }
                 Ok(out)
@@ -4196,23 +4604,80 @@ pub fn router() -> Router<Ctx> {
                 ensure_writable(&ctx)?;
                 enforce_rate_limit(&ctx)?;
 
-                let (transport, _node_target) =
-                    instance_transport_for_id(&ctx, &input.instance_id).await?;
-                let resp: alloy_proto::agent_v1::StartInstanceResponse = transport
-                    .call(
-                        "/alloy.agent.v1.InstanceService/Start",
-                        StartInstanceRequest {
-                            instance_id: input.instance_id,
-                        },
-                    )
-                    .await
-                    .map_err(|status| {
-                        api_error_from_agent_status(&ctx, "instance.start", status)
-                    })?;
+                    let instance_id = input.instance_id;
+                    recover_persisted_instances_from_legacy_table(&ctx).await?;
+                    let (transport, node_target) =
+                        instance_transport_for_id(&ctx, &instance_id).await?;
+                let mut response: Option<alloy_proto::agent_v1::StartInstanceResponse> = None;
+                let mut last_error: Option<tonic::Status> = None;
+                for attempt in 0..INSTANCE_START_MAX_ATTEMPTS {
+                    let call_result = transport
+                        .call(
+                            "/alloy.agent.v1.InstanceService/Start",
+                            StartInstanceRequest {
+                                instance_id: instance_id.clone(),
+                            },
+                        )
+                        .await;
+
+                    match call_result {
+                        Ok(resp) => {
+                            response = Some(resp);
+                            break;
+                        }
+                        Err(status) => {
+                            let retryable = should_retry_instance_start(&status);
+                            let last_attempt = attempt + 1 >= INSTANCE_START_MAX_ATTEMPTS;
+                            if !retryable || last_attempt {
+                                last_error = Some(status);
+                                break;
+                            }
+                            tokio::time::sleep(retry_backoff(attempt)).await;
+                            continue;
+                        }
+                    }
+                }
+
+                let resp = if let Some(resp) = response {
+                    resp
+                } else {
+                    let status =
+                        last_error.unwrap_or_else(|| tonic::Status::unknown("instance start failed"));
+                    let mut err = api_error_from_agent_status(&ctx, "instance.start", status);
+                    if err.code == "agent_unreachable"
+                        && let Some(node) = node_target.as_ref()
+                    {
+                        if err.hint.is_none() {
+                            err.hint = Some(format!(
+                                "Instance host node '{}' appears offline. Wait for reconnect, then retry start.",
+                                node.name
+                            ));
+                        }
+                    }
+                    return Err(err);
+                };
 
                 let status = resp
                     .status
                     .ok_or_else(|| api_error(&ctx, "internal", "missing status"))?;
+
+                let fallback_node = NodeTarget {
+                    id: None,
+                    name: default_instance_node_name(),
+                };
+                let selected_node = node_target.as_ref().unwrap_or(&fallback_node);
+
+                if let Some(persisted) = load_persisted_instance_info(&ctx, &instance_id).await? {
+                    let cfg = alloy_proto::agent_v1::InstanceConfig {
+                        instance_id: persisted.config.instance_id,
+                        template_id: persisted.config.template_id,
+                        params: persisted.config.params.into_iter().collect(),
+                        display_name: persisted.config.display_name.unwrap_or_default(),
+                    };
+                    let _ = upsert_persisted_instance_from_proto(&ctx, &cfg, Some(selected_node)).await;
+                }
+
+                let _ = save_instance_node_target(&ctx, &status.process_id, selected_node).await;
 
                 audit::record(
                     &ctx,
@@ -4231,6 +4696,7 @@ pub fn router() -> Router<Ctx> {
                 |ctx, input: RestartInstanceInput| async move {
                     ensure_writable(&ctx)?;
                     enforce_rate_limit(&ctx)?;
+                    recover_persisted_instances_from_legacy_table(&ctx).await?;
 
                     let (transport, _node_target) =
                         instance_transport_for_id(&ctx, &input.instance_id).await?;
@@ -4327,6 +4793,7 @@ pub fn router() -> Router<Ctx> {
                 |ctx, input: UpdateInstanceInput| async move {
                     ensure_writable(&ctx)?;
                     enforce_rate_limit(&ctx)?;
+                    recover_persisted_instances_from_legacy_table(&ctx).await?;
 
                     let (transport, node_target) =
                         instance_transport_for_id(&ctx, &input.instance_id).await?;
@@ -4349,6 +4816,13 @@ pub fn router() -> Router<Ctx> {
                     let cfg = resp
                         .config
                         .ok_or_else(|| api_error(&ctx, "internal", "missing instance config"))?;
+
+                    upsert_persisted_instance_from_proto(
+                        &ctx,
+                        &cfg,
+                        response_node_target.as_ref(),
+                    )
+                    .await?;
 
                     let (node_id, node_name) = node_response_fields(response_node_target.as_ref());
 
@@ -4577,19 +5051,48 @@ pub fn router() -> Router<Ctx> {
         .procedure(
             "deletePreview",
             Procedure::builder::<ApiError>().query(|ctx, input: InstanceIdInput| async move {
+                let instance_id = input.instance_id;
+                recover_persisted_instances_from_legacy_table(&ctx).await?;
                 let (transport, _node_target) =
-                    instance_transport_for_id(&ctx, &input.instance_id).await?;
-                let resp: alloy_proto::agent_v1::DeleteInstancePreviewResponse = transport
-                    .call(
-                        "/alloy.agent.v1.InstanceService/DeletePreview",
-                        DeleteInstancePreviewRequest {
-                            instance_id: input.instance_id,
-                        },
-                    )
-                    .await
-                    .map_err(|status| {
-                        api_error_from_agent_status(&ctx, "instance.delete_preview", status)
-                    })?;
+                    instance_transport_for_id(&ctx, &instance_id).await?;
+                let call_result: Result<alloy_proto::agent_v1::DeleteInstancePreviewResponse, tonic::Status> =
+                    transport
+                        .call(
+                            "/alloy.agent.v1.InstanceService/DeletePreview",
+                            DeleteInstancePreviewRequest {
+                                instance_id: instance_id.clone(),
+                            },
+                        )
+                        .await;
+
+                let resp = match call_result {
+                    Ok(resp) => resp,
+                    Err(status) => {
+                        if status.code() == tonic::Code::Unavailable
+                            && let Some(persisted) =
+                                load_persisted_instance_info(&ctx, &instance_id).await?
+                        {
+                            let node = persisted
+                                .config
+                                .node_name
+                                .unwrap_or_else(default_instance_node_name);
+                            let mut err = api_error(
+                                &ctx,
+                                "agent_unreachable",
+                                "instance.delete_preview: node is currently unreachable",
+                            );
+                            err.hint = Some(format!(
+                                "Instance is still recorded in Control on node '{node}'. Reconnect that node to fetch precise delete preview."
+                            ));
+                            return Err(err);
+                        }
+                        return Err(api_error_from_agent_status(
+                            &ctx,
+                            "instance.delete_preview",
+                            status,
+                        ));
+                    }
+                };
 
                 Ok(DeleteInstancePreviewOutput {
                     instance_id: resp.instance_id,
@@ -4620,6 +5123,7 @@ pub fn router() -> Router<Ctx> {
                     })?;
 
                 if resp.ok {
+                    let _ = delete_persisted_instance_record(&ctx, &instance_id).await;
                     let _ = delete_instance_node_target(&ctx, &instance_id).await;
                     let legacy_key = legacy_instance_node_setting_key(&instance_id);
                     let _ = setting_clear(&*ctx.db, &legacy_key).await;
@@ -4835,6 +5339,21 @@ pub fn router() -> Router<Ctx> {
                         .map_err(|e| api_error(&ctx, "db_error", format!("db error: {e}")))?;
                     for row in attached {
                         let mut active: instance_nodes::ActiveModel = row.into();
+                        active.node_id = Set(None);
+                        active.updated_at = Set(now.clone());
+                        active
+                            .update(&*ctx.db)
+                            .await
+                            .map_err(|e| api_error(&ctx, "db_error", format!("db error: {e}")))?;
+                    }
+
+                    let persisted = instances::Entity::find()
+                        .filter(instances::Column::NodeId.eq(id))
+                        .all(&*ctx.db)
+                        .await
+                        .map_err(|e| api_error(&ctx, "db_error", format!("db error: {e}")))?;
+                    for row in persisted {
+                        let mut active: instances::ActiveModel = row.into();
                         active.node_id = Set(None);
                         active.updated_at = Set(now.clone());
                         active

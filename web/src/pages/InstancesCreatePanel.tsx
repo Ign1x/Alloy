@@ -366,7 +366,11 @@ export default function InstancesCreatePanel(props: InstancesCreatePanelProps) {
                               setSelectedInstanceId(out.instance_id)
                             } catch (e) {
                               if (isAlloyApiError(e)) {
-                                const fieldErrors = e.data.field_errors ?? {}
+                                const fieldErrors = { ...(e.data.field_errors ?? {}) } as Record<string, string>
+
+                                if (e.data.code === 'agent_unreachable' && !fieldErrors.node_id) {
+                                  fieldErrors.node_id = 'Selected node is offline. Pick another node or retry later.'
+                                }
 
                                 setCreateFieldErrors(fieldErrors)
                                 setCreateFormError({ message: e.data.message, requestId: e.data.request_id })

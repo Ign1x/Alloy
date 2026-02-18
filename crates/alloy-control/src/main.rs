@@ -424,7 +424,7 @@ async fn upload_instance_save(
 }
 
 async fn cleanup_legacy_default_node(db: &sea_orm::DatabaseConnection) -> anyhow::Result<()> {
-    use alloy_db::entities::{instance_nodes, nodes};
+    use alloy_db::entities::{instance_nodes, instances, nodes};
     use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 
     let Some(endpoint) = std::env::var("ALLOY_AGENT_ENDPOINT")
@@ -443,13 +443,19 @@ async fn cleanup_legacy_default_node(db: &sea_orm::DatabaseConnection) -> anyhow
         .await?;
 
     for row in legacy_rows {
-        let in_use = instance_nodes::Entity::find()
+        let in_use_by_targets = instance_nodes::Entity::find()
             .filter(instance_nodes::Column::NodeId.eq(row.id))
             .one(db)
             .await?
             .is_some();
 
-        if in_use {
+        let in_use_by_records = instances::Entity::find()
+            .filter(instances::Column::NodeId.eq(row.id))
+            .one(db)
+            .await?
+            .is_some();
+
+        if in_use_by_targets || in_use_by_records {
             tracing::info!(
                 node_id = %row.id,
                 node_name = %row.name,

@@ -1,5 +1,6 @@
 import { Show } from 'solid-js'
 import { canStartInstance, isStopping } from '../../app/helpers/instances'
+import { isAlloyApiError } from '../../rspc'
 import { Button } from '../../components/ui/Button'
 
 export type InstanceRunActionsProps = {
@@ -49,6 +50,9 @@ export default function InstanceRunActions(props: InstanceRunActionsProps) {
                 await invalidateInstances()
                 pushToast('success', 'Stopped', instanceDisplayName(i as any))
               } catch (e) {
+                if (isAlloyApiError(e) && e.data.hint) {
+                  pushToast('info', 'Hint', e.data.hint, e.data.request_id)
+                }
                 toastError('Stop failed', e)
               }
             }}
@@ -75,10 +79,13 @@ export default function InstanceRunActions(props: InstanceRunActionsProps) {
               )
               await invalidateInstances()
               pushToast('success', 'Started', instanceDisplayName(i as any))
-            } catch (e) {
-              toastError('Start failed', e)
-            }
-          }}
+              } catch (e) {
+                if (isAlloyApiError(e) && e.data.hint) {
+                  pushToast('info', 'Hint', e.data.hint, e.data.request_id)
+                }
+                toastError('Start failed', e)
+              }
+            }}
         >
           Start
         </Button>
@@ -111,10 +118,13 @@ export default function InstanceRunActions(props: InstanceRunActionsProps) {
               )
               await invalidateInstances()
               pushToast('success', 'Restarted', instanceDisplayName(i as any))
-            } catch (e) {
-              toastError('Restart failed', e)
-            }
-          }}
+              } catch (e) {
+                if (isAlloyApiError(e) && e.data.hint) {
+                  pushToast('info', 'Hint', e.data.hint, e.data.request_id)
+                }
+                toastError('Restart failed', e)
+              }
+            }}
         >
           Restart
         </Button>

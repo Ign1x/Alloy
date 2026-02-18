@@ -2158,6 +2158,7 @@ function App() {
     instanceTemplateFilter,
     instanceTemplateFilterOptions,
     instances,
+    instancesPollErrorStreak,
     instancesLastUpdatedAtUnixMs,
     invalidateInstances,
     isReadOnly,
