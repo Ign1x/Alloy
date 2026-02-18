@@ -86,7 +86,7 @@ dependencies = [
 
 [[package]]
 name = "alloy-control"
-version = "0.2.17"
+version = "0.2.19"
 dependencies = [
  "alloy-db",
  "alloy-migration",
