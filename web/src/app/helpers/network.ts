@@ -14,14 +14,6 @@ export function instancePort(info: { config: { template_id: string; params: unkn
   return parsePort(params?.port)
 }
 
-export function connectHost() {
-  try {
-    return window.location.hostname || 'localhost'
-  } catch {
-    return 'localhost'
-  }
-}
-
 function normalizeControlWsUrl(value: string | null | undefined): string | null {
   const raw = (value ?? '').trim()
   if (!raw) return null
@@ -135,6 +127,69 @@ export function parseFrpEndpoint(config: string | null | undefined): string | nu
   }
 
   return null
+}
+
+function parseAllocatablePortsSpec(raw: string): number[] {
+  const out = new Set<number>()
+  for (const seg of raw.split(',')) {
+    const token = seg.trim()
+    if (!token) continue
+
+    const rangeMatch = token.match(/^(\d+)\s*-\s*(\d+)$/)
+    if (rangeMatch) {
+      const a = parsePortInRange(rangeMatch[1])
+      const b = parsePortInRange(rangeMatch[2])
+      if (a == null || b == null) continue
+      const lo = Math.min(a, b)
+      const hi = Math.max(a, b)
+      if (hi - lo > 4000) continue
+      for (let p = lo; p <= hi; p++) {
+        out.add(p)
+        if (out.size > 4000) break
+      }
+      continue
+    }
+
+    const port = parsePortInRange(token)
+    if (port != null) {
+      out.add(port)
+      if (out.size > 4000) break
+    }
+  }
+  return [...out].sort((a, b) => a - b)
+}
+
+function pickRemotePort(remotePort: number | null, allocPorts: number[], localPort: number | null): number | null {
+  if (allocPorts.length > 0 && localPort != null && localPort > 0) {
+    return allocPorts[localPort % allocPorts.length] ?? null
+  }
+  if (remotePort != null && remotePort > 0) return remotePort
+  if (localPort != null && localPort > 0) return localPort
+  return null
+}
+
+export function parseFrpPublicEndpoint(config: string | null | undefined, localPort?: number | null): string | null {
+  const raw = (config ?? '').trim()
+  if (!raw) return null
+
+  const serverEndpoint = parseFrpEndpoint(raw)
+  if (!serverEndpoint) return null
+  const split = serverEndpoint.lastIndexOf(':')
+  if (split <= 0) return null
+  const serverAddr = serverEndpoint.slice(0, split).trim()
+  if (!serverAddr) return null
+
+  const remoteByEq = /(?:^|\s)remote_port\s*[=:]\s*['"]?(\d+)['"]?/im.exec(raw)?.[1] ?? null
+  const remoteByCamel = /(?:^|\s)remotePort\s*[=:]\s*['"]?(\d+)['"]?/im.exec(raw)?.[1] ?? null
+  const parsedRemote = parsePort(remoteByEq ?? remoteByCamel)
+
+  const allocRaw =
+    /(?:^|\s)(?:alloy_alloc_ports|allocatable_ports)\s*[=:]\s*(.+)$/im.exec(raw)?.[1]?.trim() ?? ''
+  const allocPorts = allocRaw ? parseAllocatablePortsSpec(allocRaw) : []
+
+  const picked = pickRemotePort(parsedRemote, allocPorts, localPort ?? null)
+  if (picked == null) return null
+  return `${serverAddr}:${picked}`
 }
 
 function parsePortInRange(raw: string): number | null {

@@ -1,4 +1,4 @@
-import { connectHost, parseFrpEndpoint } from './network'
+import { parseFrpEndpoint, parseFrpPublicEndpoint } from './network'
 
 export type CreatePreviewRow = {
   label: string
@@ -93,7 +93,7 @@ function asPortLabel(raw: string): string {
 }
 
 function connectValue(label: string): string {
-  return label === 'auto' ? 'TBD (auto port)' : `${connectHost()}:${label}`
+  return label === 'auto' ? 'TBD (auto port)' : `127.0.0.1:${label}`
 }
 
 export function computeCreateAdvancedDirty(input: CreateAdvancedDirtyInput): boolean {
@@ -168,7 +168,7 @@ export function buildCreatePreview(input: BuildCreatePreviewInput): CreatePrevie
     rows.push({ label: 'Connect', value: connectValue(portLabel) })
 
     if (input.mcFrpEnabled) {
-      const ep = parseFrpEndpoint(input.mcEffectiveFrpConfig)
+      const ep = parseFrpPublicEndpoint(input.mcEffectiveFrpConfig, Number.parseInt(portLabel, 10)) ?? parseFrpEndpoint(input.mcEffectiveFrpConfig)
       rows.push({ label: 'Tunnel', value: ep ?? '(enabled)' })
       if (!input.mcEffectiveFrpConfig.trim()) warnings.push('Paste tunnel config or disable tunnels.')
     }
@@ -186,7 +186,7 @@ export function buildCreatePreview(input: BuildCreatePreviewInput): CreatePrevie
     rows.push({ label: 'Connect', value: connectValue(portLabel) })
 
     if (input.mcFrpEnabled) {
-      const ep = parseFrpEndpoint(input.mcEffectiveFrpConfig)
+      const ep = parseFrpPublicEndpoint(input.mcEffectiveFrpConfig, Number.parseInt(portLabel, 10)) ?? parseFrpEndpoint(input.mcEffectiveFrpConfig)
       rows.push({ label: 'Tunnel', value: ep ?? '(enabled)' })
       if (!input.mcEffectiveFrpConfig.trim()) warnings.push('Paste tunnel config or disable tunnels.')
     }
@@ -205,7 +205,7 @@ export function buildCreatePreview(input: BuildCreatePreviewInput): CreatePrevie
     rows.push({ label: 'Connect', value: connectValue(portLabel) })
 
     if (input.mcFrpEnabled) {
-      const ep = parseFrpEndpoint(input.mcEffectiveFrpConfig)
+      const ep = parseFrpPublicEndpoint(input.mcEffectiveFrpConfig, Number.parseInt(portLabel, 10)) ?? parseFrpEndpoint(input.mcEffectiveFrpConfig)
       rows.push({ label: 'Tunnel', value: ep ?? '(enabled)' })
       if (!input.mcEffectiveFrpConfig.trim()) warnings.push('Paste tunnel config or disable tunnels.')
     }
@@ -224,7 +224,7 @@ export function buildCreatePreview(input: BuildCreatePreviewInput): CreatePrevie
     rows.push({ label: 'Connect', value: connectValue(portLabel) })
 
     if (input.mcFrpEnabled) {
-      const ep = parseFrpEndpoint(input.mcEffectiveFrpConfig)
+      const ep = parseFrpPublicEndpoint(input.mcEffectiveFrpConfig, Number.parseInt(portLabel, 10)) ?? parseFrpEndpoint(input.mcEffectiveFrpConfig)
       rows.push({ label: 'Tunnel', value: ep ?? '(enabled)' })
       if (!input.mcEffectiveFrpConfig.trim()) warnings.push('Paste tunnel config or disable tunnels.')
     }
@@ -267,7 +267,7 @@ export function buildCreatePreview(input: BuildCreatePreviewInput): CreatePrevie
     rows.push({ label: 'Connect', value: connectValue(portLabel) })
 
     if (input.trFrpEnabled) {
-      const ep = parseFrpEndpoint(input.trEffectiveFrpConfig)
+      const ep = parseFrpPublicEndpoint(input.trEffectiveFrpConfig, Number.parseInt(portLabel, 10)) ?? parseFrpEndpoint(input.trEffectiveFrpConfig)
       rows.push({ label: 'Tunnel', value: ep ?? '(enabled)' })
       if (!input.trEffectiveFrpConfig.trim()) warnings.push('Paste tunnel config or disable tunnels.')
     }

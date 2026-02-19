@@ -1,7 +1,7 @@
 import { Show } from 'solid-js'
 import { formatRelativeTime } from '../../app/helpers/format'
 import { instanceStateLabel } from '../../app/helpers/instances'
-import { connectHost, instancePort } from '../../app/helpers/network'
+import { instancePort, parseFrpPublicEndpoint } from '../../app/helpers/network'
 import { safeCopy, shortId } from '../../app/helpers/misc'
 import { templateDisplayLabel, templateLogoSrc } from '../../app/helpers/templateBrand'
 import { StartProgress } from '../../app/primitives/StartProgress'
@@ -96,7 +96,9 @@ export default function InstanceCardHeader(props: InstanceCardHeaderProps) {
                                       </Show>
                                       <Show when={instancePort(i)}>
                                         {(p) => {
-	                                          const addr = `${connectHost()}:${p()}`
+ 	                                          const params = (i.config?.params ?? null) as Record<string, unknown> | null
+ 	                                          const frpCfg = typeof params?.frp_config === 'string' ? params.frp_config : null
+ 	                                          const addr = parseFrpPublicEndpoint(frpCfg, p()) ?? `127.0.0.1:${p()}`
 	                                          return (
 	                                            <button
 	                                              type="button"
