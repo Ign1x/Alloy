@@ -7,10 +7,12 @@ node_modules/
 dist/
 .env
 deploy/docker-compose.generated.*.yml
+deploy/.tmp-*/
 
 ## OS / tooling
 .DS_Store
 .sisyphus/
+.tools/
 
 ## Local planning docs
 goals/
