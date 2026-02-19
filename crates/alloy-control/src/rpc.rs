@@ -1275,6 +1275,8 @@ pub struct NodeDto {
     pub id: String,
     pub name: String,
     pub endpoint: String,
+    pub public_ip: Option<String>,
+    pub private_ip: Option<String>,
     pub has_connect_token: bool,
     pub enabled: bool,
     pub last_seen_at: Option<String>,
@@ -1355,6 +1357,8 @@ pub struct InstanceConfigDto {
     pub display_name: Option<String>,
     pub node_id: Option<String>,
     pub node_name: Option<String>,
+    pub node_public_ip: Option<String>,
+    pub node_private_ip: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, Type)]
@@ -1603,6 +1607,8 @@ fn map_instance_config(
     cfg: alloy_proto::agent_v1::InstanceConfig,
     node_id: Option<String>,
     node_name: Option<String>,
+    node_public_ip: Option<String>,
+    node_private_ip: Option<String>,
 ) -> InstanceConfigDto {
     InstanceConfigDto {
         instance_id: cfg.instance_id,
@@ -1615,7 +1621,59 @@ fn map_instance_config(
         },
         node_id,
         node_name,
+        node_public_ip,
+        node_private_ip,
     }
+}
+
+async fn node_ip_map(
+    ctx: &Ctx,
+) -> std::collections::BTreeMap<String, (Option<String>, Option<String>)> {
+    use alloy_db::entities::nodes;
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+
+    let mut out = std::collections::BTreeMap::<String, (Option<String>, Option<String>)>::new();
+    let targets = match nodes::Entity::find()
+        .filter(nodes::Column::Enabled.eq(true))
+        .all(&*ctx.db)
+        .await
+    {
+        Ok(rows) => rows,
+        Err(_) => return out,
+    };
+
+    for row in targets {
+        let transport = agent_transport(ctx).with_node(row.name.clone());
+        let health = transport
+            .call::<_, alloy_proto::agent_v1::HealthCheckResponse>(
+                "/alloy.agent.v1.AgentHealthService/Check",
+                HealthCheckRequest {},
+            )
+            .await;
+        let Ok(resp) = health else {
+            continue;
+        };
+
+        let public_ip = {
+            let v = resp.public_ipv4.trim();
+            if v.is_empty() {
+                None
+            } else {
+                Some(v.to_string())
+            }
+        };
+        let private_ip = {
+            let v = resp.private_ipv4.trim();
+            if v.is_empty() {
+                None
+            } else {
+                Some(v.to_string())
+            }
+        };
+        out.insert(row.name, (public_ip, private_ip));
+    }
+
+    out
 }
 
 fn map_param_type(t: i32) -> ParamTypeDto {
@@ -1691,13 +1749,21 @@ fn map_instance_info(
     info: alloy_proto::agent_v1::InstanceInfo,
     node_id: Option<String>,
     node_name: Option<String>,
+    node_public_ip: Option<String>,
+    node_private_ip: Option<String>,
 ) -> Result<InstanceInfoDto, ApiError> {
     let cfg = info
         .config
         .ok_or_else(|| api_error(ctx, "internal", "missing instance config"))?;
 
     Ok(InstanceInfoDto {
-        config: map_instance_config(cfg, node_id, node_name),
+        config: map_instance_config(
+            cfg,
+            node_id,
+            node_name,
+            node_public_ip,
+            node_private_ip,
+        ),
         status: info.status.map(map_process_status),
     })
 }
@@ -1780,6 +1846,8 @@ fn map_persisted_instance_model(row: alloy_db::entities::instances::Model) -> In
             } else {
                 Some(row.node_name)
             },
+            node_public_ip: None,
+            node_private_ip: None,
         },
         status: None,
     }
@@ -3387,19 +3455,40 @@ pub fn router() -> Router<Ctx> {
 
                 let transport = agent_transport(&ctx);
 
+                let process_id = input.process_id;
                 let req = StopProcessRequest {
-                    process_id: input.process_id,
+                    process_id: process_id.clone(),
                     timeout_ms: input.timeout_ms.unwrap_or(30_000),
                 };
 
-                let resp: alloy_proto::agent_v1::StopProcessResponse = transport
-                    .call("/alloy.agent.v1.ProcessService/Stop", req)
+                let status = match transport
+                    .call::<_, alloy_proto::agent_v1::StopProcessResponse>(
+                        "/alloy.agent.v1.ProcessService/Stop",
+                        req,
+                    )
                     .await
-                    .map_err(|status| api_error_from_agent_status(&ctx, "process.stop", status))?;
-
-                let status = resp
-                    .status
-                    .ok_or_else(|| api_error(&ctx, "internal", "missing status"))?;
+                {
+                    Ok(resp) => resp
+                        .status
+                        .ok_or_else(|| api_error(&ctx, "internal", "missing status"))?,
+                    Err(status) => {
+                        if status.code() == tonic::Code::NotFound {
+                            alloy_proto::agent_v1::ProcessStatus {
+                                process_id: process_id.clone(),
+                                template_id: String::new(),
+                                state: alloy_proto::agent_v1::ProcessState::Exited as i32,
+                                pid: 0,
+                                has_pid: false,
+                                exit_code: 0,
+                                has_exit_code: false,
+                                message: "already stopped".to_string(),
+                                resources: None,
+                            }
+                        } else {
+                            return Err(api_error_from_agent_status(&ctx, "process.stop", status));
+                        }
+                    }
+                };
 
                 let process_id = status.process_id.clone();
                 let template_id = status.template_id.clone();
@@ -4281,6 +4370,11 @@ pub fn router() -> Router<Ctx> {
                     upsert_persisted_instance_from_proto(&ctx, &cfg, Some(&requested_node)).await?;
 
                     let (node_id, node_name) = node_response_fields(Some(&requested_node));
+                    let node_ips = node_ip_map(&ctx).await;
+                    let (node_public_ip, node_private_ip) = node_name
+                        .as_ref()
+                        .and_then(|name| node_ips.get(name).cloned())
+                        .unwrap_or((None, None));
 
                     audit::record(
                         &ctx,
@@ -4290,7 +4384,13 @@ pub fn router() -> Router<Ctx> {
                     )
                     .await;
 
-                    Ok(map_instance_config(cfg, node_id, node_name))
+                    Ok(map_instance_config(
+                        cfg,
+                        node_id,
+                        node_name,
+                        node_public_ip,
+                        node_private_ip,
+                    ))
                 },
             ),
         )
@@ -4298,6 +4398,7 @@ pub fn router() -> Router<Ctx> {
             "get",
             Procedure::builder::<ApiError>().query(|ctx, input: InstanceIdInput| async move {
                 recover_persisted_instances_from_legacy_table(&ctx).await?;
+                let node_ips = node_ip_map(&ctx).await;
                 let (transport, node_target) =
                     instance_transport_for_id(&ctx, &input.instance_id).await?;
                 let response_node_target =
@@ -4318,7 +4419,18 @@ pub fn router() -> Router<Ctx> {
                             .ok_or_else(|| api_error(&ctx, "internal", "missing instance info"))?;
 
                         let (node_id, node_name) = node_response_fields(response_node_target.as_ref());
-                        let mapped = map_instance_info(&ctx, info, node_id, node_name)?;
+                        let (node_public_ip, node_private_ip) = node_name
+                            .as_ref()
+                            .and_then(|name| node_ips.get(name).cloned())
+                            .unwrap_or((None, None));
+                        let mapped = map_instance_info(
+                            &ctx,
+                            info,
+                            node_id,
+                            node_name,
+                            node_public_ip,
+                            node_private_ip,
+                        )?;
                         let cfg = alloy_proto::agent_v1::InstanceConfig {
                             instance_id: mapped.config.instance_id.clone(),
                             template_id: mapped.config.template_id.clone(),
@@ -4335,9 +4447,15 @@ pub fn router() -> Router<Ctx> {
                     }
                     Err(status) => {
                         if status.code() == tonic::Code::Unavailable
-                            && let Some(persisted) =
+                            && let Some(mut persisted) =
                                 load_persisted_instance_info(&ctx, &input.instance_id).await?
                         {
+                            if let Some(name) = persisted.config.node_name.as_ref()
+                                && let Some((pub_ip, pri_ip)) = node_ips.get(name)
+                            {
+                                persisted.config.node_public_ip = pub_ip.clone();
+                                persisted.config.node_private_ip = pri_ip.clone();
+                            }
                             return Ok(persisted);
                         }
                         Err(api_error_from_agent_status(&ctx, "instance.get", status))
@@ -4353,6 +4471,7 @@ pub fn router() -> Router<Ctx> {
 
                 recover_persisted_instances_from_legacy_table(&ctx).await?;
                 let mut by_id = std::collections::BTreeMap::<String, (InstanceInfoDto, i32)>::new();
+                let node_ips = node_ip_map(&ctx).await;
                 for persisted in list_persisted_instance_infos(&ctx).await? {
                     by_id.insert(persisted.config.instance_id.clone(), (persisted, -1));
                 }
@@ -4406,8 +4525,18 @@ pub fn router() -> Router<Ctx> {
                     let (node_id, node_name) = node_response_fields(Some(&node));
 
                     for info in resp.instances {
-                        let mapped =
-                            map_instance_info(&ctx, info, node_id.clone(), node_name.clone())?;
+                        let (node_public_ip, node_private_ip) = node_name
+                            .as_ref()
+                            .and_then(|name| node_ips.get(name).cloned())
+                            .unwrap_or((None, None));
+                        let mapped = map_instance_info(
+                            &ctx,
+                            info,
+                            node_id.clone(),
+                            node_name.clone(),
+                            node_public_ip,
+                            node_private_ip,
+                        )?;
                         let instance_id = mapped.config.instance_id.clone();
                         seen_remote_instance_ids.insert(instance_id.clone());
                         let _ = save_instance_node_target(&ctx, &instance_id, &node).await;
@@ -4451,6 +4580,12 @@ pub fn router() -> Router<Ctx> {
                 let mut out = Vec::new();
                 for (_id, (info, _priority)) in by_id {
                     let mut info = info;
+                    if let Some(name) = info.config.node_name.as_ref()
+                        && let Some((pub_ip, pri_ip)) = node_ips.get(name)
+                    {
+                        info.config.node_public_ip = pub_ip.clone();
+                        info.config.node_private_ip = pri_ip.clone();
+                    }
                     if info.status.is_none()
                         && let Some(node_name) = info.config.node_name.clone()
                         && !reachable_nodes.contains(&node_name)
@@ -4812,22 +4947,43 @@ pub fn router() -> Router<Ctx> {
                 ensure_writable(&ctx)?;
                 enforce_rate_limit(&ctx)?;
 
-                let (transport, _node_target) =
-                    instance_transport_for_id(&ctx, &input.instance_id).await?;
-                let resp: alloy_proto::agent_v1::StopInstanceResponse = transport
-                    .call(
+                let instance_id = input.instance_id;
+                let (transport, _node_target) = instance_transport_for_id(&ctx, &instance_id).await?;
+                let status = match transport
+                    .call::<_, alloy_proto::agent_v1::StopInstanceResponse>(
                         "/alloy.agent.v1.InstanceService/Stop",
                         StopInstanceRequest {
-                            instance_id: input.instance_id,
+                            instance_id: instance_id.clone(),
                             timeout_ms: input.timeout_ms.unwrap_or(30_000),
                         },
                     )
                     .await
-                    .map_err(|status| api_error_from_agent_status(&ctx, "instance.stop", status))?;
-
-                let status = resp
-                    .status
-                    .ok_or_else(|| api_error(&ctx, "internal", "missing status"))?;
+                {
+                    Ok(resp) => resp
+                        .status
+                        .ok_or_else(|| api_error(&ctx, "internal", "missing status"))?,
+                    Err(status) => {
+                        if status.code() == tonic::Code::NotFound {
+                            let template_id = load_persisted_instance_info(&ctx, &instance_id)
+                                .await?
+                                .map(|p| p.config.template_id)
+                                .unwrap_or_default();
+                            alloy_proto::agent_v1::ProcessStatus {
+                                process_id: instance_id.clone(),
+                                template_id,
+                                state: alloy_proto::agent_v1::ProcessState::Exited as i32,
+                                pid: 0,
+                                has_pid: false,
+                                exit_code: 0,
+                                has_exit_code: false,
+                                message: "already stopped".to_string(),
+                                resources: None,
+                            }
+                        } else {
+                            return Err(api_error_from_agent_status(&ctx, "instance.stop", status));
+                        }
+                    }
+                };
 
                 audit::record(
                     &ctx,
@@ -4878,6 +5034,11 @@ pub fn router() -> Router<Ctx> {
                     .await?;
 
                     let (node_id, node_name) = node_response_fields(response_node_target.as_ref());
+                    let node_ips = node_ip_map(&ctx).await;
+                    let (node_public_ip, node_private_ip) = node_name
+                        .as_ref()
+                        .and_then(|name| node_ips.get(name).cloned())
+                        .unwrap_or((None, None));
 
                     audit::record(
                         &ctx,
@@ -4887,7 +5048,13 @@ pub fn router() -> Router<Ctx> {
                     )
                     .await;
 
-                    Ok(map_instance_config(cfg, node_id, node_name))
+                    Ok(map_instance_config(
+                        cfg,
+                        node_id,
+                        node_name,
+                        node_public_ip,
+                        node_private_ip,
+                    ))
                 },
             ),
         )
@@ -5227,17 +5394,27 @@ pub fn router() -> Router<Ctx> {
                     .await
                     .map_err(|e| api_error(&ctx, "db_error", format!("db error: {e}")))?;
 
+                let ip_map = node_ip_map(&ctx).await;
+
                 Ok(rows
                     .into_iter()
-                    .map(|n| NodeDto {
-                        id: n.id.to_string(),
-                        name: n.name,
-                        endpoint: n.endpoint,
-                        has_connect_token: n.connect_token_hash.is_some(),
-                        enabled: n.enabled,
-                        last_seen_at: n.last_seen_at.map(|t| t.to_rfc3339()),
-                        agent_version: n.agent_version,
-                        last_error: n.last_error,
+                    .map(|n| {
+                        let (public_ip, private_ip) = ip_map
+                            .get(&n.name)
+                            .cloned()
+                            .unwrap_or((None, None));
+                        NodeDto {
+                            id: n.id.to_string(),
+                            name: n.name,
+                            endpoint: n.endpoint,
+                            public_ip,
+                            private_ip,
+                            has_connect_token: n.connect_token_hash.is_some(),
+                            enabled: n.enabled,
+                            last_seen_at: n.last_seen_at.map(|t| t.to_rfc3339()),
+                            agent_version: n.agent_version,
+                            last_error: n.last_error,
+                        }
                     })
                     .collect::<Vec<_>>())
             }),
@@ -5315,6 +5492,8 @@ pub fn router() -> Router<Ctx> {
                             id: inserted.id.to_string(),
                             name: inserted.name,
                             endpoint: inserted.endpoint,
+                            public_ip: None,
+                            private_ip: None,
                             has_connect_token: inserted.connect_token_hash.is_some(),
                             enabled: inserted.enabled,
                             last_seen_at: inserted.last_seen_at.map(|t| t.to_rfc3339()),
@@ -5373,6 +5552,8 @@ pub fn router() -> Router<Ctx> {
                         id: updated.id.to_string(),
                         name: updated.name,
                         endpoint: updated.endpoint,
+                        public_ip: None,
+                        private_ip: None,
                         has_connect_token: updated.connect_token_hash.is_some(),
                         enabled: updated.enabled,
                         last_seen_at: updated.last_seen_at.map(|t| t.to_rfc3339()),

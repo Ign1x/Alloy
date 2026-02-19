@@ -5,6 +5,88 @@ export function parsePort(value: unknown): number | null {
   return n
 }
 
+function normalizeHost(raw: string | null | undefined): string | null {
+  const v = (raw ?? '').trim()
+  if (!v) return null
+  if (v.startsWith('[') && v.endsWith(']')) return v.slice(1, -1).trim().toLowerCase() || null
+  return v.toLowerCase()
+}
+
+function isLoopbackOrUnspecifiedHost(host: string | null | undefined): boolean {
+  const h = normalizeHost(host)
+  if (!h) return true
+  return h === 'localhost' || h === '127.0.0.1' || h === '::1' || h === '0.0.0.0' || h === '::'
+}
+
+function parseIpv4(host: string | null | undefined): [number, number, number, number] | null {
+  const h = normalizeHost(host)
+  if (!h) return null
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(h)
+  if (!m) return null
+  const out = [Number.parseInt(m[1], 10), Number.parseInt(m[2], 10), Number.parseInt(m[3], 10), Number.parseInt(m[4], 10)]
+  if (out.some((n) => !Number.isFinite(n) || n < 0 || n > 255)) return null
+  return out as [number, number, number, number]
+}
+
+function isPrivateIpv4(host: string | null | undefined): boolean {
+  const ip = parseIpv4(host)
+  if (!ip) return false
+  const [a, b] = ip
+  if (a === 10) return true
+  if (a === 172 && b >= 16 && b <= 31) return true
+  if (a === 192 && b === 168) return true
+  if (a === 100 && b >= 64 && b <= 127) return true
+  if (a === 169 && b === 254) return true
+  return false
+}
+
+function endpointHost(endpoint: string | null | undefined): string | null {
+  const raw = (endpoint ?? '').trim()
+  if (!raw) return null
+  if (raw.startsWith('tunnel://')) return null
+  try {
+    const u = new URL(raw)
+    return normalizeHost(u.hostname)
+  } catch {
+    const value = normalizeHost(raw)
+    if (!value) return null
+    const noPath = value.split('/')[0]?.trim() ?? value
+    if (!noPath) return null
+    if (noPath.startsWith('[') && noPath.includes(']')) {
+      const end = noPath.indexOf(']')
+      if (end > 1) return normalizeHost(noPath.slice(0, end + 1))
+      return null
+    }
+    const idx = noPath.indexOf(':')
+    if (idx <= 0) return noPath
+    return noPath.slice(0, idx)
+  }
+}
+
+export type NodeAddressHints = {
+  public_ip?: string | null
+  private_ip?: string | null
+  endpoint?: string | null
+}
+
+export function preferredNodeHost(node?: NodeAddressHints | null): string | null {
+  const publicIp = normalizeHost(node?.public_ip)
+  if (publicIp && !isLoopbackOrUnspecifiedHost(publicIp) && !isPrivateIpv4(publicIp)) return publicIp
+
+  const privateIp = normalizeHost(node?.private_ip)
+  if (privateIp && !isLoopbackOrUnspecifiedHost(privateIp)) return privateIp
+
+  const fromEndpoint = endpointHost(node?.endpoint)
+  if (fromEndpoint && !isLoopbackOrUnspecifiedHost(fromEndpoint)) return fromEndpoint
+
+  return null
+}
+
+export function buildDirectConnectAddress(port: number, node?: NodeAddressHints | null): string {
+  const host = preferredNodeHost(node) ?? '127.0.0.1'
+  return `${host}:${port}`
+}
+
 export function instancePort(info: { config: { template_id: string; params: unknown } }): number | null {
   const params = info.config.params as Record<string, unknown> | null | undefined
   const templateId = String(info.config.template_id || '')

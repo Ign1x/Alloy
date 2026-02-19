@@ -235,7 +235,7 @@ fn agent_poll_wait() -> Duration {
 }
 
 fn agent_poll_stale_ms() -> u64 {
-    const DEFAULT_MS: u64 = 180_000;
+    const DEFAULT_MS: u64 = 360_000;
     const MIN_MS: u64 = 15_000;
     const MAX_MS: u64 = 900_000;
 

@@ -14,11 +14,11 @@ export type DownloadQueueJobDto = { id: string; target: string; template_id: str
 
 export type FsCapabilitiesOutput = { write_enabled: boolean }
 
-export type InstanceConfigDto = { instance_id: string; template_id: string; params: Partial<{ [key in string]: string }>; display_name: string | null; node_id: string | null; node_name: string | null }
+export type InstanceConfigDto = { instance_id: string; template_id: string; params: Partial<{ [key in string]: string }>; display_name: string | null; node_id: string | null; node_name: string | null; node_public_ip: string | null; node_private_ip: string | null }
 
 export type MinecraftVersionRef = { id: string; kind: string; release_time: string }
 
-export type NodeDto = { id: string; name: string; endpoint: string; has_connect_token: boolean; enabled: boolean; last_seen_at: string | null; agent_version: string | null; last_error: string | null }
+export type NodeDto = { id: string; name: string; endpoint: string; public_ip: string | null; private_ip: string | null; has_connect_token: boolean; enabled: boolean; last_seen_at: string | null; agent_version: string | null; last_error: string | null }
 
 export type NodeUpdateStatusDto = { configured: boolean; provider: string; endpoint: string }
 

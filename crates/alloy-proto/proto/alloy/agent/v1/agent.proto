@@ -50,4 +50,6 @@ message HealthCheckResponse {
   uint64 data_root_free_bytes = 5;
   // Best-effort TCP port availability checks (server-selected list).
   repeated PortAvailability ports = 6;
+  string public_ipv4 = 7;
+  string private_ipv4 = 8;
 }

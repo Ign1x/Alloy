@@ -3,7 +3,7 @@ import { ensureCsrfCookie } from '../auth'
 import { statusMessageParts } from '../app/helpers/agentErrors'
 import { formatBytes, formatCpuPercent, parseU64 } from '../app/helpers/format'
 import { canStartInstance, instanceStateLabel, isStopping } from '../app/helpers/instances'
-import { instancePort, parseFrpEndpoint, parseFrpPublicEndpoint } from '../app/helpers/network'
+import { buildDirectConnectAddress, instancePort, parseFrpEndpoint, parseFrpPublicEndpoint } from '../app/helpers/network'
 import { downloadJson, isSecretParamKey, safeCopy } from '../app/helpers/misc'
 import { templateDisplayLabel, templateLogoSrc } from '../app/helpers/templateBrand'
 import { StartProgress } from '../app/primitives/StartProgress'
@@ -106,7 +106,7 @@ export default function InstanceDetailsModal(props: InstanceDetailsModalProps) {
                   const viaFrp = parseFrpPublicEndpoint(raw, p)
                   if (viaFrp) return viaFrp
                 }
-                return `127.0.0.1:${p}`
+                return buildDirectConnectAddress(p, inst().config)
               }
               const frpEndpoint = () => {
                 const raw = params()?.frp_config

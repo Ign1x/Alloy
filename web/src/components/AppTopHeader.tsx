@@ -85,6 +85,7 @@ interface AppTopHeaderProps {
 
 export default function AppTopHeader(props: AppTopHeaderProps) {
   const [showLanguageMenu, setShowLanguageMenu] = createSignal(false)
+  const [controlUpdateSubmitting, setControlUpdateSubmitting] = createSignal(false)
   let languageMenuRoot: HTMLDivElement | undefined
 
   const hasControlUpdate = () => Boolean(props.updateCheck.data?.update_available)
@@ -118,6 +119,8 @@ export default function AppTopHeader(props: AppTopHeaderProps) {
   })
 
   async function triggerControlUpdate() {
+    setControlUpdateSubmitting(true)
+    props.pushToast('info', props.t('header.checking'), props.t('header.triggerControlUpdate'))
     try {
       const out = await props.triggerUpdate.mutateAsync(null)
       props.pushToast('success', props.t('header.updateTriggered'), out.message || props.t('header.watchtowerUpdateRequested'))
@@ -130,6 +133,8 @@ export default function AppTopHeader(props: AppTopHeaderProps) {
       }, 3000)
     } catch (error) {
       props.toastError(props.t('header.updateFailed'), error)
+    } finally {
+      setControlUpdateSubmitting(false)
     }
   }
 
@@ -348,7 +353,7 @@ export default function AppTopHeader(props: AppTopHeaderProps) {
                             <div class="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">{props.t('header.updateCenterDesc')}</div>
                           </div>
                           <div class="flex flex-wrap items-center justify-end gap-1.5">
-                            <Show when={props.updateCheck.isPending}>
+                            <Show when={props.updateCheck.isPending || controlUpdateSubmitting()}>
                               <Badge variant="neutral">{props.t('header.checking')}</Badge>
                             </Show>
                             <Show when={!props.updateCheck.isPending && !props.updateCheck.isError}>

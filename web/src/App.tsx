@@ -1845,6 +1845,8 @@ function App() {
     id: string
     name: string
     endpoint: string
+    public_ip?: string | null
+    private_ip?: string | null
     enabled: boolean
     last_seen_at: string | null
     agent_version: string | null
