@@ -108,6 +108,7 @@ fn is_long_running_method(method: &str) -> bool {
         "/alloy.agent.v1.ProcessService/WarmTemplateCache"
             | "/alloy.agent.v1.ProcessService/StartFromTemplate"
             | "/alloy.agent.v1.InstanceService/Start"
+            | "/alloy.agent.v1.InstanceService/Delete"
             | "/alloy.agent.v1.InstanceService/ImportSaveFromUrl"
             | "/alloy.agent.v1.InstanceService/ImportSaveFromPath"
             | "/alloy.agent.v1.AgentUpdateService/TriggerSelfUpdate"
@@ -250,7 +251,6 @@ impl AgentTransport {
             Ok(Ok(v)) => v,
             Ok(Err(_)) => {
                 let _ = conn.pending.lock().await.remove(&id);
-                let _ = self.hub.remove_if_same(&conn.node, &conn).await;
                 return Err(tonic::Status::unavailable("agent tunnel disconnected"));
             }
             Err(_) => {

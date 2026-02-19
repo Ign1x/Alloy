@@ -188,10 +188,7 @@ impl AgentHub {
         let _ = self.inner.write().await.insert(conn.node.clone(), conn);
     }
 
-    pub async fn insert_replace(
-        &self,
-        conn: Arc<AgentConnection>,
-    ) -> Option<Arc<AgentConnection>> {
+    pub async fn insert_replace(&self, conn: Arc<AgentConnection>) -> Option<Arc<AgentConnection>> {
         self.inner.write().await.insert(conn.node.clone(), conn)
     }
 
@@ -238,15 +235,23 @@ fn agent_poll_wait() -> Duration {
 }
 
 fn agent_poll_stale_ms() -> u64 {
-    const DEFAULT_MS: u64 = 60_000;
-    const MIN_MS: u64 = 5_000;
+    const DEFAULT_MS: u64 = 180_000;
+    const MIN_MS: u64 = 15_000;
     const MAX_MS: u64 = 900_000;
+
+    let recommended = {
+        let wait_ms = agent_poll_wait()
+            .as_millis()
+            .min(u64::MAX as u128) as u64;
+        wait_ms.saturating_mul(3).saturating_add(15_000)
+    };
 
     let raw = std::env::var("ALLOY_AGENT_POLL_STALE_MS").ok();
     raw.as_deref()
         .and_then(|v| v.trim().parse::<u64>().ok())
         .filter(|v| *v > 0)
         .unwrap_or(DEFAULT_MS)
+        .max(recommended)
         .clamp(MIN_MS, MAX_MS)
 }
 
@@ -685,13 +690,7 @@ async fn handle_agent_socket(state: AppState, socket: WebSocket, auth: WsAuth) {
             pending: Mutex::new(HashMap::new()),
         });
 
-        let replaced = state.agent_hub.insert_replace(conn.clone()).await;
-        if let Some(old) = replaced {
-            let _ = old.pending.lock().await.drain();
-            if let AgentTx::Ws(tx) = &old.tx {
-                let _ = tx.try_send(Message::Close(None));
-            }
-        }
+        let _ = state.agent_hub.insert_replace(conn.clone()).await;
 
         let writer = tokio::spawn(async move {
             while let Some(msg) = rx.recv().await {

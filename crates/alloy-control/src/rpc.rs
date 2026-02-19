@@ -279,7 +279,7 @@ fn compact_allocatable_ports(ports: impl IntoIterator<Item = u16>) -> String {
                 start = Some(port);
                 prev = port;
             }
-            Some(lo) if port == prev.saturating_add(1) => {
+            Some(_) if port == prev.saturating_add(1) => {
                 prev = port;
             }
             Some(lo) => {
@@ -2219,6 +2219,13 @@ async fn delete_instance_node_target(ctx: &Ctx, instance_id: &str) -> Result<(),
         .map_err(|e| api_error(ctx, "db_error", format!("db error: {e}")))?;
 
     Ok(())
+}
+
+async fn purge_instance_local_state(ctx: &Ctx, instance_id: &str) {
+    let _ = delete_persisted_instance_record(ctx, instance_id).await;
+    let _ = delete_instance_node_target(ctx, instance_id).await;
+    let legacy_key = legacy_instance_node_setting_key(instance_id);
+    let _ = setting_clear(&*ctx.db, &legacy_key).await;
 }
 
 async fn load_legacy_instance_node_target(
@@ -4370,6 +4377,7 @@ pub fn router() -> Router<Ctx> {
 
                 let nodes = list_instance_scan_targets(&ctx).await?;
                 let mut reachable_nodes = std::collections::BTreeSet::<String>::new();
+                let mut seen_remote_instance_ids = std::collections::BTreeSet::<String>::new();
 
                 for node in nodes {
                     let transport = agent_transport(&ctx).with_node(node.name.clone());
@@ -4401,6 +4409,7 @@ pub fn router() -> Router<Ctx> {
                         let mapped =
                             map_instance_info(&ctx, info, node_id.clone(), node_name.clone())?;
                         let instance_id = mapped.config.instance_id.clone();
+                        seen_remote_instance_ids.insert(instance_id.clone());
                         let _ = save_instance_node_target(&ctx, &instance_id, &node).await;
                         let cfg = alloy_proto::agent_v1::InstanceConfig {
                             instance_id: mapped.config.instance_id.clone(),
@@ -4416,6 +4425,26 @@ pub fn router() -> Router<Ctx> {
                         if should_replace {
                             by_id.insert(instance_id, (mapped, priority));
                         }
+                    }
+                }
+
+                if !reachable_nodes.is_empty() {
+                    use alloy_db::entities::instances;
+                    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+
+                    let rows = instances::Entity::find()
+                        .filter(instances::Column::NodeName.is_in(reachable_nodes.iter().cloned()))
+                        .all(&*ctx.db)
+                        .await
+                        .map_err(|e| api_error(&ctx, "db_error", format!("db error: {e}")))?;
+
+                    for row in rows {
+                        let iid = row.instance_id;
+                        if seen_remote_instance_ids.contains(&iid) {
+                            continue;
+                        }
+                        purge_instance_local_state(&ctx, &iid).await;
+                        let _ = by_id.remove(&iid);
                     }
                 }
 
@@ -5134,23 +5163,51 @@ pub fn router() -> Router<Ctx> {
                 let instance_id = input.instance_id;
                 let (transport, _node_target) =
                     instance_transport_for_id(&ctx, &instance_id).await?;
-                let resp: alloy_proto::agent_v1::DeleteInstanceResponse = transport
+                let delete_result: Result<alloy_proto::agent_v1::DeleteInstanceResponse, tonic::Status> = transport
                     .call(
                         "/alloy.agent.v1.InstanceService/Delete",
                         DeleteInstanceRequest {
                             instance_id: instance_id.clone(),
                         },
                     )
-                    .await
-                    .map_err(|status| {
-                        api_error_from_agent_status(&ctx, "instance.delete", status)
-                    })?;
+                    .await;
+
+                let resp = match delete_result {
+                    Ok(resp) => resp,
+                    Err(status) => {
+                        if status.code() == tonic::Code::NotFound {
+                            purge_instance_local_state(&ctx, &instance_id).await;
+                            audit::record(&ctx, "instance.delete", &instance_id, None).await;
+                            return Ok(DeleteInstanceOutput { ok: true });
+                        }
+
+                        if matches!(
+                            status.code(),
+                            tonic::Code::Unavailable | tonic::Code::DeadlineExceeded
+                        ) {
+                            let still_exists = transport
+                                .call::<_, alloy_proto::agent_v1::GetInstanceResponse>(
+                                    "/alloy.agent.v1.InstanceService/Get",
+                                    GetInstanceRequest {
+                                        instance_id: instance_id.clone(),
+                                    },
+                                )
+                                .await
+                                .is_ok();
+
+                            if !still_exists {
+                                purge_instance_local_state(&ctx, &instance_id).await;
+                                audit::record(&ctx, "instance.delete", &instance_id, None).await;
+                                return Ok(DeleteInstanceOutput { ok: true });
+                            }
+                        }
+
+                        return Err(api_error_from_agent_status(&ctx, "instance.delete", status));
+                    }
+                };
 
                 if resp.ok {
-                    let _ = delete_persisted_instance_record(&ctx, &instance_id).await;
-                    let _ = delete_instance_node_target(&ctx, &instance_id).await;
-                    let legacy_key = legacy_instance_node_setting_key(&instance_id);
-                    let _ = setting_clear(&*ctx.db, &legacy_key).await;
+                    purge_instance_local_state(&ctx, &instance_id).await;
                     audit::record(&ctx, "instance.delete", &instance_id, None).await;
                 }
 
