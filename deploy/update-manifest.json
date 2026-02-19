@@ -1,28 +1,28 @@
 {
   "schema": 1,
   "channel": "stable",
-  "published_at": "2026-02-17T15:48:14Z",
+  "published_at": "2026-02-19T20:00:00Z",
   "control": {
-    "tag": "v0.2.17",
-    "version": "0.2.17",
-    "url": "https://github.com/Ign1x/Alloy/releases/tag/v0.2.17",
+    "tag": "v0.2.21",
+    "version": "0.2.21",
+    "url": "https://github.com/Ign1x/Alloy/releases/tag/v0.2.22",
     "images": {
-      "ghcr": "ghcr.io/ign1x/alloy-control:v0.2.17",
+      "ghcr": "ghcr.io/ign1x/alloy-control:v0.2.21",
       "dockerhub": null
     }
   },
   "agent": {
-    "tag": "v0.2.17",
-    "version": "0.2.17",
-    "url": "https://github.com/Ign1x/Alloy/releases/tag/v0.2.17",
+    "tag": "v0.2.21",
+    "version": "0.2.21",
+    "url": "https://github.com/Ign1x/Alloy/releases/tag/v0.2.22",
     "images": {
-      "ghcr": "ghcr.io/ign1x/alloy-agent:v0.2.17",
+      "ghcr": "ghcr.io/ign1x/alloy-agent:v0.2.21",
       "dockerhub": null
     }
   },
   "compatibility": {
     "control_min_agent": "0.2.0",
     "control_max_agent": "0.2.x",
-    "note": "Control and agent in the same minor series are recommended (for example, 0.2.x with 0.2.x)."
+    "note": "Control and agent in the same minor series are recommended (control 0.2.x)."
   }
 }
