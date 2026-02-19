@@ -88,6 +88,15 @@ jobs:
           control_tag="v${control_version}"
           agent_tag="v${agent_version}"
 
+          if [ "$tag" != "$control_tag" ] || [ "$tag" != "$agent_tag" ]; then
+            echo "Release tag/version mismatch:" >&2
+            echo "  tag:           $tag" >&2
+            echo "  alloy-control: $control_tag" >&2
+            echo "  alloy-agent:   $agent_tag" >&2
+            echo "Please bump crate versions to match release tag before publishing." >&2
+            exit 1
+          fi
+
           dockerhub_namespace="${DOCKERHUB_NAMESPACE_SECRET:-${DOCKERHUB_USERNAME:-}}"
           dockerhub_namespace="$(printf '%s' "$dockerhub_namespace" | tr -d '[:space:]')"
 

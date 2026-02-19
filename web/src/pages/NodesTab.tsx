@@ -34,6 +34,15 @@ type TriggerNodeUpdateResult =
   | { ok: true }
   | { ok: false; errorText: string }
 
+function isNodeTunnelDisconnectedError(error: unknown): boolean {
+  const text = isAlloyApiError(error)
+    ? `${error.data.message} ${error.data.hint ?? ''}`.toLowerCase()
+    : error instanceof Error
+      ? error.message.toLowerCase()
+      : ''
+  return text.includes('node tunnel disconnected') || text.includes('node is currently unreachable')
+}
+
 export default function NodesTab(props: NodesTabProps) {
   const {
     tab,
@@ -60,6 +69,7 @@ export default function NodesTab(props: NodesTabProps) {
   const [bulkUpdatePending, setBulkUpdatePending] = createSignal(false)
   const [updatingNodeIds, setUpdatingNodeIds] = createSignal<Record<string, boolean>>({})
   const [deletingNodeId, setDeletingNodeId] = createSignal<string | null>(null)
+  const [nodeUpdateErrorCooldownUntil, setNodeUpdateErrorCooldownUntil] = createSignal<Record<string, number>>({})
 
   const nodeList = createMemo(() => (nodes.data ?? []) as NodeRow[])
 
@@ -208,10 +218,23 @@ export default function NodesTab(props: NodesTabProps) {
           : 'unknown error'
 
       if (notifyErrors) {
-        if (isAlloyApiError(error) && error.data.hint) {
-          pushToast('info', 'Hint', error.data.hint, error.data.request_id)
+        const disconnected = isNodeTunnelDisconnectedError(error)
+        if (disconnected) {
+          const now = Date.now()
+          const cooldownUntil = nodeUpdateErrorCooldownUntil()[node.id] ?? 0
+          if (now >= cooldownUntil) {
+            pushToast('info', 'Node reconnecting', 'Node tunnel disconnected. Retry in a few seconds.')
+            setNodeUpdateErrorCooldownUntil((prev) => ({
+              ...prev,
+              [node.id]: now + 15_000,
+            }))
+          }
+        } else {
+          if (isAlloyApiError(error) && error.data.hint) {
+            pushToast('info', 'Hint', error.data.hint, error.data.request_id)
+          }
+          toastError('Node update failed', error)
         }
-        toastError('Node update failed', error)
       }
 
       return { ok: false, errorText }
