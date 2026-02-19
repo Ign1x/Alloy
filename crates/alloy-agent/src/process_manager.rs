@@ -759,14 +759,14 @@ fn parse_allocatable_ports_hint(raw: &str) -> Vec<u16> {
 }
 
 fn choose_remote_port(explicit: Option<u16>, alloc_ports: &[u16], local_port: u16) -> u16 {
+    if !alloc_ports.is_empty() {
+        let idx = usize::from(local_port) % alloc_ports.len();
+        return alloc_ports[idx];
+    }
     if let Some(v) = explicit {
         return v;
     }
-    if alloc_ports.is_empty() {
-        return local_port;
-    }
-    let idx = usize::from(local_port) % alloc_ports.len();
-    alloc_ports[idx]
+    local_port
 }
 
 fn normalize_ini_scalar_value(raw: &str) -> String {

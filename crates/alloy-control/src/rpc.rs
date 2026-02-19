@@ -18,6 +18,7 @@ use std::{
 
 use crate::agent_transport::AgentTransport;
 use crate::audit;
+use crate::node_health::tunnel_disconnect_grace;
 
 const SETTING_DST_DEFAULT_KLEI_KEY: &str = "dst.default_klei_key";
 const SETTING_CURSEFORGE_API_KEY: &str = "minecraft.curseforge_api_key";
@@ -4340,11 +4341,33 @@ pub fn router() -> Router<Ctx> {
         .procedure(
             "list",
             Procedure::builder::<ApiError>().query(|ctx, _: ()| async move {
+                use alloy_db::entities::nodes;
+                use sea_orm::EntityTrait;
+
                 recover_persisted_instances_from_legacy_table(&ctx).await?;
                 let mut by_id = std::collections::BTreeMap::<String, (InstanceInfoDto, i32)>::new();
                 for persisted in list_persisted_instance_infos(&ctx).await? {
                     by_id.insert(persisted.config.instance_id.clone(), (persisted, -1));
                 }
+
+                let now = chrono::Utc::now();
+                let disconnect_grace = tunnel_disconnect_grace();
+                let recently_seen_nodes = nodes::Entity::find()
+                    .all(&*ctx.db)
+                    .await
+                    .map_err(|e| api_error(&ctx, "db_error", format!("db error: {e}")))?
+                    .into_iter()
+                    .filter_map(|n| {
+                        let seen = n.last_seen_at?.with_timezone(&chrono::Utc);
+                        let elapsed = now.signed_duration_since(seen).to_std().ok()?;
+                        if elapsed <= disconnect_grace {
+                            Some(n.name)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect::<std::collections::BTreeSet<_>>();
+
                 let nodes = list_instance_scan_targets(&ctx).await?;
                 let mut reachable_nodes = std::collections::BTreeSet::<String>::new();
 
@@ -4402,6 +4425,7 @@ pub fn router() -> Router<Ctx> {
                     if info.status.is_none()
                         && let Some(node_name) = info.config.node_name.clone()
                         && !reachable_nodes.contains(&node_name)
+                        && !recently_seen_nodes.contains(&node_name)
                     {
                         info.status = Some(ProcessStatusDto {
                             process_id: info.config.instance_id.clone(),
@@ -5307,7 +5331,7 @@ pub fn router() -> Router<Ctx> {
                 |ctx: Ctx, input: NodeDeleteInput| async move {
                     use alloy_db::entities::{instance_nodes, instances, nodes};
                     use sea_orm::{
-                        ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set,
+                        ColumnTrait, Condition, EntityTrait, QueryFilter,
                     };
 
                     ensure_writable(&ctx)?;
@@ -5327,48 +5351,36 @@ pub fn router() -> Router<Ctx> {
                     let model = nodes::Entity::find_by_id(id)
                         .one(&*ctx.db)
                         .await
-                        .map_err(|e| api_error(&ctx, "db_error", format!("db error: {e}")))?
-                        .ok_or_else(|| api_error(&ctx, "not_found", "node not found"))?;
-
-                    // Keep historical per-instance node_name but drop stale node_id references.
-                    let now: sea_orm::prelude::DateTimeWithTimeZone = chrono::Utc::now().into();
-                    let attached = instance_nodes::Entity::find()
-                        .filter(instance_nodes::Column::NodeId.eq(id))
-                        .all(&*ctx.db)
-                        .await
                         .map_err(|e| api_error(&ctx, "db_error", format!("db error: {e}")))?;
-                    for row in attached {
-                        let mut active: instance_nodes::ActiveModel = row.into();
-                        active.node_id = Set(None);
-                        active.updated_at = Set(now.clone());
-                        active
-                            .update(&*ctx.db)
-                            .await
-                            .map_err(|e| api_error(&ctx, "db_error", format!("db error: {e}")))?;
-                    }
 
-                    let persisted = instances::Entity::find()
-                        .filter(instances::Column::NodeId.eq(id))
-                        .all(&*ctx.db)
-                        .await
-                        .map_err(|e| api_error(&ctx, "db_error", format!("db error: {e}")))?;
-                    for row in persisted {
-                        let mut active: instances::ActiveModel = row.into();
-                        active.node_id = Set(None);
-                        active.updated_at = Set(now.clone());
-                        active
-                            .update(&*ctx.db)
-                            .await
-                            .map_err(|e| api_error(&ctx, "db_error", format!("db error: {e}")))?;
-                    }
+                    let Some(model) = model else {
+                        return Ok(NodeDeleteOutput { ok: true });
+                    };
 
-                    let rows = nodes::Entity::delete_by_id(id)
+                    instance_nodes::Entity::delete_many()
+                        .filter(
+                            Condition::any()
+                                .add(instance_nodes::Column::NodeId.eq(id))
+                                .add(instance_nodes::Column::NodeName.eq(model.name.clone())),
+                        )
                         .exec(&*ctx.db)
                         .await
                         .map_err(|e| api_error(&ctx, "db_error", format!("db error: {e}")))?;
-                    if rows.rows_affected == 0 {
-                        return Err(api_error(&ctx, "not_found", "node not found"));
-                    }
+
+                    instances::Entity::delete_many()
+                        .filter(
+                            Condition::any()
+                                .add(instances::Column::NodeId.eq(id))
+                                .add(instances::Column::NodeName.eq(model.name.clone())),
+                        )
+                        .exec(&*ctx.db)
+                        .await
+                        .map_err(|e| api_error(&ctx, "db_error", format!("db error: {e}")))?;
+
+                    let _ = nodes::Entity::delete_by_id(id)
+                        .exec(&*ctx.db)
+                        .await
+                        .map_err(|e| api_error(&ctx, "db_error", format!("db error: {e}")))?;
 
                     ctx.agent_hub.remove(&model.name).await;
 

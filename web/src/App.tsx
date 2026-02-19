@@ -800,7 +800,27 @@ function App() {
     if (!n) return null
 
     const cfg = (n.config ?? '').trim()
-    if (cfg) return cfg
+    if (cfg) {
+      const allocPorts = (n.allocatable_ports ?? '').trim()
+      if (!allocPorts) return cfg
+      const lines = cfg.split('\n')
+      const hasHint = lines.some((line) => {
+        const t = line.trim().toLowerCase()
+        if (!t) return false
+        const body = t.startsWith('#') ? t.slice(1).trim() : t.startsWith(';') ? t.slice(1).trim() : t
+        return body.startsWith('alloy_alloc_ports') || body.startsWith('allocatable_ports')
+      })
+      if (hasHint) return cfg
+      const idx = lines.findIndex((line) => {
+        const t = line.trim().toLowerCase()
+        return t === '[common]'
+      })
+      if (idx >= 0) {
+        lines.splice(idx + 1, 0, `# alloy_alloc_ports = ${allocPorts}`)
+        return lines.join('\n')
+      }
+      return `${cfg}\n# alloy_alloc_ports = ${allocPorts}`
+    }
 
     if (!n.server_addr || !n.server_port) return null
     const lines = ['[common]', `server_addr = ${n.server_addr}`, `server_port = ${n.server_port}`]
