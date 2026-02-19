@@ -2,9 +2,7 @@ type FocusCreateRefs = {
   createInstanceNameEl?: HTMLInputElement
   createSleepSecondsEl?: HTMLInputElement
   createMcEulaEl?: HTMLInputElement
-  createMcMrpackEl?: HTMLInputElement
-  createMcImportPackEl?: HTMLInputElement
-  createMcCurseforgeEl?: HTMLInputElement
+  createMcImportPackEl?: HTMLDivElement
   createMcPortEl?: HTMLInputElement
   createMcMemoryEl?: HTMLInputElement
   createMcFrpConfigEl?: HTMLTextAreaElement
@@ -88,13 +86,9 @@ export function focusFirstCreateError(options: {
       ? ['node_id', 'seconds', 'display_name']
       : template_id === 'minecraft:vanilla'
         ? ['node_id', 'accept_eula', 'version', 'memory_mb', 'port', 'frp_config', 'display_name']
-        : template_id === 'minecraft:modrinth'
-          ? ['node_id', 'accept_eula', 'mrpack', 'memory_mb', 'port', 'frp_config', 'display_name']
-          : template_id === 'minecraft:import'
+        : template_id === 'minecraft:import'
             ? ['node_id', 'accept_eula', 'pack', 'memory_mb', 'port', 'frp_config', 'display_name']
-            : template_id === 'minecraft:curseforge'
-              ? ['node_id', 'accept_eula', 'curseforge', 'memory_mb', 'port', 'frp_config', 'display_name']
-              : template_id === 'dst:vanilla'
+            : template_id === 'dst:vanilla'
                 ? ['node_id', 'cluster_token', 'cluster_name', 'max_players', 'password', 'port', 'master_port', 'auth_port', 'display_name']
                 : template_id === 'terraria:vanilla'
                   ? ['node_id', 'version', 'max_players', 'world_name', 'port', 'world_size', 'password', 'frp_config', 'display_name']
@@ -127,14 +121,10 @@ export function focusFirstCreateError(options: {
 
       if (
         template_id === 'minecraft:vanilla' ||
-        template_id === 'minecraft:modrinth' ||
-        template_id === 'minecraft:import' ||
-        template_id === 'minecraft:curseforge'
+        template_id === 'minecraft:import'
       ) {
         if (key === 'accept_eula' && focusEl(refs.createMcEulaEl)) return
-        if (key === 'mrpack' && focusEl(refs.createMcMrpackEl)) return
-        if (key === 'pack' && focusEl(refs.createMcImportPackEl)) return
-        if (key === 'curseforge' && focusEl(refs.createMcCurseforgeEl)) return
+        if (key === 'pack' && focusDropdown(refs.createMcImportPackEl)) return
         if (key === 'port' && focusEl(refs.createMcPortEl)) return
         if (key === 'frp_config') {
           if (mcFrpEnabled && mcFrpMode === 'node' && focusDropdown(refs.createMcFrpNodeEl)) return

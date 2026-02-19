@@ -41,14 +41,12 @@ export default function InstancesCreatePanel(props: InstancesCreatePanelProps) {
     instanceName,
     invalidateInstances,
     isReadOnly,
-    mcCurseforge,
     mcEffectiveFrpConfig,
     mcEula,
     mcFrpEnabled,
     mcFrpMode,
     mcImportPack,
     mcMemory,
-    mcMrpack,
     mcPort,
     mcVersion,
     pushToast,
@@ -265,33 +263,13 @@ export default function InstancesCreatePanel(props: InstancesCreatePanelProps) {
                               params.memory_mb = mcMemory() || '2048'
                               if (mcPort().trim()) params.port = mcPort().trim()
                               if (mcFrpEnabled() && mcFrpCfg) params.frp_config = mcFrpCfg
-                            } else if (template_id === 'minecraft:modrinth') {
-                              if (!mcEula()) localErrors.accept_eula = 'You must accept the EULA to start a Minecraft server.'
-                              if (!mcMrpack().trim()) localErrors.mrpack = 'Paste a Modrinth version link or a direct .mrpack URL.'
-                              if (mcFrpEnabled() && !mcFrpCfg)
-                                localErrors.frp_config = mcFrpMode() === 'node' ? 'Select a tunnel node.' : 'Paste tunnel config.'
-                              params.accept_eula = 'true'
-                              params.mrpack = mcMrpack().trim()
-                              params.memory_mb = mcMemory() || '2048'
-                              if (mcPort().trim()) params.port = mcPort().trim()
-                              if (mcFrpEnabled() && mcFrpCfg) params.frp_config = mcFrpCfg
                             } else if (template_id === 'minecraft:import') {
                               if (!mcEula()) localErrors.accept_eula = 'You must accept the EULA to start a Minecraft server.'
-                              if (!mcImportPack().trim()) localErrors.pack = 'Provide a server pack zip URL, or a path under /data.'
+                              if (!mcImportPack().trim()) localErrors.pack = 'Provide an uploaded server pack zip path under /data.'
                               if (mcFrpEnabled() && !mcFrpCfg)
                                 localErrors.frp_config = mcFrpMode() === 'node' ? 'Select a tunnel node.' : 'Paste tunnel config.'
                               params.accept_eula = 'true'
                               params.pack = mcImportPack().trim()
-                              params.memory_mb = mcMemory() || '2048'
-                              if (mcPort().trim()) params.port = mcPort().trim()
-                              if (mcFrpEnabled() && mcFrpCfg) params.frp_config = mcFrpCfg
-                            } else if (template_id === 'minecraft:curseforge') {
-                              if (!mcEula()) localErrors.accept_eula = 'You must accept the EULA to start a Minecraft server.'
-                              if (!mcCurseforge().trim()) localErrors.curseforge = 'Paste a CurseForge file URL, or modId:fileId.'
-                              if (mcFrpEnabled() && !mcFrpCfg)
-                                localErrors.frp_config = mcFrpMode() === 'node' ? 'Select a tunnel node.' : 'Paste tunnel config.'
-                              params.accept_eula = 'true'
-                              params.curseforge = mcCurseforge().trim()
                               params.memory_mb = mcMemory() || '2048'
                               if (mcPort().trim()) params.port = mcPort().trim()
                               if (mcFrpEnabled() && mcFrpCfg) params.frp_config = mcFrpCfg

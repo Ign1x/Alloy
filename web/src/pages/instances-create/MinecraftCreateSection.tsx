@@ -2,7 +2,6 @@ import { Show } from 'solid-js'
 import { optionsWithCurrentValue } from '../../app/helpers/misc'
 import { CREATE_TEMPLATE_MINECRAFT, MINECRAFT_MODE_BY_TEMPLATE_ID } from '../../app/types'
 import { LabelTip } from '../../app/primitives/LabelTip'
-import { Banner } from '../../components/ui/Banner'
 import { Button } from '../../components/ui/Button'
 import { Dropdown } from '../../components/Dropdown'
 import { Field } from '../../components/ui/Field'
@@ -20,9 +19,6 @@ export default function MinecraftCreateSection(props: MinecraftCreateSectionProp
     selectedTemplate,
     createFieldErrors,
     createTemplateId,
-    settingsStatus,
-    me,
-    setTab,
     mcCreateMode,
     minecraftCreateModeOptions,
     setSelectedTemplate,
@@ -33,15 +29,14 @@ export default function MinecraftCreateSection(props: MinecraftCreateSectionProp
     setCreateMcEulaEl,
     mcEula,
     setMcEula,
-    setCreateMcMrpackEl,
-    mcMrpack,
-    setMcMrpack,
     setCreateMcImportPackEl,
     mcImportPack,
+    mcImportPackOptions,
+    mcImportPacksPending,
+    mcImportUploadPending,
     setMcImportPack,
-    setCreateMcCurseforgeEl,
-    mcCurseforge,
-    setMcCurseforge,
+    uploadMcImportPackFile,
+    setTab,
     mcVersion,
     mcVersionOptions,
     setMcVersion,
@@ -63,6 +58,8 @@ export default function MinecraftCreateSection(props: MinecraftCreateSectionProp
     mcFrpConfig,
     setMcFrpConfig,
   } = props as any
+
+  let importPackFileEl: HTMLInputElement | undefined
 
   return (
                       <Show
@@ -128,96 +125,51 @@ export default function MinecraftCreateSection(props: MinecraftCreateSectionProp
                             </Show>
                           </div>
 
-                          <Show
-                            when={
-                              createTemplateId() === 'minecraft:curseforge' &&
-                              settingsStatus.data &&
-                              !settingsStatus.data.curseforge_api_key_set
-                            }
-                          >
-                            <Banner
-                              variant="warning"
-                              title="CurseForge API key not set"
-                              message="Set it in Settings to enable CurseForge installs."
-                              actions={
-                                <Show when={me()?.is_admin}>
-                                  <Button size="xs" variant="secondary" onClick={() => setTab('settings')}>
-                                    Open Settings
-                                  </Button>
-                                </Show>
-                              }
-                            />
-                          </Show>
-
-                          <Show when={createTemplateId() === 'minecraft:modrinth'}>
-                            <Field
-                              label={
-                                <LabelTip
-                                  label="Modpack (mrpack)"
-                                  content="Paste a Modrinth version link (recommended) or a direct .mrpack URL."
-                                />
-                              }
-                              required
-                              error={createFieldErrors().mrpack}
-                            >
-                              <Input
-                                ref={(el) => {
-                                  setCreateMcMrpackEl?.(el)
-                                }}
-                                value={mcMrpack()}
-                                onInput={(e) => setMcMrpack(e.currentTarget.value)}
-                                placeholder="https://modrinth.com/modpack/.../version/..."
-                                spellcheck={false}
-                                invalid={Boolean(createFieldErrors().mrpack)}
-                              />
-                            </Field>
-                          </Show>
-
                           <Show when={createTemplateId() === 'minecraft:import'}>
                             <Field
                               label={
                                 <LabelTip
-                                  label="Server pack (zip/path/url)"
-                                  content="Paste a direct server pack .zip URL, or a path under /data (ALLOY_DATA_ROOT). The pack should be server-ready."
+                                  label="Server pack (uploaded zip)"
+                                  content="Choose an uploaded zip from the list, or use the first item to upload a new zip."
                                 />
                               }
                               required
                               error={createFieldErrors().pack}
                             >
-                              <Input
-                                ref={(el) => {
-                                  setCreateMcImportPackEl?.(el)
-                                }}
-                                value={mcImportPack()}
-                                onInput={(e) => setMcImportPack(e.currentTarget.value)}
-                                placeholder="uploads/pack.zip or https://example.com/pack.zip"
-                                spellcheck={false}
-                                invalid={Boolean(createFieldErrors().pack)}
-                              />
-                            </Field>
-                          </Show>
-
-                          <Show when={createTemplateId() === 'minecraft:curseforge'}>
-                            <Field
-                              label={
-                                <LabelTip
-                                  label="Modpack file"
-                                  content="Paste a CurseForge file URL (recommended), or modId:fileId. Alloy will prefer the author's server pack when available."
+                              <div class="space-y-2">
+                                <div ref={(el) => setCreateMcImportPackEl?.(el)}>
+                                  <Dropdown
+                                    label=""
+                                    value={mcImportPack()}
+                                    options={mcImportPackOptions()}
+                                    placeholder={mcImportPacksPending() ? 'Loading uploaded zips...' : 'Select uploaded zip...'}
+                                    onChange={(value) => {
+                                      if (value === '__upload__') {
+                                        importPackFileEl?.click()
+                                        return
+                                      }
+                                      setMcImportPack(value)
+                                    }}
+                                  />
+                                </div>
+                                <input
+                                  ref={(el) => {
+                                    importPackFileEl = el
+                                  }}
+                                  type="file"
+                                  accept=".zip,application/zip"
+                                  class="hidden"
+                                  onChange={async (e) => {
+                                    const file = e.currentTarget.files?.[0]
+                                    if (!file) return
+                                    await uploadMcImportPackFile(file)
+                                    e.currentTarget.value = ''
+                                  }}
                                 />
-                              }
-                              required
-                              error={createFieldErrors().curseforge}
-                            >
-                              <Input
-                                ref={(el) => {
-                                  setCreateMcCurseforgeEl?.(el)
-                                }}
-                                value={mcCurseforge()}
-                                onInput={(e) => setMcCurseforge(e.currentTarget.value)}
-                                placeholder="https://www.curseforge.com/minecraft/modpacks/.../files/..."
-                                spellcheck={false}
-                                invalid={Boolean(createFieldErrors().curseforge)}
-                              />
+                                <Show when={mcImportUploadPending()}>
+                                  <div class="text-[11px] text-slate-500 dark:text-slate-400">Uploading zip...</div>
+                                </Show>
+                              </div>
                             </Field>
                           </Show>
 

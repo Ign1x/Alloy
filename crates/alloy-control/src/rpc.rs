@@ -2474,6 +2474,14 @@ pub async fn instance_transport_for_external(
     Ok(transport)
 }
 
+pub async fn create_transport_for_external(
+    ctx: &Ctx,
+    node_id: Option<String>,
+) -> Result<AgentTransport, ApiError> {
+    let requested_node = resolve_create_instance_node_target(ctx, node_id).await?;
+    Ok(agent_transport(ctx).with_node(requested_node.name))
+}
+
 async fn node_target_for_response(
     ctx: &Ctx,
     instance_id: &str,
@@ -4251,6 +4259,19 @@ pub fn router() -> Router<Ctx> {
                         display_name,
                         node_id,
                     } = input;
+
+                    if template_id == "minecraft:modrinth" || template_id == "minecraft:curseforge" {
+                        let mut err = api_error(
+                            &ctx,
+                            "invalid_param",
+                            "Modrinth/CurseForge link import is disabled. Use minecraft:import with an uploaded pack path.",
+                        );
+                        err.field_errors.insert(
+                            "template_id".to_string(),
+                            "Only minecraft:import is allowed for modpack server creation.".to_string(),
+                        );
+                        return Err(err);
+                    }
 
                     let requested_node = resolve_create_instance_node_target(&ctx, node_id).await?;
                     let transport = agent_transport(&ctx).with_node(requested_node.name.clone());

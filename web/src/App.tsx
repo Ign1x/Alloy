@@ -57,9 +57,7 @@ function App() {
   let createInstanceNameEl: HTMLInputElement | undefined
   let createSleepSecondsEl: HTMLInputElement | undefined
   let createMcEulaEl: HTMLInputElement | undefined
-  let createMcMrpackEl: HTMLInputElement | undefined
-  let createMcImportPackEl: HTMLInputElement | undefined
-  let createMcCurseforgeEl: HTMLInputElement | undefined
+  let createMcImportPackEl: HTMLDivElement | undefined
   let createMcPortEl: HTMLInputElement | undefined
   let createMcMemoryEl: HTMLInputElement | undefined
   let createMcFrpConfigEl: HTMLTextAreaElement | undefined
@@ -255,9 +253,7 @@ function App() {
   const FALLBACK_TEMPLATE_CATALOG: TemplateCatalogItem[] = [
     { template_id: 'demo:sleep', display_name: 'Demo: sleep' },
     { template_id: 'minecraft:vanilla', display_name: 'Minecraft: Vanilla' },
-    { template_id: 'minecraft:modrinth', display_name: 'Minecraft: Modrinth Pack' },
     { template_id: 'minecraft:import', display_name: 'Minecraft: Import Pack' },
-    { template_id: 'minecraft:curseforge', display_name: 'Minecraft: CurseForge Pack' },
     { template_id: 'terraria:vanilla', display_name: 'Terraria: Vanilla' },
     { template_id: 'dst:vanilla', display_name: "Don't Starve Together" },
     { template_id: 'palworld:vanilla', display_name: 'Palworld: Vanilla' },
@@ -270,7 +266,10 @@ function App() {
 
   const templateCatalog = createMemo<TemplateCatalogItem[]>(() => {
     const live = (templates.data ?? []) as TemplateCatalogItem[]
-    return live.length > 0 ? live : FALLBACK_TEMPLATE_CATALOG
+    const filteredLive = live.filter(
+      (t) => t.template_id !== 'minecraft:modrinth' && t.template_id !== 'minecraft:curseforge',
+    )
+    return filteredLive.length > 0 ? filteredLive : FALLBACK_TEMPLATE_CATALOG
   })
 
   const templateDisplayName = (templateId: string) => {
@@ -293,7 +292,7 @@ function App() {
           out.push({
             value: CREATE_TEMPLATE_MINECRAFT,
             label: 'Minecraft',
-            meta: 'Vanilla / Modrinth / Import / CurseForge',
+            meta: 'Vanilla / Import',
           })
         }
         continue
@@ -311,9 +310,7 @@ function App() {
     const ids = new Set(templateCatalog().map((t) => t.template_id))
     const out: MinecraftCreateMode[] = []
     if (ids.has(MINECRAFT_TEMPLATE_ID_BY_MODE.vanilla)) out.push('vanilla')
-    if (ids.has(MINECRAFT_TEMPLATE_ID_BY_MODE.modrinth)) out.push('modrinth')
     if (ids.has(MINECRAFT_TEMPLATE_ID_BY_MODE.import)) out.push('import')
-    if (ids.has(MINECRAFT_TEMPLATE_ID_BY_MODE.curseforge)) out.push('curseforge')
     return out
   })
 
@@ -1057,9 +1054,12 @@ function App() {
   const [mcCreateMode, setMcCreateMode] = createSignal<MinecraftCreateMode>('vanilla')
   const [mcEula, setMcEula] = createSignal(false)
   const [mcVersion, setMcVersion] = createSignal('latest_release')
-  const [mcMrpack, setMcMrpack] = createSignal('')
   const [mcImportPack, setMcImportPack] = createSignal('')
-  const [mcCurseforge, setMcCurseforge] = createSignal('')
+  const [mcImportPacks, setMcImportPacks] = createSignal<
+    { name: string; path: string; size_bytes: string; modified_unix_ms: string }[]
+  >([])
+  const [mcImportPacksPending, setMcImportPacksPending] = createSignal(false)
+  const [mcImportUploadPending, setMcImportUploadPending] = createSignal(false)
   const [mcMemory, setMcMemory] = createSignal('2048')
   const [mcPort, setMcPort] = createSignal('')
   const [mcFrpEnabled, setMcFrpEnabled] = createSignal(false)
@@ -1201,6 +1201,84 @@ function App() {
   const [dstAuthPort, setDstAuthPort] = createSignal('0')
   const [createNodeId, setCreateNodeId] = createSignal('')
 
+  async function loadMcImportPacks() {
+    if (!isAuthed()) {
+      setMcImportPacks([])
+      return
+    }
+    setMcImportPacksPending(true)
+    try {
+      const node_id = createNodeId().trim()
+      const params = new URLSearchParams()
+      if (node_id) params.set('node_id', node_id)
+      const qs = params.toString()
+      const resp = await fetch(`/instance/modpack-packs${qs ? `?${qs}` : ''}`, {
+        method: 'GET',
+        credentials: 'include',
+      })
+      const payload = (await resp.json().catch(() => null)) as
+        | { entries?: { name: string; path: string; size_bytes: string; modified_unix_ms: string }[]; message?: string }
+        | null
+      if (!resp.ok) throw new Error(payload?.message || `list packs failed: ${resp.status}`)
+      setMcImportPacks(Array.isArray(payload?.entries) ? payload!.entries! : [])
+    } catch (e) {
+      setMcImportPacks([])
+      toastError('Load uploaded packs failed', e)
+    } finally {
+      setMcImportPacksPending(false)
+    }
+  }
+
+  async function uploadMcImportPackFile(file: File) {
+    if (!file.name.toLowerCase().endsWith('.zip')) {
+      pushToast('error', 'Invalid file', 'Only .zip files are supported.')
+      return
+    }
+
+    setMcImportUploadPending(true)
+    try {
+      const csrf = await ensureCsrfCookie()
+      const form = new FormData()
+      const node_id = createNodeId().trim()
+      if (node_id) form.append('node_id', node_id)
+      form.append('file', file)
+
+      const resp = await fetch('/instance/upload-modpack', {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'x-csrf-token': csrf,
+        },
+        body: form,
+      })
+
+      const payload = (await resp.json().catch(() => null)) as
+        | { path?: string; message?: string }
+        | null
+      if (!resp.ok) throw new Error(payload?.message || `upload failed: ${resp.status}`)
+
+      const path = (payload?.path || '').trim()
+      if (path) setMcImportPack(path)
+      await loadMcImportPacks()
+      pushToast('success', 'Upload complete', path || file.name)
+    } catch (e) {
+      toastError('Upload failed', e)
+    } finally {
+      setMcImportUploadPending(false)
+    }
+  }
+
+  const mcImportPackOptions = createMemo(() => {
+    const current = mcImportPack().trim()
+    const options = mcImportPacks().map((p) => ({
+      value: p.path,
+      label: p.name,
+      meta: `${p.path} · ${p.size_bytes} B`,
+    }))
+    const withCurrent = optionsWithCurrentValue(options, current)
+    return [{ value: '__upload__', label: 'Upload zip…', meta: mcImportUploadPending() ? 'Uploading...' : undefined }, ...withCurrent]
+  })
+
   const [pwServerName, setPwServerName] = createSignal('Alloy Palworld server')
   const [pwServerDescription, setPwServerDescription] = createSignal('')
   const [pwMaxPlayers, setPwMaxPlayers] = createSignal('32')
@@ -1233,9 +1311,7 @@ function App() {
   const minecraftCreateModeOptions = createMemo(() => {
     const labels: Record<MinecraftCreateMode, string> = {
       vanilla: 'Vanilla',
-      modrinth: 'Modrinth',
       import: 'Import',
-      curseforge: 'CurseForge',
     }
     return availableMinecraftCreateModes().map((value) => ({ value, label: labels[value] }))
   })
@@ -1291,10 +1367,7 @@ function App() {
       mcFrpEnabled: mcFrpEnabled(),
       mcEffectiveFrpConfig: mcEffectiveFrpConfig(),
       mcEula: mcEula(),
-      mcMrpack: mcMrpack(),
       mcImportPack: mcImportPack(),
-      mcCurseforge: mcCurseforge(),
-      curseforgeApiKeySet: Boolean(settingsStatus.data?.curseforge_api_key_set),
       dstClusterToken: dstClusterToken(),
       dstClusterName: dstClusterName(),
       dstMaxPlayers: dstMaxPlayers(),
@@ -1357,15 +1430,13 @@ function App() {
       templateId: createTemplateId(),
       createAdvanced: createAdvanced(),
       setCreateAdvanced,
-      refs: {
-        createInstanceNameEl,
-        createSleepSecondsEl,
-        createMcEulaEl,
-        createMcMrpackEl,
-        createMcImportPackEl,
-        createMcCurseforgeEl,
-        createMcPortEl,
-        createMcMemoryEl,
+        refs: {
+          createInstanceNameEl,
+          createSleepSecondsEl,
+          createMcEulaEl,
+          createMcImportPackEl,
+          createMcPortEl,
+          createMcMemoryEl,
         createMcFrpConfigEl,
         createMcFrpNodeEl,
         createTrPortEl,
@@ -1873,6 +1944,13 @@ function App() {
     if (!valid) setCreateNodeId('')
   })
 
+  createEffect(() => {
+    if (!isAuthed()) return
+    if (createTemplateId() !== 'minecraft:import') return
+    createNodeId()
+    void loadMcImportPacks()
+  })
+
   type FrpNodeDto = {
     id: string
     name: string
@@ -2185,7 +2263,6 @@ function App() {
     invalidateInstances,
     isReadOnly,
     mcCreateMode,
-    mcCurseforge,
     mcEffectiveFrpConfig,
     mcEula,
     mcFrpConfig,
@@ -2193,8 +2270,10 @@ function App() {
     mcFrpMode,
     mcFrpNodeId,
     mcImportPack,
+    mcImportPackOptions,
+    mcImportPacksPending,
+    mcImportUploadPending,
     mcMemory,
-    mcMrpack,
     mcPort,
     mcVersion,
     mcVersionOptions,
@@ -2208,6 +2287,7 @@ function App() {
     restartInstance,
     revealInstance,
     runInstanceOp,
+    uploadMcImportPackFile,
     selectedInstanceId,
     selectedTemplate,
     setConfirmDeleteInstanceId,
@@ -2224,13 +2304,11 @@ function App() {
     setCreateInstanceNameEl: (el: HTMLInputElement) => (createInstanceNameEl = el),
     setCreateNodeId,
     setCreateNodeSelectEl: (el: HTMLDivElement) => (createNodeSelectEl = el),
-    setCreateMcCurseforgeEl: (el: HTMLInputElement) => (createMcCurseforgeEl = el),
     setCreateMcEulaEl: (el: HTMLInputElement) => (createMcEulaEl = el),
     setCreateMcFrpConfigEl: (el: HTMLTextAreaElement) => (createMcFrpConfigEl = el),
     setCreateMcFrpNodeEl: (el: HTMLDivElement) => (createMcFrpNodeEl = el),
-    setCreateMcImportPackEl: (el: HTMLInputElement) => (createMcImportPackEl = el),
+    setCreateMcImportPackEl: (el: HTMLDivElement) => (createMcImportPackEl = el),
     setCreateMcMemoryEl: (el: HTMLInputElement) => (createMcMemoryEl = el),
-    setCreateMcMrpackEl: (el: HTMLInputElement) => (createMcMrpackEl = el),
     setCreateMcPortEl: (el: HTMLInputElement) => (createMcPortEl = el),
     setCreateSleepSecondsEl: (el: HTMLInputElement) => (createSleepSecondsEl = el),
     setCreateTrFrpConfigEl: (el: HTMLTextAreaElement) => (createTrFrpConfigEl = el),
@@ -2262,7 +2340,6 @@ function App() {
     setInstanceStatusFilter,
     setInstanceTemplateFilter,
     setMcCreateMode,
-    setMcCurseforge,
     setMcEula,
     setMcFrpConfig,
     setMcFrpEnabled,
@@ -2270,7 +2347,6 @@ function App() {
     setMcFrpNodeId,
     setMcImportPack,
     setMcMemory,
-    setMcMrpack,
     setMcPort,
     setMcVersion,
     setSelectedInstanceId,

@@ -1,6 +1,6 @@
 export type UiTab = 'instances' | 'downloads' | 'files' | 'nodes' | 'frp' | 'settings'
 
-export type MinecraftCreateMode = 'vanilla' | 'modrinth' | 'import' | 'curseforge'
+export type MinecraftCreateMode = 'vanilla' | 'import'
 export type FrpConfigMode = 'paste' | 'node'
 export type DownloadTarget =
   | 'minecraft_vanilla'
@@ -58,14 +58,10 @@ export const CREATE_TEMPLATE_MINECRAFT = '__minecraft__'
 
 export const MINECRAFT_TEMPLATE_ID_BY_MODE: Record<MinecraftCreateMode, string> = {
   vanilla: 'minecraft:vanilla',
-  modrinth: 'minecraft:modrinth',
   import: 'minecraft:import',
-  curseforge: 'minecraft:curseforge',
 }
 
 export const MINECRAFT_MODE_BY_TEMPLATE_ID: Partial<Record<string, MinecraftCreateMode>> = {
   'minecraft:vanilla': 'vanilla',
-  'minecraft:modrinth': 'modrinth',
   'minecraft:import': 'import',
-  'minecraft:curseforge': 'curseforge',
 }

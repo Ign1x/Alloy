@@ -48,10 +48,7 @@ export type BuildCreatePreviewInput = {
   mcFrpEnabled: boolean
   mcEffectiveFrpConfig: string
   mcEula: boolean
-  mcMrpack: string
   mcImportPack: string
-  mcCurseforge: string
-  curseforgeApiKeySet: boolean
   dstClusterToken: string
   dstClusterName: string
   dstMaxPlayers: string
@@ -176,25 +173,6 @@ export function buildCreatePreview(input: BuildCreatePreviewInput): CreatePrevie
     if (!input.mcEula) warnings.push('Accept the Minecraft EULA to start.')
   }
 
-  if (template_id === 'minecraft:modrinth') {
-    const src = input.mcMrpack.trim()
-    rows.push({ label: 'Modpack', value: src || '(not set)' })
-    rows.push({ label: 'Memory (MB)', value: input.mcMemory.trim() || '2048' })
-
-    const portLabel = asPortLabel(input.mcPort)
-    rows.push({ label: 'Port', value: portLabel })
-    rows.push({ label: 'Connect', value: connectValue(portLabel) })
-
-    if (input.mcFrpEnabled) {
-      const ep = parseFrpPublicEndpoint(input.mcEffectiveFrpConfig, Number.parseInt(portLabel, 10)) ?? parseFrpEndpoint(input.mcEffectiveFrpConfig)
-      rows.push({ label: 'Tunnel', value: ep ?? '(enabled)' })
-      if (!input.mcEffectiveFrpConfig.trim()) warnings.push('Paste tunnel config or disable tunnels.')
-    }
-
-    if (!input.mcEula) warnings.push('Accept the Minecraft EULA to start.')
-    if (!src) warnings.push('Paste a Modrinth version link or a direct .mrpack URL.')
-  }
-
   if (template_id === 'minecraft:import') {
     const src = input.mcImportPack.trim()
     rows.push({ label: 'Pack', value: src || '(not set)' })
@@ -211,27 +189,7 @@ export function buildCreatePreview(input: BuildCreatePreviewInput): CreatePrevie
     }
 
     if (!input.mcEula) warnings.push('Accept the Minecraft EULA to start.')
-    if (!src) warnings.push('Provide a server pack zip URL, or a path under /data.')
-  }
-
-  if (template_id === 'minecraft:curseforge') {
-    const src = input.mcCurseforge.trim()
-    rows.push({ label: 'Modpack', value: src || '(not set)' })
-    rows.push({ label: 'Memory (MB)', value: input.mcMemory.trim() || '2048' })
-
-    const portLabel = asPortLabel(input.mcPort)
-    rows.push({ label: 'Port', value: portLabel })
-    rows.push({ label: 'Connect', value: connectValue(portLabel) })
-
-    if (input.mcFrpEnabled) {
-      const ep = parseFrpPublicEndpoint(input.mcEffectiveFrpConfig, Number.parseInt(portLabel, 10)) ?? parseFrpEndpoint(input.mcEffectiveFrpConfig)
-      rows.push({ label: 'Tunnel', value: ep ?? '(enabled)' })
-      if (!input.mcEffectiveFrpConfig.trim()) warnings.push('Paste tunnel config or disable tunnels.')
-    }
-
-    if (!input.mcEula) warnings.push('Accept the Minecraft EULA to start.')
-    if (!src) warnings.push('Paste a CurseForge file URL, or modId:fileId.')
-    if (!input.curseforgeApiKeySet) warnings.push('CurseForge API key is not configured (Settings).')
+    if (!src) warnings.push('Provide an uploaded server pack zip path under /data.')
   }
 
   if (template_id === 'dst:vanilla') {
