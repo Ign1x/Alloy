@@ -210,6 +210,8 @@ mod error_payload;
 mod factorio;
 mod factorio_download;
 mod filesystem_service;
+mod game_adapter_template;
+mod game_adapters;
 mod health_service;
 mod instance_service;
 mod logs_service;

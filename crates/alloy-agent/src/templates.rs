@@ -270,6 +270,31 @@ fn param_secret(
     }
 }
 
+fn from_adapter_template(t: &crate::game_adapter_template::AdapterTemplate) -> ProcessTemplate {
+    ProcessTemplate {
+        template_id: t.template_id.to_string(),
+        display_name: t.display_name.to_string(),
+        command: t.startup_command.to_string(),
+        args: t.startup_args.iter().map(|v| v.to_string()).collect(),
+        params: t
+            .params
+            .iter()
+            .map(|p| {
+                param_string(
+                    p.key,
+                    p.key,
+                    p.required,
+                    p.default_value,
+                    Vec::new(),
+                    p.default_value,
+                    "adapter param",
+                )
+            })
+            .collect(),
+        graceful_stdin: None,
+    }
+}
+
 pub fn list_templates() -> Vec<ProcessTemplate> {
     // Phase 1: hardcoded templates to avoid turning the control plane into RCE.
     // These are demos; game adapters will provide real templates later.
@@ -291,6 +316,7 @@ pub fn list_templates() -> Vec<ProcessTemplate> {
             )],
             graceful_stdin: None,
         },
+        from_adapter_template(&crate::game_adapter_template::MINIMAL_GENERIC_TEMPLATE),
         ProcessTemplate {
             // Real implementation is added incrementally in Milestone 1.
             template_id: "minecraft:vanilla".to_string(),
@@ -1029,6 +1055,13 @@ pub fn apply_params(
             ));
         }
         t.args = vec![secs.to_string()];
+    }
+
+    if t.template_id == crate::game_adapter_template::MINIMAL_GENERIC_TEMPLATE.template_id {
+        crate::game_adapter_template::validate_required_params(
+            &crate::game_adapter_template::MINIMAL_GENERIC_TEMPLATE,
+            params,
+        )?;
     }
 
     if t.template_id == "minecraft:vanilla" {
