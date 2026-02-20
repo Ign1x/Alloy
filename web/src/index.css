@@ -117,6 +117,19 @@ button:disabled {
   animation-name: zoom-in-95;
 }
 
+:root {
+  --motion-fast: 150ms;
+  --motion-normal: 220ms;
+  --motion-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-fast: 1ms;
+    --motion-normal: 1ms;
+  }
+}
+
 code,
 pre,
 kbd,
@@ -162,5 +175,35 @@ body {
   }
   .text-mono-muted {
     @apply font-mono text-[11px] text-slate-500 dark:text-slate-400;
+  }
+
+  .motion-surface {
+    transition-property: background-color, border-color, box-shadow, transform, opacity;
+    transition-duration: var(--motion-normal);
+    transition-timing-function: var(--motion-ease);
+  }
+
+  .motion-pop {
+    transition-property: transform, filter;
+    transition-duration: var(--motion-fast);
+    transition-timing-function: var(--motion-ease);
+  }
+
+  .motion-pop:hover {
+    transform: translateY(-1px);
+  }
+
+  .motion-enter {
+    animation-duration: var(--motion-fast);
+    animation-timing-function: var(--motion-ease);
+    animation-fill-mode: both;
+    animation-name: fade-in;
+  }
+
+  .motion-enter-pop {
+    animation-duration: var(--motion-fast);
+    animation-timing-function: var(--motion-ease);
+    animation-fill-mode: both;
+    animation-name: fade-in, zoom-in-95;
   }
 }

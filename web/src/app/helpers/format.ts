@@ -27,6 +27,22 @@ export function formatCpuPercent(cpuX100: number | null | undefined): string {
   return `${pct.toFixed(2)}%`
 }
 
+export function metricLevelByPercent(percent: number | null | undefined): 'unknown' | 'low' | 'medium' | 'high' | 'critical' {
+  if (percent == null || !Number.isFinite(percent)) return 'unknown'
+  if (percent < 50) return 'low'
+  if (percent < 75) return 'medium'
+  if (percent < 90) return 'high'
+  return 'critical'
+}
+
+export function metricLevelClass(level: 'unknown' | 'low' | 'medium' | 'high' | 'critical'): string {
+  if (level === 'low') return 'text-emerald-700 dark:text-emerald-300'
+  if (level === 'medium') return 'text-sky-700 dark:text-sky-300'
+  if (level === 'high') return 'text-amber-700 dark:text-amber-300'
+  if (level === 'critical') return 'text-rose-700 dark:text-rose-300'
+  return 'text-slate-600 dark:text-slate-400'
+}
+
 export function formatRelativeTime(unixMs: number | null | undefined): string {
   if (!unixMs || !Number.isFinite(unixMs) || unixMs <= 0) return '—'
   const deltaMs = Date.now() - unixMs

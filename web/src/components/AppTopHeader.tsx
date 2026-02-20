@@ -95,6 +95,25 @@ export default function AppTopHeader(props: AppTopHeaderProps) {
   const hasControlUpdate = () => Boolean(props.updateCheck.data?.update_available)
   const hasAgentUpdate = () => props.agentOutdatedCount > 0
   const hasAnyUpdate = () => hasControlUpdate() || hasAgentUpdate()
+  const effectiveFetchedAtUnixMs = createMemo<number | null>(() => {
+    const fromCheckNow = Number(checkNowAtUnixMs() ?? '')
+    if (Number.isFinite(fromCheckNow) && fromCheckNow > 0) return fromCheckNow
+    const fromQuery = Number(props.updateCheck.data?.fetched_at_unix_ms ?? '')
+    if (Number.isFinite(fromQuery) && fromQuery > 0) return fromQuery
+    return null
+  })
+  const freshness = createMemo<'unknown' | 'fresh' | 'stale'>(() => {
+    const ts = effectiveFetchedAtUnixMs()
+    if (!ts) return 'unknown'
+    const ageMs = Date.now() - ts
+    if (ageMs < 15 * 60_000) return 'fresh'
+    return 'stale'
+  })
+  const freshnessLabel = createMemo(() => {
+    if (freshness() === 'fresh') return props.t('header.catalogFresh')
+    if (freshness() === 'stale') return props.t('header.catalogStale')
+    return props.t('header.catalogUnknown')
+  })
 
   const currentLocaleLabel = createMemo(
     () => props.localeOptions.find((item) => item.value === props.locale)?.label ?? props.localeOptions[0]?.label ?? props.locale,
@@ -381,7 +400,7 @@ export default function AppTopHeader(props: AppTopHeaderProps) {
                 <Portal>
                   <div class="fixed inset-0 z-[9998]" onPointerDown={() => props.setShowUpdateCenter(false)}>
                     <div
-                      class="absolute right-5 top-14 mt-2 w-[min(92vw,32rem)] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-900/10 backdrop-blur transition-all duration-150 animate-in fade-in zoom-in-95 dark:border-slate-800 dark:bg-slate-950"
+                      class="motion-enter-pop motion-surface absolute right-5 top-14 mt-2 w-[min(92vw,32rem)] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-900/10 backdrop-blur dark:border-slate-800 dark:bg-slate-950"
                       onPointerDown={(event) => event.stopPropagation()}
                     >
                       <div class="border-b border-slate-200 px-3 py-2.5 dark:border-slate-800">
@@ -407,13 +426,16 @@ export default function AppTopHeader(props: AppTopHeaderProps) {
                                 </Badge>
                               )}
                             </Show>
+                            <Badge variant={freshness() === 'fresh' ? 'success' : freshness() === 'stale' ? 'warning' : 'neutral'}>
+                              {freshnessLabel()}
+                            </Badge>
                           </div>
                         </div>
                       </div>
 
                       <div class="max-h-[70vh] overflow-auto p-3">
                         <div class="space-y-3">
-                          <div class="rounded-xl border border-slate-200 bg-white/70 p-3 dark:border-slate-800 dark:bg-slate-950/40">
+                          <div class="motion-surface motion-enter rounded-xl border border-slate-200 bg-white/70 p-3 dark:border-slate-800 dark:bg-slate-950/40">
                             <div class="flex items-center justify-between gap-2">
                               <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">{props.t('header.control')}</div>
                               <Badge variant={hasControlUpdate() ? 'warning' : 'success'}>
@@ -447,7 +469,7 @@ export default function AppTopHeader(props: AppTopHeaderProps) {
                             </Show>
                           </div>
 
-                          <div class="rounded-xl border border-slate-200 bg-white/70 p-3 dark:border-slate-800 dark:bg-slate-950/40">
+                          <div class="motion-surface motion-enter rounded-xl border border-slate-200 bg-white/70 p-3 dark:border-slate-800 dark:bg-slate-950/40">
                             <div class="flex items-center justify-between gap-2">
                               <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">{props.t('header.agent')}</div>
                               <Badge variant={hasAgentUpdate() ? 'warning' : 'success'}>
@@ -492,10 +514,10 @@ export default function AppTopHeader(props: AppTopHeaderProps) {
                             )}
                           </Show>
 
-                          <Show when={checkNowAtUnixMs()}>
+                          <Show when={effectiveFetchedAtUnixMs()}>
                             {(ts) => (
                               <div class="text-[11px] text-slate-500 dark:text-slate-400">
-                                Last check <span class="font-mono">{new Date(Number(ts())).toISOString()}</span>
+                                {props.t('header.lastCatalogSync')} <span class="font-mono">{new Date(ts()).toISOString()}</span>
                               </div>
                             )}
                           </Show>

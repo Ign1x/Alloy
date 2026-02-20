@@ -1,6 +1,6 @@
 import { For, Show, createEffect, createMemo, createSignal } from 'solid-js'
 import { isVersionLower } from '../app/helpers/version'
-import { formatBytes, formatCpuPercent, formatRelativeTime, parseU64 } from '../app/helpers/format'
+import { formatBytes, formatCpuPercent, formatRelativeTime, metricLevelByPercent, metricLevelClass, parseU64 } from '../app/helpers/format'
 import { Button } from '../components/ui/Button'
 import { EmptyState } from '../components/ui/EmptyState'
 import { ErrorState } from '../components/ui/ErrorState'
@@ -353,6 +353,10 @@ export default function NodesTab(props: NodesTabProps) {
       })
 
       await invalidateNodes()
+      if (selectedNodeId() === null) {
+        const next = filteredNodeList().find((item) => item.id !== node.id)
+        if (next) setSelectedNodeId(next.id)
+      }
     } catch (error) {
       if (isAlloyApiError(error) && error.data.hint) {
         pushToast('info', 'Hint', error.data.hint, error.data.request_id)
@@ -397,6 +401,86 @@ export default function NodesTab(props: NodesTabProps) {
     return parseU64(value)
   }
 
+  const nodeSearchStorageKey = 'alloy.nodes.search.v1'
+  const [nodeSearchInput, setNodeSearchInput] = createSignal('')
+  const [nodeSearch, setNodeSearch] = createSignal('')
+  let nodeSearchInputEl: HTMLInputElement | undefined
+
+  createEffect(() => {
+    const handle = window.setTimeout(() => {
+      setNodeSearch(nodeSearchInput().trim().toLowerCase())
+    }, 120)
+    return () => window.clearTimeout(handle)
+  })
+
+  createEffect(() => {
+    try {
+      const raw = localStorage.getItem(nodeSearchStorageKey)
+      if (!raw) return
+      const parsed = JSON.parse(raw) as { q?: unknown }
+      if (typeof parsed.q === 'string') setNodeSearchInput(parsed.q)
+    } catch {}
+  })
+
+  createEffect(() => {
+    try {
+      localStorage.setItem(nodeSearchStorageKey, JSON.stringify({ q: nodeSearchInput() }))
+    } catch {}
+  })
+
+  createEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null
+      const tag = target?.tagName.toLowerCase()
+      const isTypingContext = tag === 'input' || tag === 'textarea' || target?.isContentEditable
+
+      if (event.key === '/' && !isTypingContext) {
+        event.preventDefault()
+        nodeSearchInputEl?.focus()
+        nodeSearchInputEl?.select()
+        return
+      }
+
+      if (event.key === 'Escape' && document.activeElement === nodeSearchInputEl && nodeSearchInput().trim().length > 0) {
+        event.preventDefault()
+        setNodeSearchInput('')
+      }
+    }
+
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  })
+
+  const filteredNodeList = createMemo(() => {
+    const q = nodeSearch()
+    const rows = nodeList()
+    if (!q) return rows
+    return rows.filter((n) => {
+      const status = n.last_error ? 'error' : n.last_seen_at ? 'healthy' : 'unknown'
+      const haystack = `${n.name} ${n.endpoint} ${n.agent_version ?? ''} ${status}`.toLowerCase()
+      return haystack.includes(q)
+    })
+  })
+
+  const healthyNodeCount = createMemo(() => nodeList().filter((n) => !n.last_error && Boolean(n.last_seen_at)).length)
+  const errorNodeCount = createMemo(() => nodeList().filter((n) => Boolean(n.last_error)).length)
+  const unknownNodeCount = createMemo(() => nodeList().filter((n) => !n.last_error && !n.last_seen_at).length)
+
+  createEffect(() => {
+    const available = new Set(filteredNodeList().map((n) => n.id))
+    setBulkSelection((prev) => {
+      const next: Record<string, boolean> = {}
+      let changed = false
+      for (const [id, selected] of Object.entries(prev)) {
+        if (!selected) continue
+        if (available.has(id)) next[id] = true
+        else changed = true
+      }
+      if (!changed && Object.keys(next).length === Object.keys(prev).length) return prev
+      return next
+    })
+  })
+
   return (
     <Show when={tab() === 'nodes'}>
       <NodesPage
@@ -417,6 +501,52 @@ export default function NodesTab(props: NodesTabProps) {
               </Show>
             </div>
 
+            <div class="motion-surface motion-enter rounded-xl border border-slate-200 bg-white/70 p-3 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Node overview</div>
+                <div class="text-[11px] text-slate-500 dark:text-slate-400">Total {nodeList().length}</div>
+              </div>
+              <div class="mt-2 grid grid-cols-1 gap-2 text-[11px] sm:grid-cols-3">
+                <div class="rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1.5 text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/20 dark:text-emerald-300">
+                  Healthy {healthyNodeCount()}
+                </div>
+                <div class="rounded-lg border border-rose-200 bg-rose-50 px-2 py-1.5 text-rose-800 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-300">
+                  Error {errorNodeCount()}
+                </div>
+                <div class="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-slate-700 dark:border-slate-800 dark:bg-slate-900/40 dark:text-slate-300">
+                  Unknown {unknownNodeCount()}
+                </div>
+              </div>
+            </div>
+
+            <div class="motion-surface motion-enter rounded-xl border border-slate-200 bg-white/70 p-3 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
+              <label class="block text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400" for="nodes-search-input">
+                Search nodes
+              </label>
+              <div class="mt-2 flex flex-col items-stretch gap-2 sm:flex-row sm:items-center">
+                <input
+                  id="nodes-search-input"
+                  ref={(el) => (nodeSearchInputEl = el)}
+                  class="h-9 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-800 outline-none transition focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                  type="text"
+                  value={nodeSearchInput()}
+                  placeholder="name / endpoint / version / status"
+                  onInput={(event) => setNodeSearchInput(event.currentTarget.value)}
+                  onKeyDown={(event) => {
+                    if (event.key !== 'Enter') return
+                    const first = filteredNodeList()[0]
+                    if (!first) return
+                    setSelectedNodeId(first.id)
+                  }}
+                />
+                <Show when={nodeSearchInput().trim().length > 0}>
+                  <Button size="xs" variant="secondary" class="w-full sm:w-auto" onClick={() => setNodeSearchInput('')}>
+                    Clear
+                  </Button>
+                </Show>
+              </div>
+            </div>
+
             <div class="flex flex-wrap items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400">
               <span>Updated {formatRelativeTime(nodesLastUpdatedAtUnixMs())}</span>
               <Show when={nodes.isPending}>
@@ -433,30 +563,38 @@ export default function NodesTab(props: NodesTabProps) {
               </Show>
             </div>
 
-            <Show when={me()?.is_admin && !nodes.isError && !nodes.isPending && nodeList().length > 0}>
-              <div class="rounded-xl border border-slate-200 bg-white/60 p-3 dark:border-slate-800 dark:bg-slate-950/40">
+            <Show when={me()?.is_admin && !nodes.isError && !nodes.isPending && filteredNodeList().length > 0}>
+              <div class="motion-surface motion-enter rounded-xl border border-slate-200 bg-white/60 p-3 dark:border-slate-800 dark:bg-slate-950/40">
                 <div class="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-500 dark:text-slate-400">
                   <span>
-                    Selected <span class="font-medium text-slate-700 dark:text-slate-200">{selectedNodeCount()}</span> / {nodeList().length}
+                    Selected <span class="font-medium text-slate-700 dark:text-slate-200">{selectedNodeCount()}</span> / {filteredNodeList().length}
                   </span>
                   <span>
                     Outdated <span class="font-medium text-amber-700 dark:text-amber-300">{outdatedNodeCount()}</span>
                   </span>
                 </div>
 
-                <div class="mt-2 flex flex-wrap items-center gap-2">
-                  <Button size="xs" variant="secondary" disabled={batchActionsBusy() || outdatedNodeCount() === 0} onClick={selectOutdatedNodes}>
+                <Show when={selectedNodeCount() > 0}>
+                  <div class="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
+                    已选择：
+                    <span class="ml-1 font-medium text-slate-700 dark:text-slate-200">{shortNames(selectedNodes())}</span>
+                  </div>
+                </Show>
+
+                <div class="mt-2 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
+                  <Button size="xs" variant="secondary" class="w-full sm:w-auto" disabled={batchActionsBusy() || outdatedNodeCount() === 0} onClick={selectOutdatedNodes}>
                     Select outdated
                   </Button>
-                  <Button size="xs" variant="secondary" disabled={batchActionsBusy() || nodeList().length === 0} onClick={selectAllNodes}>
+                  <Button size="xs" variant="secondary" class="w-full sm:w-auto" disabled={batchActionsBusy() || filteredNodeList().length === 0} onClick={selectAllNodes}>
                     Select all
                   </Button>
-                  <Button size="xs" variant="secondary" disabled={batchActionsBusy() || selectedNodeCount() === 0} onClick={clearBulkSelection}>
+                  <Button size="xs" variant="secondary" class="w-full sm:w-auto" disabled={batchActionsBusy() || selectedNodeCount() === 0} onClick={clearBulkSelection}>
                     Clear
                   </Button>
                   <Button
                     size="xs"
                     variant="primary"
+                    class="col-span-2 w-full sm:col-span-1 sm:w-auto"
                     loading={bulkUpdatePending()}
                     disabled={batchActionsBusy() || selectedNodeCount() === 0}
                     title={selectedNodeCount() === 0 ? 'Select one or more nodes first' : 'Trigger self update for selected nodes'}
@@ -478,19 +616,32 @@ export default function NodesTab(props: NodesTabProps) {
               <Show when={nodes.isPending} fallback={<></>}>
                 <div class="rounded-xl border border-slate-200 bg-white/60 p-3 dark:border-slate-800 dark:bg-slate-950/40">
                   <Skeleton lines={6} />
+                  <div class="mt-2 text-[11px] text-slate-500 dark:text-slate-400">Loading nodes...</div>
                 </div>
               </Show>
 
               <Show
-                when={!nodes.isPending && nodeList().length > 0}
+                when={!nodes.isPending && filteredNodeList().length > 0}
                 fallback={
                   <Show when={!nodes.isPending}>
-                    <EmptyState title="No nodes" />
+                    <div class="rounded-xl border border-slate-200 bg-white/60 p-3 dark:border-slate-800 dark:bg-slate-950/40">
+                      <EmptyState title={nodeSearch().length > 0 ? 'No matching nodes' : 'No nodes'} />
+                      <div class="mt-3 flex flex-wrap items-center gap-2">
+                        <Show when={nodeSearch().length > 0}>
+                          <Button size="xs" variant="secondary" onClick={() => setNodeSearchInput('')}>
+                            Clear search
+                          </Button>
+                        </Show>
+                        <Button size="xs" variant="secondary" onClick={() => void invalidateNodes()}>
+                          Retry
+                        </Button>
+                      </div>
+                    </div>
                   </Show>
                 }
               >
-                <div class="max-h-96 overflow-auto rounded-xl border border-slate-200 bg-white/60 p-1 dark:border-slate-800 dark:bg-slate-950/40">
-                  <For each={nodeList()}>
+                <div class="motion-surface motion-enter max-h-[40vh] overflow-auto rounded-xl border border-slate-200 bg-white/60 p-1 dark:border-slate-800 dark:bg-slate-950/40 md:max-h-96">
+                  <For each={filteredNodeList()}>
                     {(node) => (
                       <div class="flex items-center gap-1 rounded-lg px-1 py-1">
                         <Show when={me()?.is_admin}>
@@ -506,21 +657,28 @@ export default function NodesTab(props: NodesTabProps) {
 
                         <button
                           type="button"
-                          class={`min-w-0 flex-1 rounded-lg px-2 py-2 text-left transition-colors hover:bg-slate-100 dark:hover:bg-slate-900 ${
+                          class={`motion-pop min-w-0 flex-1 rounded-lg px-2 py-2 text-left transition-colors hover:bg-slate-100 dark:hover:bg-slate-900 ${
                             selectedNodeId() === node.id ? 'bg-slate-100 dark:bg-slate-900' : ''
                           }`}
                           onClick={() => setSelectedNodeId(node.id)}
                         >
                           <div class="flex items-center justify-between gap-2">
                             <div class="min-w-0">
-                              <div class="truncate text-sm font-medium text-slate-900 dark:text-slate-100">{node.name}</div>
+                              <div class="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">{node.name}</div>
                               <div class="mt-0.5 truncate font-mono text-[11px] text-slate-500">{node.endpoint}</div>
                             </div>
-                            <span
-                              class={`h-2 w-2 rounded-full ${
-                                node.last_error ? 'bg-rose-500' : node.last_seen_at ? 'bg-emerald-400' : 'bg-slate-500'
-                              }`}
-                            />
+                            <div class="flex items-center gap-1.5">
+                              <span
+                                class={`h-2 w-2 rounded-full ${
+                                  node.last_error ? 'bg-rose-500' : node.last_seen_at ? 'bg-emerald-400' : 'bg-slate-500'
+                                }`}
+                              />
+                              <Show when={node.cpu_percent_x100 != null}>
+                                <span class={`text-[10px] font-semibold ${metricLevelClass(metricLevelByPercent((node.cpu_percent_x100 ?? 0) / 100))}`}>
+                                  {formatCpuPercent(node.cpu_percent_x100)}
+                                </span>
+                              </Show>
+                            </div>
                           </div>
                         </button>
                       </div>
@@ -537,7 +695,7 @@ export default function NodesTab(props: NodesTabProps) {
               <div class="text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">Details</div>
             </div>
 
-            <div class="mt-3 rounded-xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
+            <div class="mt-3 rounded-xl border border-slate-200 bg-white/70 p-3 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none md:p-4">
               <Show
                 when={nodes.isError}
                 fallback={
@@ -616,7 +774,7 @@ export default function NodesTab(props: NodesTabProps) {
                                 </div>
                               </Show>
                             </div>
-                            <div class="flex flex-wrap items-center justify-end gap-2">
+                            <div class="flex w-full flex-wrap items-center justify-start gap-2 sm:w-auto sm:justify-end">
                               <Show when={me()?.is_admin}>
                                 <Button
                                   type="button"
@@ -656,11 +814,11 @@ export default function NodesTab(props: NodesTabProps) {
                                   Delete node
                                 </Button>
 
-                                <button
-                                  type="button"
-                                  disabled={setNodeEnabled.isPending || batchActionsBusy() || Boolean(deletingNodeId())}
-                                  class="group inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/60 px-2 py-1.5 text-[11px] text-slate-700 shadow-sm hover:bg-white disabled:opacity-50 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-300 dark:shadow-none dark:hover:bg-slate-900"
-                                  onClick={async () => {
+                                  <button
+                                    type="button"
+                                    disabled={setNodeEnabled.isPending || batchActionsBusy() || Boolean(deletingNodeId())}
+                                    class="group inline-flex w-full items-center justify-center gap-2 rounded-full border border-slate-200 bg-white/60 px-2 py-1.5 text-[11px] text-slate-700 shadow-sm hover:bg-white disabled:opacity-50 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-300 dark:shadow-none dark:hover:bg-slate-900 sm:w-auto"
+                                    onClick={async () => {
                                     const id = n().id
                                     const current =
                                       Object.prototype.hasOwnProperty.call(nodeEnabledOverride(), id)
@@ -701,20 +859,28 @@ export default function NodesTab(props: NodesTabProps) {
                             </div>
                           </div>
 
-                          <div class="mt-4 grid grid-cols-2 gap-3 text-xs">
-                            <div>
+                          <Show when={selectedNodeId() !== n().id}>
+                            <div class="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-300">
+                              请先在左侧列表选中该节点，再执行更新或删除操作。
+                            </div>
+                          </Show>
+
+                          <div class="mt-4 grid grid-cols-1 gap-3 text-xs sm:grid-cols-2">
+                            <div class="rounded-lg border border-slate-200 bg-white/80 p-2.5 dark:border-slate-800 dark:bg-slate-950/50">
                               <div class="text-[11px] text-slate-500">Status</div>
                               <div class="mt-1 text-slate-700 dark:text-slate-200">{n().last_error ? 'Error' : n().last_seen_at ? 'Healthy' : 'Unknown'}</div>
                             </div>
-                            <div>
+                            <div class="rounded-lg border border-slate-200 bg-white/80 p-2.5 dark:border-slate-800 dark:bg-slate-950/50">
                               <div class="text-[11px] text-slate-500">CPU</div>
-                              <div class="mt-1 text-slate-700 dark:text-slate-200">{formatCpuPercent(n().cpu_percent_x100 ?? null)}</div>
+                              <div class={`mt-1 font-semibold ${metricLevelClass(metricLevelByPercent((n().cpu_percent_x100 ?? 0) / 100))}`}>
+                                {formatCpuPercent(n().cpu_percent_x100 ?? null)}
+                              </div>
                             </div>
-                            <div>
+                            <div class="rounded-lg border border-slate-200 bg-white/80 p-2.5 dark:border-slate-800 dark:bg-slate-950/50">
                               <div class="text-[11px] text-slate-500">Agent current</div>
                               <div class="mt-1 text-slate-700 dark:text-slate-200">{n().agent_version ?? '-'}</div>
                             </div>
-                            <div>
+                            <div class="rounded-lg border border-slate-200 bg-white/80 p-2.5 dark:border-slate-800 dark:bg-slate-950/50">
                               <div class="text-[11px] text-slate-500">Memory</div>
                               <div class="mt-1 text-slate-700 dark:text-slate-200">
                                 {formatBytes(parseResourceMetric(n().memory_used_bytes))}
@@ -722,18 +888,18 @@ export default function NodesTab(props: NodesTabProps) {
                                 {formatBytes(parseResourceMetric(n().memory_total_bytes))}
                               </div>
                             </div>
-                            <div>
+                            <div class="rounded-lg border border-slate-200 bg-white/80 p-2.5 dark:border-slate-800 dark:bg-slate-950/50">
                               <div class="text-[11px] text-slate-500">Agent target</div>
                               <div class="mt-1 text-slate-700 dark:text-slate-200">{nodeAgentUpdateState(n()).targetTag ?? '-'}</div>
                             </div>
-                            <div>
+                            <div class="rounded-lg border border-slate-200 bg-white/80 p-2.5 dark:border-slate-800 dark:bg-slate-950/50">
                               <div class="text-[11px] text-slate-500">Network IO</div>
                               <div class="mt-1 text-slate-700 dark:text-slate-200">
                                 {formatBytes(parseResourceMetric(n().network_rx_bytes_per_sec))}↓/s {' · '}
                                 {formatBytes(parseResourceMetric(n().network_tx_bytes_per_sec))}↑/s
                               </div>
                             </div>
-                            <div>
+                            <div class="rounded-lg border border-slate-200 bg-white/80 p-2.5 dark:border-slate-800 dark:bg-slate-950/50">
                               <div class="text-[11px] text-slate-500">Agent update</div>
                               <div class="mt-1 text-slate-700 dark:text-slate-200">
                                 {nodeAgentUpdateState(n()).updateAvailable === true
@@ -743,18 +909,18 @@ export default function NodesTab(props: NodesTabProps) {
                                     : 'Unknown'}
                               </div>
                             </div>
-                            <div>
+                            <div class="rounded-lg border border-slate-200 bg-white/80 p-2.5 dark:border-slate-800 dark:bg-slate-950/50">
                               <div class="text-[11px] text-slate-500">Disk IO</div>
                               <div class="mt-1 text-slate-700 dark:text-slate-200">
                                 {formatBytes(parseResourceMetric(n().disk_read_bytes_per_sec))}↓/s {' · '}
                                 {formatBytes(parseResourceMetric(n().disk_write_bytes_per_sec))}↑/s
                               </div>
                             </div>
-                            <div class="col-span-2">
+                            <div class="sm:col-span-2">
                               <div class="text-[11px] text-slate-500">Last seen</div>
                               <div class="mt-1 font-mono text-[11px] text-slate-700 dark:text-slate-200">{n().last_seen_at ?? '-'}</div>
                             </div>
-                            <div class="col-span-2">
+                            <div class="sm:col-span-2">
                               <div class="text-[11px] text-slate-500">Last error</div>
                               <div class="mt-1 font-mono text-[11px] text-rose-700 dark:text-rose-300">{n().last_error ?? '-'}</div>
                             </div>
