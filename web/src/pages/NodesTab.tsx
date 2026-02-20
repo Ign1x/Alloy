@@ -1,6 +1,6 @@
 import { For, Show, createEffect, createMemo, createSignal } from 'solid-js'
 import { isVersionLower } from '../app/helpers/version'
-import { formatRelativeTime } from '../app/helpers/format'
+import { formatBytes, formatCpuPercent, formatRelativeTime, parseU64 } from '../app/helpers/format'
 import { Button } from '../components/ui/Button'
 import { EmptyState } from '../components/ui/EmptyState'
 import { ErrorState } from '../components/ui/ErrorState'
@@ -22,6 +22,13 @@ type NodeRow = {
   last_seen_at: string | null
   agent_version: string | null
   last_error: string | null
+  cpu_percent_x100?: number | null
+  memory_used_bytes?: string | null
+  memory_total_bytes?: string | null
+  network_rx_bytes_per_sec?: string | null
+  network_tx_bytes_per_sec?: string | null
+  disk_read_bytes_per_sec?: string | null
+  disk_write_bytes_per_sec?: string | null
 }
 
 type TriggerNodeUpdateOptions = {
@@ -386,6 +393,10 @@ export default function NodesTab(props: NodesTabProps) {
     return 'Trigger node self update'
   }
 
+  function parseResourceMetric(value: string | null | undefined): number | null {
+    return parseU64(value)
+  }
+
   return (
     <Show when={tab() === 'nodes'}>
       <NodesPage
@@ -696,12 +707,31 @@ export default function NodesTab(props: NodesTabProps) {
                               <div class="mt-1 text-slate-700 dark:text-slate-200">{n().last_error ? 'Error' : n().last_seen_at ? 'Healthy' : 'Unknown'}</div>
                             </div>
                             <div>
+                              <div class="text-[11px] text-slate-500">CPU</div>
+                              <div class="mt-1 text-slate-700 dark:text-slate-200">{formatCpuPercent(n().cpu_percent_x100 ?? null)}</div>
+                            </div>
+                            <div>
                               <div class="text-[11px] text-slate-500">Agent current</div>
                               <div class="mt-1 text-slate-700 dark:text-slate-200">{n().agent_version ?? '-'}</div>
                             </div>
                             <div>
+                              <div class="text-[11px] text-slate-500">Memory</div>
+                              <div class="mt-1 text-slate-700 dark:text-slate-200">
+                                {formatBytes(parseResourceMetric(n().memory_used_bytes))}
+                                {' / '}
+                                {formatBytes(parseResourceMetric(n().memory_total_bytes))}
+                              </div>
+                            </div>
+                            <div>
                               <div class="text-[11px] text-slate-500">Agent target</div>
                               <div class="mt-1 text-slate-700 dark:text-slate-200">{nodeAgentUpdateState(n()).targetTag ?? '-'}</div>
+                            </div>
+                            <div>
+                              <div class="text-[11px] text-slate-500">Network IO</div>
+                              <div class="mt-1 text-slate-700 dark:text-slate-200">
+                                {formatBytes(parseResourceMetric(n().network_rx_bytes_per_sec))}↓/s {' · '}
+                                {formatBytes(parseResourceMetric(n().network_tx_bytes_per_sec))}↑/s
+                              </div>
                             </div>
                             <div>
                               <div class="text-[11px] text-slate-500">Agent update</div>
@@ -711,6 +741,13 @@ export default function NodesTab(props: NodesTabProps) {
                                   : nodeAgentUpdateState(n()).updateAvailable === false
                                     ? 'Up to date'
                                     : 'Unknown'}
+                              </div>
+                            </div>
+                            <div>
+                              <div class="text-[11px] text-slate-500">Disk IO</div>
+                              <div class="mt-1 text-slate-700 dark:text-slate-200">
+                                {formatBytes(parseResourceMetric(n().disk_read_bytes_per_sec))}↓/s {' · '}
+                                {formatBytes(parseResourceMetric(n().disk_write_bytes_per_sec))}↑/s
                               </div>
                             </div>
                             <div class="col-span-2">

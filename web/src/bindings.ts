@@ -18,7 +18,7 @@ export type InstanceConfigDto = { instance_id: string; template_id: string; para
 
 export type MinecraftVersionRef = { id: string; kind: string; release_time: string }
 
-export type NodeDto = { id: string; name: string; endpoint: string; public_ip: string | null; private_ip: string | null; has_connect_token: boolean; enabled: boolean; last_seen_at: string | null; agent_version: string | null; last_error: string | null }
+export type NodeDto = { id: string; name: string; endpoint: string; public_ip: string | null; private_ip: string | null; has_connect_token: boolean; enabled: boolean; last_seen_at: string | null; agent_version: string | null; last_error: string | null; cpu_percent_x100: number | null; memory_used_bytes: string | null; memory_total_bytes: string | null; network_rx_bytes_per_sec: string | null; network_tx_bytes_per_sec: string | null; disk_read_bytes_per_sec: string | null; disk_write_bytes_per_sec: string | null }
 
 export type NodeUpdateStatusDto = { configured: boolean; provider: string; endpoint: string }
 
@@ -85,9 +85,9 @@ export type Procedures = {
 	node: {
 	create: { kind: "mutation", input: { name: string }, output: { node: NodeDto; connect_token: string; watchtower_token: string }, error: unknown },
 	delete: { kind: "mutation", input: { node_id: string }, output: { ok: boolean }, error: unknown },
-	list: { kind: "query", input: null, output: ({ id: string; name: string; endpoint: string; has_connect_token: boolean; enabled: boolean; last_seen_at: string | null; agent_version: string | null; last_error: string | null })[], error: unknown },
+	list: { kind: "query", input: null, output: NodeDto[], error: unknown },
 	selfUpdateStatus: { kind: "query", input: { node_id: string }, output: { configured: boolean; provider: string; endpoint: string }, error: unknown },
-	setEnabled: { kind: "mutation", input: { node_id: string; enabled: boolean }, output: { id: string; name: string; endpoint: string; has_connect_token: boolean; enabled: boolean; last_seen_at: string | null; agent_version: string | null; last_error: string | null }, error: unknown },
+	setEnabled: { kind: "mutation", input: { node_id: string; enabled: boolean }, output: NodeDto, error: unknown },
 	triggerSelfUpdate: { kind: "mutation", input: { node_id: string }, output: { ok: boolean; message: string; status: NodeUpdateStatusDto }, error: unknown },
 },
 	process: {
@@ -117,7 +117,8 @@ export type Procedures = {
 	status: { kind: "query", input: null, output: { dst_default_klei_key_set: boolean; curseforge_api_key_set: boolean; steamcmd_username_set: boolean; steamcmd_password_set: boolean; steamcmd_shared_secret_set: boolean; steamcmd_account_name: string | null }, error: unknown },
 },
 	update: {
-	check: { kind: "query", input: null, output: { current_version: string; latest: UpdateLatestReleaseDto | null; agent_latest: UpdateLatestReleaseDto | null; compatibility: UpdateCompatibilityDto | null; source: UpdateSourceDto; update_available: boolean; can_trigger_update: boolean }, error: unknown },
+	check: { kind: "query", input: null, output: { current_version: string; latest: UpdateLatestReleaseDto | null; agent_latest: UpdateLatestReleaseDto | null; compatibility: UpdateCompatibilityDto | null; source: UpdateSourceDto; update_available: boolean; can_trigger_update: boolean; fetched_at_unix_ms: string }, error: unknown },
+	checkNow: { kind: "mutation", input: null, output: { current_version: string; latest: UpdateLatestReleaseDto | null; agent_latest: UpdateLatestReleaseDto | null; compatibility: UpdateCompatibilityDto | null; source: UpdateSourceDto; update_available: boolean; can_trigger_update: boolean; fetched_at_unix_ms: string }, error: unknown },
 	trigger: { kind: "mutation", input: null, output: { ok: boolean; message: string }, error: unknown },
 },
 }

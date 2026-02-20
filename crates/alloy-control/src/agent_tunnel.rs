@@ -240,9 +240,7 @@ fn agent_poll_stale_ms() -> u64 {
     const MAX_MS: u64 = 900_000;
 
     let recommended = {
-        let wait_ms = agent_poll_wait()
-            .as_millis()
-            .min(u64::MAX as u128) as u64;
+        let wait_ms = agent_poll_wait().as_millis().min(u64::MAX as u128) as u64;
         wait_ms.saturating_mul(3).saturating_add(15_000)
     };
 

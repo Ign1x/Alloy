@@ -1922,6 +1922,13 @@ function App() {
     last_seen_at: string | null
     agent_version: string | null
     last_error: string | null
+    cpu_percent_x100?: number | null
+    memory_used_bytes?: string | null
+    memory_total_bytes?: string | null
+    network_rx_bytes_per_sec?: string | null
+    network_tx_bytes_per_sec?: string | null
+    disk_read_bytes_per_sec?: string | null
+    disk_write_bytes_per_sec?: string | null
     has_connect_token?: boolean
   }
   type NodeCreateResult = { node: NodeDto; connect_token: string; watchtower_token: string }

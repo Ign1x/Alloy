@@ -123,6 +123,15 @@ pub async fn update_catalog() -> anyhow::Result<UpdateCatalog> {
     Ok(catalog)
 }
 
+pub async fn update_catalog_force() -> anyhow::Result<UpdateCatalog> {
+    let catalog = fetch_update_catalog().await?;
+    *cache().lock().unwrap_or_else(|e| e.into_inner()) = Some(CachedCatalog {
+        fetched_at: Instant::now(),
+        catalog: catalog.clone(),
+    });
+    Ok(catalog)
+}
+
 pub async fn latest_release() -> anyhow::Result<LatestRelease> {
     Ok(update_catalog().await?.control)
 }

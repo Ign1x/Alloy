@@ -52,4 +52,11 @@ message HealthCheckResponse {
   repeated PortAvailability ports = 6;
   string public_ipv4 = 7;
   string private_ipv4 = 8;
+  uint32 cpu_percent_x100 = 9;
+  uint64 memory_used_bytes = 10;
+  uint64 memory_total_bytes = 11;
+  uint64 network_rx_bytes_per_sec = 12;
+  uint64 network_tx_bytes_per_sec = 13;
+  uint64 disk_read_bytes_per_sec = 14;
+  uint64 disk_write_bytes_per_sec = 15;
 }

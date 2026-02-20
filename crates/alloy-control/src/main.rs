@@ -476,9 +476,7 @@ async fn list_modpack_packs(
     let resp = transport
         .call::<_, alloy_proto::agent_v1::ListDirResponse>(
             "/alloy.agent.v1.FilesystemService/ListDir",
-            alloy_proto::agent_v1::ListDirRequest {
-                path: dir.clone(),
-            },
+            alloy_proto::agent_v1::ListDirRequest { path: dir.clone() },
         )
         .await;
 
@@ -501,12 +499,7 @@ async fn list_modpack_packs(
     let mut entries = list
         .entries
         .into_iter()
-        .filter(|e| {
-            !e.is_dir
-                && e.name
-                    .to_ascii_lowercase()
-                    .ends_with(".zip")
-        })
+        .filter(|e| !e.is_dir && e.name.to_ascii_lowercase().ends_with(".zip"))
         .map(|e| ModpackPackItem {
             path: format!("{}/{}", dir, e.name),
             name: e.name,

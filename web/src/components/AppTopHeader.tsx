@@ -8,6 +8,7 @@ import { StatusPill } from '../app/primitives/StatusPill'
 import { Badge } from './ui/Badge'
 import { Button } from './ui/Button'
 import { IconButton } from './ui/IconButton'
+import { ensureCsrfCookie } from '../auth'
 
 type AuthUser = { username: string; is_admin: boolean } | null
 
@@ -35,6 +36,7 @@ type UpdateCheckData = {
     manifest_url?: string | null
     warning?: string | null
   } | null
+  fetched_at_unix_ms?: string | null
 }
 
 type UpdateCheckQuery = {
@@ -86,6 +88,8 @@ interface AppTopHeaderProps {
 export default function AppTopHeader(props: AppTopHeaderProps) {
   const [showLanguageMenu, setShowLanguageMenu] = createSignal(false)
   const [controlUpdateSubmitting, setControlUpdateSubmitting] = createSignal(false)
+  const [checkNowSubmitting, setCheckNowSubmitting] = createSignal(false)
+  const [checkNowAtUnixMs, setCheckNowAtUnixMs] = createSignal<string | null>(null)
   let languageMenuRoot: HTMLDivElement | undefined
 
   const hasControlUpdate = () => Boolean(props.updateCheck.data?.update_available)
@@ -135,6 +139,40 @@ export default function AppTopHeader(props: AppTopHeaderProps) {
       props.toastError(props.t('header.updateFailed'), error)
     } finally {
       setControlUpdateSubmitting(false)
+    }
+  }
+
+  async function handleCheckNow() {
+    if (checkNowSubmitting()) return
+    setCheckNowSubmitting(true)
+    props.pushToast('info', props.t('header.checking'), 'Refreshing update catalog...')
+    try {
+      const csrf = await ensureCsrfCookie()
+      const resp = await fetch('/rspc/update.checkNow', {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'content-type': 'application/json',
+          'x-csrf-token': csrf,
+        },
+        body: 'null',
+      })
+      if (!resp.ok) {
+        const text = await resp.text().catch(() => '')
+        throw new Error(text || `check now failed: ${resp.status}`)
+      }
+      const body = (await resp.json().catch(() => null)) as
+        | { result?: { type?: string; data?: { fetched_at_unix_ms?: string } } }
+        | null
+      if (body?.result?.type === 'error') throw new Error('check now failed')
+      const fetched = body?.result?.data?.fetched_at_unix_ms
+      if (typeof fetched === 'string' && fetched.trim()) setCheckNowAtUnixMs(fetched)
+      await props.updateCheck.refetch()
+      props.pushToast('success', props.t('header.latest'), 'Update catalog refreshed.')
+    } catch (error) {
+      props.toastError(props.t('header.failedCheckUpdates'), error)
+    } finally {
+      setCheckNowSubmitting(false)
     }
   }
 
@@ -353,7 +391,7 @@ export default function AppTopHeader(props: AppTopHeaderProps) {
                             <div class="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">{props.t('header.updateCenterDesc')}</div>
                           </div>
                           <div class="flex flex-wrap items-center justify-end gap-1.5">
-                            <Show when={props.updateCheck.isPending || controlUpdateSubmitting()}>
+                            <Show when={props.updateCheck.isPending || controlUpdateSubmitting() || checkNowSubmitting()}>
                               <Badge variant="neutral">{props.t('header.checking')}</Badge>
                             </Show>
                             <Show when={!props.updateCheck.isPending && !props.updateCheck.isError}>
@@ -454,6 +492,14 @@ export default function AppTopHeader(props: AppTopHeaderProps) {
                             )}
                           </Show>
 
+                          <Show when={checkNowAtUnixMs()}>
+                            {(ts) => (
+                              <div class="text-[11px] text-slate-500 dark:text-slate-400">
+                                Last check <span class="font-mono">{new Date(Number(ts())).toISOString()}</span>
+                              </div>
+                            )}
+                          </Show>
+
                           <Show when={props.updateCheck.data?.compatibility}>
                             {(compat) => (
                               <div class="rounded-xl border border-slate-200 bg-slate-50 p-3 text-[11px] text-slate-600 dark:border-slate-800 dark:bg-slate-900/40 dark:text-slate-300">
@@ -494,7 +540,7 @@ export default function AppTopHeader(props: AppTopHeaderProps) {
                           </Show>
 
                           <div class="flex flex-wrap items-center gap-2 pt-1">
-                            <Button size="sm" variant="secondary" disabled={props.updateCheck.isPending} onClick={() => void props.updateCheck.refetch()}>
+                            <Button size="sm" variant="secondary" loading={checkNowSubmitting()} disabled={props.updateCheck.isPending || checkNowSubmitting()} onClick={() => void handleCheckNow()}>
                               {props.t('header.checkNow')}
                             </Button>
                             <Button

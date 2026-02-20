@@ -1282,6 +1282,13 @@ pub struct NodeDto {
     pub last_seen_at: Option<String>,
     pub agent_version: Option<String>,
     pub last_error: Option<String>,
+    pub cpu_percent_x100: Option<u32>,
+    pub memory_used_bytes: Option<String>,
+    pub memory_total_bytes: Option<String>,
+    pub network_rx_bytes_per_sec: Option<String>,
+    pub network_tx_bytes_per_sec: Option<String>,
+    pub disk_read_bytes_per_sec: Option<String>,
+    pub disk_write_bytes_per_sec: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, Type)]
@@ -1470,6 +1477,7 @@ pub struct UpdateCheckOutput {
     pub source: UpdateSourceDto,
     pub update_available: bool,
     pub can_trigger_update: bool,
+    pub fetched_at_unix_ms: String,
 }
 
 #[derive(Debug, Clone, serde::Serialize, Type)]
@@ -1626,13 +1634,24 @@ fn map_instance_config(
     }
 }
 
-async fn node_ip_map(
-    ctx: &Ctx,
-) -> std::collections::BTreeMap<String, (Option<String>, Option<String>)> {
+#[derive(Debug, Clone)]
+struct NodeRuntimeSnapshot {
+    public_ip: Option<String>,
+    private_ip: Option<String>,
+    cpu_percent_x100: Option<u32>,
+    memory_used_bytes: Option<u64>,
+    memory_total_bytes: Option<u64>,
+    network_rx_bytes_per_sec: Option<u64>,
+    network_tx_bytes_per_sec: Option<u64>,
+    disk_read_bytes_per_sec: Option<u64>,
+    disk_write_bytes_per_sec: Option<u64>,
+}
+
+async fn node_runtime_map(ctx: &Ctx) -> std::collections::BTreeMap<String, NodeRuntimeSnapshot> {
     use alloy_db::entities::nodes;
     use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 
-    let mut out = std::collections::BTreeMap::<String, (Option<String>, Option<String>)>::new();
+    let mut out = std::collections::BTreeMap::<String, NodeRuntimeSnapshot>::new();
     let targets = match nodes::Entity::find()
         .filter(nodes::Column::Enabled.eq(true))
         .all(&*ctx.db)
@@ -1670,10 +1689,33 @@ async fn node_ip_map(
                 Some(v.to_string())
             }
         };
-        out.insert(row.name, (public_ip, private_ip));
+        out.insert(
+            row.name,
+            NodeRuntimeSnapshot {
+                public_ip,
+                private_ip,
+                cpu_percent_x100: Some(resp.cpu_percent_x100),
+                memory_used_bytes: Some(resp.memory_used_bytes),
+                memory_total_bytes: Some(resp.memory_total_bytes),
+                network_rx_bytes_per_sec: Some(resp.network_rx_bytes_per_sec),
+                network_tx_bytes_per_sec: Some(resp.network_tx_bytes_per_sec),
+                disk_read_bytes_per_sec: Some(resp.disk_read_bytes_per_sec),
+                disk_write_bytes_per_sec: Some(resp.disk_write_bytes_per_sec),
+            },
+        );
     }
 
     out
+}
+
+async fn node_ip_map(
+    ctx: &Ctx,
+) -> std::collections::BTreeMap<String, (Option<String>, Option<String>)> {
+    node_runtime_map(ctx)
+        .await
+        .into_iter()
+        .map(|(name, s)| (name, (s.public_ip, s.private_ip)))
+        .collect()
 }
 
 fn map_param_type(t: i32) -> ParamTypeDto {
@@ -1757,13 +1799,7 @@ fn map_instance_info(
         .ok_or_else(|| api_error(ctx, "internal", "missing instance config"))?;
 
     Ok(InstanceInfoDto {
-        config: map_instance_config(
-            cfg,
-            node_id,
-            node_name,
-            node_public_ip,
-            node_private_ip,
-        ),
+        config: map_instance_config(cfg, node_id, node_name, node_public_ip, node_private_ip),
         status: info.status.map(map_process_status),
     })
 }
@@ -5415,26 +5451,42 @@ pub fn router() -> Router<Ctx> {
                     .await
                     .map_err(|e| api_error(&ctx, "db_error", format!("db error: {e}")))?;
 
-                let ip_map = node_ip_map(&ctx).await;
+                let runtime_map = node_runtime_map(&ctx).await;
 
                 Ok(rows
                     .into_iter()
                     .map(|n| {
-                        let (public_ip, private_ip) = ip_map
-                            .get(&n.name)
-                            .cloned()
-                            .unwrap_or((None, None));
+                        let runtime = runtime_map.get(&n.name).cloned();
                         NodeDto {
                             id: n.id.to_string(),
                             name: n.name,
                             endpoint: n.endpoint,
-                            public_ip,
-                            private_ip,
+                            public_ip: runtime.as_ref().and_then(|v| v.public_ip.clone()),
+                            private_ip: runtime.as_ref().and_then(|v| v.private_ip.clone()),
                             has_connect_token: n.connect_token_hash.is_some(),
                             enabled: n.enabled,
                             last_seen_at: n.last_seen_at.map(|t| t.to_rfc3339()),
                             agent_version: n.agent_version,
                             last_error: n.last_error,
+                            cpu_percent_x100: runtime.as_ref().and_then(|v| v.cpu_percent_x100),
+                            memory_used_bytes: runtime
+                                .as_ref()
+                                .and_then(|v| v.memory_used_bytes.map(|n| n.to_string())),
+                            memory_total_bytes: runtime
+                                .as_ref()
+                                .and_then(|v| v.memory_total_bytes.map(|n| n.to_string())),
+                            network_rx_bytes_per_sec: runtime
+                                .as_ref()
+                                .and_then(|v| v.network_rx_bytes_per_sec.map(|n| n.to_string())),
+                            network_tx_bytes_per_sec: runtime
+                                .as_ref()
+                                .and_then(|v| v.network_tx_bytes_per_sec.map(|n| n.to_string())),
+                            disk_read_bytes_per_sec: runtime
+                                .as_ref()
+                                .and_then(|v| v.disk_read_bytes_per_sec.map(|n| n.to_string())),
+                            disk_write_bytes_per_sec: runtime
+                                .as_ref()
+                                .and_then(|v| v.disk_write_bytes_per_sec.map(|n| n.to_string())),
                         }
                     })
                     .collect::<Vec<_>>())
@@ -5520,6 +5572,13 @@ pub fn router() -> Router<Ctx> {
                             last_seen_at: inserted.last_seen_at.map(|t| t.to_rfc3339()),
                             agent_version: inserted.agent_version,
                             last_error: inserted.last_error,
+                            cpu_percent_x100: None,
+                            memory_used_bytes: None,
+                            memory_total_bytes: None,
+                            network_rx_bytes_per_sec: None,
+                            network_tx_bytes_per_sec: None,
+                            disk_read_bytes_per_sec: None,
+                            disk_write_bytes_per_sec: None,
                         },
                         connect_token: token,
                         watchtower_token,
@@ -5580,6 +5639,13 @@ pub fn router() -> Router<Ctx> {
                         last_seen_at: updated.last_seen_at.map(|t| t.to_rfc3339()),
                         agent_version: updated.agent_version,
                         last_error: updated.last_error,
+                        cpu_percent_x100: None,
+                        memory_used_bytes: None,
+                        memory_total_bytes: None,
+                        network_rx_bytes_per_sec: None,
+                        network_tx_bytes_per_sec: None,
+                        disk_read_bytes_per_sec: None,
+                        disk_write_bytes_per_sec: None,
                     })
                 },
             ),
@@ -6178,6 +6244,58 @@ pub fn router() -> Router<Ctx> {
                     },
                     update_available,
                     can_trigger_update: crate::update::watchtower_configured(),
+                    fetched_at_unix_ms: chrono::Utc::now().timestamp_millis().to_string(),
+                })
+            }),
+        )
+        .procedure(
+            "checkNow",
+            Procedure::builder::<ApiError>().mutation(|ctx: Ctx, _: ()| async move {
+                let user = ctx
+                    .user
+                    .clone()
+                    .ok_or_else(|| api_error(&ctx, "unauthorized", "unauthorized"))?;
+                if !user.is_admin {
+                    return Err(api_error(&ctx, "forbidden", "forbidden"));
+                }
+
+                let current_version = env!("CARGO_PKG_VERSION").to_string();
+                let current = crate::update::parse_simple_version(&current_version);
+
+                let catalog = crate::update::update_catalog_force().await.map_err(|e| {
+                    api_error(
+                        &ctx,
+                        "upstream_error",
+                        format!("update.checkNow failed: {e}"),
+                    )
+                })?;
+
+                let latest_parsed = crate::update::parse_simple_version(&catalog.control.tag_name);
+                let update_available = match (current, latest_parsed) {
+                    (Some(cur), Some(lat)) => lat > cur,
+                    _ => false,
+                };
+
+                Ok(UpdateCheckOutput {
+                    current_version,
+                    latest: Some(map_update_latest_release(&catalog.control)),
+                    agent_latest: catalog.agent.as_ref().map(map_update_latest_release),
+                    compatibility: catalog.compatibility.as_ref().map(|compat| {
+                        UpdateCompatibilityDto {
+                            control_min_agent: compat.control_min_agent.clone(),
+                            control_max_agent: compat.control_max_agent.clone(),
+                            note: compat.note.clone(),
+                        }
+                    }),
+                    source: UpdateSourceDto {
+                        kind: catalog.source.as_str().to_string(),
+                        channel: catalog.channel.clone(),
+                        manifest_url: catalog.manifest_url.clone(),
+                        warning: catalog.warning.clone(),
+                    },
+                    update_available,
+                    can_trigger_update: crate::update::watchtower_configured(),
+                    fetched_at_unix_ms: chrono::Utc::now().timestamp_millis().to_string(),
                 })
             }),
         )
