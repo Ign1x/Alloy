@@ -16,16 +16,43 @@ This project now supports a single-maintainer workflow based on one platform and
   - Shared adapter manifest table for per-template port policy.
   - One generic `ensure_adapter_ports` path for auto-assigned ports.
 - `crates/alloy-agent/src/game_adapter_template.rs`
-  - Minimal adapter template model for lightweight game definitions.
+  - Canonical adapter registry (`list_adapter_templates`) that defines:
+    - parameter schema (key/label/type/default/help/required/advanced),
+    - validator binding per template,
+    - port policy declaration (protocol + field list),
+    - startup command/args and graceful stdin.
 - `crates/alloy-agent/src/templates.rs`
-  - Bridges lightweight adapter template into existing process template list.
+  - Converts adapter schema into RPC `TemplateParam` and appends shared sandbox params.
+  - Uses adapter-level validation dispatch for all adapter templates.
 
 ## How To Add A New Game (Lightweight Path)
 
-1. Add a lightweight template in `game_adapter_template.rs`.
-2. Add port policy in `game_adapters.rs` if auto-port persistence is needed.
-3. If required, add runtime-specific layout/download/start logic in existing game module path.
-4. Keep shared validation and safety checks in platform modules, not in per-game forks.
+1. Implement game runtime logic (if needed) in its existing module (for example `foo.rs`) and expose `validate_vanilla_params` (or equivalent validator).
+2. Register one `AdapterTemplate` entry in `game_adapter_template.rs`:
+   - set `template_id`, `display_name`, `startup_command`, `startup_args`,
+   - define `params` with `TemplateParamKind` and full UX metadata,
+   - set `validator` and `ports`,
+   - set `graceful_stdin` when graceful shutdown is supported.
+3. Do not add template wiring in `templates.rs` or port mapping in `game_adapters.rs`; both consume the adapter registry automatically.
+4. Keep shared validation/safety checks centralized in platform modules instead of per-game forks.
+
+## Port Policy Rules
+
+- Declare all auto-allocated ports in `AdapterTemplate.ports`.
+- Use `PortProtocol::Tcp` / `PortProtocol::Udp` per field.
+- Use `0` or empty values to trigger auto-allocation; explicit non-zero values are preserved.
+- Multi-port templates are deduplicated within the same protocol during allocation.
+
+## Parameter Schema Rules
+
+- Define every user-facing field in `AdapterTemplateParam` (no ad-hoc params in `templates.rs`).
+- Choose `TemplateParamKind` exactly:
+  - `String` for plain text,
+  - `Int { min, max }` for bounded integers,
+  - `Bool` for true/false,
+  - `SecretString` for sensitive values.
+- Keep defaults, placeholders, enum values, and help text in the same schema entry.
+- `required=true` enforces non-empty presence; domain-specific checks belong in validator functions.
 
 ## Safety Baseline
 

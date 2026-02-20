@@ -3,96 +3,20 @@ use std::collections::{BTreeMap, HashSet};
 use tonic::Status;
 
 use crate::port_alloc;
-
-#[derive(Clone, Copy, Debug)]
-enum PortProtocol {
-    Tcp,
-    Udp,
-}
-
-#[derive(Clone, Copy, Debug)]
-struct PortField {
-    key: &'static str,
-    protocol: PortProtocol,
-}
-
-const PORTS_MC_AND_TERRARIA: &[PortField] = &[PortField {
-    key: "port",
-    protocol: PortProtocol::Tcp,
-}];
-
-const PORTS_FACTORIO: &[PortField] = &[PortField {
-    key: "port",
-    protocol: PortProtocol::Udp,
-}];
-
-const PORTS_PAIR_UDP: &[PortField] = &[
-    PortField {
-        key: "port",
-        protocol: PortProtocol::Udp,
-    },
-    PortField {
-        key: "query_port",
-        protocol: PortProtocol::Udp,
-    },
-];
-
-const PORTS_SEVEN_DAYS: &[PortField] = &[
-    PortField {
-        key: "port",
-        protocol: PortProtocol::Udp,
-    },
-    PortField {
-        key: "query_port",
-        protocol: PortProtocol::Udp,
-    },
-    PortField {
-        key: "control_panel_port",
-        protocol: PortProtocol::Tcp,
-    },
-];
-
-const PORTS_DST: &[PortField] = &[
-    PortField {
-        key: "port",
-        protocol: PortProtocol::Udp,
-    },
-    PortField {
-        key: "master_port",
-        protocol: PortProtocol::Udp,
-    },
-    PortField {
-        key: "auth_port",
-        protocol: PortProtocol::Udp,
-    },
-];
-
-const ADAPTERS: &[(&str, &[PortField])] = &[
-    ("minecraft:vanilla", PORTS_MC_AND_TERRARIA),
-    ("minecraft:modrinth", PORTS_MC_AND_TERRARIA),
-    ("minecraft:import", PORTS_MC_AND_TERRARIA),
-    ("minecraft:curseforge", PORTS_MC_AND_TERRARIA),
-    ("terraria:vanilla", PORTS_MC_AND_TERRARIA),
-    ("factorio:vanilla", PORTS_FACTORIO),
-    ("palworld:vanilla", PORTS_PAIR_UDP),
-    ("the_forest:vanilla", PORTS_PAIR_UDP),
-    ("sons_of_the_forest:vanilla", PORTS_PAIR_UDP),
-    ("seven_days:vanilla", PORTS_SEVEN_DAYS),
-    ("dst:vanilla", PORTS_DST),
-];
+use crate::game_adapter_template::PortProtocol;
 
 pub fn ensure_adapter_ports(
     template_id: &str,
     params: &mut BTreeMap<String, String>,
 ) -> Result<bool, Status> {
-    let Some((_, port_fields)) = ADAPTERS.iter().find(|(id, _)| *id == template_id) else {
+    let Some(port_fields) = crate::game_adapter_template::adapter_port_fields(template_id) else {
         return Ok(false);
     };
 
     let mut used_tcp = HashSet::<u16>::new();
     let mut used_udp = HashSet::<u16>::new();
 
-    for field in *port_fields {
+    for field in port_fields {
         let current = params.get(field.key).map(|v| v.trim()).unwrap_or("");
         if current.is_empty() || current == "0" {
             continue;
@@ -112,7 +36,7 @@ pub fn ensure_adapter_ports(
     }
 
     let mut changed = false;
-    for field in *port_fields {
+    for field in port_fields {
         let current = params.get(field.key).map(|v| v.trim()).unwrap_or("");
         if !current.is_empty() && current != "0" {
             continue;
