@@ -1,4 +1,9 @@
-use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
+use axum::{
+    Json,
+    extract::State,
+    http::StatusCode,
+    response::{IntoResponse, Response},
+};
 use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
 use serde::{Deserialize, Serialize};
 
@@ -18,8 +23,28 @@ pub const ACCESS_COOKIE_NAME: &str = "access";
 const REFRESH_COOKIE_NAME: &str = "refresh";
 
 #[derive(Debug, Serialize)]
-pub struct ErrorBody {
+pub struct AuthErrorBody {
+    pub code: String,
     pub message: String,
+    pub source: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub window_seconds: Option<i64>,
+}
+
+const SESSION_RISK_WINDOW_SECONDS: i64 = 30 * 24 * 60 * 60;
+const LOGIN_RISK_WINDOW_SECONDS: i64 = 15 * 60;
+
+fn default_auth_error_code(status: StatusCode) -> &'static str {
+    match status {
+        StatusCode::BAD_REQUEST => "bad_request",
+        StatusCode::UNAUTHORIZED => "unauthorized",
+        StatusCode::FORBIDDEN => "forbidden",
+        StatusCode::CONFLICT => "conflict",
+        StatusCode::INTERNAL_SERVER_ERROR => "internal_error",
+        _ => "auth_error",
+    }
 }
 
 fn parse_bool_flag(raw: &str) -> Option<bool> {
@@ -49,13 +74,71 @@ fn required_env_non_empty(name: &str) -> Option<String> {
         .filter(|v| !v.is_empty())
 }
 
-fn json_error(code: StatusCode, message: impl Into<String>) -> impl IntoResponse {
+pub fn auth_error_response(
+    status: StatusCode,
+    code: impl Into<String>,
+    message: impl Into<String>,
+) -> Response {
+    auth_error_response_with_context(status, code, message, "auth", None, None)
+}
+
+pub fn auth_error_response_with_context(
+    status: StatusCode,
+    code: impl Into<String>,
+    message: impl Into<String>,
+    source: impl Into<String>,
+    reason: Option<String>,
+    window_seconds: Option<i64>,
+) -> Response {
     (
-        code,
-        Json(ErrorBody {
+        status,
+        Json(AuthErrorBody {
+            code: code.into(),
             message: message.into(),
+            source: source.into(),
+            reason,
+            window_seconds,
         }),
     )
+        .into_response()
+}
+
+fn json_error(code: StatusCode, message: impl Into<String>) -> Response {
+    auth_error_response(code, default_auth_error_code(code), message)
+}
+
+fn json_error_code_with_context(
+    status: StatusCode,
+    error_code: &'static str,
+    message: impl Into<String>,
+    source: &'static str,
+    window_seconds: Option<i64>,
+) -> Response {
+    auth_error_response_with_context(
+        status,
+        error_code,
+        message,
+        source,
+        Some(error_code.to_string()),
+        window_seconds,
+    )
+}
+
+fn audit_security_event(
+    reason: &'static str,
+    source: &'static str,
+    window_seconds: Option<i64>,
+    user_id: Option<Uuid>,
+) {
+    let at_unix_ms = chrono::Utc::now().timestamp_millis();
+    tracing::warn!(
+        reason,
+        source,
+        window_seconds,
+        user_id = ?user_id,
+        at_unix_ms,
+        "security event"
+    );
 }
 
 fn cookie_base(name: &'static str, value: String, path: &'static str) -> Cookie<'static> {
@@ -280,14 +363,38 @@ pub async fn login(
     jar: CookieJar,
     Json(input): Json<LoginRequest>,
 ) -> impl IntoResponse {
+    let username = input.username.trim().to_string();
+    if username.is_empty() || input.password.is_empty() {
+        audit_security_event(
+            "login_input_invalid",
+            "auth.login",
+            Some(LOGIN_RISK_WINDOW_SECONDS),
+            None,
+        );
+        return json_error_code_with_context(
+            StatusCode::BAD_REQUEST,
+            "login_input_invalid",
+            "username and password are required",
+            "auth.login",
+            Some(LOGIN_RISK_WINDOW_SECONDS),
+        )
+        .into_response();
+    }
+
     let db = &*state.db;
     let user = match alloy_db::entities::users::Entity::find()
-        .filter(alloy_db::entities::users::Column::Username.eq(input.username.clone()))
+        .filter(alloy_db::entities::users::Column::Username.eq(username))
         .one(db)
         .await
     {
         Ok(Some(u)) => u,
         Ok(None) => {
+            audit_security_event(
+                "login_invalid_credentials",
+                "auth.login",
+                Some(LOGIN_RISK_WINDOW_SECONDS),
+                None,
+            );
             return json_error(StatusCode::UNAUTHORIZED, "invalid credentials").into_response();
         }
         Err(e) => {
@@ -297,6 +404,12 @@ pub async fn login(
     };
 
     if !verify_password(&user.password_hash, &input.password) {
+        audit_security_event(
+            "login_invalid_credentials",
+            "auth.login",
+            Some(LOGIN_RISK_WINDOW_SECONDS),
+            Some(user.id),
+        );
         return json_error(StatusCode::UNAUTHORIZED, "invalid credentials").into_response();
     }
 
@@ -544,7 +657,20 @@ pub async fn refresh(State(state): State<AppState>, jar: CookieJar) -> impl Into
     {
         Ok(Some(t)) => t,
         Ok(None) => {
-            return json_error(StatusCode::UNAUTHORIZED, "invalid refresh token").into_response();
+            audit_security_event(
+                "refresh_token_not_found",
+                "auth.refresh",
+                Some(SESSION_RISK_WINDOW_SECONDS),
+                None,
+            );
+            return json_error_code_with_context(
+                StatusCode::UNAUTHORIZED,
+                "refresh_token_invalid",
+                "invalid refresh token",
+                "auth.refresh",
+                Some(SESSION_RISK_WINDOW_SECONDS),
+            )
+            .into_response();
         }
         Err(e) => {
             return json_error(StatusCode::INTERNAL_SERVER_ERROR, format!("db error: {e}"))
@@ -553,14 +679,81 @@ pub async fn refresh(State(state): State<AppState>, jar: CookieJar) -> impl Into
     };
 
     if token.revoked_at.is_some() {
-        return json_error(StatusCode::UNAUTHORIZED, "refresh token revoked").into_response();
+        audit_security_event(
+            "refresh_token_revoked",
+            "auth.refresh",
+            Some(SESSION_RISK_WINDOW_SECONDS),
+            Some(token.user_id),
+        );
+        return json_error_code_with_context(
+            StatusCode::UNAUTHORIZED,
+            "refresh_token_revoked",
+            "refresh token revoked",
+            "auth.refresh",
+            Some(SESSION_RISK_WINDOW_SECONDS),
+        )
+        .into_response();
     }
     if token.rotated_at.is_some() {
-        // Reuse detection: fail hard for now.
-        return json_error(StatusCode::UNAUTHORIZED, "refresh token already used").into_response();
+        let now = chrono::Utc::now();
+        if let Err(e) = alloy_db::entities::refresh_tokens::Entity::update_many()
+            .col_expr(
+                alloy_db::entities::refresh_tokens::Column::RevokedAt,
+                Expr::value(now),
+            )
+            .filter(alloy_db::entities::refresh_tokens::Column::UserId.eq(token.user_id))
+            .filter(alloy_db::entities::refresh_tokens::Column::RevokedAt.is_null())
+            .exec(db)
+            .await
+        {
+            return json_error(StatusCode::INTERNAL_SERVER_ERROR, format!("db error: {e}"))
+                .into_response();
+        }
+
+        audit_security_event(
+            "refresh_token_reuse_detected",
+            "auth.refresh",
+            Some(SESSION_RISK_WINDOW_SECONDS),
+            Some(token.user_id),
+        );
+
+        audit_security_event(
+            "refresh_token_reuse_forced_invalidation",
+            "auth.refresh",
+            Some(SESSION_RISK_WINDOW_SECONDS),
+            Some(token.user_id),
+        );
+
+        let jar = jar
+            .remove(clear_cookie(ACCESS_COOKIE_NAME, "/"))
+            .remove(clear_cookie(REFRESH_COOKIE_NAME, "/auth/refresh"));
+        return (
+            jar,
+            json_error_code_with_context(
+                StatusCode::UNAUTHORIZED,
+                "refresh_token_reuse_detected",
+                "refresh token reuse detected; all sessions invalidated",
+                "auth.refresh",
+                Some(SESSION_RISK_WINDOW_SECONDS),
+            ),
+        )
+            .into_response();
     }
     if token.expires_at < chrono::Utc::now().fixed_offset() {
-        return json_error(StatusCode::UNAUTHORIZED, "refresh token expired").into_response();
+        audit_security_event(
+            "refresh_token_expired",
+            "auth.refresh",
+            Some(SESSION_RISK_WINDOW_SECONDS),
+            Some(token.user_id),
+        );
+        return json_error_code_with_context(
+            StatusCode::UNAUTHORIZED,
+            "refresh_token_expired",
+            "refresh token expired",
+            "auth.refresh",
+            Some(SESSION_RISK_WINDOW_SECONDS),
+        )
+        .into_response();
     }
 
     // Rotate.

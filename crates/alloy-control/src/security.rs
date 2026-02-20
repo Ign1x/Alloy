@@ -2,32 +2,36 @@ use axum::{
     body::Body,
     http::{HeaderMap, HeaderValue, Method, Request, StatusCode},
     middleware::Next,
-    response::{IntoResponse, Response},
+    response::Response,
 };
 use axum_extra::extract::cookie::CookieJar;
 use rand::RngCore;
-use serde::Serialize;
 use tracing::Instrument;
 
-use crate::auth::{ACCESS_COOKIE_NAME, CSRF_COOKIE_NAME, validate_access_jwt};
+use crate::auth::{
+    ACCESS_COOKIE_NAME,
+    CSRF_COOKIE_NAME,
+    auth_error_response_with_context,
+    validate_access_jwt,
+};
 use crate::request_meta::RequestMeta;
 use crate::rpc::AuthUser;
 
 const CSRF_HEADER_NAME: &str = "x-csrf-token";
 
-#[derive(Debug, Serialize)]
-struct ErrorBody {
-    message: String,
-}
-
-fn json_error(code: StatusCode, message: impl Into<String>) -> Response {
-    (
+fn json_auth_error(
+    status: StatusCode,
+    code: &'static str,
+    message: impl Into<String>,
+) -> Response {
+    auth_error_response_with_context(
+        status,
         code,
-        axum::Json(ErrorBody {
-            message: message.into(),
-        }),
+        message,
+        "security.middleware",
+        Some(code.to_string()),
+        None,
     )
-        .into_response()
 }
 
 fn is_unsafe_method(method: &Method) -> bool {
@@ -46,7 +50,7 @@ fn parse_allowed_origins() -> Vec<String> {
     raw.split(',')
         .map(|s| s.trim())
         .filter(|s| !s.is_empty())
-        .map(|s| s.to_string())
+        .map(|s| s.trim_end_matches('/').to_ascii_lowercase())
         .collect()
 }
 
@@ -79,24 +83,54 @@ fn origin_is_same_host(headers: &HeaderMap, origin: &str) -> bool {
     host == origin_host
 }
 
-fn origin_is_allowed(headers: &HeaderMap) -> bool {
-    // Treat missing Origin as a non-browser client (curl, service-to-service).
-    // For browsers, Origin should be present for unsafe methods.
-    let origin = match headers.get(axum::http::header::ORIGIN) {
-        Some(v) => match v.to_str() {
-            Ok(s) => s,
-            Err(_) => return false,
-        },
-        None => return true,
+fn validate_origin(headers: &HeaderMap) -> Result<(), Response> {
+    let has_cookie = request_has_cookie_header(headers);
+    let origin_header = headers.get(axum::http::header::ORIGIN);
+
+    let origin = match origin_header {
+        Some(v) => v.to_str().map_err(|_| {
+            json_auth_error(
+                StatusCode::FORBIDDEN,
+                "origin_invalid_header",
+                "origin header is not valid UTF-8",
+            )
+        })?,
+        None => {
+            if has_cookie {
+                return Err(json_auth_error(
+                    StatusCode::FORBIDDEN,
+                    "origin_required",
+                    "origin header required for cookie-authenticated unsafe request",
+                ));
+            }
+            return Ok(());
+        }
     };
 
-    // Always allow same-origin unsafe requests.
-    if origin_is_same_host(headers, origin) {
-        return true;
+    let origin_normalized = origin.trim().trim_end_matches('/').to_ascii_lowercase();
+
+    if !origin_normalized.starts_with("http://") && !origin_normalized.starts_with("https://") {
+        return Err(json_auth_error(
+            StatusCode::FORBIDDEN,
+            "origin_invalid_scheme",
+            "origin must use http or https",
+        ));
+    }
+
+    if origin_is_same_host(headers, &origin_normalized) {
+        return Ok(());
     }
 
     let allowed = parse_allowed_origins();
-    allowed.iter().any(|a| a == origin)
+    if allowed.iter().any(|a| a == &origin_normalized) {
+        return Ok(());
+    }
+
+    Err(json_auth_error(
+        StatusCode::FORBIDDEN,
+        "origin_not_allowed",
+        format!("origin '{origin_normalized}' is not in allowlist"),
+    ))
 }
 
 fn request_has_cookie_header(headers: &HeaderMap) -> bool {
@@ -107,19 +141,55 @@ fn request_has_cookie_header(headers: &HeaderMap) -> bool {
         .unwrap_or(false)
 }
 
-fn csrf_is_valid(headers: &HeaderMap) -> bool {
+fn validate_csrf(headers: &HeaderMap) -> Result<(), Response> {
     let jar = CookieJar::from_headers(headers);
     let cookie = match jar.get(CSRF_COOKIE_NAME) {
         Some(c) => c,
-        None => return false,
+        None => {
+            return Err(json_auth_error(
+                StatusCode::FORBIDDEN,
+                "csrf_cookie_missing",
+                "csrf cookie missing",
+            ));
+        }
     };
+
+    if cookie.value().trim().is_empty() {
+        return Err(json_auth_error(
+            StatusCode::FORBIDDEN,
+            "csrf_cookie_empty",
+            "csrf cookie is empty",
+        ));
+    }
 
     let header = match headers.get(CSRF_HEADER_NAME).and_then(|v| v.to_str().ok()) {
         Some(v) => v,
-        None => return false,
+        None => {
+            return Err(json_auth_error(
+                StatusCode::FORBIDDEN,
+                "csrf_header_missing",
+                "csrf header missing",
+            ));
+        }
     };
 
-    cookie.value() == header
+    if header.trim().is_empty() {
+        return Err(json_auth_error(
+            StatusCode::FORBIDDEN,
+            "csrf_header_empty",
+            "csrf header is empty",
+        ));
+    }
+
+    if cookie.value() != header {
+        return Err(json_auth_error(
+            StatusCode::FORBIDDEN,
+            "csrf_mismatch",
+            "csrf token mismatch",
+        ));
+    }
+
+    Ok(())
 }
 
 // Middleware: double-submit CSRF + Origin allowlist.
@@ -132,14 +202,14 @@ pub async fn csrf_and_origin(req: Request<Body>, next: Next) -> Response {
     }
 
     let headers = req.headers();
-    if !origin_is_allowed(headers) {
-        return json_error(StatusCode::FORBIDDEN, "origin not allowed");
+    if let Err(resp) = validate_origin(headers) {
+        return resp;
     }
 
-    // Only enforce CSRF when cookies are present; this keeps non-browser and
-    // service-to-service clients workable without forcing CSRF headers.
-    if request_has_cookie_header(headers) && !csrf_is_valid(headers) {
-        return json_error(StatusCode::FORBIDDEN, "csrf invalid");
+    if request_has_cookie_header(headers) {
+        if let Err(resp) = validate_csrf(headers) {
+            return resp;
+        }
     }
 
     next.run(req).await
@@ -162,7 +232,13 @@ pub async fn rspc_auth_guard(req: Request<Body>, next: Next) -> Response {
     let jar = CookieJar::from_headers(headers);
     let token = match jar.get(ACCESS_COOKIE_NAME) {
         Some(c) => c.value(),
-        None => return json_error(StatusCode::UNAUTHORIZED, "missing access token"),
+        None => {
+            return json_auth_error(
+                StatusCode::UNAUTHORIZED,
+                "access_token_missing",
+                "missing access token",
+            );
+        }
     };
 
     let user = match validate_access_jwt(token) {
@@ -171,7 +247,13 @@ pub async fn rspc_auth_guard(req: Request<Body>, next: Next) -> Response {
             username: u.username,
             is_admin: u.is_admin,
         },
-        Err(_) => return json_error(StatusCode::UNAUTHORIZED, "invalid access token"),
+        Err(_) => {
+            return json_auth_error(
+                StatusCode::UNAUTHORIZED,
+                "access_token_invalid",
+                "invalid access token",
+            );
+        }
     };
 
     let mut req = req;
