@@ -1351,6 +1351,24 @@ async fn set_entry_message(
     e.message = message;
 }
 
+fn process_exit_with_code_message(code: Option<i32>) -> String {
+    format!("exited with code {}", code.unwrap_or_default())
+}
+
+fn restart_scheduled_message(delay_ms: u64, attempt: u32, max_retries: u32) -> String {
+    format!(
+        "restart scheduled: delay={}ms attempt={}/{}",
+        delay_ms, attempt, max_retries
+    )
+}
+
+fn restart_limit_reached_message(attempts: u32, max_retries: u32) -> String {
+    format!(
+        "restart skipped: retry limit reached ({}/{})",
+        attempts, max_retries
+    )
+}
+
 #[derive(Debug)]
 struct ProcessEntry {
     template_id: ProcessTemplateId,
@@ -1378,20 +1396,40 @@ impl ProcessManager {
         let inner = self.inner.clone();
         tokio::spawn(async move {
             let mut last: Option<(u64, tokio::time::Instant)> = None;
+            let mut misses: u8 = 0;
             let interval = resource_sample_interval();
 
             loop {
                 let now = tokio::time::Instant::now();
-                let Some(ticks) = read_proc_cpu_ticks(pid).await else {
-                    break;
-                };
-                let rss_bytes = read_proc_rss_bytes(pid).await.unwrap_or(0);
-                let (read_bytes, write_bytes) = read_proc_io_bytes(pid).await.unwrap_or((0, 0));
+                let ticks = read_proc_cpu_ticks(pid).await;
+                let rss_bytes = read_proc_rss_bytes(pid).await;
+                let io_bytes = read_proc_io_bytes(pid).await;
 
-                let cpu_percent_x100 = last
-                    .map(|(prev_ticks, prev_at)| cpu_percent_x100(prev_ticks, prev_at, ticks, now))
-                    .unwrap_or(0);
-                last = Some((ticks, now));
+                if ticks.is_none() && rss_bytes.is_none() && io_bytes.is_none() {
+                    misses = misses.saturating_add(1);
+                    if misses >= 5 {
+                        break;
+                    }
+                    tokio::time::sleep(interval).await;
+                    continue;
+                }
+
+                misses = 0;
+
+                let cpu_percent_x100 = if let Some(ticks_now) = ticks {
+                    let cpu = last
+                        .map(|(prev_ticks, prev_at)| {
+                            cpu_percent_x100(prev_ticks, prev_at, ticks_now, now)
+                        })
+                        .unwrap_or(0);
+                    last = Some((ticks_now, now));
+                    cpu
+                } else {
+                    0
+                };
+
+                let rss_bytes = rss_bytes.unwrap_or(0);
+                let (read_bytes, write_bytes) = io_bytes.unwrap_or((0, 0));
 
                 {
                     let mut map = inner.lock().await;
@@ -1911,10 +1949,7 @@ impl ProcessManager {
                                     e.message = Some("exited".to_string());
                                 } else {
                                     e.state = ProcessState::Failed;
-                                    e.message = Some(format!(
-                                        "exited with code {}",
-                                        status.code().unwrap_or_default()
-                                    ));
+                                    e.message = Some(process_exit_with_code_message(status.code()));
                                 }
                             }
                             Err(err) => {
@@ -1932,15 +1967,19 @@ impl ProcessManager {
                                 RestartPolicy::OnFailure => is_failure,
                             };
 
-                            if should_restart && e.restart_attempts < e.restart.max_retries {
-                                e.restart_attempts = e.restart_attempts.saturating_add(1);
-                                let delay_ms = compute_backoff_ms(e.restart, e.restart_attempts);
-                                restart_after = Some(Duration::from_millis(delay_ms));
-                                restart_attempt = e.restart_attempts;
-                                e.message = Some(format!(
-                                    "restarting in {}ms (attempt {}/{})",
-                                    delay_ms, restart_attempt, e.restart.max_retries
-                                ));
+                            if should_restart {
+                                if e.restart_attempts < e.restart.max_retries {
+                                    e.restart_attempts = e.restart_attempts.saturating_add(1);
+                                    let delay_ms = compute_backoff_ms(e.restart, e.restart_attempts);
+                                    restart_after = Some(Duration::from_millis(delay_ms));
+                                    restart_attempt = e.restart_attempts;
+                                    e.message = Some(restart_scheduled_message(delay_ms, restart_attempt, e.restart.max_retries));
+                                } else {
+                                    e.message = Some(restart_limit_reached_message(
+                                        e.restart_attempts,
+                                        e.restart.max_retries,
+                                    ));
+                                }
                             }
                         }
 
@@ -2396,10 +2435,7 @@ impl ProcessManager {
                                     e.message = Some("exited".to_string());
                                 } else {
                                     e.state = ProcessState::Failed;
-                                    e.message = Some(format!(
-                                        "exited with code {}",
-                                        status.code().unwrap_or_default()
-                                    ));
+                                    e.message = Some(process_exit_with_code_message(status.code()));
                                 }
                             }
                             Err(err) => {
@@ -2417,15 +2453,19 @@ impl ProcessManager {
                                 RestartPolicy::OnFailure => is_failure,
                             };
 
-                            if should_restart && e.restart_attempts < e.restart.max_retries {
-                                e.restart_attempts = e.restart_attempts.saturating_add(1);
-                                let delay_ms = compute_backoff_ms(e.restart, e.restart_attempts);
-                                restart_after = Some(Duration::from_millis(delay_ms));
-                                restart_attempt = e.restart_attempts;
-                                e.message = Some(format!(
-                                    "restarting in {}ms (attempt {}/{})",
-                                    delay_ms, restart_attempt, e.restart.max_retries
-                                ));
+                            if should_restart {
+                                if e.restart_attempts < e.restart.max_retries {
+                                    e.restart_attempts = e.restart_attempts.saturating_add(1);
+                                    let delay_ms = compute_backoff_ms(e.restart, e.restart_attempts);
+                                    restart_after = Some(Duration::from_millis(delay_ms));
+                                    restart_attempt = e.restart_attempts;
+                                    e.message = Some(restart_scheduled_message(delay_ms, restart_attempt, e.restart.max_retries));
+                                } else {
+                                    e.message = Some(restart_limit_reached_message(
+                                        e.restart_attempts,
+                                        e.restart.max_retries,
+                                    ));
+                                }
                             }
                         }
 
@@ -2839,10 +2879,7 @@ impl ProcessManager {
                                     e.message = Some("exited".to_string());
                                 } else {
                                     e.state = ProcessState::Failed;
-                                    e.message = Some(format!(
-                                        "exited with code {}",
-                                        status.code().unwrap_or_default()
-                                    ));
+                                    e.message = Some(process_exit_with_code_message(status.code()));
                                 }
                             }
                             Err(err) => {
@@ -2860,15 +2897,19 @@ impl ProcessManager {
                                 RestartPolicy::OnFailure => is_failure,
                             };
 
-                            if should_restart && e.restart_attempts < e.restart.max_retries {
-                                e.restart_attempts = e.restart_attempts.saturating_add(1);
-                                let delay_ms = compute_backoff_ms(e.restart, e.restart_attempts);
-                                restart_after = Some(Duration::from_millis(delay_ms));
-                                restart_attempt = e.restart_attempts;
-                                e.message = Some(format!(
-                                    "restarting in {}ms (attempt {}/{})",
-                                    delay_ms, restart_attempt, e.restart.max_retries
-                                ));
+                            if should_restart {
+                                if e.restart_attempts < e.restart.max_retries {
+                                    e.restart_attempts = e.restart_attempts.saturating_add(1);
+                                    let delay_ms = compute_backoff_ms(e.restart, e.restart_attempts);
+                                    restart_after = Some(Duration::from_millis(delay_ms));
+                                    restart_attempt = e.restart_attempts;
+                                    e.message = Some(restart_scheduled_message(delay_ms, restart_attempt, e.restart.max_retries));
+                                } else {
+                                    e.message = Some(restart_limit_reached_message(
+                                        e.restart_attempts,
+                                        e.restart.max_retries,
+                                    ));
+                                }
                             }
                         }
 
@@ -3289,10 +3330,7 @@ impl ProcessManager {
                                     e.message = Some("exited".to_string());
                                 } else {
                                     e.state = ProcessState::Failed;
-                                    e.message = Some(format!(
-                                        "exited with code {}",
-                                        status.code().unwrap_or_default()
-                                    ));
+                                    e.message = Some(process_exit_with_code_message(status.code()));
                                 }
                             }
                             Err(err) => {
@@ -3310,15 +3348,19 @@ impl ProcessManager {
                                 RestartPolicy::OnFailure => is_failure,
                             };
 
-                            if should_restart && e.restart_attempts < e.restart.max_retries {
-                                e.restart_attempts = e.restart_attempts.saturating_add(1);
-                                let delay_ms = compute_backoff_ms(e.restart, e.restart_attempts);
-                                restart_after = Some(Duration::from_millis(delay_ms));
-                                restart_attempt = e.restart_attempts;
-                                e.message = Some(format!(
-                                    "restarting in {}ms (attempt {}/{})",
-                                    delay_ms, restart_attempt, e.restart.max_retries
-                                ));
+                            if should_restart {
+                                if e.restart_attempts < e.restart.max_retries {
+                                    e.restart_attempts = e.restart_attempts.saturating_add(1);
+                                    let delay_ms = compute_backoff_ms(e.restart, e.restart_attempts);
+                                    restart_after = Some(Duration::from_millis(delay_ms));
+                                    restart_attempt = e.restart_attempts;
+                                    e.message = Some(restart_scheduled_message(delay_ms, restart_attempt, e.restart.max_retries));
+                                } else {
+                                    e.message = Some(restart_limit_reached_message(
+                                        e.restart_attempts,
+                                        e.restart.max_retries,
+                                    ));
+                                }
                             }
                         }
 
@@ -3698,10 +3740,7 @@ impl ProcessManager {
                                     e.message = Some("exited".to_string());
                                 } else {
                                     e.state = ProcessState::Failed;
-                                    e.message = Some(format!(
-                                        "exited with code {}",
-                                        status.code().unwrap_or_default()
-                                    ));
+                                    e.message = Some(process_exit_with_code_message(status.code()));
                                 }
                             }
                             Err(err) => {
@@ -3719,15 +3758,19 @@ impl ProcessManager {
                                 RestartPolicy::OnFailure => is_failure,
                             };
 
-                            if should_restart && e.restart_attempts < e.restart.max_retries {
-                                e.restart_attempts = e.restart_attempts.saturating_add(1);
-                                let delay_ms = compute_backoff_ms(e.restart, e.restart_attempts);
-                                restart_after = Some(Duration::from_millis(delay_ms));
-                                restart_attempt = e.restart_attempts;
-                                e.message = Some(format!(
-                                    "restarting in {}ms (attempt {}/{})",
-                                    delay_ms, restart_attempt, e.restart.max_retries
-                                ));
+                            if should_restart {
+                                if e.restart_attempts < e.restart.max_retries {
+                                    e.restart_attempts = e.restart_attempts.saturating_add(1);
+                                    let delay_ms = compute_backoff_ms(e.restart, e.restart_attempts);
+                                    restart_after = Some(Duration::from_millis(delay_ms));
+                                    restart_attempt = e.restart_attempts;
+                                    e.message = Some(restart_scheduled_message(delay_ms, restart_attempt, e.restart.max_retries));
+                                } else {
+                                    e.message = Some(restart_limit_reached_message(
+                                        e.restart_attempts,
+                                        e.restart.max_retries,
+                                    ));
+                                }
                             }
                         }
 
@@ -4209,10 +4252,7 @@ impl ProcessManager {
                                     e.message = Some("exited".to_string());
                                 } else {
                                     e.state = ProcessState::Failed;
-                                    e.message = Some(format!(
-                                        "exited with code {}",
-                                        status.code().unwrap_or_default()
-                                    ));
+                                    e.message = Some(process_exit_with_code_message(status.code()));
                                 }
                             }
                             Err(err) => {
@@ -4230,15 +4270,19 @@ impl ProcessManager {
                                 RestartPolicy::OnFailure => is_failure,
                             };
 
-                            if should_restart && e.restart_attempts < e.restart.max_retries {
-                                e.restart_attempts = e.restart_attempts.saturating_add(1);
-                                let delay_ms = compute_backoff_ms(e.restart, e.restart_attempts);
-                                restart_after = Some(Duration::from_millis(delay_ms));
-                                restart_attempt = e.restart_attempts;
-                                e.message = Some(format!(
-                                    "restarting in {}ms (attempt {}/{})",
-                                    delay_ms, restart_attempt, e.restart.max_retries
-                                ));
+                            if should_restart {
+                                if e.restart_attempts < e.restart.max_retries {
+                                    e.restart_attempts = e.restart_attempts.saturating_add(1);
+                                    let delay_ms = compute_backoff_ms(e.restart, e.restart_attempts);
+                                    restart_after = Some(Duration::from_millis(delay_ms));
+                                    restart_attempt = e.restart_attempts;
+                                    e.message = Some(restart_scheduled_message(delay_ms, restart_attempt, e.restart.max_retries));
+                                } else {
+                                    e.message = Some(restart_limit_reached_message(
+                                        e.restart_attempts,
+                                        e.restart.max_retries,
+                                    ));
+                                }
                             }
                         }
 
@@ -4622,10 +4666,7 @@ impl ProcessManager {
                                     e.message = Some("exited".to_string());
                                 } else {
                                     e.state = ProcessState::Failed;
-                                    e.message = Some(format!(
-                                        "exited with code {}",
-                                        status.code().unwrap_or_default()
-                                    ));
+                                    e.message = Some(process_exit_with_code_message(status.code()));
                                 }
                             }
                             Err(err) => {
@@ -4643,15 +4684,19 @@ impl ProcessManager {
                                 RestartPolicy::OnFailure => is_failure,
                             };
 
-                            if should_restart && e.restart_attempts < e.restart.max_retries {
-                                e.restart_attempts = e.restart_attempts.saturating_add(1);
-                                let delay_ms = compute_backoff_ms(e.restart, e.restart_attempts);
-                                restart_after = Some(Duration::from_millis(delay_ms));
-                                restart_attempt = e.restart_attempts;
-                                e.message = Some(format!(
-                                    "restarting in {}ms (attempt {}/{})",
-                                    delay_ms, restart_attempt, e.restart.max_retries
-                                ));
+                            if should_restart {
+                                if e.restart_attempts < e.restart.max_retries {
+                                    e.restart_attempts = e.restart_attempts.saturating_add(1);
+                                    let delay_ms = compute_backoff_ms(e.restart, e.restart_attempts);
+                                    restart_after = Some(Duration::from_millis(delay_ms));
+                                    restart_attempt = e.restart_attempts;
+                                    e.message = Some(restart_scheduled_message(delay_ms, restart_attempt, e.restart.max_retries));
+                                } else {
+                                    e.message = Some(restart_limit_reached_message(
+                                        e.restart_attempts,
+                                        e.restart.max_retries,
+                                    ));
+                                }
                             }
                         }
 
@@ -5081,10 +5126,7 @@ impl ProcessManager {
                                     e.message = Some("exited".to_string());
                                 } else {
                                     e.state = ProcessState::Failed;
-                                    e.message = Some(format!(
-                                        "exited with code {}",
-                                        status.code().unwrap_or_default()
-                                    ));
+                                    e.message = Some(process_exit_with_code_message(status.code()));
                                 }
                             }
                             Err(err) => {
@@ -5102,15 +5144,19 @@ impl ProcessManager {
                                 RestartPolicy::OnFailure => is_failure,
                             };
 
-                            if should_restart && e.restart_attempts < e.restart.max_retries {
-                                e.restart_attempts = e.restart_attempts.saturating_add(1);
-                                let delay_ms = compute_backoff_ms(e.restart, e.restart_attempts);
-                                restart_after = Some(Duration::from_millis(delay_ms));
-                                restart_attempt = e.restart_attempts;
-                                e.message = Some(format!(
-                                    "restarting in {}ms (attempt {}/{})",
-                                    delay_ms, restart_attempt, e.restart.max_retries
-                                ));
+                            if should_restart {
+                                if e.restart_attempts < e.restart.max_retries {
+                                    e.restart_attempts = e.restart_attempts.saturating_add(1);
+                                    let delay_ms = compute_backoff_ms(e.restart, e.restart_attempts);
+                                    restart_after = Some(Duration::from_millis(delay_ms));
+                                    restart_attempt = e.restart_attempts;
+                                    e.message = Some(restart_scheduled_message(delay_ms, restart_attempt, e.restart.max_retries));
+                                } else {
+                                    e.message = Some(restart_limit_reached_message(
+                                        e.restart_attempts,
+                                        e.restart.max_retries,
+                                    ));
+                                }
                             }
                         }
 
@@ -5757,10 +5803,7 @@ impl ProcessManager {
                                 e.message = Some("exited".to_string());
                             } else {
                                 e.state = ProcessState::Failed;
-                                e.message = Some(format!(
-                                    "exited with code {}",
-                                    status.code().unwrap_or_default()
-                                ));
+                                e.message = Some(process_exit_with_code_message(status.code()));
                             }
                         }
                         Err(err) => {
@@ -5778,15 +5821,19 @@ impl ProcessManager {
                             RestartPolicy::OnFailure => is_failure,
                         };
 
-                        if should_restart && e.restart_attempts < e.restart.max_retries {
-                            e.restart_attempts = e.restart_attempts.saturating_add(1);
-                            let delay_ms = compute_backoff_ms(e.restart, e.restart_attempts);
-                            restart_after = Some(Duration::from_millis(delay_ms));
-                            restart_attempt = e.restart_attempts;
-                            e.message = Some(format!(
-                                "restarting in {}ms (attempt {}/{})",
-                                delay_ms, restart_attempt, e.restart.max_retries
-                            ));
+                        if should_restart {
+                            if e.restart_attempts < e.restart.max_retries {
+                                e.restart_attempts = e.restart_attempts.saturating_add(1);
+                                let delay_ms = compute_backoff_ms(e.restart, e.restart_attempts);
+                                restart_after = Some(Duration::from_millis(delay_ms));
+                                restart_attempt = e.restart_attempts;
+                                e.message = Some(restart_scheduled_message(delay_ms, restart_attempt, e.restart.max_retries));
+                            } else {
+                                e.message = Some(restart_limit_reached_message(
+                                    e.restart_attempts,
+                                    e.restart.max_retries,
+                                ));
+                            }
                         }
                     }
 
@@ -5968,6 +6015,18 @@ impl ProcessManager {
                 .ok_or_else(|| anyhow::anyhow!("unknown process_id: {process_id}"))?;
 
             if matches!(e.state, ProcessState::Exited | ProcessState::Failed) {
+                return Ok(ProcessStatus {
+                    id: ProcessId(process_id.to_string()),
+                    template_id: e.template_id.clone(),
+                    state: e.state,
+                    pid: e.pid,
+                    exit_code: e.exit_code,
+                    message: e.message.clone(),
+                    resources: e.resources.clone(),
+                });
+            }
+
+            if matches!(e.state, ProcessState::Stopping) {
                 return Ok(ProcessStatus {
                     id: ProcessId(process_id.to_string()),
                     template_id: e.template_id.clone(),

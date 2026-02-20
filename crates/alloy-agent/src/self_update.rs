@@ -7,7 +7,6 @@ use alloy_proto::agent_v1::{
     GetSelfUpdateStatusRequest, GetSelfUpdateStatusResponse, TriggerSelfUpdateRequest,
     TriggerSelfUpdateResponse,
 };
-use anyhow::Context;
 use tonic::{Request, Response, Status};
 
 const DEFAULT_WATCHTOWER_URL: &str = "http://watchtower:8080";
@@ -81,19 +80,41 @@ fn http_client() -> &'static reqwest::Client {
     })
 }
 
+fn clip_text(raw: &str, max_bytes: usize) -> String {
+    if raw.len() <= max_bytes {
+        return raw.to_string();
+    }
+    let mut out = raw[..max_bytes].to_string();
+    out.push_str("...");
+    out
+}
+
 async fn trigger_watchtower_update(endpoint: &str, token: &str) -> anyhow::Result<String> {
     let url = format!("{}/v1/update", endpoint.trim_end_matches('/'));
+    let token_state = if token.trim().is_empty() {
+        "missing"
+    } else {
+        "present"
+    };
+
     let resp = http_client()
-        .get(url)
+        .get(&url)
         .bearer_auth(token)
         .send()
         .await
-        .context("request watchtower update")?;
+        .map_err(|err| {
+            anyhow::anyhow!(
+                "watchtower update request failed: endpoint={url}, token={token_state}, status=unreachable, error={err}. hint: verify ALLOY_AGENT_SELF_UPDATE_WATCHTOWER_URL reachability and token configuration"
+            )
+        })?;
 
     let status = resp.status();
     let text = resp.text().await.unwrap_or_default();
     if !status.is_success() {
-        anyhow::bail!("watchtower update failed ({status}): {text}");
+        let body = clip_text(text.trim(), 512);
+        anyhow::bail!(
+            "watchtower update failed: endpoint={url}, token={token_state}, status={status}, body={body}. hint: check WATCHTOWER_HTTP_API_TOKEN and /v1/update"
+        );
     }
 
     Ok(text)

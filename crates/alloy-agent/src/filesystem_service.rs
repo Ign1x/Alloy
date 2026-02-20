@@ -1,5 +1,6 @@
+use std::io::ErrorKind;
 use std::path::{Component, Path, PathBuf};
-use std::time::UNIX_EPOCH;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use alloy_proto::agent_v1::filesystem_service_server::{
     FilesystemService, FilesystemServiceServer,
@@ -14,9 +15,24 @@ use tonic::{Request, Response, Status};
 
 use crate::minecraft;
 
-const DEFAULT_READ_LIMIT: u64 = 64 * 1024;
-const MAX_READ_LIMIT: u64 = 1024 * 1024;
-const MAX_WRITE_LIMIT: usize = 1024 * 1024;
+const DEFAULT_READ_LIMIT_BYTES: u64 = 64 * 1024;
+const DEFAULT_READ_MAX_BYTES: u64 = 4 * 1024 * 1024;
+const DEFAULT_WRITE_MAX_CHUNK_BYTES: usize = 4 * 1024 * 1024;
+const HARD_MAX_IO_CHUNK_BYTES: u64 = 16 * 1024 * 1024;
+
+#[derive(Debug, Clone, Copy)]
+struct FsLimits {
+    read_default_bytes: u64,
+    read_max_bytes: u64,
+    write_max_chunk_bytes: usize,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct FsWritePolicy {
+    atomic_on_truncate_start: bool,
+    conflict_detection: bool,
+    require_contiguous_offsets: bool,
+}
 
 #[derive(Debug, Default, Clone)]
 pub struct FilesystemApi;
@@ -51,6 +67,142 @@ fn status_from_io(op: &'static str, err: std::io::Error) -> Status {
     }
 }
 
+fn status_from_mkdir_io(err: std::io::Error) -> Status {
+    match err.kind() {
+        ErrorKind::NotFound => Status::not_found("mkdir failed: parent directory not found"),
+        ErrorKind::PermissionDenied => Status::permission_denied("mkdir failed: permission denied"),
+        ErrorKind::AlreadyExists => Status::already_exists("mkdir failed: path already exists"),
+        ErrorKind::InvalidInput => Status::invalid_argument("mkdir failed: invalid input"),
+        ErrorKind::NotADirectory => {
+            Status::failed_precondition("mkdir failed: parent is not a directory")
+        }
+        ErrorKind::ReadOnlyFilesystem => {
+            Status::failed_precondition("mkdir failed: filesystem is read-only")
+        }
+        _ => Status::internal(format!("mkdir failed: {err}")),
+    }
+}
+
+fn status_from_rename_io(err: std::io::Error) -> Status {
+    match err.kind() {
+        ErrorKind::NotFound => Status::not_found("rename failed: source or parent not found"),
+        ErrorKind::PermissionDenied => {
+            Status::permission_denied("rename failed: permission denied")
+        }
+        ErrorKind::AlreadyExists => Status::already_exists("rename failed: target already exists"),
+        ErrorKind::InvalidInput => Status::invalid_argument("rename failed: invalid input"),
+        ErrorKind::NotADirectory | ErrorKind::IsADirectory => {
+            Status::failed_precondition("rename failed: source/target type mismatch")
+        }
+        ErrorKind::CrossesDevices => {
+            Status::failed_precondition("rename failed: cross-device move is not supported")
+        }
+        ErrorKind::ReadOnlyFilesystem => {
+            Status::failed_precondition("rename failed: filesystem is read-only")
+        }
+        _ => Status::internal(format!("rename failed: {err}")),
+    }
+}
+
+fn status_from_remove_io(err: std::io::Error) -> Status {
+    match err.kind() {
+        ErrorKind::NotFound => Status::not_found("remove failed: path not found"),
+        ErrorKind::PermissionDenied => {
+            Status::permission_denied("remove failed: permission denied")
+        }
+        ErrorKind::InvalidInput => Status::invalid_argument("remove failed: invalid input"),
+        ErrorKind::DirectoryNotEmpty => {
+            Status::failed_precondition("remove failed: directory not empty")
+        }
+        ErrorKind::NotADirectory | ErrorKind::IsADirectory => {
+            Status::failed_precondition("remove failed: path type mismatch")
+        }
+        ErrorKind::ReadOnlyFilesystem => {
+            Status::failed_precondition("remove failed: filesystem is read-only")
+        }
+        _ => Status::internal(format!("remove failed: {err}")),
+    }
+}
+
+fn env_u64(name: &str) -> Option<u64> {
+    std::env::var(name)
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .and_then(|v| v.parse::<u64>().ok())
+}
+
+fn env_usize(name: &str) -> Option<usize> {
+    std::env::var(name)
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .and_then(|v| v.parse::<usize>().ok())
+}
+
+fn env_bool(name: &str, default_value: bool) -> bool {
+    match std::env::var(name)
+        .ok()
+        .map(|v| v.trim().to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("1") | Some("true") | Some("yes") | Some("on") => true,
+        Some("0") | Some("false") | Some("no") | Some("off") => false,
+        _ => default_value,
+    }
+}
+
+fn fs_limits() -> FsLimits {
+    let read_max_bytes = env_u64("ALLOY_FS_READ_MAX_BYTES")
+        .unwrap_or(DEFAULT_READ_MAX_BYTES)
+        .max(1)
+        .min(HARD_MAX_IO_CHUNK_BYTES);
+    let read_default_bytes = env_u64("ALLOY_FS_READ_DEFAULT_BYTES")
+        .unwrap_or(DEFAULT_READ_LIMIT_BYTES)
+        .max(1)
+        .min(read_max_bytes);
+    let write_max_chunk_bytes = env_usize("ALLOY_FS_WRITE_MAX_CHUNK_BYTES")
+        .unwrap_or(DEFAULT_WRITE_MAX_CHUNK_BYTES)
+        .max(1)
+        .min(HARD_MAX_IO_CHUNK_BYTES as usize);
+
+    FsLimits {
+        read_default_bytes,
+        read_max_bytes,
+        write_max_chunk_bytes,
+    }
+}
+
+fn fs_write_policy() -> FsWritePolicy {
+    FsWritePolicy {
+        atomic_on_truncate_start: env_bool("ALLOY_FS_WRITE_ATOMIC_ON_TRUNCATE", false),
+        conflict_detection: env_bool("ALLOY_FS_WRITE_CONFLICT_DETECTION", true),
+        require_contiguous_offsets: env_bool("ALLOY_FS_WRITE_REQUIRE_CONTIGUOUS", false),
+    }
+}
+
+fn log_io_error(op: &'static str, path: &Path, err: &std::io::Error) {
+    tracing::warn!(
+        operation = op,
+        path = %path.display(),
+        kind = ?err.kind(),
+        error = %err,
+        "filesystem io error"
+    );
+}
+
+fn log_reject(op: &'static str, req_path: &str, reason: &'static str) {
+    tracing::warn!(operation = op, path = req_path, reason, "filesystem request rejected");
+}
+
+fn temp_write_path(path: &Path) -> PathBuf {
+    let epoch_nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    path.with_extension(format!("tmp-{}-{epoch_nanos}", std::process::id()))
+}
+
 fn normalize_rel_path(rel: &str) -> Result<PathBuf, FsPathError> {
     if rel.is_empty() {
         return Ok(PathBuf::new());
@@ -81,20 +233,76 @@ fn data_root() -> PathBuf {
     minecraft::data_root()
 }
 
-fn scoped_path(rel: &str) -> Result<PathBuf, FsPathError> {
-    let rel = normalize_rel_path(rel)?;
-    Ok(data_root().join(rel))
+fn ensure_within_root(root: &Path, canon: &Path, op: &'static str, req_path: &str) -> Result<(), Status> {
+    if canon.starts_with(root) {
+        return Ok(());
+    }
+
+    tracing::warn!(
+        operation = op,
+        path = req_path,
+        resolved = %canon.display(),
+        root = %root.display(),
+        "filesystem path escapes data root"
+    );
+    Err(Status::from(FsPathError::EscapesRoot))
 }
 
-async fn enforce_scoped_existing_path(p: &Path) -> Result<PathBuf, Status> {
-    let root = data_root();
-    // canonicalize() resolves symlinks. This prevents escaping the data root via symlink chains.
-    let canon = tokio::fs::canonicalize(p)
-        .await
-        .map_err(|e| status_from_io("failed to canonicalize path", e))?;
-    if !canon.starts_with(&root) {
-        return Err(Status::from(FsPathError::EscapesRoot));
+async fn ensure_no_symlink_components(
+    root: &Path,
+    rel: &Path,
+    req_path: &str,
+    op: &'static str,
+) -> Result<(), Status> {
+    let mut cur = root.to_path_buf();
+    for c in rel.components() {
+        let seg = match c {
+            Component::CurDir => continue,
+            Component::Normal(s) => s,
+            _ => return Err(Status::from(FsPathError::Traversal)),
+        };
+        cur.push(seg);
+
+        match tokio::fs::symlink_metadata(&cur).await {
+            Ok(meta) => {
+                if meta.file_type().is_symlink() {
+                    log_reject(op, req_path, "symlink component is not allowed");
+                    return Err(Status::invalid_argument("symlinks are not allowed in path"));
+                }
+            }
+            Err(e) if e.kind() == ErrorKind::NotFound => break,
+            Err(e) => {
+                log_io_error(op, &cur, &e);
+                return Err(status_from_io("failed to stat path", e));
+            }
+        }
     }
+    Ok(())
+}
+
+async fn enforce_scoped_existing_path(rel_path: &str, op: &'static str) -> Result<PathBuf, Status> {
+    let rel = normalize_rel_path(rel_path).map_err(Status::from)?;
+    let root = data_root();
+
+    ensure_no_symlink_components(&root, &rel, rel_path, op).await?;
+
+    let scoped = root.join(&rel);
+    let meta = tokio::fs::symlink_metadata(&scoped)
+        .await
+        .map_err(|e| {
+            log_io_error(op, &scoped, &e);
+            status_from_io("failed to stat path", e)
+        })?;
+    if meta.file_type().is_symlink() {
+        log_reject(op, rel_path, "symlink target is not allowed");
+        return Err(Status::invalid_argument("symlinks are not allowed"));
+    }
+
+    let canon = tokio::fs::canonicalize(&scoped).await.map_err(|e| {
+        log_io_error(op, &scoped, &e);
+        status_from_io("failed to canonicalize path", e)
+    })?;
+    ensure_within_root(&root, &canon, op, rel_path)?;
     Ok(canon)
 }
 
@@ -118,24 +326,44 @@ fn ensure_fs_write_enabled() -> Result<(), Status> {
     Ok(())
 }
 
-async fn ensure_scoped_parent_dir(rel_path: &str) -> Result<PathBuf, Status> {
+async fn ensure_scoped_parent_dir(rel_path: &str, op: &'static str) -> Result<PathBuf, Status> {
     let rel = normalize_rel_path(rel_path).map_err(Status::from)?;
     let parent = rel.parent().unwrap_or(Path::new(""));
-    let parent_scoped = data_root().join(parent);
+    let root = data_root();
+    let parent_scoped = root.join(parent);
 
-    let meta = tokio::fs::metadata(&parent_scoped)
+    ensure_no_symlink_components(&root, parent, rel_path, op).await?;
+
+    let meta = tokio::fs::symlink_metadata(&parent_scoped)
         .await
-        .map_err(|e| status_from_io("failed to stat parent directory", e))?;
+        .map_err(|e| {
+            log_io_error(op, &parent_scoped, &e);
+            status_from_io("failed to stat parent directory", e)
+        })?;
+    if meta.file_type().is_symlink() {
+        log_reject(op, rel_path, "parent directory is a symlink");
+        return Err(Status::invalid_argument(
+            "parent directory cannot be a symlink",
+        ));
+    }
     if !meta.is_dir() {
         return Err(Status::invalid_argument("parent is not a directory"));
     }
 
-    enforce_scoped_existing_path(&parent_scoped).await
+    let canon = tokio::fs::canonicalize(&parent_scoped).await.map_err(|e| {
+        log_io_error(op, &parent_scoped, &e);
+        status_from_io("failed to canonicalize parent directory", e)
+    })?;
+    ensure_within_root(&root, &canon, op, rel_path)?;
+    Ok(canon)
 }
 
 async fn mkdir_rel(rel: &str, recursive: bool) -> Result<(), Status> {
+    let req_path = rel;
     let rel = normalize_rel_path(rel).map_err(Status::from)?;
     let root = data_root();
+
+    ensure_no_symlink_components(&root, &rel, req_path, "mkdir").await?;
 
     // Create directories step-by-step, refusing to traverse symlinks.
     let mut cur = root.clone();
@@ -149,22 +377,23 @@ async fn mkdir_rel(rel: &str, recursive: bool) -> Result<(), Status> {
         match tokio::fs::symlink_metadata(&next).await {
             Ok(m) => {
                 if m.file_type().is_symlink() {
+                    log_reject("mkdir", req_path, "symlink component is not allowed");
                     return Err(Status::invalid_argument(
                         "symlinks are not allowed in mkdir path",
                     ));
                 }
                 if !m.is_dir() {
-                    return Err(Status::invalid_argument(
-                        "path component is not a directory",
-                    ));
+                    log_reject("mkdir", req_path, "path component is not a directory");
+                    return Err(Status::failed_precondition("path component is not a directory"));
                 }
             }
             Err(e) => {
-                if e.kind() == std::io::ErrorKind::NotFound {
+                if e.kind() == ErrorKind::NotFound {
                     if recursive {
-                        tokio::fs::create_dir(&next)
-                            .await
-                            .map_err(|e| Status::internal(format!("failed to create dir: {e}")))?;
+                        tokio::fs::create_dir(&next).await.map_err(|e| {
+                            log_io_error("mkdir", &next, &e);
+                            status_from_mkdir_io(e)
+                        })?;
                     } else {
                         // If not recursive, only allow creating the leaf.
                         // Fail if any intermediate component is missing.
@@ -172,24 +401,25 @@ async fn mkdir_rel(rel: &str, recursive: bool) -> Result<(), Status> {
                         if !is_leaf {
                             return Err(Status::not_found("parent directory not found"));
                         }
-                        tokio::fs::create_dir(&next)
-                            .await
-                            .map_err(|e| Status::internal(format!("failed to create dir: {e}")))?;
+                        tokio::fs::create_dir(&next).await.map_err(|e| {
+                            log_io_error("mkdir", &next, &e);
+                            status_from_mkdir_io(e)
+                        })?;
                     }
                 } else {
-                    return Err(Status::internal(format!("failed to stat path: {e}")));
+                    log_io_error("mkdir", &next, &e);
+                    return Err(status_from_mkdir_io(e));
                 }
             }
         }
         cur = next;
     }
 
-    let canon = tokio::fs::canonicalize(&cur)
-        .await
-        .map_err(|e| Status::internal(format!("failed to canonicalize: {e}")))?;
-    if !canon.starts_with(&root) {
-        return Err(Status::from(FsPathError::EscapesRoot));
-    }
+    let canon = tokio::fs::canonicalize(&cur).await.map_err(|e| {
+        log_io_error("mkdir", &cur, &e);
+        Status::internal(format!("failed to canonicalize: {e}"))
+    })?;
+    ensure_within_root(&root, &canon, "mkdir", req_path)?;
     Ok(())
 }
 
@@ -209,21 +439,21 @@ impl FilesystemService for FilesystemApi {
         request: Request<ListDirRequest>,
     ) -> Result<Response<ListDirResponse>, Status> {
         let req = request.into_inner();
-        let dir = scoped_path(&req.path).map_err(Status::from)?;
+        let dir = enforce_scoped_existing_path(&req.path, "list_dir").await?;
 
-        let meta = tokio::fs::metadata(&dir)
-            .await
-            .map_err(|e| status_from_io("failed to stat path", e))?;
+        let meta = tokio::fs::metadata(&dir).await.map_err(|e| {
+            log_io_error("list_dir", &dir, &e);
+            status_from_io("failed to stat path", e)
+        })?;
         if !meta.is_dir() {
             return Err(Status::invalid_argument("path is not a directory"));
         }
 
-        let dir = enforce_scoped_existing_path(&dir).await?;
-
         let mut entries = Vec::new();
-        let mut rd = tokio::fs::read_dir(&dir)
-            .await
-            .map_err(|e| status_from_io("failed to read dir", e))?;
+        let mut rd = tokio::fs::read_dir(&dir).await.map_err(|e| {
+            log_io_error("list_dir", &dir, &e);
+            status_from_io("failed to read dir", e)
+        })?;
         while let Some(de) = rd
             .next_entry()
             .await
@@ -263,17 +493,17 @@ impl FilesystemService for FilesystemApi {
         &self,
         request: Request<ReadFileRequest>,
     ) -> Result<Response<ReadFileResponse>, Status> {
+        let limits = fs_limits();
         let req = request.into_inner();
-        let path = scoped_path(&req.path).map_err(Status::from)?;
+        let path = enforce_scoped_existing_path(&req.path, "read_file").await?;
 
-        let meta = tokio::fs::metadata(&path)
-            .await
-            .map_err(|e| status_from_io("failed to stat path", e))?;
+        let meta = tokio::fs::metadata(&path).await.map_err(|e| {
+            log_io_error("read_file", &path, &e);
+            status_from_io("failed to stat path", e)
+        })?;
         if !meta.is_file() {
             return Err(Status::invalid_argument("path is not a file"));
         }
-
-        let path = enforce_scoped_existing_path(&path).await?;
 
         let size = meta.len();
         let offset = req.offset;
@@ -281,26 +511,29 @@ impl FilesystemService for FilesystemApi {
             return Err(Status::invalid_argument("offset out of range"));
         }
 
-        let mut limit = req.limit;
-        if limit == 0 {
-            limit = DEFAULT_READ_LIMIT;
-        }
-        limit = limit.min(MAX_READ_LIMIT);
+        let limit = if req.limit == 0 {
+            limits.read_default_bytes
+        } else {
+            req.limit.min(limits.read_max_bytes)
+        };
 
         let remaining = size - offset;
         let to_read = std::cmp::min(remaining, limit) as usize;
 
-        let mut f = tokio::fs::File::open(&path)
-            .await
-            .map_err(|e| status_from_io("failed to open file", e))?;
+        let mut f = tokio::fs::File::open(&path).await.map_err(|e| {
+            log_io_error("read_file", &path, &e);
+            status_from_io("failed to open file", e)
+        })?;
         f.seek(std::io::SeekFrom::Start(offset))
             .await
             .map_err(|e| Status::internal(format!("failed to seek: {e}")))?;
 
         let mut buf = vec![0u8; to_read];
-        f.read_exact(&mut buf)
-            .await
-            .map_err(|e| Status::internal(format!("failed to read: {e}")))?;
+        if to_read > 0 {
+            f.read_exact(&mut buf)
+                .await
+                .map_err(|e| Status::internal(format!("failed to read: {e}")))?;
+        }
 
         Ok(Response::new(ReadFileResponse {
             data: buf,
@@ -323,40 +556,91 @@ impl FilesystemService for FilesystemApi {
         request: Request<WriteFileRequest>,
     ) -> Result<Response<WriteFileResponse>, Status> {
         ensure_fs_write_enabled()?;
+        let limits = fs_limits();
+        let policy = fs_write_policy();
         let req = request.into_inner();
-        if req.data.len() > MAX_WRITE_LIMIT {
-            return Err(Status::invalid_argument("file too large"));
+        if req.data.len() > limits.write_max_chunk_bytes {
+            return Err(Status::invalid_argument(format!(
+                "write chunk too large (max {} bytes)",
+                limits.write_max_chunk_bytes
+            )));
         }
 
-        let parent = ensure_scoped_parent_dir(&req.path).await?;
+        let parent = ensure_scoped_parent_dir(&req.path, "write_file").await?;
         let rel = normalize_rel_path(&req.path).map_err(Status::from)?;
         let file_name = rel
             .file_name()
             .ok_or_else(|| Status::invalid_argument("path must include filename"))?;
         let path = parent.join(file_name);
 
-        let meta = tokio::fs::symlink_metadata(&path).await.ok();
-        if let Some(m) = meta {
-            if m.file_type().is_symlink() {
-                return Err(Status::invalid_argument("refusing to write to symlink"));
+        let existing_meta = match tokio::fs::symlink_metadata(&path).await {
+            Ok(m) => {
+                if m.file_type().is_symlink() {
+                    log_reject("write_file", &req.path, "target is a symlink");
+                    return Err(Status::invalid_argument("refusing to write to symlink"));
+                }
+                if m.is_dir() {
+                    log_reject("write_file", &req.path, "target is a directory");
+                    return Err(Status::invalid_argument("path is a directory"));
+                }
+                Some(m)
             }
-            if m.is_dir() {
-                return Err(Status::invalid_argument("path is a directory"));
+            Err(e) if e.kind() == ErrorKind::NotFound => None,
+            Err(e) => {
+                log_io_error("write_file", &path, &e);
+                return Err(status_from_io("failed to stat path", e));
+            }
+        };
+
+        if policy.conflict_detection && !req.truncate {
+            match existing_meta.as_ref() {
+                Some(meta) => {
+                    let current_size = meta.len();
+                    if req.offset > current_size {
+                        return Err(Status::failed_precondition(
+                            "write conflict: offset beyond current file size",
+                        ));
+                    }
+                    if policy.require_contiguous_offsets && req.offset != current_size {
+                        return Err(Status::failed_precondition(
+                            "write conflict: expected contiguous chunk offset",
+                        ));
+                    }
+                }
+                None => {
+                    if req.offset != 0 {
+                        return Err(Status::failed_precondition(
+                            "write conflict: file does not exist for non-zero offset",
+                        ));
+                    }
+                }
             }
         }
 
-        if req.offset == 0 && !req.truncate {
-            let tmp = path.with_extension("tmp");
-            let mut f = tokio::fs::File::create(&tmp)
-                .await
-                .map_err(|e| status_from_io("failed to create temp file", e))?;
+        if policy.require_contiguous_offsets && req.truncate && req.offset != 0 {
+            return Err(Status::failed_precondition(
+                "write conflict: truncate writes must start at offset 0",
+            ));
+        }
+
+        let atomic_replace = req.offset == 0 && (!req.truncate || policy.atomic_on_truncate_start);
+
+        if atomic_replace {
+            let tmp = temp_write_path(&path);
+            let mut f = tokio::fs::File::create(&tmp).await.map_err(|e| {
+                log_io_error("write_file", &tmp, &e);
+                status_from_io("failed to create temp file", e)
+            })?;
             f.write_all(&req.data)
                 .await
                 .map_err(|e| Status::internal(format!("failed to write: {e}")))?;
-            f.flush().await.ok();
-            tokio::fs::rename(&tmp, &path)
+            f.flush()
                 .await
-                .map_err(|e| status_from_io("failed to persist file", e))?;
+                .map_err(|e| Status::internal(format!("failed to flush: {e}")))?;
+            tokio::fs::rename(&tmp, &path).await.map_err(|e| {
+                log_io_error("write_file", &path, &e);
+                status_from_rename_io(e)
+            })?;
             return Ok(Response::new(WriteFileResponse { ok: true }));
         }
 
@@ -365,7 +649,10 @@ impl FilesystemService for FilesystemApi {
             .write(true)
             .open(&path)
             .await
-            .map_err(|e| status_from_io("failed to open file", e))?;
+            .map_err(|e| {
+                log_io_error("write_file", &path, &e);
+                status_from_io("failed to open file", e)
+            })?;
 
         if req.truncate {
             f.set_len(0)
@@ -379,7 +666,9 @@ impl FilesystemService for FilesystemApi {
         f.write_all(&req.data)
             .await
             .map_err(|e| Status::internal(format!("failed to write: {e}")))?;
-        f.flush().await.ok();
+        f.flush()
+            .await
+            .map_err(|e| Status::internal(format!("failed to flush: {e}")))?;
 
         Ok(Response::new(WriteFileResponse { ok: true }))
     }
@@ -390,23 +679,41 @@ impl FilesystemService for FilesystemApi {
     ) -> Result<Response<RenameResponse>, Status> {
         ensure_fs_write_enabled()?;
         let req = request.into_inner();
-        let from = scoped_path(&req.from_path).map_err(Status::from)?;
-        let from = enforce_scoped_existing_path(&from).await?;
+        let from = enforce_scoped_existing_path(&req.from_path, "rename").await?;
 
-        let to_parent = ensure_scoped_parent_dir(&req.to_path).await?;
+        let to_parent = ensure_scoped_parent_dir(&req.to_path, "rename").await?;
         let to_rel = normalize_rel_path(&req.to_path).map_err(Status::from)?;
         let to_name = to_rel
             .file_name()
             .ok_or_else(|| Status::invalid_argument("to_path must include filename"))?;
         let to = to_parent.join(to_name);
 
-        if tokio::fs::symlink_metadata(&to).await.is_ok() {
-            return Err(Status::already_exists("target already exists"));
+        match tokio::fs::symlink_metadata(&to).await {
+            Ok(meta) => {
+                if meta.file_type().is_symlink() {
+                    log_reject("rename", &req.to_path, "target is a symlink");
+                    return Err(Status::invalid_argument("target cannot be a symlink"));
+                }
+                return Err(Status::already_exists("target already exists"));
+            }
+            Err(e) if e.kind() == ErrorKind::NotFound => {}
+            Err(e) => {
+                log_io_error("rename", &to, &e);
+                return Err(status_from_rename_io(e));
+            }
         }
 
-        tokio::fs::rename(&from, &to)
-            .await
-            .map_err(|e| status_from_io("rename failed", e))?;
+        tokio::fs::rename(&from, &to).await.map_err(|e| {
+            tracing::warn!(
+                operation = "rename",
+                from = %from.display(),
+                to = %to.display(),
+                kind = ?e.kind(),
+                error = %e,
+                "filesystem io error"
+            );
+            status_from_rename_io(e)
+        })?;
         Ok(Response::new(RenameResponse { ok: true }))
     }
 
@@ -416,13 +723,14 @@ impl FilesystemService for FilesystemApi {
     ) -> Result<Response<RemoveResponse>, Status> {
         ensure_fs_write_enabled()?;
         let req = request.into_inner();
-        let path = scoped_path(&req.path).map_err(Status::from)?;
-        let path = enforce_scoped_existing_path(&path).await?;
+        let path = enforce_scoped_existing_path(&req.path, "remove").await?;
 
-        let meta = tokio::fs::symlink_metadata(&path)
-            .await
-            .map_err(|e| status_from_io("failed to stat path", e))?;
+        let meta = tokio::fs::symlink_metadata(&path).await.map_err(|e| {
+            log_io_error("remove", &path, &e);
+            status_from_remove_io(e)
+        })?;
         if meta.file_type().is_symlink() {
+            log_reject("remove", &req.path, "target is a symlink");
             return Err(Status::invalid_argument("refusing to remove symlink"));
         }
 
@@ -430,16 +738,25 @@ impl FilesystemService for FilesystemApi {
             if req.recursive {
                 tokio::fs::remove_dir_all(&path)
                     .await
-                    .map_err(|e| status_from_io("remove failed", e))?;
+                    .map_err(|e| {
+                        log_io_error("remove", &path, &e);
+                        status_from_remove_io(e)
+                    })?;
             } else {
                 tokio::fs::remove_dir(&path)
                     .await
-                    .map_err(|e| status_from_io("remove failed", e))?;
+                    .map_err(|e| {
+                        log_io_error("remove", &path, &e);
+                        status_from_remove_io(e)
+                    })?;
             }
         } else {
             tokio::fs::remove_file(&path)
                 .await
-                .map_err(|e| status_from_io("remove failed", e))?;
+                .map_err(|e| {
+                    log_io_error("remove", &path, &e);
+                    status_from_remove_io(e)
+                })?;
         }
 
         Ok(Response::new(RemoveResponse { ok: true }))
