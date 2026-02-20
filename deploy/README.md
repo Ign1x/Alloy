@@ -43,6 +43,20 @@ Default first-login credential (if `.env` is empty): `admin / admin123456`.
 Installer scripts also re-load values from `.env` into process env before running Docker Compose,
 so accidentally exported empty shell vars will not break startup.
 
+Installer scripts now print a unified status prefix in both modes:
+
+- `[alloy-install][local|release][INFO|WARN|ERROR] ...`
+
+Before `docker compose up`, both installers run preflight checks for:
+
+- Docker daemon + Docker Compose plugin availability
+- Output/env directory write permission
+- Release data directory write permission (`ALLOY_POSTGRES_DATA_DIR`)
+- Critical env values present in `.env`
+- Host port conflicts (`release: 10043`, `local: 10043 + 3000`)
+
+If a check fails, installers print next-step remediation hints directly in stderr.
+
 ## Updates
 
 Alloy stores persistent data outside the container filesystem, so updating containers does **not** wipe worlds/configs as long as you keep the same mounts/volumes.
@@ -76,6 +90,13 @@ export ALLOY_IMAGE_TAG=latest
 bash deploy/install.sh --mode release
 ```
 
+You can also pin release Postgres data path explicitly:
+
+```bash
+export ALLOY_POSTGRES_DATA_DIR=./alloy-postgres
+bash deploy/install.sh --mode release
+```
+
 Release compose is **control-plane only** (`web + alloy-control + postgres + watchtower`) and does not start a local `alloy-agent`.
 For game nodes, deploy `alloy-agent` on remote hosts and connect them from panel `Nodes`.
 
@@ -96,11 +117,19 @@ Stop (keep data):
 docker compose --env-file .env -f deploy/docker-compose.generated.release.yml down
 ```
 
-Reset release data (⚠️ wipes `./alloy-postgres`):
+Reset release data (⚠️ destructive; verify resolved path before `rm -rf`):
 
 ```bash
 docker compose --env-file .env -f deploy/docker-compose.generated.release.yml down
-rm -rf alloy-postgres
+
+COMPOSE_FILE=deploy/docker-compose.generated.release.yml
+COMPOSE_DIR="$(cd "$(dirname "$COMPOSE_FILE")" && pwd)"
+DATA_DIR_RAW="$(awk -F= '/^ALLOY_POSTGRES_DATA_DIR=/{print $2; exit}' .env)"
+DATA_DIR_RAW="${DATA_DIR_RAW:-./alloy-postgres}"
+if [[ "$DATA_DIR_RAW" = /* ]]; then DATA_DIR="$DATA_DIR_RAW"; else DATA_DIR="$COMPOSE_DIR/$DATA_DIR_RAW"; fi
+
+printf 'About to remove: %s\n' "$DATA_DIR"
+rm -rf -- "$DATA_DIR"
 ```
 
 For local mode volumes, use:
@@ -286,6 +315,32 @@ curl -fsS -X POST -H 'content-type: application/json' \
 | `spawn_failed` | Missing deps / non-executable server binary | Use Docker image or install runtime deps (see `deploy/agent.Dockerfile`: `libicu`, `libssl`, `zlib`, etc). |
 | `read_only` | Control is in read-only mode | Unset `ALLOY_READ_ONLY` and restart `alloy-control`. |
 | FS write operations unavailable | FS write is disabled by default | Set `ALLOY_FS_WRITE_ENABLED=true` on `alloy-agent` (still scoped to `ALLOY_DATA_ROOT`). |
+| `no active tunnel` / `tunnel send failed` / `timeout` | Node tunnel interrupted or not authenticated | Verify node token + `ALLOY_CONTROL_WS_URL`, then inspect `alloy-control` logs for tunnel state transitions. |
+| One-click update failed | Watchtower API/token mismatch or watchtower not running | Confirm `watchtower` container is running and `ALLOY_WATCHTOWER_TOKEN` matches both control + watchtower env. |
+
+### One-command diagnostics
+
+Watchtower (release compose):
+
+```bash
+docker compose --env-file .env -f deploy/docker-compose.generated.release.yml ps watchtower && \
+docker compose --env-file .env -f deploy/docker-compose.generated.release.yml logs --tail=120 watchtower && \
+docker compose --env-file .env -f deploy/docker-compose.generated.release.yml logs --tail=120 alloy-control | grep -Ei 'watchtower|update|manifest|token'
+```
+
+Tunnel health (release compose):
+
+```bash
+docker compose --env-file .env -f deploy/docker-compose.generated.release.yml logs --tail=160 alloy-control | grep -Ei 'agent/ws|tunnel|poll|no active tunnel|timeout' || true
+curl -fsS "http://localhost:10043/rspc/agent.health?input=null"
+```
+
+FS write (run on the node host that runs `alloy-agent`; replace `<agent-container>`):
+
+```bash
+docker logs --tail=160 <agent-container> | grep -Ei 'fs write|permission|read_only|path escape' || true
+docker exec <agent-container> sh -lc 'echo ALLOY_FS_WRITE_ENABLED=${ALLOY_FS_WRITE_ENABLED:-unset}; echo ALLOY_DATA_ROOT=${ALLOY_DATA_ROOT:-unset}'
+```
 
 ## Configuration
 

@@ -70,4 +70,4 @@ volumes:
     driver_opts:
       type: none
       o: bind
-      device: ./alloy-postgres
+      device: ${ALLOY_POSTGRES_DATA_DIR:-./alloy-postgres}
