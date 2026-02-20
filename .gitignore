@@ -7,6 +7,8 @@ node_modules/
 dist/
 .env
 deploy/docker-compose.generated.*.yml
+compose.override.yml
+docker-compose.override.yml
 deploy/.tmp-*/
 
 ## OS / tooling
