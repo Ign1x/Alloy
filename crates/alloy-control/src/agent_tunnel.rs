@@ -18,7 +18,7 @@ use axum::{
 use futures_util::{SinkExt, StreamExt};
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use tokio::sync::{Mutex, Notify, RwLock, mpsc, oneshot};
-use tracing::Instrument;
+use tracing::{Instrument, debug, info, warn};
 
 use crate::state::AppState;
 
@@ -64,12 +64,154 @@ pub struct TunnelResponse {
     pub status_message: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TunnelLinkKind {
+    Ws,
+    Poll,
+}
+
+impl TunnelLinkKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Ws => "ws",
+            Self::Poll => "poll",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TunnelState {
+    Connected,
+    Stale,
+    Reconnecting,
+    Disconnected,
+}
+
+impl TunnelState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Connected => "connected",
+            Self::Stale => "stale",
+            Self::Reconnecting => "reconnecting",
+            Self::Disconnected => "disconnected",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TunnelReasonCode {
+    WsConnected,
+    PollConnected,
+    WsReadClosed,
+    WsReadError,
+    WsSendFailed,
+    WsHeartbeatSendFailed,
+    PollStaleTimeout,
+    PollMailboxFull,
+    PollHeartbeat,
+    PollDelivery,
+    WsDelivery,
+    RequestTimeout,
+    Reconnecting,
+    Disconnected,
+    PendingDropped,
+    ReplacedByNewConnection,
+}
+
+impl TunnelReasonCode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::WsConnected => "tunnel.ws.connected",
+            Self::PollConnected => "tunnel.poll.connected",
+            Self::WsReadClosed => "tunnel.ws.read_closed",
+            Self::WsReadError => "tunnel.ws.read_error",
+            Self::WsSendFailed => "tunnel.ws.send_failed",
+            Self::WsHeartbeatSendFailed => "tunnel.ws.heartbeat_send_failed",
+            Self::PollStaleTimeout => "tunnel.poll.stale_timeout",
+            Self::PollMailboxFull => "tunnel.poll.mailbox_full",
+            Self::PollHeartbeat => "tunnel.poll.heartbeat",
+            Self::PollDelivery => "tunnel.poll.delivery",
+            Self::WsDelivery => "tunnel.ws.delivery",
+            Self::RequestTimeout => "tunnel.request.timeout",
+            Self::Reconnecting => "tunnel.reconnecting",
+            Self::Disconnected => "tunnel.disconnected",
+            Self::PendingDropped => "tunnel.pending.dropped",
+            Self::ReplacedByNewConnection => "tunnel.replaced_by_new_connection",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct TunnelSnapshot {
+    pub state: TunnelState,
+    pub link: Option<TunnelLinkKind>,
+    pub reason_code: Option<String>,
+    pub reason_detail: Option<String>,
+    pub updated_at_unix_ms: u64,
+    pub recent_rtt_ms: Option<u64>,
+    pub consecutive_failures: u32,
+    pub last_success_unix_ms: Option<u64>,
+}
+
+impl Default for TunnelSnapshot {
+    fn default() -> Self {
+        Self {
+            state: TunnelState::Disconnected,
+            link: None,
+            reason_code: None,
+            reason_detail: None,
+            updated_at_unix_ms: now_unix_ms(),
+            recent_rtt_ms: None,
+            consecutive_failures: 0,
+            last_success_unix_ms: None,
+        }
+    }
+}
+
+fn is_valid_tunnel_transition(from: TunnelState, to: TunnelState) -> bool {
+    match from {
+        TunnelState::Connected => matches!(
+            to,
+            TunnelState::Connected
+                | TunnelState::Stale
+                | TunnelState::Reconnecting
+                | TunnelState::Disconnected
+        ),
+        TunnelState::Stale => matches!(
+            to,
+            TunnelState::Stale
+                | TunnelState::Reconnecting
+                | TunnelState::Disconnected
+                | TunnelState::Connected
+        ),
+        TunnelState::Reconnecting => matches!(
+            to,
+            TunnelState::Reconnecting
+                | TunnelState::Connected
+                | TunnelState::Disconnected
+                | TunnelState::Stale
+        ),
+        TunnelState::Disconnected => {
+            matches!(to, TunnelState::Disconnected | TunnelState::Reconnecting | TunnelState::Connected)
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct AgentConnection {
     pub node: String,
     pub agent_version: String,
     pub tx: AgentTx,
     pub pending: Mutex<HashMap<String, oneshot::Sender<TunnelResponse>>>,
+}
+
+impl AgentConnection {
+    fn link_kind(&self) -> TunnelLinkKind {
+        match &self.tx {
+            AgentTx::Ws(_) => TunnelLinkKind::Ws,
+            AgentTx::Poll(_) => TunnelLinkKind::Poll,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -126,6 +268,104 @@ impl PollMailbox {
         }
         v
     }
+
+    pub async fn len(&self) -> usize {
+        self.queue.lock().await.len()
+    }
+
+    pub async fn drain(&self) -> usize {
+        let mut q = self.queue.lock().await;
+        let dropped = q.len();
+        q.clear();
+        dropped
+    }
+}
+
+fn connected_reason_code(link: TunnelLinkKind) -> TunnelReasonCode {
+    match link {
+        TunnelLinkKind::Ws => TunnelReasonCode::WsConnected,
+        TunnelLinkKind::Poll => TunnelReasonCode::PollConnected,
+    }
+}
+
+async fn drain_pending_requests_with_logs(
+    node: &str,
+    pending: &Mutex<HashMap<String, oneshot::Sender<TunnelResponse>>>,
+    reason: TunnelReasonCode,
+    reason_detail: &str,
+) -> usize {
+    let mut guard = pending.lock().await;
+    let count = guard.len();
+    if count == 0 {
+        debug!(
+            node,
+            reason_code = reason.as_str(),
+            reason_detail,
+            "pending cleanup no-op"
+        );
+        return 0;
+    }
+
+    let sample_ids: Vec<String> = guard.keys().take(5).cloned().collect();
+    info!(
+        node,
+        reason_code = reason.as_str(),
+        reason_detail,
+        pending_count = count,
+        "draining pending tunnel requests"
+    );
+    warn!(
+        node,
+        reason_code = reason.as_str(),
+        reason_detail,
+        pending_count = count,
+        "pending tunnel requests dropped"
+    );
+    debug!(
+        node,
+        reason_code = reason.as_str(),
+        reason_detail,
+        sample_request_ids = ?sample_ids,
+        "pending cleanup sample ids"
+    );
+
+    guard.clear();
+    count
+}
+
+async fn cleanup_poll_mailbox_with_logs(
+    node: &str,
+    mailbox: &PollMailbox,
+    reason: TunnelReasonCode,
+    reason_detail: &str,
+) -> usize {
+    let queued = mailbox.len().await;
+    info!(
+        node,
+        reason_code = reason.as_str(),
+        reason_detail,
+        queued_messages = queued,
+        "cleaning poll mailbox"
+    );
+    if queued > 0 {
+        warn!(
+            node,
+            reason_code = reason.as_str(),
+            reason_detail,
+            queued_messages = queued,
+            "dropping queued poll mailbox messages"
+        );
+    }
+
+    let dropped = mailbox.drain().await;
+    debug!(
+        node,
+        reason_code = reason.as_str(),
+        reason_detail,
+        dropped_messages = dropped,
+        "poll mailbox cleanup finished"
+    );
+    dropped
 }
 
 #[derive(Debug, Clone)]
@@ -153,6 +393,7 @@ impl AgentTx {
 #[derive(Clone, Default)]
 pub struct AgentHub {
     inner: Arc<RwLock<HashMap<String, Arc<AgentConnection>>>>,
+    snapshots: Arc<RwLock<HashMap<String, TunnelSnapshot>>>,
 }
 
 impl AgentHub {
@@ -170,9 +411,76 @@ impl AgentHub {
             let stale_ms = agent_poll_stale_ms();
             let now_ms = now_unix_ms();
             if now_ms.saturating_sub(last_ms) > stale_ms {
-                // Consider the node disconnected and drop the poll mailbox.
-                let _ = self.remove_if_same(node, &conn).await;
-                let _ = conn.pending.lock().await.drain();
+                let stale_for_ms = now_ms.saturating_sub(last_ms);
+                self.record_tunnel_event(
+                    node,
+                    TunnelState::Stale,
+                    Some(TunnelLinkKind::Poll),
+                    TunnelReasonCode::PollStaleTimeout,
+                    Some(format!(
+                        "poll stale timeout: stale_for_ms={stale_for_ms} stale_window_ms={stale_ms}"
+                    )),
+                    None,
+                    false,
+                    true,
+                )
+                .await;
+                self.record_tunnel_event(
+                    node,
+                    TunnelState::Reconnecting,
+                    Some(TunnelLinkKind::Poll),
+                    TunnelReasonCode::Reconnecting,
+                    Some("removing stale poll mailbox".to_string()),
+                    None,
+                    false,
+                    false,
+                )
+                .await;
+
+                if let AgentTx::Poll(mailbox) = &conn.tx {
+                    let _ = cleanup_poll_mailbox_with_logs(
+                        node,
+                        mailbox,
+                        TunnelReasonCode::PollStaleTimeout,
+                        "stale poll mailbox",
+                    )
+                    .await;
+                }
+
+                let removed = self.remove_if_same(node, &conn).await;
+                let dropped = drain_pending_requests_with_logs(
+                    node,
+                    &conn.pending,
+                    TunnelReasonCode::PendingDropped,
+                    "stale poll cleanup",
+                )
+                .await;
+                if dropped > 0 {
+                    self.record_tunnel_event(
+                        node,
+                        TunnelState::Reconnecting,
+                        Some(TunnelLinkKind::Poll),
+                        TunnelReasonCode::PendingDropped,
+                        Some(format!("dropped_pending_requests={dropped}")),
+                        None,
+                        false,
+                        true,
+                    )
+                    .await;
+                }
+                if removed {
+                    self.record_tunnel_event(
+                        node,
+                        TunnelState::Disconnected,
+                        Some(TunnelLinkKind::Poll),
+                        TunnelReasonCode::Disconnected,
+                        Some("stale poll tunnel removed".to_string()),
+                        None,
+                        false,
+                        false,
+                    )
+                    .await;
+                }
                 return None;
             }
         }
@@ -180,16 +488,25 @@ impl AgentHub {
         Some(conn)
     }
 
+    pub async fn snapshot(&self, node: &str) -> TunnelSnapshot {
+        self.snapshots
+            .read()
+            .await
+            .get(node)
+            .cloned()
+            .unwrap_or_default()
+    }
+
     pub async fn nodes(&self) -> Vec<String> {
         self.inner.read().await.keys().cloned().collect()
     }
 
     pub async fn insert(&self, conn: Arc<AgentConnection>) {
-        let _ = self.inner.write().await.insert(conn.node.clone(), conn);
+        let _ = self.insert_connection(conn).await;
     }
 
     pub async fn insert_replace(&self, conn: Arc<AgentConnection>) -> Option<Arc<AgentConnection>> {
-        self.inner.write().await.insert(conn.node.clone(), conn)
+        self.insert_connection(conn).await
     }
 
     pub async fn remove_if_same(&self, node: &str, conn: &Arc<AgentConnection>) -> bool {
@@ -205,7 +522,154 @@ impl AgentHub {
     }
 
     pub async fn remove(&self, node: &str) {
-        self.inner.write().await.remove(node);
+        let conn = self.inner.write().await.remove(node);
+        self.snapshots.write().await.remove(node);
+        if let Some(conn) = conn {
+            if let AgentTx::Poll(mailbox) = &conn.tx {
+                let _ = cleanup_poll_mailbox_with_logs(
+                    node,
+                    mailbox,
+                    TunnelReasonCode::Disconnected,
+                    "explicit hub remove",
+                )
+                .await;
+            }
+            let _ = drain_pending_requests_with_logs(
+                node,
+                &conn.pending,
+                TunnelReasonCode::PendingDropped,
+                "explicit hub remove",
+            )
+            .await;
+        }
+    }
+
+    async fn insert_connection(&self, conn: Arc<AgentConnection>) -> Option<Arc<AgentConnection>> {
+        let node = conn.node.clone();
+        let new_link = conn.link_kind();
+        let replaced = self.inner.write().await.insert(node.clone(), conn.clone());
+
+        if let Some(old_conn) = replaced.as_ref() {
+            let old_link = old_conn.link_kind();
+            self.record_tunnel_event(
+                &node,
+                TunnelState::Reconnecting,
+                Some(old_link),
+                TunnelReasonCode::ReplacedByNewConnection,
+                Some(format!(
+                    "old_link={} new_link={}",
+                    old_link.as_str(),
+                    new_link.as_str()
+                )),
+                None,
+                false,
+                true,
+            )
+            .await;
+
+            if let AgentTx::Poll(mailbox) = &old_conn.tx {
+                let _ = cleanup_poll_mailbox_with_logs(
+                    &node,
+                    mailbox,
+                    TunnelReasonCode::ReplacedByNewConnection,
+                    "connection replaced",
+                )
+                .await;
+            }
+
+            let dropped = drain_pending_requests_with_logs(
+                &node,
+                &old_conn.pending,
+                TunnelReasonCode::PendingDropped,
+                "connection replaced",
+            )
+            .await;
+            if dropped > 0 {
+                self.record_tunnel_event(
+                    &node,
+                    TunnelState::Reconnecting,
+                    Some(old_link),
+                    TunnelReasonCode::PendingDropped,
+                    Some(format!("dropped_pending_requests={dropped}")),
+                    None,
+                    false,
+                    true,
+                )
+                .await;
+            }
+
+            self.record_tunnel_event(
+                &node,
+                TunnelState::Disconnected,
+                Some(old_link),
+                TunnelReasonCode::Disconnected,
+                Some("previous tunnel connection replaced".to_string()),
+                None,
+                false,
+                false,
+            )
+            .await;
+        }
+
+        self.record_tunnel_event(
+            &node,
+            TunnelState::Connected,
+            Some(new_link),
+            connected_reason_code(new_link),
+            Some(format!("agent_version={}", conn.agent_version.trim())),
+            None,
+            true,
+            false,
+        )
+        .await;
+
+        replaced
+    }
+
+    async fn record_tunnel_event(
+        &self,
+        node: &str,
+        next_state: TunnelState,
+        link: Option<TunnelLinkKind>,
+        reason: TunnelReasonCode,
+        reason_detail: Option<String>,
+        recent_rtt_ms: Option<u64>,
+        mark_success: bool,
+        mark_failure: bool,
+    ) {
+        let mut snapshots = self.snapshots.write().await;
+        let snapshot = snapshots.entry(node.to_string()).or_default();
+        let from_state = snapshot.state;
+        if !is_valid_tunnel_transition(from_state, next_state) {
+            warn!(
+                node,
+                from_state = from_state.as_str(),
+                to_state = next_state.as_str(),
+                reason_code = reason.as_str(),
+                "invalid tunnel state transition ignored"
+            );
+            return;
+        }
+
+        snapshot.state = next_state;
+        if let Some(link) = link {
+            snapshot.link = Some(link);
+        }
+        snapshot.reason_code = Some(reason.as_str().to_string());
+        snapshot.reason_detail = reason_detail;
+        let now_ms = now_unix_ms();
+        snapshot.updated_at_unix_ms = now_ms;
+        if let Some(rtt_ms) = recent_rtt_ms {
+            snapshot.recent_rtt_ms = Some(rtt_ms);
+        }
+
+        if mark_failure {
+            snapshot.consecutive_failures = snapshot.consecutive_failures.saturating_add(1);
+        }
+        if mark_success {
+            snapshot.consecutive_failures = 0;
+            snapshot.last_success_unix_ms = Some(now_ms);
+        }
     }
 }
 
@@ -456,6 +920,22 @@ pub async fn agent_poll(
 
     ensure_node_row_connected(&state, &node, &agent_version).await;
 
+    if let Some(conn) = state.agent_hub.get(&node).await {
+        state
+            .agent_hub
+            .record_tunnel_event(
+                &node,
+                TunnelState::Connected,
+                Some(conn.link_kind()),
+                connected_reason_code(conn.link_kind()),
+                Some("poll request observed".to_string()),
+                None,
+                true,
+                false,
+            )
+            .await;
+    }
+
     // Ensure we have a poll mailbox for this node.
     let mailbox = match state.agent_hub.get(&node).await {
         Some(conn) => match &conn.tx {
@@ -488,15 +968,47 @@ pub async fn agent_poll(
     mailbox.touch();
 
     let wait = agent_poll_wait();
+    let started_at_ms = now_unix_ms();
     let next = mailbox.pop_or_wait(wait).await;
     match next {
-        None => StatusCode::NO_CONTENT.into_response(),
-        Some(text) => (
-            StatusCode::OK,
-            [(axum::http::header::CONTENT_TYPE, "application/json")],
-            text,
-        )
-            .into_response(),
+        None => {
+            state
+                .agent_hub
+                .record_tunnel_event(
+                    &node,
+                    TunnelState::Connected,
+                    Some(TunnelLinkKind::Poll),
+                    TunnelReasonCode::PollHeartbeat,
+                    Some(format!("poll heartbeat timeout_ms={}", wait.as_millis())),
+                    None,
+                    true,
+                    false,
+                )
+                .await;
+            StatusCode::NO_CONTENT.into_response()
+        }
+        Some(text) => {
+            let rtt_ms = now_unix_ms().saturating_sub(started_at_ms);
+            state
+                .agent_hub
+                .record_tunnel_event(
+                    &node,
+                    TunnelState::Connected,
+                    Some(TunnelLinkKind::Poll),
+                    TunnelReasonCode::PollDelivery,
+                    Some(format!("poll delivery rtt_ms={rtt_ms}")),
+                    Some(rtt_ms),
+                    true,
+                    false,
+                )
+                .await;
+            (
+                StatusCode::OK,
+                [(axum::http::header::CONTENT_TYPE, "application/json")],
+                text,
+            )
+                .into_response()
+        }
     }
 }
 
@@ -570,6 +1082,33 @@ pub async fn agent_resp(
                 status_code,
                 status_message,
             });
+            state
+                .agent_hub
+                .record_tunnel_event(
+                    &node,
+                    TunnelState::Connected,
+                    Some(TunnelLinkKind::Poll),
+                    TunnelReasonCode::PollDelivery,
+                    Some("poll response delivered".to_string()),
+                    None,
+                    true,
+                    false,
+                )
+                .await;
+        } else {
+            state
+                .agent_hub
+                .record_tunnel_event(
+                    &node,
+                    TunnelState::Reconnecting,
+                    Some(TunnelLinkKind::Poll),
+                    TunnelReasonCode::RequestTimeout,
+                    Some(format!("late poll response id={id}")),
+                    None,
+                    false,
+                    true,
+                )
+                .await;
         }
     }
 
@@ -690,9 +1229,37 @@ async fn handle_agent_socket(state: AppState, socket: WebSocket, auth: WsAuth) {
 
         let _ = state.agent_hub.insert_replace(conn.clone()).await;
 
+        state
+            .agent_hub
+            .record_tunnel_event(
+                &node,
+                TunnelState::Connected,
+                Some(TunnelLinkKind::Ws),
+                TunnelReasonCode::WsConnected,
+                Some("websocket handshake completed".to_string()),
+                None,
+                true,
+                false,
+            )
+            .await;
+
+        let writer_node = node.clone();
+        let writer_hub = state.agent_hub.clone();
         let writer = tokio::spawn(async move {
             while let Some(msg) = rx.recv().await {
                 if sender.send(msg).await.is_err() {
+                    writer_hub
+                        .record_tunnel_event(
+                            &writer_node,
+                            TunnelState::Reconnecting,
+                            Some(TunnelLinkKind::Ws),
+                            TunnelReasonCode::WsSendFailed,
+                            Some("websocket writer send failed".to_string()),
+                            None,
+                            false,
+                            true,
+                        )
+                        .await;
                     break;
                 }
             }
@@ -701,6 +1268,8 @@ async fn handle_agent_socket(state: AppState, socket: WebSocket, auth: WsAuth) {
         let heartbeat_tx = ws_tx.clone();
         let heartbeat_interval = agent_ws_ping_interval();
         let app_keepalive_interval = agent_ws_app_keepalive_interval(heartbeat_interval);
+        let heartbeat_node = node.clone();
+        let heartbeat_hub = state.agent_hub.clone();
         let heartbeat = tokio::spawn(async move {
             let mut ping = tokio::time::interval(heartbeat_interval);
             ping.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -721,6 +1290,18 @@ async fn handle_agent_socket(state: AppState, socket: WebSocket, auth: WsAuth) {
                             .await
                             .is_err()
                         {
+                            heartbeat_hub
+                                .record_tunnel_event(
+                                    &heartbeat_node,
+                                    TunnelState::Reconnecting,
+                                    Some(TunnelLinkKind::Ws),
+                                    TunnelReasonCode::WsHeartbeatSendFailed,
+                                    Some("websocket ping send failed".to_string()),
+                                    None,
+                                    false,
+                                    true,
+                                )
+                                .await;
                             break;
                         }
                     }
@@ -735,6 +1316,18 @@ async fn handle_agent_socket(state: AppState, socket: WebSocket, auth: WsAuth) {
                             .await
                             .is_err()
                         {
+                            heartbeat_hub
+                                .record_tunnel_event(
+                                    &heartbeat_node,
+                                    TunnelState::Reconnecting,
+                                    Some(TunnelLinkKind::Ws),
+                                    TunnelReasonCode::WsHeartbeatSendFailed,
+                                    Some("websocket app keepalive send failed".to_string()),
+                                    None,
+                                    false,
+                                    true,
+                                )
+                                .await;
                             break;
                         }
                     }
@@ -743,7 +1336,22 @@ async fn handle_agent_socket(state: AppState, socket: WebSocket, auth: WsAuth) {
         });
 
         while let Some(msg) = receiver.next().await {
-            let Ok(msg) = msg else { break };
+            let Ok(msg) = msg else {
+                state
+                    .agent_hub
+                    .record_tunnel_event(
+                        &node,
+                        TunnelState::Reconnecting,
+                        Some(TunnelLinkKind::Ws),
+                        TunnelReasonCode::WsReadError,
+                        Some("websocket read error".to_string()),
+                        None,
+                        false,
+                        true,
+                    )
+                    .await;
+                break;
+            };
             match msg {
                 Message::Text(text) => {
                     let Ok(frame) = serde_json::from_str::<AgentToControlFrame>(&text) else {
@@ -765,6 +1373,33 @@ async fn handle_agent_socket(state: AppState, socket: WebSocket, auth: WsAuth) {
                                     status_code,
                                     status_message,
                                 });
+                                state
+                                    .agent_hub
+                                    .record_tunnel_event(
+                                        &node,
+                                        TunnelState::Connected,
+                                        Some(TunnelLinkKind::Ws),
+                                        TunnelReasonCode::WsDelivery,
+                                        Some("ws response delivered".to_string()),
+                                        None,
+                                        true,
+                                        false,
+                                    )
+                                    .await;
+                            } else {
+                                state
+                                    .agent_hub
+                                    .record_tunnel_event(
+                                        &node,
+                                        TunnelState::Reconnecting,
+                                        Some(TunnelLinkKind::Ws),
+                                        TunnelReasonCode::RequestTimeout,
+                                        Some(format!("late ws response id={id}")),
+                                        None,
+                                        false,
+                                        true,
+                                    )
+                                    .await;
                             }
                         }
                         AgentToControlFrame::Hello { .. } | AgentToControlFrame::Unknown => {}
@@ -774,13 +1409,64 @@ async fn handle_agent_socket(state: AppState, socket: WebSocket, auth: WsAuth) {
                     let _ = ws_tx.send(Message::Pong(payload)).await;
                 }
                 Message::Pong(_) => {}
-                Message::Close(_) => break,
+                Message::Close(_) => {
+                    state
+                        .agent_hub
+                        .record_tunnel_event(
+                            &node,
+                            TunnelState::Reconnecting,
+                            Some(TunnelLinkKind::Ws),
+                            TunnelReasonCode::WsReadClosed,
+                            Some("websocket peer closed".to_string()),
+                            None,
+                            false,
+                            true,
+                        )
+                        .await;
+                    break;
+                }
                 _ => {}
             }
         }
 
-        let _ = state.agent_hub.remove_if_same(&node, &conn).await;
-        let _ = conn.pending.lock().await.drain();
+        let removed = state.agent_hub.remove_if_same(&node, &conn).await;
+        let dropped = drain_pending_requests_with_logs(
+            &node,
+            &conn.pending,
+            TunnelReasonCode::PendingDropped,
+            "ws connection closed",
+        )
+        .await;
+        if dropped > 0 {
+            state
+                .agent_hub
+                .record_tunnel_event(
+                    &node,
+                    TunnelState::Reconnecting,
+                    Some(TunnelLinkKind::Ws),
+                    TunnelReasonCode::PendingDropped,
+                    Some(format!("dropped_pending_requests={dropped}")),
+                    None,
+                    false,
+                    true,
+                )
+                .await;
+        }
+        if removed {
+            state
+                .agent_hub
+                .record_tunnel_event(
+                    &node,
+                    TunnelState::Disconnected,
+                    Some(TunnelLinkKind::Ws),
+                    TunnelReasonCode::Disconnected,
+                    Some("ws tunnel removed from hub".to_string()),
+                    None,
+                    false,
+                    false,
+                )
+                .await;
+        }
 
         heartbeat.abort();
         writer.abort();
