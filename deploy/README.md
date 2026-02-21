@@ -54,6 +54,7 @@ Before `docker compose up`, both installers run preflight checks for:
 - Release data directory write permission (`ALLOY_POSTGRES_DATA_DIR`)
 - Critical env values present in `.env`
 - Host port conflicts (`release: 10043`, `local: 10043 + 3000`)
+- Docker Compose config validity (`docker compose ... config`)
 
 If a check fails, installers print next-step remediation hints directly in stderr.
 

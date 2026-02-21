@@ -53,7 +53,10 @@ function Fail-WithHelp([string]$message, [string[]]$hints = @()) {
 function Ensure-DirectoryWritable([string]$path, [string]$label) {
   New-Item -ItemType Directory -Path $path -Force | Out-Null
   if (!(Test-Path -Path $path -PathType Container)) {
-    Fail-WithHelp "$label directory is not accessible: $path"
+    Fail-WithHelp "$label directory is not accessible: $path" @(
+      "Check: Get-Item -Force `"$path`"",
+      "Pick a writable -Output path or run in a writable directory."
+    )
   }
 
   $probe = Join-Path $path ".alloy-write-test-$PID.tmp"
@@ -61,7 +64,10 @@ function Ensure-DirectoryWritable([string]$path, [string]$label) {
     Set-Content -Path $probe -Value "probe" -Encoding UTF8 -NoNewline
   }
   catch {
-    Fail-WithHelp "$label directory is not writable: $path" @("Grant write permission and rerun.")
+    Fail-WithHelp "$label directory is not writable: $path" @(
+      "Check: Get-Item -Force `"$path`"",
+      "Grant write permission and rerun."
+    )
   }
   finally {
     Remove-Item -Path $probe -Force -ErrorAction SilentlyContinue
@@ -85,6 +91,7 @@ function Test-PortInUse([int]$port) {
   }
   catch {
     Write-InstallWarn "Skipping port check for $port because active listener query is unavailable."
+    Write-InstallHint "Run PowerShell as Administrator if listener query is blocked by permissions."
     return $false
   }
 
@@ -274,11 +281,18 @@ try {
   Require-Command "docker"
   docker info *> $null
   if ($LASTEXITCODE -ne 0) {
-    Fail-WithHelp "Cannot connect to Docker daemon." @("Start Docker and rerun deploy/install.ps1.")
+    Fail-WithHelp "Cannot connect to Docker daemon." @(
+      "Check: docker info",
+      "Windows: Ensure Docker Desktop is running.",
+      "WSL2: Ensure integration is enabled for your distro."
+    )
   }
   docker compose version *> $null
   if ($LASTEXITCODE -ne 0) {
-    Fail-WithHelp "docker compose plugin is unavailable." @("Install Docker Compose v2 and rerun deploy/install.ps1.")
+    Fail-WithHelp "docker compose plugin is unavailable." @(
+      "Check: docker compose version",
+      "Install Docker Compose v2 (Docker Desktop or compose plugin), then rerun."
+    )
   }
 
   $CurrentStep = "env validation"
@@ -291,6 +305,15 @@ try {
   }
   else {
     Require-EnvValue "ALLOY_POSTGRES_DATA_DIR"
+  }
+
+  $CurrentStep = "compose config preflight"
+  docker compose --env-file $EnvFile -f $Output config *> $null
+  if ($LASTEXITCODE -ne 0) {
+    Fail-WithHelp "docker compose config failed for $Output." @(
+      "Run: docker compose --env-file `"$EnvFile`" -f `"$Output`" config",
+      "Fix the reported error and rerun."
+    )
   }
 
   $CurrentStep = "port preflight"

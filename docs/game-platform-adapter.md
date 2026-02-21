@@ -35,6 +35,7 @@ This project now supports a single-maintainer workflow based on one platform and
    - set `graceful_stdin` when graceful shutdown is supported.
 3. Do not add template wiring in `templates.rs` or port mapping in `game_adapters.rs`; both consume the adapter registry automatically.
 4. Keep shared validation/safety checks centralized in platform modules instead of per-game forks.
+5. Run `cargo test -p alloy-agent` and ensure adapter template contract tests pass.
 
 ## Port Policy Rules
 
@@ -42,6 +43,7 @@ This project now supports a single-maintainer workflow based on one platform and
 - Use `PortProtocol::Tcp` / `PortProtocol::Udp` per field.
 - Use `0` or empty values to trigger auto-allocation; explicit non-zero values are preserved.
 - Multi-port templates are deduplicated within the same protocol during allocation.
+- If a game has both UDP and TCP ports (for example Factorio game port + RCON TCP port), declare both fields in `AdapterTemplate.ports` so they are auto-assigned and persisted consistently.
 
 ## Parameter Schema Rules
 

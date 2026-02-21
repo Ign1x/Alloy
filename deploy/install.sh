@@ -135,12 +135,18 @@ ensure_dir_writable() {
   local label="$2"
   mkdir -p "$dir"
   if [[ ! -d "$dir" ]]; then
-    fail_with_help "$label directory is not accessible: $dir"
+    fail_with_help \
+      "$label directory is not accessible: $dir" \
+      "Check: ls -ld \"$dir\"" \
+      "Pick a writable --output path or run in a writable directory."
   fi
 
   local probe="$dir/.alloy-write-test-$$"
   if ! : > "$probe" 2>/dev/null; then
-    fail_with_help "$label directory is not writable: $dir" "Grant write permission and rerun."
+    fail_with_help \
+      "$label directory is not writable: $dir" \
+      "Check: ls -ld \"$dir\"" \
+      "Grant write permission and rerun."
   fi
   rm -f "$probe"
 }
@@ -189,6 +195,7 @@ check_port_or_exit() {
 
   if ! has_port_probe; then
     log_warn "Skipping port check for $label because ss/lsof/netstat is unavailable."
+    print_hint "Install a port probe tool to enable this check (ss/iproute2, lsof, or net-tools)."
     return
   fi
 
@@ -246,11 +253,24 @@ CURRENT_STEP="directory preflight"
 ensure_dir_writable "$(dirname -- "$OUTPUT")" "compose output"
 ensure_dir_writable "$(dirname -- "$ENV_FILE")" "env"
 
+CURRENT_STEP="dependency preflight"
+require_command awk
+require_command cut
+require_command grep
+require_command head
+require_command tr
+
 rand_hex() {
   local bytes="$1"
   if command -v openssl >/dev/null 2>&1; then
     openssl rand -hex "$bytes"
     return
+  fi
+
+  if ! command -v od >/dev/null 2>&1; then
+    fail_with_help \
+      "Cannot generate random secrets (missing both openssl and od)." \
+      "Install 'openssl' or coreutils (od), then rerun."
   fi
   od -An -N "$bytes" -tx1 /dev/urandom | tr -d ' \n'
 }
@@ -369,10 +389,17 @@ fi
 CURRENT_STEP="docker preflight"
 require_command docker
 if ! docker info >/dev/null 2>&1; then
-  fail_with_help "Cannot connect to Docker daemon." "Start Docker and rerun deploy/install.sh."
+  fail_with_help \
+    "Cannot connect to Docker daemon." \
+    "Check: docker info" \
+    "Linux (systemd): sudo systemctl start docker" \
+    "Linux (permission): sudo usermod -aG docker \"\$(id -un)\" && newgrp docker"
 fi
 if ! docker compose version >/dev/null 2>&1; then
-  fail_with_help "docker compose plugin is unavailable." "Install Docker Compose v2 and rerun deploy/install.sh."
+  fail_with_help \
+    "docker compose plugin is unavailable." \
+    "Check: docker compose version" \
+    "Install Docker Compose v2 (docker compose plugin), then rerun."
 fi
 
 CURRENT_STEP="env validation"
@@ -385,6 +412,14 @@ if [[ "$MODE" == "local" ]]; then
   require_env_value "ALLOY_POSTGRES_PASSWORD"
 else
   require_env_value "ALLOY_POSTGRES_DATA_DIR"
+fi
+
+CURRENT_STEP="compose config preflight"
+if ! docker compose --env-file "$ENV_FILE" -f "$OUTPUT" config >/dev/null; then
+  fail_with_help \
+    "docker compose config failed for $OUTPUT." \
+    "Run: docker compose --env-file \"$ENV_FILE\" -f \"$OUTPUT\" config" \
+    "Fix the reported error and rerun."
 fi
 
 CURRENT_STEP="port preflight"
