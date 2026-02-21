@@ -272,6 +272,47 @@ fn from_adapter_template_param(p: &crate::game_adapter_template::AdapterTemplate
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn adapter_template_param_mapping_preserves_advanced_and_secret() {
+        let p1 = crate::game_adapter_template::AdapterTemplateParam {
+            key: "x",
+            label: "X",
+            kind: TemplateParamKind::SecretString,
+            required: true,
+            default_value: "",
+            enum_values: &[],
+            placeholder: "",
+            help: "",
+            advanced: true,
+        };
+        let out = from_adapter_template_param(&p1);
+        assert_eq!(out.key, "x");
+        assert_eq!(out.advanced, true);
+        assert_eq!(out.secret, true);
+        assert_eq!(out.r#type, ParamType::String as i32);
+
+        let p2 = crate::game_adapter_template::AdapterTemplateParam {
+            key: "p",
+            label: "P",
+            kind: TemplateParamKind::Int { min: 0, max: 10 },
+            required: false,
+            default_value: "5",
+            enum_values: &[],
+            placeholder: "",
+            help: "",
+            advanced: false,
+        };
+        let out2 = from_adapter_template_param(&p2);
+        assert_eq!(out2.r#type, ParamType::Int as i32);
+        assert_eq!(out2.min_int, 0);
+        assert_eq!(out2.max_int, 10);
+    }
+}
+
 fn from_adapter_template(t: &crate::game_adapter_template::AdapterTemplate) -> ProcessTemplate {
     ProcessTemplate {
         template_id: t.template_id.to_string(),

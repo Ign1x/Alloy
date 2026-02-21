@@ -59,10 +59,16 @@ const PORTS_MC_AND_TERRARIA: &[PortField] = &[PortField {
     key: "port",
     protocol: PortProtocol::Tcp,
 }];
-const PORTS_FACTORIO: &[PortField] = &[PortField {
-    key: "port",
-    protocol: PortProtocol::Udp,
-}];
+const PORTS_FACTORIO: &[PortField] = &[
+    PortField {
+        key: "port",
+        protocol: PortProtocol::Udp,
+    },
+    PortField {
+        key: "rcon_port",
+        protocol: PortProtocol::Tcp,
+    },
+];
 const PORTS_PAIR_UDP: &[PortField] = &[
     PortField {
         key: "port",
@@ -165,10 +171,7 @@ const PARAM_MC_MEMORY_MB: AdapterTemplateParam = template_param(
 const PARAM_MC_PORT: AdapterTemplateParam = template_param(
     "port",
     "Port",
-    TemplateParamKind::Int {
-        min: 1024,
-        max: 65535,
-    },
+    TemplateParamKind::Int { min: 0, max: 65535 },
     false,
     "0",
     EMPTY_ENUM,
@@ -268,10 +271,7 @@ const TERRARIA_PARAMS: &[AdapterTemplateParam] = &[
     template_param(
         "port",
         "Port",
-        TemplateParamKind::Int {
-            min: 1024,
-            max: 65535,
-        },
+        TemplateParamKind::Int { min: 0, max: 65535 },
         false,
         "0",
         EMPTY_ENUM,
@@ -1077,4 +1077,157 @@ fn validate_the_forest_vanilla(params: &BTreeMap<String, String>) -> anyhow::Res
 fn validate_sons_of_the_forest_vanilla(params: &BTreeMap<String, String>) -> anyhow::Result<()> {
     let _ = crate::sons_of_the_forest::validate_vanilla_params(params)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn adapter_template_contract_unique_template_ids() {
+        let mut ids = std::collections::HashSet::<&'static str>::new();
+        for t in list_adapter_templates() {
+            assert!(
+                ids.insert(t.template_id),
+                "duplicate template_id: {}",
+                t.template_id
+            );
+        }
+    }
+
+    #[test]
+    fn adapter_template_contract_params_are_well_formed() {
+        for t in list_adapter_templates() {
+            assert!(!t.template_id.trim().is_empty(), "empty template_id");
+            assert!(
+                !t.display_name.trim().is_empty(),
+                "empty display_name for {}",
+                t.template_id
+            );
+            assert!(
+                !t.startup_command.trim().is_empty(),
+                "empty startup_command for {}",
+                t.template_id
+            );
+
+            if let Some(stdin) = t.graceful_stdin {
+                assert!(
+                    !stdin.is_empty(),
+                    "empty graceful_stdin for {}",
+                    t.template_id
+                );
+            }
+
+            let mut keys = std::collections::HashSet::<&'static str>::new();
+            for p in t.params {
+                assert!(
+                    keys.insert(p.key),
+                    "duplicate param key {} in {}",
+                    p.key,
+                    t.template_id
+                );
+                assert!(
+                    !p.key.trim().is_empty(),
+                    "empty param key in {}",
+                    t.template_id
+                );
+                assert!(
+                    !p.label.trim().is_empty(),
+                    "empty label for {}:{}",
+                    t.template_id,
+                    p.key
+                );
+
+                match p.kind {
+                    TemplateParamKind::String | TemplateParamKind::SecretString => {
+                        if !p.enum_values.is_empty() {
+                            assert!(
+                                p.enum_values.iter().any(|v| *v == p.default_value),
+                                "default_value not in enum for {}:{} (default={})",
+                                t.template_id,
+                                p.key,
+                                p.default_value
+                            );
+                        }
+                    }
+                    TemplateParamKind::Bool => {
+                        assert!(
+                            p.default_value == "true" || p.default_value == "false",
+                            "bool default must be \"true\" or \"false\" for {}:{} (default={})",
+                            t.template_id,
+                            p.key,
+                            p.default_value
+                        );
+                    }
+                    TemplateParamKind::Int { min, max } => {
+                        assert!(
+                            min <= max,
+                            "int bounds invalid for {}:{}",
+                            t.template_id,
+                            p.key
+                        );
+                        if !p.default_value.trim().is_empty() {
+                            let dv: i64 = p.default_value.trim().parse().unwrap_or_else(|_| {
+                                panic!(
+                                    "int default is not an integer for {}:{} (default={})",
+                                    t.template_id, p.key, p.default_value
+                                )
+                            });
+                            assert!(
+                                (min..=max).contains(&dv),
+                                "int default out of range for {}:{} (default={} range={}..={})",
+                                t.template_id,
+                                p.key,
+                                dv,
+                                min,
+                                max
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn adapter_template_contract_port_fields_match_int_params() {
+        for t in list_adapter_templates() {
+            let params_by_key: std::collections::BTreeMap<&str, &AdapterTemplateParam> =
+                t.params.iter().map(|p| (p.key, p)).collect();
+
+            let mut seen = std::collections::HashSet::<&'static str>::new();
+            for port in t.ports {
+                assert!(
+                    seen.insert(port.key),
+                    "duplicate port field key {} in {}",
+                    port.key,
+                    t.template_id
+                );
+
+                let p = params_by_key.get(port.key).copied().unwrap_or_else(|| {
+                    panic!(
+                        "port field {} has no corresponding param in {}",
+                        port.key, t.template_id
+                    )
+                });
+
+                match p.kind {
+                    TemplateParamKind::Int { min, max } => {
+                        assert!(
+                            min == 0 && max == 65535,
+                            "port param kind must be Int {{min:0,max:65535}} for {}:{} (got min={}, max={})",
+                            t.template_id,
+                            p.key,
+                            min,
+                            max
+                        );
+                    }
+                    _ => panic!(
+                        "port field {} must map to an Int param in {}",
+                        port.key, t.template_id
+                    ),
+                }
+            }
+        }
+    }
 }
