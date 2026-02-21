@@ -23,8 +23,9 @@ use crate::process_manager::ProcessManager;
 
 const INSTANCES_DIR: &str = "instances";
 const IMPORT_STAGE_VALIDATE: &str = "validate";
-const IMPORT_STAGE_DOWNLOAD: &str = "download";
-const IMPORT_STAGE_COPY: &str = "copy";
+const IMPORT_STAGE_TRANSFER: &str = "transfer";
+const IMPORT_STAGE_DOWNLOAD: &str = IMPORT_STAGE_TRANSFER;
+const IMPORT_STAGE_COPY: &str = IMPORT_STAGE_TRANSFER;
 const IMPORT_STAGE_EXTRACT: &str = "extract";
 const IMPORT_STAGE_INSTALL: &str = "install";
 const IMPORT_STAGE_CLEANUP: &str = "cleanup";
@@ -340,25 +341,47 @@ fn ip_is_private_or_local(ip: IpAddr) -> bool {
 
 fn validate_import_url(url: &Url) -> Result<(), Status> {
     if url.scheme() != "http" && url.scheme() != "https" {
-        return Err(Status::invalid_argument("url must be http(s)"));
+        return Err(Status::invalid_argument(format!(
+            "[{IMPORT_STAGE_VALIDATE}] url must be http(s)"
+        )));
     }
 
     let host = url
         .host_str()
-        .ok_or_else(|| Status::invalid_argument("url host is required"))?;
+        .ok_or_else(|| {
+            Status::invalid_argument(format!(
+                "[{IMPORT_STAGE_VALIDATE}] url host is required"
+            ))
+        })?;
 
     if host.eq_ignore_ascii_case("localhost") {
-        return Err(Status::invalid_argument("url host is not allowed"));
+        return Err(Status::invalid_argument(format!(
+            "[{IMPORT_STAGE_VALIDATE}] url host is not allowed"
+        )));
     }
 
     if let Ok(ip) = host.parse::<IpAddr>()
         && ip_is_private_or_local(ip)
         && !host_allowed_by_env_allowlist(host)
     {
-        return Err(Status::invalid_argument("url host is not allowed"));
+        return Err(Status::invalid_argument(format!(
+            "[{IMPORT_STAGE_VALIDATE}] url host is not allowed"
+        )));
     }
 
     Ok(())
+}
+
+fn invalid_with_stage(stage: &str, message: impl Into<String>) -> Status {
+    Status::invalid_argument(format!("[{stage}] {}", message.into()))
+}
+
+fn internal_with_stage(stage: &str, message: impl Into<String>) -> Status {
+    Status::internal(format!("[{stage}] {}", message.into()))
+}
+
+fn unavailable_with_stage(stage: &str, message: impl Into<String>) -> Status {
+    Status::unavailable(format!("[{stage}] {}", message.into()))
 }
 
 fn ensure_non_empty_file(path: &Path, label: &str) -> anyhow::Result<()> {
@@ -575,20 +598,89 @@ fn status_with_stage(stage: &str, status: Status) -> Status {
     Status::new(status.code(), format!("[{stage}] {}", status.message()))
 }
 
-fn rollback_replace_target(target: &Path, backup: &Option<PathBuf>) {
-    if let Some(backup_path) = backup
-        && !target.exists()
-        && backup_path.exists()
-    {
-        let _ = std::fs::rename(backup_path, target);
-    }
-}
-
 fn cleanup_path_best_effort(path: &Path) {
     if path.is_dir() {
         let _ = std::fs::remove_dir_all(path);
     } else {
         let _ = std::fs::remove_file(path);
+    }
+}
+
+#[derive(Debug)]
+enum ImportRollbackAction {
+    RestoreBackup {
+        target: PathBuf,
+        backup: PathBuf,
+        salvage: PathBuf,
+    },
+}
+
+impl ImportRollbackAction {
+    fn run(self, cleanup_paths: &mut Vec<PathBuf>) {
+        match self {
+            Self::RestoreBackup {
+                target,
+                backup,
+                salvage,
+            } => {
+                if !backup.exists() {
+                    return;
+                }
+
+                if target.exists() {
+                    if std::fs::rename(&target, &salvage).is_ok() {
+                        cleanup_paths.push(salvage);
+                    } else {
+                        cleanup_path_best_effort(&target);
+                    }
+                }
+
+                let _ = std::fs::rename(&backup, &target);
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
+struct ImportTxn {
+    committed: bool,
+    cleanup_paths: Vec<PathBuf>,
+    rollbacks: Vec<ImportRollbackAction>,
+}
+
+impl ImportTxn {
+    fn new() -> Self {
+        Self {
+            committed: false,
+            cleanup_paths: Vec::new(),
+            rollbacks: Vec::new(),
+        }
+    }
+
+    fn commit(&mut self) {
+        self.committed = true;
+    }
+
+    fn cleanup_path(&mut self, path: PathBuf) {
+        self.cleanup_paths.push(path);
+    }
+
+    fn rollback(&mut self, action: ImportRollbackAction) {
+        self.rollbacks.push(action);
+    }
+}
+
+impl Drop for ImportTxn {
+    fn drop(&mut self) {
+        if !self.committed {
+            while let Some(action) = self.rollbacks.pop() {
+                action.run(&mut self.cleanup_paths);
+            }
+        }
+
+        for p in self.cleanup_paths.drain(..) {
+            cleanup_path_best_effort(&p);
+        }
     }
 }
 
@@ -692,232 +784,270 @@ async fn install_save_from_downloaded(
     tokio::task::spawn_blocking(
         move || -> Result<ImportPipelineResult, Status> {
             let nonce = alloy_process::ProcessId::new().0;
-            let mut cleanup_paths: Vec<PathBuf> = vec![download_path.clone()];
+            let mut txn = ImportTxn::new();
+            txn.cleanup_path(download_path.clone());
             let mut extracted = false;
 
-            let result = (|| -> Result<ImportPipelineResult, Status> {
-                if template_id == "minecraft:vanilla"
-                    || template_id == "minecraft:modrinth"
-                    || template_id == "minecraft:import"
-                    || template_id == "minecraft:curseforge"
-                {
-                    let is_zip = is_zip_hint || file_magic_is_zip(&download_path);
-                    if !is_zip {
-                        return Err(Status::invalid_argument(
-                            "[validate] minecraft save import expects a .zip world",
-                        ));
-                    }
+            let backup_target = |txn: &mut ImportTxn, target: &Path, backup_path: &Path| {
+                if !target.exists() {
+                    return Ok(()) as Result<(), Status>;
+                }
 
-                    let extracted_root = imports_dir.join(format!("extracted-{nonce}"));
-                    cleanup_paths.push(extracted_root.clone());
-                    extract_zip_safely(&download_path, &extracted_root).map_err(|e| {
-                        Status::invalid_argument(format!("[extract] failed to extract zip: {e}"))
-                    })?;
-                    extracted = true;
-                    let world_root = find_minecraft_world_root(&extracted_root).map_err(|e| {
-                        Status::invalid_argument(format!("[validate] invalid minecraft world: {e}"))
-                    })?;
-                    validate_minecraft_world_root(&world_root).map_err(|e| {
-                        Status::invalid_argument(format!(
-                            "[validate] invalid minecraft world layout: {e}"
-                        ))
-                    })?;
+                std::fs::rename(target, backup_path).map_err(|e| {
+                    internal_with_stage(
+                        IMPORT_STAGE_INSTALL,
+                        format!("failed to backup existing save: {e}"),
+                    )
+                })?;
 
-                    let level_rel = minecraft_level_rel(&instance_dir);
-                    let level_rel = normalize_rel_path(level_rel.to_string_lossy().as_ref())
-                        .map_err(|e| status_with_stage("validate", e))?;
-                    let target = instance_dir.join(&level_rel);
-                    let target_parent = target.parent().ok_or_else(|| {
-                        Status::invalid_argument("[validate] invalid level-name path")
-                    })?;
-                    std::fs::create_dir_all(target_parent).map_err(|e| {
-                        Status::internal(format!("[install] failed to create world parent: {e}"))
-                    })?;
+                let name = target
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("target");
+                let salvage = imports_dir.join(format!("rollback-{nonce}-{name}"));
+                txn.rollback(ImportRollbackAction::RestoreBackup {
+                    target: target.to_path_buf(),
+                    backup: backup_path.to_path_buf(),
+                    salvage,
+                });
+                Ok(())
+            };
 
-                    let mut backup: Option<PathBuf> = None;
-                    if target.exists() {
-                        let name = target
-                            .file_name()
-                            .and_then(|s| s.to_str())
-                            .unwrap_or("world");
-                        let backup_path = target.with_file_name(format!("{name}_backup_{nonce}"));
-                        std::fs::rename(&target, &backup_path).map_err(|e| {
-                            Status::internal(format!(
-                                "[install] failed to backup existing world: {e}"
-                            ))
-                        })?;
-                        backup = Some(backup_path);
-                    }
-
-                    if let Err(e) = std::fs::rename(&world_root, &target) {
-                        rollback_replace_target(&target, &backup);
-                        return Err(Status::internal(format!(
-                            "[install] failed to install world: {e}"
-                        )));
-                    }
-
-                    let stages = import_pipeline_stages(source_kind, extracted);
-                    return Ok(finalize_import_result(
-                        &template_id,
-                        source_kind,
-                        started_at_unix_ms,
-                        &stages,
-                        target,
-                        backup,
+            let out = if template_id == "minecraft:vanilla"
+                || template_id == "minecraft:modrinth"
+                || template_id == "minecraft:import"
+                || template_id == "minecraft:curseforge"
+            {
+                let is_zip = is_zip_hint || file_magic_is_zip(&download_path);
+                if !is_zip {
+                    return Err(invalid_with_stage(
+                        IMPORT_STAGE_VALIDATE,
+                        "minecraft save import expects a .zip world",
                     ));
                 }
 
-                if template_id == "terraria:vanilla" {
-                    let world_name = params
-                        .get("world_name")
-                        .map(|s| s.trim())
-                        .filter(|s| !s.is_empty())
+                let extracted_root = imports_dir.join(format!("extracted-{nonce}"));
+                txn.cleanup_path(extracted_root.clone());
+                extract_zip_safely(&download_path, &extracted_root).map_err(|e| {
+                    invalid_with_stage(
+                        IMPORT_STAGE_EXTRACT,
+                        format!("failed to extract zip: {e}"),
+                    )
+                })?;
+                extracted = true;
+
+                let world_root = find_minecraft_world_root(&extracted_root).map_err(|e| {
+                    invalid_with_stage(
+                        IMPORT_STAGE_VALIDATE,
+                        format!("invalid minecraft world: {e}"),
+                    )
+                })?;
+                validate_minecraft_world_root(&world_root).map_err(|e| {
+                    invalid_with_stage(
+                        IMPORT_STAGE_VALIDATE,
+                        format!("invalid minecraft world layout: {e}"),
+                    )
+                })?;
+
+                let level_rel = minecraft_level_rel(&instance_dir);
+                let level_rel = normalize_rel_path(level_rel.to_string_lossy().as_ref())
+                    .map_err(|e| status_with_stage(IMPORT_STAGE_VALIDATE, e))?;
+                let target = instance_dir.join(&level_rel);
+                let target_parent = target.parent().ok_or_else(|| {
+                    invalid_with_stage(IMPORT_STAGE_VALIDATE, "invalid level-name path")
+                })?;
+                std::fs::create_dir_all(target_parent).map_err(|e| {
+                    internal_with_stage(
+                        IMPORT_STAGE_INSTALL,
+                        format!("failed to create world parent: {e}"),
+                    )
+                })?;
+
+                let mut backup: Option<PathBuf> = None;
+                if target.exists() {
+                    let name = target
+                        .file_name()
+                        .and_then(|s| s.to_str())
                         .unwrap_or("world");
-                    let worlds_dir = instance_dir.join("worlds");
-                    std::fs::create_dir_all(&worlds_dir).map_err(|e| {
-                        Status::internal(format!("[install] failed to create worlds dir: {e}"))
-                    })?;
-                    let target = worlds_dir.join(format!("{world_name}.wld"));
-
-                    let is_zip = is_zip_hint || file_magic_is_zip(&download_path);
-                    let source_wld = if is_zip {
-                        let extracted_root = imports_dir.join(format!("extracted-{nonce}"));
-                        cleanup_paths.push(extracted_root.clone());
-                        extract_zip_safely(&download_path, &extracted_root).map_err(|e| {
-                            Status::invalid_argument(format!("[extract] failed to extract zip: {e}"))
-                        })?;
-                        extracted = true;
-                        let wld = find_single_terraria_world_file(&extracted_root).map_err(|e| {
-                            Status::invalid_argument(format!("[validate] invalid terraria save: {e}"))
-                        })?;
-                        let staged = imports_dir.join(format!("staged-{nonce}.wld"));
-                        cleanup_paths.push(staged.clone());
-                        let _ = std::fs::remove_file(&staged);
-                        std::fs::rename(&wld, &staged).map_err(|e| {
-                            Status::internal(format!("[extract] failed to stage world: {e}"))
-                        })?;
-                        staged
-                    } else {
-                        if !download_path
-                            .to_string_lossy()
-                            .to_ascii_lowercase()
-                            .ends_with(".wld")
-                        {
-                            return Err(Status::invalid_argument(
-                                "[validate] terraria save must be a .wld file or a zip containing one .wld",
-                            ));
-                        }
-                        ensure_non_empty_file(&download_path, "terraria world (.wld)").map_err(
-                            |e| {
-                                Status::invalid_argument(format!(
-                                    "[validate] invalid terraria save file: {e}"
-                                ))
-                            },
-                        )?;
-                        download_path.clone()
-                    };
-
-                    let mut backup: Option<PathBuf> = None;
-                    if target.exists() {
-                        let backup_path = worlds_dir.join(format!("{world_name}.wld.backup_{nonce}"));
-                        std::fs::rename(&target, &backup_path).map_err(|e| {
-                            Status::internal(format!(
-                                "[install] failed to backup existing world: {e}"
-                            ))
-                        })?;
-                        backup = Some(backup_path);
-                    }
-
-                    if let Err(e) = std::fs::rename(&source_wld, &target) {
-                        rollback_replace_target(&target, &backup);
-                        return Err(Status::internal(format!(
-                            "[install] failed to install world: {e}"
-                        )));
-                    }
-
-                    let stages = import_pipeline_stages(source_kind, extracted);
-                    return Ok(finalize_import_result(
-                        &template_id,
-                        source_kind,
-                        started_at_unix_ms,
-                        &stages,
-                        target,
-                        backup,
-                    ));
+                    let backup_path = target.with_file_name(format!("{name}_backup_{nonce}"));
+                    backup_target(&mut txn, &target, &backup_path)?;
+                    backup = Some(backup_path);
                 }
 
-                if template_id == "dst:vanilla" {
-                    let is_zip = is_zip_hint || file_magic_is_zip(&download_path);
-                    if !is_zip {
-                        return Err(Status::invalid_argument(
-                            "[validate] dst save import expects a .zip cluster (Cluster_1/)",
-                        ));
-                    }
+                std::fs::rename(&world_root, &target).map_err(|e| {
+                    internal_with_stage(
+                        IMPORT_STAGE_INSTALL,
+                        format!("failed to install world: {e}"),
+                    )
+                })?;
 
+                let stages = import_pipeline_stages(source_kind, extracted);
+                finalize_import_result(
+                    &template_id,
+                    source_kind,
+                    started_at_unix_ms,
+                    &stages,
+                    target,
+                    backup,
+                )
+            } else if template_id == "terraria:vanilla" {
+                let world_name = params
+                    .get("world_name")
+                    .map(|s| s.trim())
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or("world");
+                let worlds_dir = instance_dir.join("worlds");
+                std::fs::create_dir_all(&worlds_dir).map_err(|e| {
+                    internal_with_stage(
+                        IMPORT_STAGE_INSTALL,
+                        format!("failed to create worlds dir: {e}"),
+                    )
+                })?;
+                let target = worlds_dir.join(format!("{world_name}.wld"));
+
+                let is_zip = is_zip_hint || file_magic_is_zip(&download_path);
+                let source_wld = if is_zip {
                     let extracted_root = imports_dir.join(format!("extracted-{nonce}"));
-                    cleanup_paths.push(extracted_root.clone());
+                    txn.cleanup_path(extracted_root.clone());
                     extract_zip_safely(&download_path, &extracted_root).map_err(|e| {
-                        Status::invalid_argument(format!("[extract] failed to extract zip: {e}"))
+                        invalid_with_stage(
+                            IMPORT_STAGE_EXTRACT,
+                            format!("failed to extract zip: {e}"),
+                        )
                     })?;
                     extracted = true;
-
-                    let cluster_root = find_dst_cluster_root(&extracted_root)
-                        .map_err(|e| Status::invalid_argument(format!("[validate] invalid dst save: {e}")))?;
-                    validate_dst_cluster_root(&cluster_root).map_err(|e| {
-                        Status::invalid_argument(format!(
-                            "[validate] invalid dst cluster layout: {e}"
-                        ))
+                    let wld = find_single_terraria_world_file(&extracted_root).map_err(|e| {
+                        invalid_with_stage(
+                            IMPORT_STAGE_VALIDATE,
+                            format!("invalid terraria save: {e}"),
+                        )
                     })?;
-
-                    let dst_root = instance_dir.join("klei").join("DoNotStarveTogether");
-                    std::fs::create_dir_all(&dst_root).map_err(|e| {
-                        Status::internal(format!("[install] failed to create dst root: {e}"))
+                    let staged = imports_dir.join(format!("staged-{nonce}.wld"));
+                    txn.cleanup_path(staged.clone());
+                    let _ = std::fs::remove_file(&staged);
+                    std::fs::rename(&wld, &staged).map_err(|e| {
+                        internal_with_stage(
+                            IMPORT_STAGE_EXTRACT,
+                            format!("failed to stage world: {e}"),
+                        )
                     })?;
-
-                    let target = dst_root.join("Cluster_1");
-                    let mut backup: Option<PathBuf> = None;
-                    if target.exists() {
-                        let backup_path = dst_root.join(format!("Cluster_1_backup_{nonce}"));
-                        std::fs::rename(&target, &backup_path).map_err(|e| {
-                            Status::internal(format!(
-                                "[install] failed to backup existing cluster: {e}"
-                            ))
-                        })?;
-                        backup = Some(backup_path);
+                    staged
+                } else {
+                    if !download_path
+                        .to_string_lossy()
+                        .to_ascii_lowercase()
+                        .ends_with(".wld")
+                    {
+                        return Err(invalid_with_stage(
+                            IMPORT_STAGE_VALIDATE,
+                            "terraria save must be a .wld file or a zip containing one .wld",
+                        ));
                     }
+                    ensure_non_empty_file(&download_path, "terraria world (.wld)").map_err(|e| {
+                        invalid_with_stage(
+                            IMPORT_STAGE_VALIDATE,
+                            format!("invalid terraria save file: {e}"),
+                        )
+                    })?;
+                    download_path.clone()
+                };
 
-                    if let Err(e) = std::fs::rename(&cluster_root, &target) {
-                        rollback_replace_target(&target, &backup);
-                        return Err(Status::internal(format!(
-                            "[install] failed to install cluster: {e}"
-                        )));
-                    }
+                let mut backup: Option<PathBuf> = None;
+                if target.exists() {
+                    let backup_path = worlds_dir.join(format!("{world_name}.wld.backup_{nonce}"));
+                    backup_target(&mut txn, &target, &backup_path)?;
+                    backup = Some(backup_path);
+                }
 
-                    let stages = import_pipeline_stages(source_kind, extracted);
-                    return Ok(finalize_import_result(
-                        &template_id,
-                        source_kind,
-                        started_at_unix_ms,
-                        &stages,
-                        target,
-                        backup,
+                std::fs::rename(&source_wld, &target).map_err(|e| {
+                    internal_with_stage(
+                        IMPORT_STAGE_INSTALL,
+                        format!("failed to install world: {e}"),
+                    )
+                })?;
+
+                let stages = import_pipeline_stages(source_kind, extracted);
+                finalize_import_result(
+                    &template_id,
+                    source_kind,
+                    started_at_unix_ms,
+                    &stages,
+                    target,
+                    backup,
+                )
+            } else if template_id == "dst:vanilla" {
+                let is_zip = is_zip_hint || file_magic_is_zip(&download_path);
+                if !is_zip {
+                    return Err(invalid_with_stage(
+                        IMPORT_STAGE_VALIDATE,
+                        "dst save import expects a .zip cluster (Cluster_1/)",
                     ));
                 }
 
-                Err(Status::unimplemented(
-                    "[validate] save import is not supported for this template",
-                ))
-            })();
+                let extracted_root = imports_dir.join(format!("extracted-{nonce}"));
+                txn.cleanup_path(extracted_root.clone());
+                extract_zip_safely(&download_path, &extracted_root).map_err(|e| {
+                    invalid_with_stage(
+                        IMPORT_STAGE_EXTRACT,
+                        format!("failed to extract zip: {e}"),
+                    )
+                })?;
+                extracted = true;
 
-            for p in cleanup_paths {
-                cleanup_path_best_effort(&p);
-            }
+                let cluster_root = find_dst_cluster_root(&extracted_root).map_err(|e| {
+                    invalid_with_stage(IMPORT_STAGE_VALIDATE, format!("invalid dst save: {e}"))
+                })?;
+                validate_dst_cluster_root(&cluster_root).map_err(|e| {
+                    invalid_with_stage(
+                        IMPORT_STAGE_VALIDATE,
+                        format!("invalid dst cluster layout: {e}"),
+                    )
+                })?;
 
-            result
+                let dst_root = instance_dir.join("klei").join("DoNotStarveTogether");
+                std::fs::create_dir_all(&dst_root).map_err(|e| {
+                    internal_with_stage(
+                        IMPORT_STAGE_INSTALL,
+                        format!("failed to create dst root: {e}"),
+                    )
+                })?;
+
+                let target = dst_root.join("Cluster_1");
+                let mut backup: Option<PathBuf> = None;
+                if target.exists() {
+                    let backup_path = dst_root.join(format!("Cluster_1_backup_{nonce}"));
+                    backup_target(&mut txn, &target, &backup_path)?;
+                    backup = Some(backup_path);
+                }
+
+                std::fs::rename(&cluster_root, &target).map_err(|e| {
+                    internal_with_stage(
+                        IMPORT_STAGE_INSTALL,
+                        format!("failed to install cluster: {e}"),
+                    )
+                })?;
+
+                let stages = import_pipeline_stages(source_kind, extracted);
+                finalize_import_result(
+                    &template_id,
+                    source_kind,
+                    started_at_unix_ms,
+                    &stages,
+                    target,
+                    backup,
+                )
+            } else {
+                return Err(Status::unimplemented(format!(
+                    "[{IMPORT_STAGE_VALIDATE}] save import is not supported for this template"
+                )));
+            };
+
+            txn.commit();
+            Ok(out)
         },
     )
     .await
-    .map_err(|e| Status::internal(format!("[pipeline] import task failed: {e}")))?
+    .map_err(|e| internal_with_stage(IMPORT_STAGE_INSTALL, format!("import task failed: {e}")))?
 }
 
 #[derive(Debug, Clone)]
@@ -1061,26 +1191,41 @@ impl InstanceService for InstanceApi {
         request: Request<ImportSaveFromUrlRequest>,
     ) -> Result<Response<ImportSaveFromUrlResponse>, Status> {
         let req = request.into_inner();
-        let id = normalize_instance_id(&req.instance_id).map_err(Status::from)?;
-        ensure_instance_stopped(&self.manager, &id).await?;
+        let id = normalize_instance_id(&req.instance_id)
+            .map_err(|e| status_with_stage(IMPORT_STAGE_VALIDATE, Status::from(e)))?;
+        ensure_instance_stopped(&self.manager, &id)
+            .await
+            .map_err(|e| status_with_stage(IMPORT_STAGE_VALIDATE, e))?;
 
         let url_raw = req.url.trim();
         if url_raw.is_empty() {
-            return Err(Status::invalid_argument("url is required"));
+            return Err(invalid_with_stage(IMPORT_STAGE_VALIDATE, "url is required"));
         }
         let url =
-            Url::parse(url_raw).map_err(|_| Status::invalid_argument("[validate] invalid url"))?;
+            Url::parse(url_raw).map_err(|_| invalid_with_stage(IMPORT_STAGE_VALIDATE, "invalid url"))?;
         validate_import_url(&url)?;
 
-        let inst = load_instance(&id).await?;
+        let inst = load_instance(&id)
+            .await
+            .map_err(|e| status_with_stage(IMPORT_STAGE_VALIDATE, e))?;
         let instance_dir = instance_dir(&id).map_err(Status::from)?;
         tokio::fs::create_dir_all(&instance_dir)
             .await
-            .map_err(|e| Status::internal(format!("failed to create instance dir: {e}")))?;
+            .map_err(|e| {
+                internal_with_stage(
+                    IMPORT_STAGE_DOWNLOAD,
+                    format!("failed to create instance dir: {e}"),
+                )
+            })?;
         let imports_dir = instance_dir.join("imports");
         tokio::fs::create_dir_all(&imports_dir)
             .await
-            .map_err(|e| Status::internal(format!("failed to create imports dir: {e}")))?;
+            .map_err(|e| {
+                internal_with_stage(
+                    IMPORT_STAGE_DOWNLOAD,
+                    format!("failed to create imports dir: {e}"),
+                )
+            })?;
 
         let nonce = alloy_process::ProcessId::new().0;
         let leaf = url
@@ -1111,18 +1256,26 @@ impl InstanceService for InstanceApi {
             .timeout(Duration::from_secs(30 * 60))
             .redirect(reqwest::redirect::Policy::none())
             .build()
-            .map_err(|e| Status::internal(format!("failed to build http client: {e}")))?;
+            .map_err(|e| {
+                internal_with_stage(
+                    IMPORT_STAGE_DOWNLOAD,
+                    format!("failed to build http client: {e}"),
+                )
+            })?;
         let resp = client
             .get(url)
             .send()
             .await
-            .map_err(|e| Status::unavailable(format!("[download] download failed: {e}")))?;
+            .map_err(|e| unavailable_with_stage(IMPORT_STAGE_DOWNLOAD, format!("download failed: {e}")))?;
         let resp = resp
             .error_for_status()
-            .map_err(|e| Status::unavailable(format!("[download] download failed: {e}")))?;
+            .map_err(|e| unavailable_with_stage(IMPORT_STAGE_DOWNLOAD, format!("download failed: {e}")))?;
 
         let mut out = tokio::fs::File::create(&download_path).await.map_err(|e| {
-            Status::internal(format!("[download] failed to create download file: {e}"))
+            internal_with_stage(
+                IMPORT_STAGE_DOWNLOAD,
+                format!("failed to create download file: {e}"),
+            )
         })?;
         let mut total: u64 = 0;
         let mut stream = resp.bytes_stream();
@@ -1131,35 +1284,42 @@ impl InstanceService for InstanceApi {
                 Ok(v) => v,
                 Err(e) => {
                     cleanup_file_best_effort(&download_path).await;
-                    return Err(Status::unavailable(format!(
-                        "[download] download failed: {e}"
-                    )));
+                    return Err(unavailable_with_stage(
+                        IMPORT_STAGE_DOWNLOAD,
+                        format!("download failed: {e}"),
+                    ));
                 }
             };
             total = total.saturating_add(chunk.len() as u64);
             // Hard safety limit: 2GiB.
             if total > 2 * 1024 * 1024 * 1024_u64 {
                 cleanup_file_best_effort(&download_path).await;
-                return Err(Status::invalid_argument("[download] download too large"));
+                return Err(invalid_with_stage(
+                    IMPORT_STAGE_DOWNLOAD,
+                    "download too large",
+                ));
             }
             if let Err(e) = out.write_all(&chunk).await {
                 cleanup_file_best_effort(&download_path).await;
-                return Err(Status::internal(format!(
-                    "[download] failed to write download file: {e}"
-                )));
+                return Err(internal_with_stage(
+                    IMPORT_STAGE_DOWNLOAD,
+                    format!("failed to write download file: {e}"),
+                ));
             }
         }
         if let Err(e) = out.flush().await {
             cleanup_file_best_effort(&download_path).await;
-            return Err(Status::internal(format!(
-                "[download] failed to flush download file: {e}"
-            )));
+            return Err(internal_with_stage(
+                IMPORT_STAGE_DOWNLOAD,
+                format!("failed to flush download file: {e}"),
+            ));
         }
         if let Err(e) = out.sync_all().await {
             cleanup_file_best_effort(&download_path).await;
-            return Err(Status::internal(format!(
-                "[download] failed to sync download file: {e}"
-            )));
+            return Err(internal_with_stage(
+                IMPORT_STAGE_DOWNLOAD,
+                format!("failed to sync download file: {e}"),
+            ));
         }
 
         let res = install_save_from_downloaded(
@@ -1194,41 +1354,64 @@ impl InstanceService for InstanceApi {
         request: Request<ImportSaveFromPathRequest>,
     ) -> Result<Response<ImportSaveFromUrlResponse>, Status> {
         let req = request.into_inner();
-        let id = normalize_instance_id(&req.instance_id).map_err(Status::from)?;
-        ensure_instance_stopped(&self.manager, &id).await?;
+        let id = normalize_instance_id(&req.instance_id)
+            .map_err(|e| status_with_stage(IMPORT_STAGE_VALIDATE, Status::from(e)))?;
+        ensure_instance_stopped(&self.manager, &id)
+            .await
+            .map_err(|e| status_with_stage(IMPORT_STAGE_VALIDATE, e))?;
 
         let rel =
-            normalize_rel_path(req.path.trim()).map_err(|e| status_with_stage("validate", e))?;
+            normalize_rel_path(req.path.trim()).map_err(|e| status_with_stage(IMPORT_STAGE_VALIDATE, e))?;
         if rel.as_os_str().is_empty() {
-            return Err(Status::invalid_argument("[validate] path is required"));
+            return Err(invalid_with_stage(IMPORT_STAGE_VALIDATE, "path is required"));
         }
 
         let source = data_root().join(&rel);
         let meta = tokio::fs::metadata(&source)
             .await
-            .map_err(|_| Status::not_found("[validate] uploaded save not found"))?;
+            .map_err(|_| Status::not_found(format!(
+                "[{IMPORT_STAGE_VALIDATE}] uploaded save not found"
+            )))?;
         if !meta.is_file() {
-            return Err(Status::invalid_argument("[validate] path must be a file"));
+            return Err(invalid_with_stage(IMPORT_STAGE_VALIDATE, "path must be a file"));
         }
 
         let canonical = tokio::fs::canonicalize(&source)
             .await
-            .map_err(|e| Status::internal(format!("failed to resolve upload path: {e}")))?;
+            .map_err(|e| {
+                internal_with_stage(
+                    IMPORT_STAGE_VALIDATE,
+                    format!("failed to resolve upload path: {e}"),
+                )
+            })?;
         if !canonical.starts_with(data_root()) {
-            return Err(Status::invalid_argument(
-                "[validate] path escapes data root",
+            return Err(invalid_with_stage(
+                IMPORT_STAGE_VALIDATE,
+                "path escapes data root",
             ));
         }
 
-        let inst = load_instance(&id).await?;
+        let inst = load_instance(&id)
+            .await
+            .map_err(|e| status_with_stage(IMPORT_STAGE_VALIDATE, e))?;
         let instance_dir = instance_dir(&id).map_err(Status::from)?;
         tokio::fs::create_dir_all(&instance_dir)
             .await
-            .map_err(|e| Status::internal(format!("failed to create instance dir: {e}")))?;
+            .map_err(|e| {
+                internal_with_stage(
+                    IMPORT_STAGE_COPY,
+                    format!("failed to create instance dir: {e}"),
+                )
+            })?;
         let imports_dir = instance_dir.join("imports");
         tokio::fs::create_dir_all(&imports_dir)
             .await
-            .map_err(|e| Status::internal(format!("failed to create imports dir: {e}")))?;
+            .map_err(|e| {
+                internal_with_stage(
+                    IMPORT_STAGE_COPY,
+                    format!("failed to create imports dir: {e}"),
+                )
+            })?;
 
         let nonce = alloy_process::ProcessId::new().0;
         let staged_name = rel
@@ -1247,13 +1430,14 @@ impl InstanceService for InstanceApi {
         let staged_path = imports_dir.join(format!("staged-{nonce}-{staged_name}"));
         if let Err(e) = tokio::fs::copy(&canonical, &staged_path).await {
             cleanup_file_best_effort(&staged_path).await;
-            return Err(Status::internal(format!(
-                "[copy] failed to stage import file: {e}"
-            )));
+            return Err(internal_with_stage(
+                IMPORT_STAGE_COPY,
+                format!("failed to stage import file: {e}"),
+            ));
         }
 
         let is_zip_hint = rel.to_string_lossy().to_ascii_lowercase().ends_with(".zip");
-        let res = install_save_from_downloaded(
+        let result = install_save_from_downloaded(
             inst.template_id.clone(),
             inst.params.clone(),
             ImportSourceKind::Path,
@@ -1262,9 +1446,11 @@ impl InstanceService for InstanceApi {
             imports_dir,
             instance_dir,
         )
-        .await?;
+        .await;
 
         cleanup_file_best_effort(&canonical).await;
+
+        let res = result?;
 
         let message = res.message;
         let installed = rel_to_data_root(&res.installed_path);

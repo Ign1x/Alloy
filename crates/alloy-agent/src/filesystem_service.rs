@@ -55,6 +55,10 @@ impl From<FsPathError> for Status {
 }
 
 fn status_from_io(op: &'static str, err: std::io::Error) -> Status {
+    if is_symlink_nofollow_error(&err) {
+        return Status::invalid_argument(format!("{op}: symlinks are not allowed"));
+    }
+
     match err.kind() {
         std::io::ErrorKind::NotFound => Status::not_found(format!("{op}: not found")),
         std::io::ErrorKind::PermissionDenied => {
@@ -63,9 +67,37 @@ fn status_from_io(op: &'static str, err: std::io::Error) -> Status {
         std::io::ErrorKind::InvalidInput => {
             Status::invalid_argument(format!("{op}: invalid input"))
         }
+        std::io::ErrorKind::AlreadyExists => Status::already_exists(format!("{op}: already exists")),
+        std::io::ErrorKind::NotADirectory | std::io::ErrorKind::IsADirectory => {
+            Status::failed_precondition(format!("{op}: path type mismatch"))
+        }
+        std::io::ErrorKind::ReadOnlyFilesystem => {
+            Status::failed_precondition(format!("{op}: filesystem is read-only"))
+        }
+        std::io::ErrorKind::CrossesDevices => {
+            Status::failed_precondition(format!("{op}: cross-device operation is not supported"))
+        }
         _ => Status::internal(format!("{op}: {err}")),
     }
 }
+
+#[cfg(unix)]
+fn is_symlink_nofollow_error(err: &std::io::Error) -> bool {
+    err.kind() == ErrorKind::Other && err.raw_os_error() == Some(libc::ELOOP)
+}
+
+#[cfg(not(unix))]
+fn is_symlink_nofollow_error(_err: &std::io::Error) -> bool {
+    false
+}
+
+#[cfg(unix)]
+fn apply_open_nofollow(opt: &mut tokio::fs::OpenOptions) {
+    opt.custom_flags(libc::O_NOFOLLOW);
+}
+
+#[cfg(not(unix))]
+fn apply_open_nofollow(_opt: &mut tokio::fs::OpenOptions) {}
 
 fn status_from_mkdir_io(err: std::io::Error) -> Status {
     match err.kind() {
@@ -175,7 +207,7 @@ fn fs_limits() -> FsLimits {
 
 fn fs_write_policy() -> FsWritePolicy {
     FsWritePolicy {
-        atomic_on_truncate_start: env_bool("ALLOY_FS_WRITE_ATOMIC_ON_TRUNCATE", false),
+        atomic_on_truncate_start: env_bool("ALLOY_FS_WRITE_ATOMIC_ON_TRUNCATE", true),
         conflict_detection: env_bool("ALLOY_FS_WRITE_CONFLICT_DETECTION", true),
         require_contiguous_offsets: env_bool("ALLOY_FS_WRITE_REQUIRE_CONTIGUOUS", false),
     }
@@ -460,10 +492,20 @@ impl FilesystemService for FilesystemApi {
             .map_err(|e| status_from_io("failed to read dir entry", e))?
         {
             let name = de.file_name().to_string_lossy().to_string();
-            let m = de
-                .metadata()
+            let ft = de
+                .file_type()
                 .await
                 .map_err(|e| status_from_io("failed to stat dir entry", e))?;
+
+            let m = if ft.is_symlink() {
+                tokio::fs::symlink_metadata(de.path())
+                    .await
+                    .map_err(|e| status_from_io("failed to stat dir entry", e))?
+            } else {
+                de.metadata()
+                    .await
+                    .map_err(|e| status_from_io("failed to stat dir entry", e))?
+            };
             let modified_unix_ms = m
                 .modified()
                 .ok()
@@ -479,8 +521,14 @@ impl FilesystemService for FilesystemApi {
                 .unwrap_or(0);
             entries.push(DirEntry {
                 name,
-                is_dir: m.is_dir(),
-                size_bytes: if m.is_file() { m.len() } else { 0 },
+                is_dir: if ft.is_symlink() { false } else { m.is_dir() },
+                size_bytes: if ft.is_symlink() {
+                    0
+                } else if m.is_file() {
+                    m.len()
+                } else {
+                    0
+                },
                 modified_unix_ms,
             });
         }
@@ -520,19 +568,31 @@ impl FilesystemService for FilesystemApi {
         let remaining = size - offset;
         let to_read = std::cmp::min(remaining, limit) as usize;
 
-        let mut f = tokio::fs::File::open(&path).await.map_err(|e| {
+        let mut open = tokio::fs::OpenOptions::new();
+        open.read(true);
+        apply_open_nofollow(&mut open);
+        let mut f = open.open(&path).await.map_err(|e| {
             log_io_error("read_file", &path, &e);
             status_from_io("failed to open file", e)
         })?;
         f.seek(std::io::SeekFrom::Start(offset))
             .await
-            .map_err(|e| Status::internal(format!("failed to seek: {e}")))?;
+            .map_err(|e| status_from_io("failed to seek", e))?;
 
         let mut buf = vec![0u8; to_read];
         if to_read > 0 {
-            f.read_exact(&mut buf)
-                .await
-                .map_err(|e| Status::internal(format!("failed to read: {e}")))?;
+            let mut read_total = 0usize;
+            while read_total < to_read {
+                let n = f
+                    .read(&mut buf[read_total..])
+                    .await
+                    .map_err(|e| status_from_io("failed to read", e))?;
+                if n == 0 {
+                    break;
+                }
+                read_total = read_total.saturating_add(n);
+            }
+            buf.truncate(read_total);
         }
 
         Ok(Response::new(ReadFileResponse {
@@ -564,6 +624,12 @@ impl FilesystemService for FilesystemApi {
                 "write chunk too large (max {} bytes)",
                 limits.write_max_chunk_bytes
             )));
+        }
+
+        if req.truncate && req.offset != 0 {
+            return Err(Status::failed_precondition(
+                "write conflict: truncate writes must start at offset 0",
+            ));
         }
 
         let parent = ensure_scoped_parent_dir(&req.path, "write_file").await?;
@@ -617,58 +683,160 @@ impl FilesystemService for FilesystemApi {
             }
         }
 
-        if policy.require_contiguous_offsets && req.truncate && req.offset != 0 {
-            return Err(Status::failed_precondition(
-                "write conflict: truncate writes must start at offset 0",
-            ));
-        }
-
-        let atomic_replace = req.offset == 0 && (!req.truncate || policy.atomic_on_truncate_start);
+        let atomic_replace = req.offset == 0 && req.truncate && policy.atomic_on_truncate_start;
 
         if atomic_replace {
-            let tmp = temp_write_path(&path);
-            let mut f = tokio::fs::File::create(&tmp).await.map_err(|e| {
-                log_io_error("write_file", &tmp, &e);
-                status_from_io("failed to create temp file", e)
+            let mut tmp: Option<PathBuf> = None;
+            for _ in 0..5 {
+                let candidate = temp_write_path(&path);
+                let open_res = tokio::fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(&candidate)
+                    .await;
+                match open_res {
+                    Ok(mut f) => {
+                        if let Err(e) = f.write_all(&req.data).await {
+                            log_io_error("write_file", &candidate, &e);
+                            let _ = tokio::fs::remove_file(&candidate).await;
+                            return Err(status_from_io("failed to write", e));
+                        }
+                        if let Err(e) = f.flush().await {
+                            log_io_error("write_file", &candidate, &e);
+                            let _ = tokio::fs::remove_file(&candidate).await;
+                            return Err(status_from_io("failed to flush", e));
+                        }
+                        drop(f);
+                        tmp = Some(candidate);
+                        break;
+                    }
+                    Err(e) if e.kind() == ErrorKind::AlreadyExists => continue,
+                    Err(e) => {
+                        log_io_error("write_file", &candidate, &e);
+                        return Err(status_from_io("failed to create temp file", e));
+                    }
+                }
+            }
+
+            let tmp = tmp.ok_or_else(|| {
+                Status::internal("failed to allocate temp file for atomic write")
             })?;
-            f.write_all(&req.data)
-                .await
-                .map_err(|e| Status::internal(format!("failed to write: {e}")))?;
-            f.flush()
-                .await
-                .map_err(|e| Status::internal(format!("failed to flush: {e}")))?;
-            tokio::fs::rename(&tmp, &path).await.map_err(|e| {
-                log_io_error("write_file", &path, &e);
-                status_from_rename_io(e)
-            })?;
-            return Ok(Response::new(WriteFileResponse { ok: true }));
+
+            if cfg!(windows) && existing_meta.is_some() {
+                let mut backup: Option<PathBuf> = None;
+                for _ in 0..5 {
+                    let candidate = path.with_extension(format!(
+                        "bak-{}-{}",
+                        std::process::id(),
+                        SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .map(|d| d.as_nanos())
+                            .unwrap_or(0)
+                    ));
+                    match tokio::fs::rename(&path, &candidate).await {
+                        Ok(_) => {
+                            backup = Some(candidate);
+                            break;
+                        }
+                        Err(e) if e.kind() == ErrorKind::AlreadyExists => continue,
+                        Err(e) => {
+                            log_io_error("write_file", &path, &e);
+                            let _ = tokio::fs::remove_file(&tmp).await;
+                            return Err(status_from_rename_io(e));
+                        }
+                    }
+                }
+
+                let backup = backup.ok_or_else(|| {
+                    let _ = tokio::fs::remove_file(&tmp);
+                    Status::internal("failed to allocate backup path for atomic write")
+                })?;
+
+                match tokio::fs::rename(&tmp, &path).await {
+                    Ok(_) => {
+                        let _ = tokio::fs::remove_file(&backup).await;
+                        return Ok(Response::new(WriteFileResponse { ok: true }));
+                    }
+                    Err(e) => {
+                        log_io_error("write_file", &path, &e);
+                        let _ = tokio::fs::rename(&backup, &path).await;
+                        let _ = tokio::fs::remove_file(&tmp).await;
+                        return Err(status_from_rename_io(e));
+                    }
+                }
+            }
+
+            match tokio::fs::rename(&tmp, &path).await {
+                Ok(_) => return Ok(Response::new(WriteFileResponse { ok: true })),
+                Err(e) => {
+                    log_io_error("write_file", &path, &e);
+                    let _ = tokio::fs::remove_file(&tmp).await;
+                    return Err(status_from_rename_io(e));
+                }
+            }
         }
 
-        let mut f = tokio::fs::OpenOptions::new()
-            .create(true)
-            .write(true)
-            .open(&path)
-            .await
-            .map_err(|e| {
+        let mut open = tokio::fs::OpenOptions::new();
+        open.write(true);
+
+        let observed_existing_target = existing_meta.is_some();
+        if !observed_existing_target {
+            if policy.conflict_detection {
+                open.create_new(true);
+            } else {
+                open.create(true);
+            }
+        }
+        apply_open_nofollow(&mut open);
+
+        let mut f = open.open(&path).await.map_err(|e| {
+            log_io_error("write_file", &path, &e);
+            if policy.conflict_detection {
+                if existing_meta.is_some() && e.kind() == ErrorKind::NotFound {
+                    return Status::failed_precondition(
+                        "write conflict: target file disappeared",
+                    );
+                }
+                if existing_meta.is_none() && e.kind() == ErrorKind::AlreadyExists {
+                    return Status::failed_precondition("write conflict: target already exists");
+                }
+            }
+            status_from_io("failed to open file", e)
+        })?;
+
+        if policy.conflict_detection && !req.truncate {
+            let m = f.metadata().await.map_err(|e| {
                 log_io_error("write_file", &path, &e);
-                status_from_io("failed to open file", e)
+                status_from_io("failed to stat open file", e)
             })?;
+            let current_size = m.len();
+            if req.offset > current_size {
+                return Err(Status::failed_precondition(
+                    "write conflict: offset beyond current file size",
+                ));
+            }
+            if policy.require_contiguous_offsets && req.offset != current_size {
+                return Err(Status::failed_precondition(
+                    "write conflict: expected contiguous chunk offset",
+                ));
+            }
+        }
 
         if req.truncate {
             f.set_len(0)
                 .await
-                .map_err(|e| Status::internal(format!("failed to truncate: {e}")))?;
+                .map_err(|e| status_from_io("failed to truncate", e))?;
         }
 
         f.seek(std::io::SeekFrom::Start(req.offset))
             .await
-            .map_err(|e| Status::internal(format!("failed to seek: {e}")))?;
+            .map_err(|e| status_from_io("failed to seek", e))?;
         f.write_all(&req.data)
             .await
-            .map_err(|e| Status::internal(format!("failed to write: {e}")))?;
+            .map_err(|e| status_from_io("failed to write", e))?;
         f.flush()
             .await
-            .map_err(|e| Status::internal(format!("failed to flush: {e}")))?;
+            .map_err(|e| status_from_io("failed to flush", e))?;
 
         Ok(Response::new(WriteFileResponse { ok: true }))
     }
