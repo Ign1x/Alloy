@@ -105,6 +105,7 @@ pub enum TunnelReasonCode {
     WsReadClosed,
     WsReadError,
     WsSendFailed,
+    WsHeartbeat,
     WsHeartbeatSendFailed,
     PollStaleTimeout,
     PollMailboxFull,
@@ -126,6 +127,7 @@ impl TunnelReasonCode {
             Self::WsReadClosed => "tunnel.ws.read_closed",
             Self::WsReadError => "tunnel.ws.read_error",
             Self::WsSendFailed => "tunnel.ws.send_failed",
+            Self::WsHeartbeat => "tunnel.ws.heartbeat",
             Self::WsHeartbeatSendFailed => "tunnel.ws.heartbeat_send_failed",
             Self::PollStaleTimeout => "tunnel.poll.stale_timeout",
             Self::PollMailboxFull => "tunnel.poll.mailbox_full",
@@ -1247,14 +1249,14 @@ async fn handle_agent_socket(state: AppState, socket: WebSocket, auth: WsAuth) {
         let writer_hub = state.agent_hub.clone();
         let writer = tokio::spawn(async move {
             while let Some(msg) = rx.recv().await {
-                if sender.send(msg).await.is_err() {
+                if let Err(e) = sender.send(msg).await {
                     writer_hub
                         .record_tunnel_event(
                             &writer_node,
                             TunnelState::Reconnecting,
                             Some(TunnelLinkKind::Ws),
                             TunnelReasonCode::WsSendFailed,
-                            Some("websocket writer send failed".to_string()),
+                            Some(format!("websocket writer send failed: {e}")),
                             None,
                             false,
                             true,
@@ -1285,18 +1287,16 @@ async fn handle_agent_socket(state: AppState, socket: WebSocket, auth: WsAuth) {
             loop {
                 tokio::select! {
                     _ = ping.tick() => {
-                        if heartbeat_tx
-                            .send(Message::Ping(Vec::new().into()))
-                            .await
-                            .is_err()
-                        {
+                        let ts_ms = now_unix_ms();
+                        let payload = ts_ms.to_be_bytes().to_vec();
+                        if let Err(e) = heartbeat_tx.send(Message::Ping(payload.into())).await {
                             heartbeat_hub
                                 .record_tunnel_event(
                                     &heartbeat_node,
                                     TunnelState::Reconnecting,
                                     Some(TunnelLinkKind::Ws),
                                     TunnelReasonCode::WsHeartbeatSendFailed,
-                                    Some("websocket ping send failed".to_string()),
+                                    Some(format!("websocket ping send failed: {e}")),
                                     None,
                                     false,
                                     true,
@@ -1311,10 +1311,9 @@ async fn handle_agent_socket(state: AppState, socket: WebSocket, auth: WsAuth) {
                         }
                     }, if app_keepalive.is_some() => {
                         // App-level keepalive survives some intermediaries that ignore WS control frames.
-                        if heartbeat_tx
+                        if let Err(e) = heartbeat_tx
                             .send(Message::Text("{\"type\":\"keepalive\"}".into()))
                             .await
-                            .is_err()
                         {
                             heartbeat_hub
                                 .record_tunnel_event(
@@ -1322,7 +1321,7 @@ async fn handle_agent_socket(state: AppState, socket: WebSocket, auth: WsAuth) {
                                     TunnelState::Reconnecting,
                                     Some(TunnelLinkKind::Ws),
                                     TunnelReasonCode::WsHeartbeatSendFailed,
-                                    Some("websocket app keepalive send failed".to_string()),
+                                    Some(format!("websocket app keepalive send failed: {e}")),
                                     None,
                                     false,
                                     true,
@@ -1336,7 +1335,9 @@ async fn handle_agent_socket(state: AppState, socket: WebSocket, auth: WsAuth) {
         });
 
         while let Some(msg) = receiver.next().await {
-            let Ok(msg) = msg else {
+            let msg = match msg {
+                Ok(v) => v,
+                Err(e) => {
                 state
                     .agent_hub
                     .record_tunnel_event(
@@ -1344,13 +1345,14 @@ async fn handle_agent_socket(state: AppState, socket: WebSocket, auth: WsAuth) {
                         TunnelState::Reconnecting,
                         Some(TunnelLinkKind::Ws),
                         TunnelReasonCode::WsReadError,
-                        Some("websocket read error".to_string()),
+                        Some(format!("websocket read error: {e}")),
                         None,
                         false,
                         true,
                     )
                     .await;
                 break;
+                }
             };
             match msg {
                 Message::Text(text) => {
@@ -1408,8 +1410,39 @@ async fn handle_agent_socket(state: AppState, socket: WebSocket, auth: WsAuth) {
                 Message::Ping(payload) => {
                     let _ = ws_tx.send(Message::Pong(payload)).await;
                 }
-                Message::Pong(_) => {}
-                Message::Close(_) => {
+                Message::Pong(payload) => {
+                    let now_ms = now_unix_ms();
+                    let rtt_ms = if payload.len() >= 8 {
+                        let mut buf = [0u8; 8];
+                        buf.copy_from_slice(&payload[..8]);
+                        let sent_ms = u64::from_be_bytes(buf);
+                        now_ms.checked_sub(sent_ms)
+                    } else {
+                        None
+                    };
+                    let detail = match rtt_ms {
+                        Some(v) => format!("ws heartbeat pong rtt_ms={v}"),
+                        None => format!("ws heartbeat pong payload_len={}", payload.len()),
+                    };
+                    state
+                        .agent_hub
+                        .record_tunnel_event(
+                            &node,
+                            TunnelState::Connected,
+                            Some(TunnelLinkKind::Ws),
+                            TunnelReasonCode::WsHeartbeat,
+                            Some(detail),
+                            rtt_ms,
+                            true,
+                            false,
+                        )
+                        .await;
+                }
+                Message::Close(frame) => {
+                    let detail = frame
+                        .as_ref()
+                        .map(|v| format!("websocket peer closed: code={} reason={}", v.code, v.reason))
+                        .unwrap_or_else(|| "websocket peer closed".to_string());
                     state
                         .agent_hub
                         .record_tunnel_event(
@@ -1417,7 +1450,7 @@ async fn handle_agent_socket(state: AppState, socket: WebSocket, auth: WsAuth) {
                             TunnelState::Reconnecting,
                             Some(TunnelLinkKind::Ws),
                             TunnelReasonCode::WsReadClosed,
-                            Some("websocket peer closed".to_string()),
+                            Some(detail),
                             None,
                             false,
                             true,

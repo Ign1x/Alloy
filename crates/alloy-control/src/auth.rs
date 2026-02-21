@@ -16,6 +16,7 @@ use alloy_db::sea_orm::{
 use sea_orm::prelude::Expr;
 use sea_orm::prelude::Uuid;
 
+use crate::request_meta::RequestMeta;
 use crate::state::AppState;
 
 pub const CSRF_COOKIE_NAME: &str = "csrf";
@@ -27,6 +28,8 @@ pub struct AuthErrorBody {
     pub code: String,
     pub message: String,
     pub source: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -79,7 +82,7 @@ pub fn auth_error_response(
     code: impl Into<String>,
     message: impl Into<String>,
 ) -> Response {
-    auth_error_response_with_context(status, code, message, "auth", None, None)
+    auth_error_response_with_context(status, code, message, "auth", None, None, None)
 }
 
 pub fn auth_error_response_with_context(
@@ -87,6 +90,7 @@ pub fn auth_error_response_with_context(
     code: impl Into<String>,
     message: impl Into<String>,
     source: impl Into<String>,
+    request_id: Option<String>,
     reason: Option<String>,
     window_seconds: Option<i64>,
 ) -> Response {
@@ -96,6 +100,7 @@ pub fn auth_error_response_with_context(
             code: code.into(),
             message: message.into(),
             source: source.into(),
+            request_id,
             reason,
             window_seconds,
         }),
@@ -103,11 +108,8 @@ pub fn auth_error_response_with_context(
         .into_response()
 }
 
-fn json_error(code: StatusCode, message: impl Into<String>) -> Response {
-    auth_error_response(code, default_auth_error_code(code), message)
-}
-
-fn json_error_code_with_context(
+fn json_error_code_with_meta(
+    meta: &RequestMeta,
     status: StatusCode,
     error_code: &'static str,
     message: impl Into<String>,
@@ -119,8 +121,25 @@ fn json_error_code_with_context(
         error_code,
         message,
         source,
+        Some(meta.request_id.clone()),
         Some(error_code.to_string()),
         window_seconds,
+    )
+}
+
+fn json_error_with_meta(
+    meta: &RequestMeta,
+    status: StatusCode,
+    message: impl Into<String>,
+) -> Response {
+    auth_error_response_with_context(
+        status,
+        default_auth_error_code(status),
+        message,
+        "auth",
+        Some(meta.request_id.clone()),
+        None,
+        None,
     )
 }
 
@@ -360,6 +379,7 @@ fn make_access_jwt(user: &alloy_db::entities::users::Model) -> anyhow::Result<St
 
 pub async fn login(
     State(state): State<AppState>,
+    axum::extract::Extension(meta): axum::extract::Extension<RequestMeta>,
     jar: CookieJar,
     Json(input): Json<LoginRequest>,
 ) -> impl IntoResponse {
@@ -371,7 +391,24 @@ pub async fn login(
             Some(LOGIN_RISK_WINDOW_SECONDS),
             None,
         );
-        return json_error_code_with_context(
+        let ctx = crate::rpc::Ctx {
+            db: state.db.clone(),
+            agent_hub: state.agent_hub.clone(),
+            user: None,
+            request_id: meta.request_id.clone(),
+        };
+        crate::audit::record_auth_failure(
+            &ctx,
+            "auth.login.failed",
+            "auth",
+            "login_input_invalid",
+            "auth.login",
+            Some(LOGIN_RISK_WINDOW_SECONDS),
+            &meta,
+        )
+        .await;
+        return json_error_code_with_meta(
+            &meta,
             StatusCode::BAD_REQUEST,
             "login_input_invalid",
             "username and password are required",
@@ -395,10 +432,27 @@ pub async fn login(
                 Some(LOGIN_RISK_WINDOW_SECONDS),
                 None,
             );
-            return json_error(StatusCode::UNAUTHORIZED, "invalid credentials").into_response();
+            let ctx = crate::rpc::Ctx {
+                db: state.db.clone(),
+                agent_hub: state.agent_hub.clone(),
+                user: None,
+                request_id: meta.request_id.clone(),
+            };
+            crate::audit::record_auth_failure(
+                &ctx,
+                "auth.login.failed",
+                "auth",
+                "login_invalid_credentials",
+                "auth.login",
+                Some(LOGIN_RISK_WINDOW_SECONDS),
+                &meta,
+            )
+            .await;
+            return json_error_with_meta(&meta, StatusCode::UNAUTHORIZED, "invalid credentials")
+                .into_response();
         }
         Err(e) => {
-            return json_error(StatusCode::INTERNAL_SERVER_ERROR, format!("db error: {e}"))
+            return json_error_with_meta(&meta, StatusCode::INTERNAL_SERVER_ERROR, format!("db error: {e}"))
                 .into_response();
         }
     };
@@ -410,13 +464,34 @@ pub async fn login(
             Some(LOGIN_RISK_WINDOW_SECONDS),
             Some(user.id),
         );
-        return json_error(StatusCode::UNAUTHORIZED, "invalid credentials").into_response();
+        let ctx = crate::rpc::Ctx {
+            db: state.db.clone(),
+            agent_hub: state.agent_hub.clone(),
+            user: Some(crate::rpc::AuthUser {
+                user_id: user.id.to_string(),
+                username: user.username.clone(),
+                is_admin: user.is_admin,
+            }),
+            request_id: meta.request_id.clone(),
+        };
+        crate::audit::record_auth_failure(
+            &ctx,
+            "auth.login.failed",
+            "auth",
+            "login_invalid_credentials",
+            "auth.login",
+            Some(LOGIN_RISK_WINDOW_SECONDS),
+            &meta,
+        )
+        .await;
+        return json_error_with_meta(&meta, StatusCode::UNAUTHORIZED, "invalid credentials")
+            .into_response();
     }
 
     let access = match make_access_jwt(&user) {
         Ok(v) => v,
         Err(e) => {
-            return json_error(StatusCode::INTERNAL_SERVER_ERROR, format!("jwt error: {e}"))
+            return json_error_with_meta(&meta, StatusCode::INTERNAL_SERVER_ERROR, format!("jwt error: {e}"))
                 .into_response();
         }
     };
@@ -438,7 +513,7 @@ pub async fn login(
         .exec(db)
         .await
     {
-        return json_error(StatusCode::INTERNAL_SERVER_ERROR, format!("db error: {e}"))
+        return json_error_with_meta(&meta, StatusCode::INTERNAL_SERVER_ERROR, format!("db error: {e}"))
             .into_response();
     }
 
@@ -457,46 +532,57 @@ pub async fn login(
         .into_response()
 }
 
-pub async fn whoami(State(_state): State<AppState>, jar: CookieJar) -> impl IntoResponse {
+pub async fn whoami(
+    State(_state): State<AppState>,
+    axum::extract::Extension(meta): axum::extract::Extension<RequestMeta>,
+    jar: CookieJar,
+) -> impl IntoResponse {
     let token = match jar.get(ACCESS_COOKIE_NAME) {
         Some(c) => c.value().to_string(),
         None => {
-            return json_error(StatusCode::UNAUTHORIZED, "missing access token").into_response();
+            return json_error_with_meta(&meta, StatusCode::UNAUTHORIZED, "missing access token")
+                .into_response();
         }
     };
 
     match validate_access_jwt(&token) {
         Ok(me) => (StatusCode::OK, Json(me)).into_response(),
-        Err(_) => json_error(StatusCode::UNAUTHORIZED, "invalid access token").into_response(),
+        Err(_) => json_error_with_meta(&meta, StatusCode::UNAUTHORIZED, "invalid access token")
+            .into_response(),
     }
 }
 
 pub async fn change_credentials(
     State(state): State<AppState>,
+    axum::extract::Extension(meta): axum::extract::Extension<RequestMeta>,
     jar: CookieJar,
     Json(input): Json<ChangeCredentialsRequest>,
 ) -> impl IntoResponse {
     if is_read_only() {
-        return json_error(StatusCode::FORBIDDEN, "control is in read-only mode").into_response();
+        return json_error_with_meta(&meta, StatusCode::FORBIDDEN, "control is in read-only mode")
+            .into_response();
     }
 
     let token = match jar.get(ACCESS_COOKIE_NAME) {
         Some(c) => c.value().to_string(),
         None => {
-            return json_error(StatusCode::UNAUTHORIZED, "missing access token").into_response();
+            return json_error_with_meta(&meta, StatusCode::UNAUTHORIZED, "missing access token")
+                .into_response();
         }
     };
 
     let me = match validate_access_jwt(&token) {
         Ok(me) => me,
         Err(_) => {
-            return json_error(StatusCode::UNAUTHORIZED, "invalid access token").into_response();
+            return json_error_with_meta(&meta, StatusCode::UNAUTHORIZED, "invalid access token")
+                .into_response();
         }
     };
 
     let current_password = input.current_password;
     if current_password.trim().is_empty() {
-        return json_error(StatusCode::BAD_REQUEST, "current password is required").into_response();
+        return json_error_with_meta(&meta, StatusCode::BAD_REQUEST, "current password is required")
+            .into_response();
     }
 
     let next_username = input
@@ -506,7 +592,8 @@ pub async fn change_credentials(
     let next_password = input.new_password.filter(|v| !v.is_empty());
 
     if next_username.is_none() && next_password.is_none() {
-        return json_error(
+        return json_error_with_meta(
+            &meta,
             StatusCode::BAD_REQUEST,
             "new username or password is required",
         )
@@ -516,7 +603,8 @@ pub async fn change_credentials(
     let user_id = match Uuid::parse_str(&me.user_id) {
         Ok(v) => v,
         Err(_) => {
-            return json_error(StatusCode::UNAUTHORIZED, "invalid access token").into_response();
+            return json_error_with_meta(&meta, StatusCode::UNAUTHORIZED, "invalid access token")
+                .into_response();
         }
     };
 
@@ -526,15 +614,19 @@ pub async fn change_credentials(
         .await
     {
         Ok(Some(u)) => u,
-        Ok(None) => return json_error(StatusCode::UNAUTHORIZED, "user not found").into_response(),
+        Ok(None) => {
+            return json_error_with_meta(&meta, StatusCode::UNAUTHORIZED, "user not found")
+                .into_response();
+        }
         Err(e) => {
-            return json_error(StatusCode::INTERNAL_SERVER_ERROR, format!("db error: {e}"))
+            return json_error_with_meta(&meta, StatusCode::INTERNAL_SERVER_ERROR, format!("db error: {e}"))
                 .into_response();
         }
     };
 
     if !verify_password(&user.password_hash, &current_password) {
-        return json_error(StatusCode::UNAUTHORIZED, "invalid current password").into_response();
+        return json_error_with_meta(&meta, StatusCode::UNAUTHORIZED, "invalid current password")
+            .into_response();
     }
 
     let mut active: alloy_db::entities::users::ActiveModel = user.clone().into();
@@ -550,13 +642,14 @@ pub async fn change_credentials(
             {
                 Ok(v) => v.is_some(),
                 Err(e) => {
-                    return json_error(StatusCode::INTERNAL_SERVER_ERROR, format!("db error: {e}"))
+                    return json_error_with_meta(&meta, StatusCode::INTERNAL_SERVER_ERROR, format!("db error: {e}"))
                         .into_response();
                 }
             };
 
             if exists {
-                return json_error(StatusCode::CONFLICT, "username already exists").into_response();
+                return json_error_with_meta(&meta, StatusCode::CONFLICT, "username already exists")
+                    .into_response();
             }
 
             active.username = Set(username);
@@ -568,7 +661,8 @@ pub async fn change_credentials(
         let hash = match hash_password(&password) {
             Ok(v) => v,
             Err(e) => {
-                return json_error(
+                return json_error_with_meta(
+                    &meta,
                     StatusCode::INTERNAL_SERVER_ERROR,
                     format!("hash error: {e}"),
                 )
@@ -580,8 +674,12 @@ pub async fn change_credentials(
     }
 
     if !changed {
-        return json_error(StatusCode::BAD_REQUEST, "no credential changes detected")
-            .into_response();
+        return json_error_with_meta(
+            &meta,
+            StatusCode::BAD_REQUEST,
+            "no credential changes detected",
+        )
+        .into_response();
     }
 
     let updated = match active.update(db).await {
@@ -591,9 +689,10 @@ pub async fn change_credentials(
             if message.contains("idx_users_username_unique")
                 || message.contains("UNIQUE constraint failed: users.username")
             {
-                return json_error(StatusCode::CONFLICT, "username already exists").into_response();
+                return json_error_with_meta(&meta, StatusCode::CONFLICT, "username already exists")
+                    .into_response();
             }
-            return json_error(StatusCode::INTERNAL_SERVER_ERROR, format!("db error: {e}"))
+            return json_error_with_meta(&meta, StatusCode::INTERNAL_SERVER_ERROR, format!("db error: {e}"))
                 .into_response();
         }
     };
@@ -601,7 +700,7 @@ pub async fn change_credentials(
     let access = match make_access_jwt(&updated) {
         Ok(v) => v,
         Err(e) => {
-            return json_error(StatusCode::INTERNAL_SERVER_ERROR, format!("jwt error: {e}"))
+            return json_error_with_meta(&meta, StatusCode::INTERNAL_SERVER_ERROR, format!("jwt error: {e}"))
                 .into_response();
         }
     };
@@ -639,12 +738,17 @@ pub async fn logout(State(state): State<AppState>, jar: CookieJar) -> impl IntoR
     (jar, StatusCode::NO_CONTENT).into_response()
 }
 
-pub async fn refresh(State(state): State<AppState>, jar: CookieJar) -> impl IntoResponse {
+pub async fn refresh(
+    State(state): State<AppState>,
+    axum::extract::Extension(meta): axum::extract::Extension<RequestMeta>,
+    jar: CookieJar,
+) -> impl IntoResponse {
     let db = &*state.db;
     let refresh_cookie = match jar.get(REFRESH_COOKIE_NAME) {
         Some(c) => c.value().to_string(),
         None => {
-            return json_error(StatusCode::UNAUTHORIZED, "missing refresh token").into_response();
+            return json_error_with_meta(&meta, StatusCode::UNAUTHORIZED, "missing refresh token")
+                .into_response();
         }
     };
     let h = hash_refresh_token(&refresh_cookie);
@@ -663,7 +767,24 @@ pub async fn refresh(State(state): State<AppState>, jar: CookieJar) -> impl Into
                 Some(SESSION_RISK_WINDOW_SECONDS),
                 None,
             );
-            return json_error_code_with_context(
+            let ctx = crate::rpc::Ctx {
+                db: state.db.clone(),
+                agent_hub: state.agent_hub.clone(),
+                user: None,
+                request_id: meta.request_id.clone(),
+            };
+            crate::audit::record_auth_failure(
+                &ctx,
+                "auth.refresh.failed",
+                "auth",
+                "refresh_token_invalid",
+                "auth.refresh",
+                Some(SESSION_RISK_WINDOW_SECONDS),
+                &meta,
+            )
+            .await;
+            return json_error_code_with_meta(
+                &meta,
                 StatusCode::UNAUTHORIZED,
                 "refresh_token_invalid",
                 "invalid refresh token",
@@ -673,8 +794,12 @@ pub async fn refresh(State(state): State<AppState>, jar: CookieJar) -> impl Into
             .into_response();
         }
         Err(e) => {
-            return json_error(StatusCode::INTERNAL_SERVER_ERROR, format!("db error: {e}"))
-                .into_response();
+            return json_error_with_meta(
+                &meta,
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("db error: {e}"),
+            )
+            .into_response();
         }
     };
 
@@ -685,7 +810,28 @@ pub async fn refresh(State(state): State<AppState>, jar: CookieJar) -> impl Into
             Some(SESSION_RISK_WINDOW_SECONDS),
             Some(token.user_id),
         );
-        return json_error_code_with_context(
+        let ctx = crate::rpc::Ctx {
+            db: state.db.clone(),
+            agent_hub: state.agent_hub.clone(),
+            user: Some(crate::rpc::AuthUser {
+                user_id: token.user_id.to_string(),
+                username: String::new(),
+                is_admin: false,
+            }),
+            request_id: meta.request_id.clone(),
+        };
+        crate::audit::record_auth_failure(
+            &ctx,
+            "auth.refresh.failed",
+            "auth",
+            "refresh_token_revoked",
+            "auth.refresh",
+            Some(SESSION_RISK_WINDOW_SECONDS),
+            &meta,
+        )
+        .await;
+        return json_error_code_with_meta(
+            &meta,
             StatusCode::UNAUTHORIZED,
             "refresh_token_revoked",
             "refresh token revoked",
@@ -706,8 +852,12 @@ pub async fn refresh(State(state): State<AppState>, jar: CookieJar) -> impl Into
             .exec(db)
             .await
         {
-            return json_error(StatusCode::INTERNAL_SERVER_ERROR, format!("db error: {e}"))
-                .into_response();
+            return json_error_with_meta(
+                &meta,
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("db error: {e}"),
+            )
+            .into_response();
         }
 
         audit_security_event(
@@ -724,12 +874,34 @@ pub async fn refresh(State(state): State<AppState>, jar: CookieJar) -> impl Into
             Some(token.user_id),
         );
 
+        let ctx = crate::rpc::Ctx {
+            db: state.db.clone(),
+            agent_hub: state.agent_hub.clone(),
+            user: Some(crate::rpc::AuthUser {
+                user_id: token.user_id.to_string(),
+                username: String::new(),
+                is_admin: false,
+            }),
+            request_id: meta.request_id.clone(),
+        };
+        crate::audit::record_auth_failure(
+            &ctx,
+            "auth.refresh.failed",
+            "auth",
+            "refresh_token_reuse_detected",
+            "auth.refresh",
+            Some(SESSION_RISK_WINDOW_SECONDS),
+            &meta,
+        )
+        .await;
+
         let jar = jar
             .remove(clear_cookie(ACCESS_COOKIE_NAME, "/"))
             .remove(clear_cookie(REFRESH_COOKIE_NAME, "/auth/refresh"));
         return (
             jar,
-            json_error_code_with_context(
+            json_error_code_with_meta(
+                &meta,
                 StatusCode::UNAUTHORIZED,
                 "refresh_token_reuse_detected",
                 "refresh token reuse detected; all sessions invalidated",
@@ -746,7 +918,28 @@ pub async fn refresh(State(state): State<AppState>, jar: CookieJar) -> impl Into
             Some(SESSION_RISK_WINDOW_SECONDS),
             Some(token.user_id),
         );
-        return json_error_code_with_context(
+        let ctx = crate::rpc::Ctx {
+            db: state.db.clone(),
+            agent_hub: state.agent_hub.clone(),
+            user: Some(crate::rpc::AuthUser {
+                user_id: token.user_id.to_string(),
+                username: String::new(),
+                is_admin: false,
+            }),
+            request_id: meta.request_id.clone(),
+        };
+        crate::audit::record_auth_failure(
+            &ctx,
+            "auth.refresh.failed",
+            "auth",
+            "refresh_token_expired",
+            "auth.refresh",
+            Some(SESSION_RISK_WINDOW_SECONDS),
+            &meta,
+        )
+        .await;
+        return json_error_code_with_meta(
+            &meta,
             StatusCode::UNAUTHORIZED,
             "refresh_token_expired",
             "refresh token expired",
@@ -761,8 +954,12 @@ pub async fn refresh(State(state): State<AppState>, jar: CookieJar) -> impl Into
     let mut active: alloy_db::entities::refresh_tokens::ActiveModel = token.into();
     active.rotated_at = Set(Some(chrono::Utc::now().into()));
     if let Err(e) = active.update(db).await {
-        return json_error(StatusCode::INTERNAL_SERVER_ERROR, format!("db error: {e}"))
-            .into_response();
+        return json_error_with_meta(
+            &meta,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("db error: {e}"),
+        )
+        .into_response();
     }
 
     let user = match alloy_db::entities::users::Entity::find_by_id(user_id)
@@ -770,14 +967,21 @@ pub async fn refresh(State(state): State<AppState>, jar: CookieJar) -> impl Into
         .await
     {
         Ok(Some(u)) => u,
-        _ => return json_error(StatusCode::UNAUTHORIZED, "user not found").into_response(),
+        _ => {
+            return json_error_with_meta(&meta, StatusCode::UNAUTHORIZED, "user not found")
+                .into_response();
+        }
     };
 
     let access = match make_access_jwt(&user) {
         Ok(v) => v,
         Err(e) => {
-            return json_error(StatusCode::INTERNAL_SERVER_ERROR, format!("jwt error: {e}"))
-                .into_response();
+            return json_error_with_meta(
+                &meta,
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("jwt error: {e}"),
+            )
+            .into_response();
         }
     };
 
@@ -797,8 +1001,12 @@ pub async fn refresh(State(state): State<AppState>, jar: CookieJar) -> impl Into
         .exec(db)
         .await
     {
-        return json_error(StatusCode::INTERNAL_SERVER_ERROR, format!("db error: {e}"))
-            .into_response();
+        return json_error_with_meta(
+            &meta,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("db error: {e}"),
+        )
+        .into_response();
     }
 
     let jar = jar
