@@ -10,7 +10,7 @@ use anyhow::Context;
 use serde::Serialize;
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
-    process::{ChildStdin, Command},
+    process::{Child, ChildStdin, Command},
     sync::Mutex,
     sync::mpsc,
 };
@@ -1352,7 +1352,10 @@ async fn set_entry_message(
 }
 
 fn process_exit_with_code_message(code: Option<i32>) -> String {
-    format!("exited with code {}", code.unwrap_or_default())
+    match code {
+        Some(v) => format!("exited with code {v}"),
+        None => "exited (no code)".to_string(),
+    }
 }
 
 fn restart_scheduled_message(delay_ms: u64, attempt: u32, max_retries: u32) -> String {
@@ -1369,6 +1372,36 @@ fn restart_limit_reached_message(attempts: u32, max_retries: u32) -> String {
     )
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DesiredState {
+    Running,
+    Stopped,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RestartStatus {
+    None,
+    Scheduled {
+        nonce: u64,
+        delay_ms: u64,
+        attempt: u32,
+        max_retries: u32,
+    },
+    SkippedLimit {
+        attempts: u32,
+        max_retries: u32,
+    },
+    Cancelled,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct RestartSchedule {
+    nonce: u64,
+    delay: Duration,
+    attempt: u32,
+    max_retries: u32,
+}
+
 #[derive(Debug)]
 struct ProcessEntry {
     template_id: ProcessTemplateId,
@@ -1377,6 +1410,7 @@ struct ProcessEntry {
     resources: Option<alloy_process::ProcessResources>,
     exit_code: Option<i32>,
     message: Option<String>,
+    exit_reason: Option<String>,
     restart: RestartConfig,
     restart_attempts: u32,
     stdin: Option<ChildStdin>,
@@ -1384,11 +1418,309 @@ struct ProcessEntry {
     pgid: Option<i32>,
     logs: Arc<Mutex<LogBuffer>>,
     log_file_tx: Option<mpsc::UnboundedSender<String>>,
+    desired: DesiredState,
+    restart_nonce: u64,
+    restart_status: RestartStatus,
+}
+
+fn terminal_message(exit_reason: &str, restart: RestartStatus) -> String {
+    match restart {
+        RestartStatus::None => exit_reason.to_string(),
+        RestartStatus::Scheduled {
+            delay_ms,
+            attempt,
+            max_retries,
+            ..
+        } => format!(
+            "{exit_reason}; {}",
+            restart_scheduled_message(delay_ms, attempt, max_retries)
+        ),
+        RestartStatus::SkippedLimit {
+            attempts,
+            max_retries,
+        } => format!(
+            "{exit_reason}; {}",
+            restart_limit_reached_message(attempts, max_retries)
+        ),
+        RestartStatus::Cancelled => format!("{exit_reason}; restart cancelled (stop requested)"),
+    }
+}
+
+fn entry_message(e: &ProcessEntry) -> Option<String> {
+    if matches!(e.state, ProcessState::Exited | ProcessState::Failed) {
+        let reason = e
+            .exit_reason
+            .as_deref()
+            .or_else(|| e.message.as_deref())
+            .unwrap_or("");
+        if reason.trim().is_empty() {
+            return None;
+        }
+        return Some(terminal_message(reason, e.restart_status));
+    }
+
+    e.message.clone()
+}
+
+fn apply_exit_and_maybe_schedule_restart(
+    e: &mut ProcessEntry,
+    res: &Result<std::process::ExitStatus, std::io::Error>,
+    runtime: Duration,
+) -> Option<RestartSchedule> {
+    e.message = None;
+    e.exit_reason = None;
+    e.restart_status = RestartStatus::None;
+
+    let stopping = matches!(e.state, ProcessState::Stopping);
+    let early_exit = runtime < early_exit_threshold();
+
+    let exit_reason = match res {
+        Ok(status) => {
+            e.exit_code = status.code();
+
+            if stopping {
+                e.state = ProcessState::Exited;
+                "stopped".to_string()
+            } else if early_exit {
+                e.state = ProcessState::Failed;
+                format!("exited too quickly ({}ms)", runtime.as_millis())
+            } else if status.success() {
+                e.state = ProcessState::Exited;
+                "exited".to_string()
+            } else {
+                e.state = ProcessState::Failed;
+                process_exit_with_code_message(status.code())
+            }
+        }
+        Err(err) => {
+            e.exit_code = None;
+            e.state = ProcessState::Failed;
+            format!("wait failed: {err}")
+        }
+    };
+
+    e.exit_reason = Some(exit_reason);
+
+    if !stopping && !early_exit {
+        e.restart_attempts = 0;
+    }
+
+    if stopping || e.desired != DesiredState::Running {
+        return None;
+    }
+
+    let is_failure = matches!(e.state, ProcessState::Failed) || e.exit_code.is_some_and(|c| c != 0);
+    let should_restart = match e.restart.policy {
+        RestartPolicy::Off => false,
+        RestartPolicy::Always => true,
+        RestartPolicy::OnFailure => is_failure,
+    };
+    if !should_restart {
+        return None;
+    }
+
+    if e.restart_attempts >= e.restart.max_retries {
+        e.restart_status = RestartStatus::SkippedLimit {
+            attempts: e.restart_attempts,
+            max_retries: e.restart.max_retries,
+        };
+        return None;
+    }
+
+    e.restart_attempts = e.restart_attempts.saturating_add(1);
+    let delay_ms = compute_backoff_ms(e.restart, e.restart_attempts);
+
+    e.restart_nonce = e.restart_nonce.saturating_add(1);
+    let nonce = e.restart_nonce;
+    e.restart_status = RestartStatus::Scheduled {
+        nonce,
+        delay_ms,
+        attempt: e.restart_attempts,
+        max_retries: e.restart.max_retries,
+    };
+
+    Some(RestartSchedule {
+        nonce,
+        delay: Duration::from_millis(delay_ms),
+        attempt: e.restart_attempts,
+        max_retries: e.restart.max_retries,
+    })
 }
 
 #[derive(Clone, Debug, Default)]
 pub struct ProcessManager {
     inner: Arc<Mutex<HashMap<String, ProcessEntry>>>,
+}
+
+fn spawn_delayed_restart_task(
+    manager: ProcessManager,
+    inner: Arc<Mutex<HashMap<String, ProcessEntry>>>,
+    wait_sink: LogSink,
+    process_id: String,
+    template_id: String,
+    params_for_restart: BTreeMap<String, String>,
+    schedule: RestartSchedule,
+) {
+    tokio::spawn(async move {
+        tokio::time::sleep(schedule.delay).await;
+
+        let skip_reason = {
+            let map = inner.lock().await;
+            match map.get(&process_id) {
+                None => Some("process entry not found".to_string()),
+                Some(e) => {
+                    if e.desired != DesiredState::Running {
+                        Some("desired state is stopped".to_string())
+                    } else {
+                        match e.restart_status {
+                            RestartStatus::Scheduled { nonce, .. } if nonce == schedule.nonce => {
+                                None
+                            }
+                            RestartStatus::Scheduled { .. } => {
+                                Some("superseded by newer restart schedule".to_string())
+                            }
+                            RestartStatus::Cancelled => Some("stop requested".to_string()),
+                            RestartStatus::SkippedLimit { .. } => {
+                                Some("retry limit reached".to_string())
+                            }
+                            RestartStatus::None => Some("restart no longer scheduled".to_string()),
+                        }
+                    }
+                }
+            }
+        };
+
+        if let Some(reason) = skip_reason {
+            wait_sink
+                .emit(format!("[alloy-agent] restart skipped: {reason}"))
+                .await;
+            return;
+        }
+
+        let res = manager
+            .start_from_template_with_process_id(&process_id, &template_id, params_for_restart)
+            .await;
+        match res {
+            Ok(st) if matches!(st.state, ProcessState::Failed) => {
+                let msg = st
+                    .message
+                    .filter(|s| !s.trim().is_empty())
+                    .unwrap_or_else(|| "unknown error".to_string());
+                wait_sink
+                    .emit(format!("[alloy-agent] auto-restart failed: {msg}"))
+                    .await;
+            }
+            Ok(_) => {
+                wait_sink
+                    .emit("[alloy-agent] auto-restart triggered".to_string())
+                    .await;
+            }
+            Err(err) => {
+                wait_sink
+                    .emit(format!("[alloy-agent] auto-restart failed: {err}"))
+                    .await;
+            }
+        }
+    });
+}
+
+fn spawn_wait_task(
+    manager: ProcessManager,
+    inner: Arc<Mutex<HashMap<String, ProcessEntry>>>,
+    wait_sink: LogSink,
+    process_id: String,
+    template_id: String,
+    params_for_restart: BTreeMap<String, String>,
+    mut child: Child,
+    started: tokio::time::Instant,
+    process_pgid: Option<i32>,
+) {
+    tokio::spawn(async move {
+        let res = child.wait().await;
+
+        #[cfg(unix)]
+        if let Some(pgid) = process_pgid {
+            unsafe {
+                libc::kill(-pgid, libc::SIGTERM);
+            }
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            let alive = unsafe { libc::kill(-pgid, 0) == 0 };
+            if alive {
+                unsafe {
+                    libc::kill(-pgid, libc::SIGKILL);
+                }
+            }
+        }
+
+        let runtime = tokio::time::Instant::now().duration_since(started);
+
+        let (final_state, exit_code, exit_reason, restart_status, restart_schedule) = {
+            let mut map = inner.lock().await;
+            let Some(e) = map.get_mut(&process_id) else {
+                return;
+            };
+
+            e.stdin = None;
+            let schedule = apply_exit_and_maybe_schedule_restart(e, &res, runtime);
+            (
+                e.state,
+                e.exit_code,
+                e.exit_reason.clone().unwrap_or_default(),
+                e.restart_status,
+                schedule,
+            )
+        };
+
+        wait_sink
+            .emit(format!(
+                "[alloy-agent] process exited: state={:?} exit_code={:?} runtime_ms={} reason={}",
+                final_state,
+                exit_code,
+                runtime.as_millis(),
+                exit_reason
+            ))
+            .await;
+
+        if let Some(schedule) = restart_schedule {
+            let delay_ms = schedule.delay.as_millis().min(u128::from(u64::MAX)) as u64;
+            wait_sink
+                .emit(format!(
+                    "[alloy-agent] {}",
+                    restart_scheduled_message(delay_ms, schedule.attempt, schedule.max_retries)
+                ))
+                .await;
+            spawn_delayed_restart_task(
+                manager,
+                inner,
+                wait_sink,
+                process_id,
+                template_id,
+                params_for_restart,
+                schedule,
+            );
+            return;
+        }
+
+        match restart_status {
+            RestartStatus::SkippedLimit {
+                attempts,
+                max_retries,
+            } => {
+                wait_sink
+                    .emit(format!(
+                        "[alloy-agent] {}",
+                        restart_limit_reached_message(attempts, max_retries)
+                    ))
+                    .await;
+            }
+            RestartStatus::Cancelled => {
+                wait_sink
+                    .emit("[alloy-agent] restart skipped: stop requested".to_string())
+                    .await;
+            }
+            RestartStatus::None | RestartStatus::Scheduled { .. } => {}
+        }
+    });
 }
 
 impl ProcessManager {
@@ -1549,6 +1881,7 @@ impl ProcessManager {
                     resources: None,
                     exit_code: None,
                     message: Some("starting...".to_string()),
+                    exit_reason: None,
                     restart: initial_restart,
                     restart_attempts: reused_restart_attempts,
                     stdin: None,
@@ -1556,6 +1889,9 @@ impl ProcessManager {
                     pgid: None,
                     logs: logs.clone(),
                     log_file_tx: Some(log_tx.clone()),
+                    desired: DesiredState::Running,
+                    restart_nonce: 0,
+                    restart_status: RestartStatus::None,
                 },
             );
         }
@@ -1798,6 +2134,7 @@ impl ProcessManager {
                             resources: None,
                             exit_code: None,
                             message: Some(format!("waiting for port {}...", mc.port)),
+                            exit_reason: None,
                             restart,
                             restart_attempts: reused_restart_attempts,
                             stdin,
@@ -1805,6 +2142,9 @@ impl ProcessManager {
                             pgid,
                             logs: logs.clone(),
                             log_file_tx: Some(log_tx.clone()),
+                            desired: DesiredState::Running,
+                            restart_nonce: 0,
+                            restart_status: RestartStatus::None,
                         },
                     );
                 }
@@ -1902,140 +2242,17 @@ impl ProcessManager {
                 let wait_sink = sink.clone();
                 let template_id = t.template_id.clone();
                 let params_for_restart = params.clone();
-                tokio::spawn(async move {
-                    let res = child.wait().await;
-                    #[cfg(unix)]
-                    if let Some(pgid) = process_pgid {
-                        unsafe {
-                            libc::kill(-pgid, libc::SIGTERM);
-                        }
-                        tokio::time::sleep(Duration::from_millis(500)).await;
-                        let alive = unsafe { libc::kill(-pgid, 0) == 0 };
-                        if alive {
-                            unsafe {
-                                libc::kill(-pgid, libc::SIGKILL);
-                            }
-                        }
-                    }
-                    let runtime = tokio::time::Instant::now().duration_since(started);
-
-                    let mut restart_after: Option<Duration> = None;
-                    let mut restart_attempt: u32 = 0;
-
-                    let (final_state, exit_code) = {
-                        let mut map = inner.lock().await;
-                        let Some(e) = map.get_mut(&id_str) else {
-                            return;
-                        };
-
-                        e.stdin = None;
-                        let stopping = matches!(e.state, ProcessState::Stopping);
-
-                        match res {
-                            Ok(status) => {
-                                e.exit_code = status.code();
-
-                                if stopping {
-                                    e.state = ProcessState::Exited;
-                                    e.message = Some("stopped".to_string());
-                                } else if runtime < early_exit_threshold() {
-                                    e.state = ProcessState::Failed;
-                                    e.message = Some(format!(
-                                        "exited too quickly ({}ms)",
-                                        runtime.as_millis()
-                                    ));
-                                } else if status.success() {
-                                    e.state = ProcessState::Exited;
-                                    e.message = Some("exited".to_string());
-                                } else {
-                                    e.state = ProcessState::Failed;
-                                    e.message = Some(process_exit_with_code_message(status.code()));
-                                }
-                            }
-                            Err(err) => {
-                                e.state = ProcessState::Failed;
-                                e.message = Some(format!("wait failed: {err}"));
-                            }
-                        }
-
-                        if !stopping {
-                            let is_failure = matches!(e.state, ProcessState::Failed)
-                                || e.exit_code.is_some_and(|c| c != 0);
-                            let should_restart = match e.restart.policy {
-                                RestartPolicy::Off => false,
-                                RestartPolicy::Always => true,
-                                RestartPolicy::OnFailure => is_failure,
-                            };
-
-                            if should_restart {
-                                if e.restart_attempts < e.restart.max_retries {
-                                    e.restart_attempts = e.restart_attempts.saturating_add(1);
-                                    let delay_ms = compute_backoff_ms(e.restart, e.restart_attempts);
-                                    restart_after = Some(Duration::from_millis(delay_ms));
-                                    restart_attempt = e.restart_attempts;
-                                    e.message = Some(restart_scheduled_message(delay_ms, restart_attempt, e.restart.max_retries));
-                                } else {
-                                    e.message = Some(restart_limit_reached_message(
-                                        e.restart_attempts,
-                                        e.restart.max_retries,
-                                    ));
-                                }
-                            }
-                        }
-
-                        (e.state, e.exit_code)
-                    };
-
-                    wait_sink
-                        .emit(format!(
-                            "[alloy-agent] process exited: state={:?} exit_code={:?} runtime_ms={}",
-                            final_state,
-                            exit_code,
-                            runtime.as_millis()
-                        ))
-                        .await;
-
-                    if let Some(delay) = restart_after {
-                        wait_sink
-                            .emit(format!(
-                                "[alloy-agent] auto-restart scheduled in {}ms (attempt {})",
-                                delay.as_millis(),
-                                restart_attempt
-                            ))
-                            .await;
-                        let handle = tokio::runtime::Handle::current();
-                        let wait_sink = wait_sink.clone();
-                        tokio::task::spawn_blocking(move || {
-                            std::thread::sleep(delay);
-                            let res = handle.block_on(manager.start_from_template_with_process_id(
-                                &id_str,
-                                &template_id,
-                                params_for_restart,
-                            ));
-                            match res {
-                                Ok(st) if matches!(st.state, ProcessState::Failed) => {
-                                    let msg = st
-                                        .message
-                                        .filter(|s| !s.trim().is_empty())
-                                        .unwrap_or_else(|| "unknown error".to_string());
-                                    handle.block_on(wait_sink.emit(format!(
-                                        "[alloy-agent] auto-restart failed: {msg}"
-                                    )));
-                                }
-                                Ok(_) => {
-                                    handle.block_on(wait_sink.emit(
-                                        "[alloy-agent] auto-restart triggered".to_string(),
-                                    ));
-                                }
-                                Err(err) => {
-                                    handle.block_on(wait_sink.emit(format!(
-                                        "[alloy-agent] auto-restart failed: {err}"
-                                    )));
-                                }
-                            }
-                        });
-                    }
-                });
+                spawn_wait_task(
+                    manager,
+                    inner,
+                    wait_sink,
+                    id_str,
+                    template_id,
+                    params_for_restart,
+                    child,
+                    started,
+                    process_pgid,
+                );
 
                 return Ok(ProcessStatus {
                     id: id.clone(),
@@ -2285,6 +2502,7 @@ impl ProcessManager {
                             resources: None,
                             exit_code: None,
                             message: Some(format!("waiting for port {}...", mc.port)),
+                            exit_reason: None,
                             restart,
                             restart_attempts: reused_restart_attempts,
                             stdin,
@@ -2292,6 +2510,9 @@ impl ProcessManager {
                             pgid,
                             logs: logs.clone(),
                             log_file_tx: Some(log_tx.clone()),
+                            desired: DesiredState::Running,
+                            restart_nonce: 0,
+                            restart_status: RestartStatus::None,
                         },
                     );
                 }
@@ -2388,140 +2609,17 @@ impl ProcessManager {
                 let wait_sink = sink.clone();
                 let template_id = t.template_id.clone();
                 let params_for_restart = params.clone();
-                tokio::spawn(async move {
-                    let res = child.wait().await;
-                    #[cfg(unix)]
-                    if let Some(pgid) = process_pgid {
-                        unsafe {
-                            libc::kill(-pgid, libc::SIGTERM);
-                        }
-                        tokio::time::sleep(Duration::from_millis(500)).await;
-                        let alive = unsafe { libc::kill(-pgid, 0) == 0 };
-                        if alive {
-                            unsafe {
-                                libc::kill(-pgid, libc::SIGKILL);
-                            }
-                        }
-                    }
-                    let runtime = tokio::time::Instant::now().duration_since(started);
-
-                    let mut restart_after: Option<Duration> = None;
-                    let mut restart_attempt: u32 = 0;
-
-                    let (final_state, exit_code) = {
-                        let mut map = inner.lock().await;
-                        let Some(e) = map.get_mut(&id_str) else {
-                            return;
-                        };
-
-                        e.stdin = None;
-                        let stopping = matches!(e.state, ProcessState::Stopping);
-
-                        match res {
-                            Ok(status) => {
-                                e.exit_code = status.code();
-
-                                if stopping {
-                                    e.state = ProcessState::Exited;
-                                    e.message = Some("stopped".to_string());
-                                } else if runtime < early_exit_threshold() {
-                                    e.state = ProcessState::Failed;
-                                    e.message = Some(format!(
-                                        "exited too quickly ({}ms)",
-                                        runtime.as_millis()
-                                    ));
-                                } else if status.success() {
-                                    e.state = ProcessState::Exited;
-                                    e.message = Some("exited".to_string());
-                                } else {
-                                    e.state = ProcessState::Failed;
-                                    e.message = Some(process_exit_with_code_message(status.code()));
-                                }
-                            }
-                            Err(err) => {
-                                e.state = ProcessState::Failed;
-                                e.message = Some(format!("wait failed: {err}"));
-                            }
-                        }
-
-                        if !stopping {
-                            let is_failure = matches!(e.state, ProcessState::Failed)
-                                || e.exit_code.is_some_and(|c| c != 0);
-                            let should_restart = match e.restart.policy {
-                                RestartPolicy::Off => false,
-                                RestartPolicy::Always => true,
-                                RestartPolicy::OnFailure => is_failure,
-                            };
-
-                            if should_restart {
-                                if e.restart_attempts < e.restart.max_retries {
-                                    e.restart_attempts = e.restart_attempts.saturating_add(1);
-                                    let delay_ms = compute_backoff_ms(e.restart, e.restart_attempts);
-                                    restart_after = Some(Duration::from_millis(delay_ms));
-                                    restart_attempt = e.restart_attempts;
-                                    e.message = Some(restart_scheduled_message(delay_ms, restart_attempt, e.restart.max_retries));
-                                } else {
-                                    e.message = Some(restart_limit_reached_message(
-                                        e.restart_attempts,
-                                        e.restart.max_retries,
-                                    ));
-                                }
-                            }
-                        }
-
-                        (e.state, e.exit_code)
-                    };
-
-                    wait_sink
-                        .emit(format!(
-                            "[alloy-agent] process exited: state={:?} exit_code={:?} runtime_ms={}",
-                            final_state,
-                            exit_code,
-                            runtime.as_millis()
-                        ))
-                        .await;
-
-                    if let Some(delay) = restart_after {
-                        wait_sink
-                            .emit(format!(
-                                "[alloy-agent] auto-restart scheduled in {}ms (attempt {})",
-                                delay.as_millis(),
-                                restart_attempt
-                            ))
-                            .await;
-                        let handle = tokio::runtime::Handle::current();
-                        let wait_sink = wait_sink.clone();
-                        tokio::task::spawn_blocking(move || {
-                            std::thread::sleep(delay);
-                            let res = handle.block_on(manager.start_from_template_with_process_id(
-                                &id_str,
-                                &template_id,
-                                params_for_restart,
-                            ));
-                            match res {
-                                Ok(st) if matches!(st.state, ProcessState::Failed) => {
-                                    let msg = st
-                                        .message
-                                        .filter(|s| !s.trim().is_empty())
-                                        .unwrap_or_else(|| "unknown error".to_string());
-                                    handle.block_on(wait_sink.emit(format!(
-                                        "[alloy-agent] auto-restart failed: {msg}"
-                                    )));
-                                }
-                                Ok(_) => {
-                                    handle.block_on(wait_sink.emit(
-                                        "[alloy-agent] auto-restart triggered".to_string(),
-                                    ));
-                                }
-                                Err(err) => {
-                                    handle.block_on(wait_sink.emit(format!(
-                                        "[alloy-agent] auto-restart failed: {err}"
-                                    )));
-                                }
-                            }
-                        });
-                    }
-                });
+                spawn_wait_task(
+                    manager,
+                    inner,
+                    wait_sink,
+                    id_str,
+                    template_id,
+                    params_for_restart,
+                    child,
+                    started,
+                    process_pgid,
+                );
 
                 return Ok(ProcessStatus {
                     id: id.clone(),
@@ -2729,6 +2827,7 @@ impl ProcessManager {
                             resources: None,
                             exit_code: None,
                             message: Some(format!("waiting for port {}...", mc.port)),
+                            exit_reason: None,
                             restart,
                             restart_attempts: reused_restart_attempts,
                             stdin,
@@ -2736,6 +2835,9 @@ impl ProcessManager {
                             pgid,
                             logs: logs.clone(),
                             log_file_tx: Some(log_tx.clone()),
+                            desired: DesiredState::Running,
+                            restart_nonce: 0,
+                            restart_status: RestartStatus::None,
                         },
                     );
                 }
@@ -2832,140 +2934,17 @@ impl ProcessManager {
                 let wait_sink = sink.clone();
                 let template_id = t.template_id.clone();
                 let params_for_restart = params.clone();
-                tokio::spawn(async move {
-                    let res = child.wait().await;
-                    #[cfg(unix)]
-                    if let Some(pgid) = process_pgid {
-                        unsafe {
-                            libc::kill(-pgid, libc::SIGTERM);
-                        }
-                        tokio::time::sleep(Duration::from_millis(500)).await;
-                        let alive = unsafe { libc::kill(-pgid, 0) == 0 };
-                        if alive {
-                            unsafe {
-                                libc::kill(-pgid, libc::SIGKILL);
-                            }
-                        }
-                    }
-                    let runtime = tokio::time::Instant::now().duration_since(started);
-
-                    let mut restart_after: Option<Duration> = None;
-                    let mut restart_attempt: u32 = 0;
-
-                    let (final_state, exit_code) = {
-                        let mut map = inner.lock().await;
-                        let Some(e) = map.get_mut(&id_str) else {
-                            return;
-                        };
-
-                        e.stdin = None;
-                        let stopping = matches!(e.state, ProcessState::Stopping);
-
-                        match res {
-                            Ok(status) => {
-                                e.exit_code = status.code();
-
-                                if stopping {
-                                    e.state = ProcessState::Exited;
-                                    e.message = Some("stopped".to_string());
-                                } else if runtime < early_exit_threshold() {
-                                    e.state = ProcessState::Failed;
-                                    e.message = Some(format!(
-                                        "exited too quickly ({}ms)",
-                                        runtime.as_millis()
-                                    ));
-                                } else if status.success() {
-                                    e.state = ProcessState::Exited;
-                                    e.message = Some("exited".to_string());
-                                } else {
-                                    e.state = ProcessState::Failed;
-                                    e.message = Some(process_exit_with_code_message(status.code()));
-                                }
-                            }
-                            Err(err) => {
-                                e.state = ProcessState::Failed;
-                                e.message = Some(format!("wait failed: {err}"));
-                            }
-                        }
-
-                        if !stopping {
-                            let is_failure = matches!(e.state, ProcessState::Failed)
-                                || e.exit_code.is_some_and(|c| c != 0);
-                            let should_restart = match e.restart.policy {
-                                RestartPolicy::Off => false,
-                                RestartPolicy::Always => true,
-                                RestartPolicy::OnFailure => is_failure,
-                            };
-
-                            if should_restart {
-                                if e.restart_attempts < e.restart.max_retries {
-                                    e.restart_attempts = e.restart_attempts.saturating_add(1);
-                                    let delay_ms = compute_backoff_ms(e.restart, e.restart_attempts);
-                                    restart_after = Some(Duration::from_millis(delay_ms));
-                                    restart_attempt = e.restart_attempts;
-                                    e.message = Some(restart_scheduled_message(delay_ms, restart_attempt, e.restart.max_retries));
-                                } else {
-                                    e.message = Some(restart_limit_reached_message(
-                                        e.restart_attempts,
-                                        e.restart.max_retries,
-                                    ));
-                                }
-                            }
-                        }
-
-                        (e.state, e.exit_code)
-                    };
-
-                    wait_sink
-                        .emit(format!(
-                            "[alloy-agent] process exited: state={:?} exit_code={:?} runtime_ms={}",
-                            final_state,
-                            exit_code,
-                            runtime.as_millis()
-                        ))
-                        .await;
-
-                    if let Some(delay) = restart_after {
-                        wait_sink
-                            .emit(format!(
-                                "[alloy-agent] auto-restart scheduled in {}ms (attempt {})",
-                                delay.as_millis(),
-                                restart_attempt
-                            ))
-                            .await;
-                        let handle = tokio::runtime::Handle::current();
-                        let wait_sink = wait_sink.clone();
-                        tokio::task::spawn_blocking(move || {
-                            std::thread::sleep(delay);
-                            let res = handle.block_on(manager.start_from_template_with_process_id(
-                                &id_str,
-                                &template_id,
-                                params_for_restart,
-                            ));
-                            match res {
-                                Ok(st) if matches!(st.state, ProcessState::Failed) => {
-                                    let msg = st
-                                        .message
-                                        .filter(|s| !s.trim().is_empty())
-                                        .unwrap_or_else(|| "unknown error".to_string());
-                                    handle.block_on(wait_sink.emit(format!(
-                                        "[alloy-agent] auto-restart failed: {msg}"
-                                    )));
-                                }
-                                Ok(_) => {
-                                    handle.block_on(wait_sink.emit(
-                                        "[alloy-agent] auto-restart triggered".to_string(),
-                                    ));
-                                }
-                                Err(err) => {
-                                    handle.block_on(wait_sink.emit(format!(
-                                        "[alloy-agent] auto-restart failed: {err}"
-                                    )));
-                                }
-                            }
-                        });
-                    }
-                });
+                spawn_wait_task(
+                    manager,
+                    inner,
+                    wait_sink,
+                    id_str,
+                    template_id,
+                    params_for_restart,
+                    child,
+                    started,
+                    process_pgid,
+                );
 
                 return Ok(ProcessStatus {
                     id: id.clone(),
@@ -3180,6 +3159,7 @@ impl ProcessManager {
                             resources: None,
                             exit_code: None,
                             message: Some(format!("waiting for port {}...", mc.port)),
+                            exit_reason: None,
                             restart,
                             restart_attempts: reused_restart_attempts,
                             stdin,
@@ -3187,6 +3167,9 @@ impl ProcessManager {
                             pgid,
                             logs: logs.clone(),
                             log_file_tx: Some(log_tx.clone()),
+                            desired: DesiredState::Running,
+                            restart_nonce: 0,
+                            restart_status: RestartStatus::None,
                         },
                     );
                 }
@@ -3283,140 +3266,17 @@ impl ProcessManager {
                 let wait_sink = sink.clone();
                 let template_id = t.template_id.clone();
                 let params_for_restart = params.clone();
-                tokio::spawn(async move {
-                    let res = child.wait().await;
-                    #[cfg(unix)]
-                    if let Some(pgid) = process_pgid {
-                        unsafe {
-                            libc::kill(-pgid, libc::SIGTERM);
-                        }
-                        tokio::time::sleep(Duration::from_millis(500)).await;
-                        let alive = unsafe { libc::kill(-pgid, 0) == 0 };
-                        if alive {
-                            unsafe {
-                                libc::kill(-pgid, libc::SIGKILL);
-                            }
-                        }
-                    }
-                    let runtime = tokio::time::Instant::now().duration_since(started);
-
-                    let mut restart_after: Option<Duration> = None;
-                    let mut restart_attempt: u32 = 0;
-
-                    let (final_state, exit_code) = {
-                        let mut map = inner.lock().await;
-                        let Some(e) = map.get_mut(&id_str) else {
-                            return;
-                        };
-
-                        e.stdin = None;
-                        let stopping = matches!(e.state, ProcessState::Stopping);
-
-                        match res {
-                            Ok(status) => {
-                                e.exit_code = status.code();
-
-                                if stopping {
-                                    e.state = ProcessState::Exited;
-                                    e.message = Some("stopped".to_string());
-                                } else if runtime < early_exit_threshold() {
-                                    e.state = ProcessState::Failed;
-                                    e.message = Some(format!(
-                                        "exited too quickly ({}ms)",
-                                        runtime.as_millis()
-                                    ));
-                                } else if status.success() {
-                                    e.state = ProcessState::Exited;
-                                    e.message = Some("exited".to_string());
-                                } else {
-                                    e.state = ProcessState::Failed;
-                                    e.message = Some(process_exit_with_code_message(status.code()));
-                                }
-                            }
-                            Err(err) => {
-                                e.state = ProcessState::Failed;
-                                e.message = Some(format!("wait failed: {err}"));
-                            }
-                        }
-
-                        if !stopping {
-                            let is_failure = matches!(e.state, ProcessState::Failed)
-                                || e.exit_code.is_some_and(|c| c != 0);
-                            let should_restart = match e.restart.policy {
-                                RestartPolicy::Off => false,
-                                RestartPolicy::Always => true,
-                                RestartPolicy::OnFailure => is_failure,
-                            };
-
-                            if should_restart {
-                                if e.restart_attempts < e.restart.max_retries {
-                                    e.restart_attempts = e.restart_attempts.saturating_add(1);
-                                    let delay_ms = compute_backoff_ms(e.restart, e.restart_attempts);
-                                    restart_after = Some(Duration::from_millis(delay_ms));
-                                    restart_attempt = e.restart_attempts;
-                                    e.message = Some(restart_scheduled_message(delay_ms, restart_attempt, e.restart.max_retries));
-                                } else {
-                                    e.message = Some(restart_limit_reached_message(
-                                        e.restart_attempts,
-                                        e.restart.max_retries,
-                                    ));
-                                }
-                            }
-                        }
-
-                        (e.state, e.exit_code)
-                    };
-
-                    wait_sink
-                        .emit(format!(
-                            "[alloy-agent] process exited: state={:?} exit_code={:?} runtime_ms={}",
-                            final_state,
-                            exit_code,
-                            runtime.as_millis()
-                        ))
-                        .await;
-
-                    if let Some(delay) = restart_after {
-                        wait_sink
-                            .emit(format!(
-                                "[alloy-agent] auto-restart scheduled in {}ms (attempt {})",
-                                delay.as_millis(),
-                                restart_attempt
-                            ))
-                            .await;
-                        let handle = tokio::runtime::Handle::current();
-                        let wait_sink = wait_sink.clone();
-                        tokio::task::spawn_blocking(move || {
-                            std::thread::sleep(delay);
-                            let res = handle.block_on(manager.start_from_template_with_process_id(
-                                &id_str,
-                                &template_id,
-                                params_for_restart,
-                            ));
-                            match res {
-                                Ok(st) if matches!(st.state, ProcessState::Failed) => {
-                                    let msg = st
-                                        .message
-                                        .filter(|s| !s.trim().is_empty())
-                                        .unwrap_or_else(|| "unknown error".to_string());
-                                    handle.block_on(wait_sink.emit(format!(
-                                        "[alloy-agent] auto-restart failed: {msg}"
-                                    )));
-                                }
-                                Ok(_) => {
-                                    handle.block_on(wait_sink.emit(
-                                        "[alloy-agent] auto-restart triggered".to_string(),
-                                    ));
-                                }
-                                Err(err) => {
-                                    handle.block_on(wait_sink.emit(format!(
-                                        "[alloy-agent] auto-restart failed: {err}"
-                                    )));
-                                }
-                            }
-                        });
-                    }
-                });
+                spawn_wait_task(
+                    manager,
+                    inner,
+                    wait_sink,
+                    id_str,
+                    template_id,
+                    params_for_restart,
+                    child,
+                    started,
+                    process_pgid,
+                );
 
                 return Ok(ProcessStatus {
                     id: id.clone(),
@@ -3655,6 +3515,7 @@ impl ProcessManager {
                             resources: None,
                             exit_code: None,
                             message: Some("starting...".to_string()),
+                            exit_reason: None,
                             restart,
                             restart_attempts: reused_restart_attempts,
                             stdin,
@@ -3662,6 +3523,9 @@ impl ProcessManager {
                             pgid,
                             logs: logs.clone(),
                             log_file_tx: Some(log_tx.clone()),
+                            desired: DesiredState::Running,
+                            restart_nonce: 0,
+                            restart_status: RestartStatus::None,
                         },
                     );
                 }
@@ -3693,140 +3557,17 @@ impl ProcessManager {
                 let wait_sink = sink.clone();
                 let template_id = t.template_id.clone();
                 let params_for_restart = params.clone();
-                tokio::spawn(async move {
-                    let res = child.wait().await;
-                    #[cfg(unix)]
-                    if let Some(pgid) = process_pgid {
-                        unsafe {
-                            libc::kill(-pgid, libc::SIGTERM);
-                        }
-                        tokio::time::sleep(Duration::from_millis(500)).await;
-                        let alive = unsafe { libc::kill(-pgid, 0) == 0 };
-                        if alive {
-                            unsafe {
-                                libc::kill(-pgid, libc::SIGKILL);
-                            }
-                        }
-                    }
-                    let runtime = tokio::time::Instant::now().duration_since(started);
-
-                    let mut restart_after: Option<Duration> = None;
-                    let mut restart_attempt: u32 = 0;
-
-                    let (final_state, exit_code) = {
-                        let mut map = inner.lock().await;
-                        let Some(e) = map.get_mut(&id_str) else {
-                            return;
-                        };
-
-                        e.stdin = None;
-                        let stopping = matches!(e.state, ProcessState::Stopping);
-
-                        match res {
-                            Ok(status) => {
-                                e.exit_code = status.code();
-
-                                if stopping {
-                                    e.state = ProcessState::Exited;
-                                    e.message = Some("stopped".to_string());
-                                } else if runtime < early_exit_threshold() {
-                                    e.state = ProcessState::Failed;
-                                    e.message = Some(format!(
-                                        "exited too quickly ({}ms)",
-                                        runtime.as_millis()
-                                    ));
-                                } else if status.success() {
-                                    e.state = ProcessState::Exited;
-                                    e.message = Some("exited".to_string());
-                                } else {
-                                    e.state = ProcessState::Failed;
-                                    e.message = Some(process_exit_with_code_message(status.code()));
-                                }
-                            }
-                            Err(err) => {
-                                e.state = ProcessState::Failed;
-                                e.message = Some(format!("wait failed: {err}"));
-                            }
-                        }
-
-                        if !stopping {
-                            let is_failure = matches!(e.state, ProcessState::Failed)
-                                || e.exit_code.is_some_and(|c| c != 0);
-                            let should_restart = match e.restart.policy {
-                                RestartPolicy::Off => false,
-                                RestartPolicy::Always => true,
-                                RestartPolicy::OnFailure => is_failure,
-                            };
-
-                            if should_restart {
-                                if e.restart_attempts < e.restart.max_retries {
-                                    e.restart_attempts = e.restart_attempts.saturating_add(1);
-                                    let delay_ms = compute_backoff_ms(e.restart, e.restart_attempts);
-                                    restart_after = Some(Duration::from_millis(delay_ms));
-                                    restart_attempt = e.restart_attempts;
-                                    e.message = Some(restart_scheduled_message(delay_ms, restart_attempt, e.restart.max_retries));
-                                } else {
-                                    e.message = Some(restart_limit_reached_message(
-                                        e.restart_attempts,
-                                        e.restart.max_retries,
-                                    ));
-                                }
-                            }
-                        }
-
-                        (e.state, e.exit_code)
-                    };
-
-                    wait_sink
-                        .emit(format!(
-                            "[alloy-agent] process exited: state={:?} exit_code={:?} runtime_ms={}",
-                            final_state,
-                            exit_code,
-                            runtime.as_millis()
-                        ))
-                        .await;
-
-                    if let Some(delay) = restart_after {
-                        wait_sink
-                            .emit(format!(
-                                "[alloy-agent] auto-restart scheduled in {}ms (attempt {})",
-                                delay.as_millis(),
-                                restart_attempt
-                            ))
-                            .await;
-                        let handle = tokio::runtime::Handle::current();
-                        let wait_sink = wait_sink.clone();
-                        tokio::task::spawn_blocking(move || {
-                            std::thread::sleep(delay);
-                            let res = handle.block_on(manager.start_from_template_with_process_id(
-                                &id_str,
-                                &template_id,
-                                params_for_restart,
-                            ));
-                            match res {
-                                Ok(st) if matches!(st.state, ProcessState::Failed) => {
-                                    let msg = st
-                                        .message
-                                        .filter(|s| !s.trim().is_empty())
-                                        .unwrap_or_else(|| "unknown error".to_string());
-                                    handle.block_on(wait_sink.emit(format!(
-                                        "[alloy-agent] auto-restart failed: {msg}"
-                                    )));
-                                }
-                                Ok(_) => {
-                                    handle.block_on(wait_sink.emit(
-                                        "[alloy-agent] auto-restart triggered".to_string(),
-                                    ));
-                                }
-                                Err(err) => {
-                                    handle.block_on(wait_sink.emit(format!(
-                                        "[alloy-agent] auto-restart failed: {err}"
-                                    )));
-                                }
-                            }
-                        });
-                    }
-                });
+                spawn_wait_task(
+                    manager,
+                    inner,
+                    wait_sink,
+                    id_str,
+                    template_id,
+                    params_for_restart,
+                    child,
+                    started,
+                    process_pgid,
+                );
 
                 return Ok(ProcessStatus {
                     id: id.clone(),
@@ -4093,6 +3834,7 @@ impl ProcessManager {
                             resources: None,
                             exit_code: None,
                             message: Some(format!("waiting for port {}...", tr.port)),
+                            exit_reason: None,
                             restart,
                             restart_attempts: reused_restart_attempts,
                             stdin,
@@ -4100,6 +3842,9 @@ impl ProcessManager {
                             pgid,
                             logs: logs.clone(),
                             log_file_tx: Some(log_tx.clone()),
+                            desired: DesiredState::Running,
+                            restart_nonce: 0,
+                            restart_status: RestartStatus::None,
                         },
                     );
                 }
@@ -4205,140 +3950,17 @@ impl ProcessManager {
                 let wait_sink = sink.clone();
                 let template_id = t.template_id.clone();
                 let params_for_restart = params.clone();
-                tokio::spawn(async move {
-                    let res = child.wait().await;
-                    #[cfg(unix)]
-                    if let Some(pgid) = process_pgid {
-                        unsafe {
-                            libc::kill(-pgid, libc::SIGTERM);
-                        }
-                        tokio::time::sleep(Duration::from_millis(500)).await;
-                        let alive = unsafe { libc::kill(-pgid, 0) == 0 };
-                        if alive {
-                            unsafe {
-                                libc::kill(-pgid, libc::SIGKILL);
-                            }
-                        }
-                    }
-                    let runtime = tokio::time::Instant::now().duration_since(started);
-
-                    let mut restart_after: Option<Duration> = None;
-                    let mut restart_attempt: u32 = 0;
-
-                    let (final_state, exit_code) = {
-                        let mut map = inner.lock().await;
-                        let Some(e) = map.get_mut(&id_str) else {
-                            return;
-                        };
-
-                        e.stdin = None;
-                        let stopping = matches!(e.state, ProcessState::Stopping);
-
-                        match res {
-                            Ok(status) => {
-                                e.exit_code = status.code();
-
-                                if stopping {
-                                    e.state = ProcessState::Exited;
-                                    e.message = Some("stopped".to_string());
-                                } else if runtime < early_exit_threshold() {
-                                    e.state = ProcessState::Failed;
-                                    e.message = Some(format!(
-                                        "exited too quickly ({}ms)",
-                                        runtime.as_millis()
-                                    ));
-                                } else if status.success() {
-                                    e.state = ProcessState::Exited;
-                                    e.message = Some("exited".to_string());
-                                } else {
-                                    e.state = ProcessState::Failed;
-                                    e.message = Some(process_exit_with_code_message(status.code()));
-                                }
-                            }
-                            Err(err) => {
-                                e.state = ProcessState::Failed;
-                                e.message = Some(format!("wait failed: {err}"));
-                            }
-                        }
-
-                        if !stopping {
-                            let is_failure = matches!(e.state, ProcessState::Failed)
-                                || e.exit_code.is_some_and(|c| c != 0);
-                            let should_restart = match e.restart.policy {
-                                RestartPolicy::Off => false,
-                                RestartPolicy::Always => true,
-                                RestartPolicy::OnFailure => is_failure,
-                            };
-
-                            if should_restart {
-                                if e.restart_attempts < e.restart.max_retries {
-                                    e.restart_attempts = e.restart_attempts.saturating_add(1);
-                                    let delay_ms = compute_backoff_ms(e.restart, e.restart_attempts);
-                                    restart_after = Some(Duration::from_millis(delay_ms));
-                                    restart_attempt = e.restart_attempts;
-                                    e.message = Some(restart_scheduled_message(delay_ms, restart_attempt, e.restart.max_retries));
-                                } else {
-                                    e.message = Some(restart_limit_reached_message(
-                                        e.restart_attempts,
-                                        e.restart.max_retries,
-                                    ));
-                                }
-                            }
-                        }
-
-                        (e.state, e.exit_code)
-                    };
-
-                    wait_sink
-                        .emit(format!(
-                            "[alloy-agent] process exited: state={:?} exit_code={:?} runtime_ms={}",
-                            final_state,
-                            exit_code,
-                            runtime.as_millis()
-                        ))
-                        .await;
-
-                    if let Some(delay) = restart_after {
-                        wait_sink
-                            .emit(format!(
-                                "[alloy-agent] auto-restart scheduled in {}ms (attempt {})",
-                                delay.as_millis(),
-                                restart_attempt
-                            ))
-                            .await;
-                        let handle = tokio::runtime::Handle::current();
-                        let wait_sink = wait_sink.clone();
-                        tokio::task::spawn_blocking(move || {
-                            std::thread::sleep(delay);
-                            let res = handle.block_on(manager.start_from_template_with_process_id(
-                                &id_str,
-                                &template_id,
-                                params_for_restart,
-                            ));
-                            match res {
-                                Ok(st) if matches!(st.state, ProcessState::Failed) => {
-                                    let msg = st
-                                        .message
-                                        .filter(|s| !s.trim().is_empty())
-                                        .unwrap_or_else(|| "unknown error".to_string());
-                                    handle.block_on(wait_sink.emit(format!(
-                                        "[alloy-agent] auto-restart failed: {msg}"
-                                    )));
-                                }
-                                Ok(_) => {
-                                    handle.block_on(wait_sink.emit(
-                                        "[alloy-agent] auto-restart triggered".to_string(),
-                                    ));
-                                }
-                                Err(err) => {
-                                    handle.block_on(wait_sink.emit(format!(
-                                        "[alloy-agent] auto-restart failed: {err}"
-                                    )));
-                                }
-                            }
-                        });
-                    }
-                });
+                spawn_wait_task(
+                    manager,
+                    inner,
+                    wait_sink,
+                    id_str,
+                    template_id,
+                    params_for_restart,
+                    child,
+                    started,
+                    process_pgid,
+                );
 
                 return Ok(ProcessStatus {
                     id: id.clone(),
@@ -4581,6 +4203,7 @@ impl ProcessManager {
                             resources: None,
                             exit_code: None,
                             message: Some(format!("waiting for udp ports {} / {}...", pw.port, pw.query_port)),
+                            exit_reason: None,
                             restart,
                             restart_attempts: reused_restart_attempts,
                             stdin,
@@ -4588,6 +4211,9 @@ impl ProcessManager {
                             pgid,
                             logs: logs.clone(),
                             log_file_tx: Some(log_tx.clone()),
+                            desired: DesiredState::Running,
+                            restart_nonce: 0,
+                            restart_status: RestartStatus::None,
                         },
                     );
                 }
@@ -4619,140 +4245,17 @@ impl ProcessManager {
                 let wait_sink = sink.clone();
                 let template_id = t.template_id.clone();
                 let params_for_restart = params.clone();
-                tokio::spawn(async move {
-                    let res = child.wait().await;
-                    #[cfg(unix)]
-                    if let Some(pgid) = process_pgid {
-                        unsafe {
-                            libc::kill(-pgid, libc::SIGTERM);
-                        }
-                        tokio::time::sleep(Duration::from_millis(500)).await;
-                        let alive = unsafe { libc::kill(-pgid, 0) == 0 };
-                        if alive {
-                            unsafe {
-                                libc::kill(-pgid, libc::SIGKILL);
-                            }
-                        }
-                    }
-                    let runtime = tokio::time::Instant::now().duration_since(started);
-
-                    let mut restart_after: Option<Duration> = None;
-                    let mut restart_attempt: u32 = 0;
-
-                    let (final_state, exit_code) = {
-                        let mut map = inner.lock().await;
-                        let Some(e) = map.get_mut(&id_str) else {
-                            return;
-                        };
-
-                        e.stdin = None;
-                        let stopping = matches!(e.state, ProcessState::Stopping);
-
-                        match res {
-                            Ok(status) => {
-                                e.exit_code = status.code();
-
-                                if stopping {
-                                    e.state = ProcessState::Exited;
-                                    e.message = Some("stopped".to_string());
-                                } else if runtime < early_exit_threshold() {
-                                    e.state = ProcessState::Failed;
-                                    e.message = Some(format!(
-                                        "exited too quickly ({}ms)",
-                                        runtime.as_millis()
-                                    ));
-                                } else if status.success() {
-                                    e.state = ProcessState::Exited;
-                                    e.message = Some("exited".to_string());
-                                } else {
-                                    e.state = ProcessState::Failed;
-                                    e.message = Some(process_exit_with_code_message(status.code()));
-                                }
-                            }
-                            Err(err) => {
-                                e.state = ProcessState::Failed;
-                                e.message = Some(format!("wait failed: {err}"));
-                            }
-                        }
-
-                        if !stopping {
-                            let is_failure = matches!(e.state, ProcessState::Failed)
-                                || e.exit_code.is_some_and(|c| c != 0);
-                            let should_restart = match e.restart.policy {
-                                RestartPolicy::Off => false,
-                                RestartPolicy::Always => true,
-                                RestartPolicy::OnFailure => is_failure,
-                            };
-
-                            if should_restart {
-                                if e.restart_attempts < e.restart.max_retries {
-                                    e.restart_attempts = e.restart_attempts.saturating_add(1);
-                                    let delay_ms = compute_backoff_ms(e.restart, e.restart_attempts);
-                                    restart_after = Some(Duration::from_millis(delay_ms));
-                                    restart_attempt = e.restart_attempts;
-                                    e.message = Some(restart_scheduled_message(delay_ms, restart_attempt, e.restart.max_retries));
-                                } else {
-                                    e.message = Some(restart_limit_reached_message(
-                                        e.restart_attempts,
-                                        e.restart.max_retries,
-                                    ));
-                                }
-                            }
-                        }
-
-                        (e.state, e.exit_code)
-                    };
-
-                    wait_sink
-                        .emit(format!(
-                            "[alloy-agent] process exited: state={:?} exit_code={:?} runtime_ms={}",
-                            final_state,
-                            exit_code,
-                            runtime.as_millis()
-                        ))
-                        .await;
-
-                    if let Some(delay) = restart_after {
-                        wait_sink
-                            .emit(format!(
-                                "[alloy-agent] auto-restart scheduled in {}ms (attempt {})",
-                                delay.as_millis(),
-                                restart_attempt
-                            ))
-                            .await;
-                        let handle = tokio::runtime::Handle::current();
-                        let wait_sink = wait_sink.clone();
-                        tokio::task::spawn_blocking(move || {
-                            std::thread::sleep(delay);
-                            let res = handle.block_on(manager.start_from_template_with_process_id(
-                                &id_str,
-                                &template_id,
-                                params_for_restart,
-                            ));
-                            match res {
-                                Ok(st) if matches!(st.state, ProcessState::Failed) => {
-                                    let msg = st
-                                        .message
-                                        .filter(|s| !s.trim().is_empty())
-                                        .unwrap_or_else(|| "unknown error".to_string());
-                                    handle.block_on(wait_sink.emit(format!(
-                                        "[alloy-agent] auto-restart failed: {msg}"
-                                    )));
-                                }
-                                Ok(_) => {
-                                    handle.block_on(wait_sink.emit(
-                                        "[alloy-agent] auto-restart triggered".to_string(),
-                                    ));
-                                }
-                                Err(err) => {
-                                    handle.block_on(wait_sink.emit(format!(
-                                        "[alloy-agent] auto-restart failed: {err}"
-                                    )));
-                                }
-                            }
-                        });
-                    }
-                });
+                spawn_wait_task(
+                    manager,
+                    inner,
+                    wait_sink,
+                    id_str,
+                    template_id,
+                    params_for_restart,
+                    child,
+                    started,
+                    process_pgid,
+                );
 
                 return Ok(ProcessStatus {
                     id: id.clone(),
@@ -5041,6 +4544,7 @@ impl ProcessManager {
                             resources: None,
                             exit_code: None,
                             message: Some(format!("waiting for port {}...", fx.port)),
+                            exit_reason: None,
                             restart,
                             restart_attempts: reused_restart_attempts,
                             stdin,
@@ -5048,6 +4552,9 @@ impl ProcessManager {
                             pgid,
                             logs: logs.clone(),
                             log_file_tx: Some(log_tx.clone()),
+                            desired: DesiredState::Running,
+                            restart_nonce: 0,
+                            restart_status: RestartStatus::None,
                         },
                     );
                 }
@@ -5079,140 +4586,17 @@ impl ProcessManager {
                 let wait_sink = sink.clone();
                 let template_id = t.template_id.clone();
                 let params_for_restart = params.clone();
-                tokio::spawn(async move {
-                    let res = child.wait().await;
-                    #[cfg(unix)]
-                    if let Some(pgid) = process_pgid {
-                        unsafe {
-                            libc::kill(-pgid, libc::SIGTERM);
-                        }
-                        tokio::time::sleep(Duration::from_millis(500)).await;
-                        let alive = unsafe { libc::kill(-pgid, 0) == 0 };
-                        if alive {
-                            unsafe {
-                                libc::kill(-pgid, libc::SIGKILL);
-                            }
-                        }
-                    }
-                    let runtime = tokio::time::Instant::now().duration_since(started);
-
-                    let mut restart_after: Option<Duration> = None;
-                    let mut restart_attempt: u32 = 0;
-
-                    let (final_state, exit_code) = {
-                        let mut map = inner.lock().await;
-                        let Some(e) = map.get_mut(&id_str) else {
-                            return;
-                        };
-
-                        e.stdin = None;
-                        let stopping = matches!(e.state, ProcessState::Stopping);
-
-                        match res {
-                            Ok(status) => {
-                                e.exit_code = status.code();
-
-                                if stopping {
-                                    e.state = ProcessState::Exited;
-                                    e.message = Some("stopped".to_string());
-                                } else if runtime < early_exit_threshold() {
-                                    e.state = ProcessState::Failed;
-                                    e.message = Some(format!(
-                                        "exited too quickly ({}ms)",
-                                        runtime.as_millis()
-                                    ));
-                                } else if status.success() {
-                                    e.state = ProcessState::Exited;
-                                    e.message = Some("exited".to_string());
-                                } else {
-                                    e.state = ProcessState::Failed;
-                                    e.message = Some(process_exit_with_code_message(status.code()));
-                                }
-                            }
-                            Err(err) => {
-                                e.state = ProcessState::Failed;
-                                e.message = Some(format!("wait failed: {err}"));
-                            }
-                        }
-
-                        if !stopping {
-                            let is_failure = matches!(e.state, ProcessState::Failed)
-                                || e.exit_code.is_some_and(|c| c != 0);
-                            let should_restart = match e.restart.policy {
-                                RestartPolicy::Off => false,
-                                RestartPolicy::Always => true,
-                                RestartPolicy::OnFailure => is_failure,
-                            };
-
-                            if should_restart {
-                                if e.restart_attempts < e.restart.max_retries {
-                                    e.restart_attempts = e.restart_attempts.saturating_add(1);
-                                    let delay_ms = compute_backoff_ms(e.restart, e.restart_attempts);
-                                    restart_after = Some(Duration::from_millis(delay_ms));
-                                    restart_attempt = e.restart_attempts;
-                                    e.message = Some(restart_scheduled_message(delay_ms, restart_attempt, e.restart.max_retries));
-                                } else {
-                                    e.message = Some(restart_limit_reached_message(
-                                        e.restart_attempts,
-                                        e.restart.max_retries,
-                                    ));
-                                }
-                            }
-                        }
-
-                        (e.state, e.exit_code)
-                    };
-
-                    wait_sink
-                        .emit(format!(
-                            "[alloy-agent] process exited: state={:?} exit_code={:?} runtime_ms={}",
-                            final_state,
-                            exit_code,
-                            runtime.as_millis()
-                        ))
-                        .await;
-
-                    if let Some(delay) = restart_after {
-                        wait_sink
-                            .emit(format!(
-                                "[alloy-agent] auto-restart scheduled in {}ms (attempt {})",
-                                delay.as_millis(),
-                                restart_attempt
-                            ))
-                            .await;
-                        let handle = tokio::runtime::Handle::current();
-                        let wait_sink = wait_sink.clone();
-                        tokio::task::spawn_blocking(move || {
-                            std::thread::sleep(delay);
-                            let res = handle.block_on(manager.start_from_template_with_process_id(
-                                &id_str,
-                                &template_id,
-                                params_for_restart,
-                            ));
-                            match res {
-                                Ok(st) if matches!(st.state, ProcessState::Failed) => {
-                                    let msg = st
-                                        .message
-                                        .filter(|s| !s.trim().is_empty())
-                                        .unwrap_or_else(|| "unknown error".to_string());
-                                    handle.block_on(wait_sink.emit(format!(
-                                        "[alloy-agent] auto-restart failed: {msg}"
-                                    )));
-                                }
-                                Ok(_) => {
-                                    handle.block_on(wait_sink.emit(
-                                        "[alloy-agent] auto-restart triggered".to_string(),
-                                    ));
-                                }
-                                Err(err) => {
-                                    handle.block_on(wait_sink.emit(format!(
-                                        "[alloy-agent] auto-restart failed: {err}"
-                                    )));
-                                }
-                            }
-                        });
-                    }
-                });
+                spawn_wait_task(
+                    manager,
+                    inner,
+                    wait_sink,
+                    id_str,
+                    template_id,
+                    params_for_restart,
+                    child,
+                    started,
+                    process_pgid,
+                );
 
                 return Ok(ProcessStatus {
                     id: id.clone(),
@@ -5750,6 +5134,7 @@ impl ProcessManager {
                         resources: None,
                         exit_code: None,
                         message: None,
+                        exit_reason: None,
                         restart,
                         restart_attempts: reused_restart_attempts,
                         stdin,
@@ -5757,6 +5142,9 @@ impl ProcessManager {
                         pgid,
                         logs: logs.clone(),
                         log_file_tx: Some(log_tx.clone()),
+                        desired: DesiredState::Running,
+                        restart_nonce: 0,
+                        restart_status: RestartStatus::None,
                     },
                 );
             }
@@ -5771,128 +5159,17 @@ impl ProcessManager {
             let wait_sink = sink.clone();
             let template_id = t.template_id.clone();
             let params_for_restart = params.clone();
-            tokio::spawn(async move {
-                let res = child.wait().await;
-                let runtime = tokio::time::Instant::now().duration_since(started);
-
-                let mut restart_after: Option<Duration> = None;
-                let mut restart_attempt: u32 = 0;
-
-                let (final_state, exit_code) = {
-                    let mut map = inner.lock().await;
-                    let Some(e) = map.get_mut(&id_str) else {
-                        return;
-                    };
-
-                    e.stdin = None;
-                    let stopping = matches!(e.state, ProcessState::Stopping);
-
-                    match res {
-                        Ok(status) => {
-                            e.exit_code = status.code();
-
-                            if stopping {
-                                e.state = ProcessState::Exited;
-                                e.message = Some("stopped".to_string());
-                            } else if runtime < early_exit_threshold() {
-                                e.state = ProcessState::Failed;
-                                e.message =
-                                    Some(format!("exited too quickly ({}ms)", runtime.as_millis()));
-                            } else if status.success() {
-                                e.state = ProcessState::Exited;
-                                e.message = Some("exited".to_string());
-                            } else {
-                                e.state = ProcessState::Failed;
-                                e.message = Some(process_exit_with_code_message(status.code()));
-                            }
-                        }
-                        Err(err) => {
-                            e.state = ProcessState::Failed;
-                            e.message = Some(format!("wait failed: {err}"));
-                        }
-                    }
-
-                    if !stopping {
-                        let is_failure = matches!(e.state, ProcessState::Failed)
-                            || e.exit_code.is_some_and(|c| c != 0);
-                        let should_restart = match e.restart.policy {
-                            RestartPolicy::Off => false,
-                            RestartPolicy::Always => true,
-                            RestartPolicy::OnFailure => is_failure,
-                        };
-
-                        if should_restart {
-                            if e.restart_attempts < e.restart.max_retries {
-                                e.restart_attempts = e.restart_attempts.saturating_add(1);
-                                let delay_ms = compute_backoff_ms(e.restart, e.restart_attempts);
-                                restart_after = Some(Duration::from_millis(delay_ms));
-                                restart_attempt = e.restart_attempts;
-                                e.message = Some(restart_scheduled_message(delay_ms, restart_attempt, e.restart.max_retries));
-                            } else {
-                                e.message = Some(restart_limit_reached_message(
-                                    e.restart_attempts,
-                                    e.restart.max_retries,
-                                ));
-                            }
-                        }
-                    }
-
-                    (e.state, e.exit_code)
-                };
-
-                wait_sink
-                    .emit(format!(
-                        "[alloy-agent] process exited: state={:?} exit_code={:?} runtime_ms={}",
-                        final_state,
-                        exit_code,
-                        runtime.as_millis()
-                    ))
-                    .await;
-
-                if let Some(delay) = restart_after {
-                    wait_sink
-                        .emit(format!(
-                            "[alloy-agent] auto-restart scheduled in {}ms (attempt {})",
-                            delay.as_millis(),
-                            restart_attempt
-                        ))
-                        .await;
-                    let handle = tokio::runtime::Handle::current();
-                    let wait_sink = wait_sink.clone();
-                    tokio::task::spawn_blocking(move || {
-                        std::thread::sleep(delay);
-                        let res = handle.block_on(manager.start_from_template_with_process_id(
-                            &id_str,
-                            &template_id,
-                            params_for_restart,
-                        ));
-                        match res {
-                            Ok(st) if matches!(st.state, ProcessState::Failed) => {
-                                let msg = st
-                                    .message
-                                    .filter(|s| !s.trim().is_empty())
-                                    .unwrap_or_else(|| "unknown error".to_string());
-                                handle.block_on(
-                                    wait_sink
-                                        .emit(format!("[alloy-agent] auto-restart failed: {msg}")),
-                                );
-                            }
-                            Ok(_) => {
-                                handle.block_on(
-                                    wait_sink
-                                        .emit("[alloy-agent] auto-restart triggered".to_string()),
-                                );
-                            }
-                            Err(err) => {
-                                handle.block_on(
-                                    wait_sink
-                                        .emit(format!("[alloy-agent] auto-restart failed: {err}")),
-                                );
-                            }
-                        }
-                    });
-                }
-            });
+            spawn_wait_task(
+                manager,
+                inner,
+                wait_sink,
+                id_str,
+                template_id,
+                params_for_restart,
+                child,
+                started,
+                None,
+            );
 
             Ok(ProcessStatus {
                 id: id.clone(),
@@ -5925,7 +5202,8 @@ impl ProcessManager {
                             pid: None,
                             resources: None,
                             exit_code: None,
-                            message: Some(msg.clone()),
+                            message: None,
+                            exit_reason: Some(msg.clone()),
                             restart,
                             restart_attempts: reused_restart_attempts,
                             stdin: None,
@@ -5933,6 +5211,9 @@ impl ProcessManager {
                             pgid: None,
                             logs: logs.clone(),
                             log_file_tx: Some(log_tx.clone()),
+                            desired: DesiredState::Running,
+                            restart_nonce: 0,
+                            restart_status: RestartStatus::None,
                         },
                     );
                 }
@@ -5964,7 +5245,7 @@ impl ProcessManager {
                 state: e.state,
                 pid: e.pid,
                 exit_code: e.exit_code,
-                message: e.message.clone(),
+                message: entry_message(e),
                 resources: e.resources.clone(),
             })
             .collect()
@@ -5978,7 +5259,7 @@ impl ProcessManager {
             state: e.state,
             pid: e.pid,
             exit_code: e.exit_code,
-            message: e.message.clone(),
+            message: entry_message(e),
             resources: e.resources.clone(),
         })
     }
@@ -6015,13 +5296,18 @@ impl ProcessManager {
                 .ok_or_else(|| anyhow::anyhow!("unknown process_id: {process_id}"))?;
 
             if matches!(e.state, ProcessState::Exited | ProcessState::Failed) {
+                e.desired = DesiredState::Stopped;
+                if matches!(e.restart_status, RestartStatus::Scheduled { .. }) {
+                    e.restart_nonce = e.restart_nonce.saturating_add(1);
+                    e.restart_status = RestartStatus::Cancelled;
+                }
                 return Ok(ProcessStatus {
                     id: ProcessId(process_id.to_string()),
                     template_id: e.template_id.clone(),
                     state: e.state,
                     pid: e.pid,
                     exit_code: e.exit_code,
-                    message: e.message.clone(),
+                    message: entry_message(e),
                     resources: e.resources.clone(),
                 });
             }
@@ -6033,7 +5319,7 @@ impl ProcessManager {
                     state: e.state,
                     pid: e.pid,
                     exit_code: e.exit_code,
-                    message: e.message.clone(),
+                    message: entry_message(e),
                     resources: e.resources.clone(),
                 });
             }
@@ -6042,6 +5328,12 @@ impl ProcessManager {
             pgid = e.pgid;
             logs = e.logs.clone();
             log_tx = e.log_file_tx.clone();
+
+            e.desired = DesiredState::Stopped;
+            if matches!(e.restart_status, RestartStatus::Scheduled { .. }) {
+                e.restart_nonce = e.restart_nonce.saturating_add(1);
+                e.restart_status = RestartStatus::Cancelled;
+            }
             e.state = ProcessState::Stopping;
             e.message = Some("stopping".to_string());
 
