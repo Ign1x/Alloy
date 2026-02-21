@@ -3,7 +3,9 @@ use serde::{Deserialize, de::DeserializeOwned};
 use std::{
     cmp::Reverse,
     collections::HashMap,
+    future::Future,
     net::IpAddr,
+    pin::Pin,
     sync::{Mutex, OnceLock},
     time::{Duration, Instant},
 };
@@ -12,9 +14,13 @@ const MODRINTH_API_BASE: &str = "https://api.modrinth.com/v2";
 const MODRINTH_WORLD_PAGE_BASE: &str = "https://modrinth.com/world";
 const MODRINTH_ALLOWED_HOSTS: &[&str] = &["cdn.modrinth.com", "modrinth.com"];
 
+const MODRINTH_PROVIDER_ID: ProviderId = "modrinth";
+
 const SEARCH_CACHE_TTL: Duration = Duration::from_secs(45);
+const SEARCH_CACHE_STALE_TTL: Duration = Duration::from_secs(10 * 60);
 const SEARCH_CACHE_MAX_ENTRIES: usize = 256;
 const RESOLVE_CACHE_TTL: Duration = Duration::from_secs(120);
+const RESOLVE_CACHE_STALE_TTL: Duration = Duration::from_secs(30 * 60);
 const RESOLVE_CACHE_MAX_ENTRIES: usize = 256;
 
 const RETRY_ATTEMPTS: u32 = 3;
@@ -55,10 +61,57 @@ pub struct ResolveSaveDownloadInput {
     pub version_id: String,
 }
 
+type ProviderId = &'static str;
+type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
+
+trait SaveSearchProviderBackend: Send + Sync {
+    fn id(&self) -> ProviderId;
+
+    fn search_worlds<'a>(&'a self, query: &'a str, limit: u32)
+        -> BoxFuture<'a, anyhow::Result<Vec<SaveSearchHit>>>;
+
+    fn resolve_download<'a>(
+        &'a self,
+        project_id: &'a str,
+        version_id: &'a str,
+    ) -> BoxFuture<'a, anyhow::Result<ResolvedSaveDownload>>;
+}
+
+struct ModrinthProvider;
+
+impl SaveSearchProviderBackend for ModrinthProvider {
+    fn id(&self) -> ProviderId {
+        "modrinth"
+    }
+
+    fn search_worlds<'a>(
+        &'a self,
+        query: &'a str,
+        limit: u32,
+    ) -> BoxFuture<'a, anyhow::Result<Vec<SaveSearchHit>>> {
+        Box::pin(async move { search_worlds_modrinth(query, limit).await })
+    }
+
+    fn resolve_download<'a>(
+        &'a self,
+        project_id: &'a str,
+        version_id: &'a str,
+    ) -> BoxFuture<'a, anyhow::Result<ResolvedSaveDownload>> {
+        Box::pin(async move { resolve_download_modrinth(project_id, version_id).await })
+    }
+}
+
+static MODRINTH_PROVIDER: ModrinthProvider = ModrinthProvider;
+static PROVIDERS: [&'static dyn SaveSearchProviderBackend; 1] = [&MODRINTH_PROVIDER];
+
+fn providers() -> &'static [&'static dyn SaveSearchProviderBackend] {
+    &PROVIDERS
+}
+
 #[derive(Debug)]
 struct SaveSearchError {
     scope: &'static str,
-    provider: Option<&'static str>,
+    provider: Option<ProviderId>,
     code: &'static str,
     retryable: bool,
     message: String,
@@ -82,7 +135,7 @@ impl std::error::Error for SaveSearchError {}
 
 fn structured_error(
     scope: &'static str,
-    provider: Option<&'static str>,
+    provider: Option<ProviderId>,
     code: &'static str,
     retryable: bool,
     message: impl Into<String>,
@@ -102,46 +155,41 @@ fn is_retryable_provider_error(err: &anyhow::Error) -> bool {
         .unwrap_or(false)
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-enum SaveSearchProvider {
-    Modrinth,
-}
-
-impl SaveSearchProvider {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Modrinth => "modrinth",
-        }
+fn provider_from_input(raw: &str) -> anyhow::Result<&'static dyn SaveSearchProviderBackend> {
+    let normalized = raw.trim().to_ascii_lowercase();
+    if normalized.is_empty() {
+        return Err(structured_error(
+            "input",
+            None,
+            "provider_required",
+            false,
+            "provider is required",
+        ));
     }
 
-    fn from_input(raw: &str) -> anyhow::Result<Self> {
-        let normalized = raw.trim().to_ascii_lowercase();
-        if normalized.is_empty() {
-            return Err(structured_error(
-                "input",
-                None,
-                "provider_required",
-                false,
-                "provider is required",
-            ));
-        }
-
-        match normalized.as_str() {
-            "modrinth" => Ok(Self::Modrinth),
-            _ => Err(structured_error(
+    providers()
+        .iter()
+        .copied()
+        .find(|p| p.id() == normalized.as_str())
+        .ok_or_else(|| {
+            structured_error(
                 "input",
                 None,
                 "unsupported_provider",
                 false,
                 format!("unsupported provider: {raw}"),
-            )),
-        }
-    }
+            )
+        })
+}
+
+fn is_provider_scoped_error(err: &anyhow::Error) -> bool {
+    err.downcast_ref::<SaveSearchError>()
+        .is_some_and(|v| v.provider.is_some())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct SearchCacheKey {
-    provider: SaveSearchProvider,
+    provider: ProviderId,
     query: String,
     limit: u32,
 }
@@ -154,7 +202,7 @@ struct SearchCacheEntry {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct ResolveCacheKey {
-    provider: SaveSearchProvider,
+    provider: ProviderId,
     project_id: String,
     version_id: String,
 }
@@ -242,8 +290,8 @@ fn resolve_cache() -> &'static Mutex<HashMap<ResolveCacheKey, ResolveCacheEntry>
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-fn provider_state() -> &'static Mutex<HashMap<SaveSearchProvider, ProviderRuntimeState>> {
-    static STATE: OnceLock<Mutex<HashMap<SaveSearchProvider, ProviderRuntimeState>>> =
+fn provider_state() -> &'static Mutex<HashMap<ProviderId, ProviderRuntimeState>> {
+    static STATE: OnceLock<Mutex<HashMap<ProviderId, ProviderRuntimeState>>> =
         OnceLock::new();
     STATE.get_or_init(|| Mutex::new(HashMap::new()))
 }
@@ -276,7 +324,7 @@ fn provider_failure_backoff(failures: u32) -> Duration {
     )
 }
 
-fn ensure_provider_ready(provider: SaveSearchProvider) -> anyhow::Result<()> {
+fn ensure_provider_ready(provider: ProviderId) -> anyhow::Result<()> {
     let now = Instant::now();
     let guard = provider_state().lock().unwrap_or_else(|e| e.into_inner());
     if let Some(state) = guard.get(&provider)
@@ -286,7 +334,7 @@ fn ensure_provider_ready(provider: SaveSearchProvider) -> anyhow::Result<()> {
         let wait_ms = until.duration_since(now).as_millis();
         return Err(structured_error(
             "provider",
-            Some(provider.as_str()),
+            Some(provider),
             "provider_backoff_active",
             true,
             format!("provider is in backoff window; retry in {wait_ms}ms"),
@@ -295,7 +343,7 @@ fn ensure_provider_ready(provider: SaveSearchProvider) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn mark_provider_success(provider: SaveSearchProvider) {
+fn mark_provider_success(provider: ProviderId) {
     let mut guard = provider_state().lock().unwrap_or_else(|e| e.into_inner());
     guard.insert(
         provider,
@@ -306,7 +354,7 @@ fn mark_provider_success(provider: SaveSearchProvider) {
     );
 }
 
-fn mark_provider_retryable_failure(provider: SaveSearchProvider) -> Duration {
+fn mark_provider_retryable_failure(provider: ProviderId) -> Duration {
     let now = Instant::now();
     let mut guard = provider_state().lock().unwrap_or_else(|e| e.into_inner());
     let state = guard.entry(provider).or_default();
@@ -317,7 +365,7 @@ fn mark_provider_retryable_failure(provider: SaveSearchProvider) -> Duration {
 }
 
 fn prune_search_cache(cache: &mut HashMap<SearchCacheKey, SearchCacheEntry>, now: Instant) {
-    cache.retain(|_, v| now.duration_since(v.cached_at) < SEARCH_CACHE_TTL);
+    cache.retain(|_, v| now.duration_since(v.cached_at) < SEARCH_CACHE_STALE_TTL);
     if cache.len() <= SEARCH_CACHE_MAX_ENTRIES {
         return;
     }
@@ -331,7 +379,7 @@ fn prune_search_cache(cache: &mut HashMap<SearchCacheKey, SearchCacheEntry>, now
 }
 
 fn prune_resolve_cache(cache: &mut HashMap<ResolveCacheKey, ResolveCacheEntry>, now: Instant) {
-    cache.retain(|_, v| now.duration_since(v.cached_at) < RESOLVE_CACHE_TTL);
+    cache.retain(|_, v| now.duration_since(v.cached_at) < RESOLVE_CACHE_STALE_TTL);
     if cache.len() <= RESOLVE_CACHE_MAX_ENTRIES {
         return;
     }
@@ -344,11 +392,30 @@ fn prune_resolve_cache(cache: &mut HashMap<ResolveCacheKey, ResolveCacheEntry>, 
     }
 }
 
-fn get_search_cache(key: &SearchCacheKey) -> Option<Vec<SaveSearchHit>> {
+fn get_search_cache_fresh(key: &SearchCacheKey) -> Option<Vec<SaveSearchHit>> {
     let now = Instant::now();
     let mut guard = search_cache().lock().unwrap_or_else(|e| e.into_inner());
     prune_search_cache(&mut guard, now);
-    guard.get(key).map(|entry| entry.value.clone())
+    guard.get(key).and_then(|entry| {
+        if now.duration_since(entry.cached_at) < SEARCH_CACHE_TTL {
+            Some(entry.value.clone())
+        } else {
+            None
+        }
+    })
+}
+
+fn get_search_cache_stale(key: &SearchCacheKey) -> Option<Vec<SaveSearchHit>> {
+    let now = Instant::now();
+    let mut guard = search_cache().lock().unwrap_or_else(|e| e.into_inner());
+    prune_search_cache(&mut guard, now);
+    guard.get(key).and_then(|entry| {
+        if now.duration_since(entry.cached_at) < SEARCH_CACHE_STALE_TTL {
+            Some(entry.value.clone())
+        } else {
+            None
+        }
+    })
 }
 
 fn put_search_cache(key: SearchCacheKey, value: Vec<SaveSearchHit>) {
@@ -364,11 +431,30 @@ fn put_search_cache(key: SearchCacheKey, value: Vec<SaveSearchHit>) {
     );
 }
 
-fn get_resolve_cache(key: &ResolveCacheKey) -> Option<ResolvedSaveDownload> {
+fn get_resolve_cache_fresh(key: &ResolveCacheKey) -> Option<ResolvedSaveDownload> {
     let now = Instant::now();
     let mut guard = resolve_cache().lock().unwrap_or_else(|e| e.into_inner());
     prune_resolve_cache(&mut guard, now);
-    guard.get(key).map(|entry| entry.value.clone())
+    guard.get(key).and_then(|entry| {
+        if now.duration_since(entry.cached_at) < RESOLVE_CACHE_TTL {
+            Some(entry.value.clone())
+        } else {
+            None
+        }
+    })
+}
+
+fn get_resolve_cache_stale(key: &ResolveCacheKey) -> Option<ResolvedSaveDownload> {
+    let now = Instant::now();
+    let mut guard = resolve_cache().lock().unwrap_or_else(|e| e.into_inner());
+    prune_resolve_cache(&mut guard, now);
+    guard.get(key).and_then(|entry| {
+        if now.duration_since(entry.cached_at) < RESOLVE_CACHE_STALE_TTL {
+            Some(entry.value.clone())
+        } else {
+            None
+        }
+    })
 }
 
 fn put_resolve_cache(key: ResolveCacheKey, value: ResolvedSaveDownload) {
@@ -391,14 +477,14 @@ fn host_allowed(host: &str, allowlist: &[&str]) -> bool {
 }
 
 fn validate_allowed_https_url(
-    provider: SaveSearchProvider,
+    provider: ProviderId,
     raw: &str,
     allowed_hosts: &[&str],
 ) -> anyhow::Result<Url> {
     let parsed = Url::parse(raw.trim()).map_err(|e| {
         structured_error(
             "validation",
-            Some(provider.as_str()),
+            Some(provider),
             "invalid_url",
             false,
             format!("invalid provider url: {e}"),
@@ -408,7 +494,7 @@ fn validate_allowed_https_url(
     if parsed.scheme() != "https" {
         return Err(structured_error(
             "validation",
-            Some(provider.as_str()),
+            Some(provider),
             "url_scheme_not_allowed",
             false,
             "provider url must use https",
@@ -418,7 +504,7 @@ fn validate_allowed_https_url(
     if !parsed.username().is_empty() || parsed.password().is_some() {
         return Err(structured_error(
             "validation",
-            Some(provider.as_str()),
+            Some(provider),
             "url_userinfo_not_allowed",
             false,
             "provider url must not include username/password",
@@ -430,7 +516,7 @@ fn validate_allowed_https_url(
         .ok_or_else(|| {
             structured_error(
                 "validation",
-                Some(provider.as_str()),
+                Some(provider),
                 "url_host_missing",
                 false,
                 "provider url host is missing",
@@ -442,7 +528,7 @@ fn validate_allowed_https_url(
     if host.parse::<IpAddr>().is_ok() {
         return Err(structured_error(
             "validation",
-            Some(provider.as_str()),
+            Some(provider),
             "url_ip_not_allowed",
             false,
             "provider url host cannot be an IP address",
@@ -452,7 +538,7 @@ fn validate_allowed_https_url(
     if parsed.port().is_some_and(|p| p != 443) {
         return Err(structured_error(
             "validation",
-            Some(provider.as_str()),
+            Some(provider),
             "url_port_not_allowed",
             false,
             "provider url port is not allowed",
@@ -462,7 +548,7 @@ fn validate_allowed_https_url(
     if !host_allowed(&host, allowed_hosts) {
         return Err(structured_error(
             "validation",
-            Some(provider.as_str()),
+            Some(provider),
             "url_host_not_allowed",
             false,
             format!("provider url host is not allowed: {host}"),
@@ -493,7 +579,7 @@ fn sort_hits_stably(hits: &mut [SaveSearchHit]) {
 }
 
 async fn fetch_json_with_retry<T>(
-    provider: SaveSearchProvider,
+    provider: ProviderId,
     url: Url,
     operation: &'static str,
 ) -> anyhow::Result<T>
@@ -508,7 +594,7 @@ where
             Err(err) => {
                 let mapped = structured_error(
                     "provider",
-                    Some(provider.as_str()),
+                    Some(provider),
                     "request_send_failed",
                     true,
                     format!(
@@ -529,7 +615,7 @@ where
             let retryable = status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error();
             let mapped = structured_error(
                 "provider",
-                Some(provider.as_str()),
+                Some(provider),
                 if retryable {
                     "request_http_status_retryable"
                 } else {
@@ -552,7 +638,7 @@ where
         return response.json::<T>().await.map_err(|err| {
             structured_error(
                 "provider",
-                Some(provider.as_str()),
+                Some(provider),
                 "response_json_invalid",
                 false,
                 format!("{operation} response JSON parse failed: {err}"),
@@ -563,7 +649,7 @@ where
     Err(last_retryable_error.unwrap_or_else(|| {
         structured_error(
             "provider",
-            Some(provider.as_str()),
+            Some(provider),
             "request_retry_exhausted",
             true,
             format!("{operation} exhausted retry attempts"),
@@ -571,23 +657,120 @@ where
     }))
 }
 
-async fn search_worlds_with_provider(
-    provider: SaveSearchProvider,
+async fn search_worlds_cached(
+    provider: &'static dyn SaveSearchProviderBackend,
     query: &str,
     limit: u32,
 ) -> anyhow::Result<Vec<SaveSearchHit>> {
-    match provider {
-        SaveSearchProvider::Modrinth => search_worlds_modrinth(query, limit).await,
+    let cache_key = SearchCacheKey {
+        provider: provider.id(),
+        query: normalize_query_for_cache(query),
+        limit,
+    };
+    if let Some(cached) = get_search_cache_fresh(&cache_key) {
+        return Ok(cached);
+    }
+
+    if let Err(err) = ensure_provider_ready(provider.id()) {
+        if let Some(stale) = get_search_cache_stale(&cache_key) {
+            return Ok(stale);
+        }
+        return Err(err);
+    }
+
+    match provider.search_worlds(query, limit).await {
+        Ok(mut out) => {
+            for hit in &mut out {
+                hit.provider = provider.id().to_string();
+            }
+            sort_hits_stably(&mut out);
+            put_search_cache(cache_key, out.clone());
+            mark_provider_success(provider.id());
+            Ok(out)
+        }
+        Err(err) => {
+            if is_retryable_provider_error(&err) {
+                let delay = mark_provider_retryable_failure(provider.id());
+                if let Some(stale) = get_search_cache_stale(&cache_key) {
+                    return Ok(stale);
+                }
+                return Err(structured_error(
+                    "provider",
+                    Some(provider.id()),
+                    "provider_backoff_applied",
+                    true,
+                    format!(
+                        "provider request failed; applied backoff={}ms; cause={err}",
+                        delay.as_millis()
+                    ),
+                ));
+            }
+
+            if is_provider_scoped_error(&err)
+                && let Some(stale) = get_search_cache_stale(&cache_key)
+            {
+                return Ok(stale);
+            }
+
+            Err(err)
+        }
     }
 }
 
-async fn resolve_download_with_provider(
-    provider: SaveSearchProvider,
+async fn resolve_download_cached(
+    provider: &'static dyn SaveSearchProviderBackend,
     project_id: &str,
     version_id: &str,
 ) -> anyhow::Result<ResolvedSaveDownload> {
-    match provider {
-        SaveSearchProvider::Modrinth => resolve_download_modrinth(project_id, version_id).await,
+    let cache_key = ResolveCacheKey {
+        provider: provider.id(),
+        project_id: project_id.to_string(),
+        version_id: version_id.to_string(),
+    };
+    if let Some(cached) = get_resolve_cache_fresh(&cache_key) {
+        return Ok(cached);
+    }
+
+    if let Err(err) = ensure_provider_ready(provider.id()) {
+        if let Some(stale) = get_resolve_cache_stale(&cache_key) {
+            return Ok(stale);
+        }
+        return Err(err);
+    }
+
+    match provider.resolve_download(project_id, version_id).await {
+        Ok(mut resolved) => {
+            resolved.provider = provider.id().to_string();
+            put_resolve_cache(cache_key, resolved.clone());
+            mark_provider_success(provider.id());
+            Ok(resolved)
+        }
+        Err(err) => {
+            if is_retryable_provider_error(&err) {
+                let delay = mark_provider_retryable_failure(provider.id());
+                if let Some(stale) = get_resolve_cache_stale(&cache_key) {
+                    return Ok(stale);
+                }
+                return Err(structured_error(
+                    "provider",
+                    Some(provider.id()),
+                    "provider_backoff_applied",
+                    true,
+                    format!(
+                        "provider request failed; applied backoff={}ms; cause={err}",
+                        delay.as_millis()
+                    ),
+                ));
+            }
+
+            if is_provider_scoped_error(&err)
+                && let Some(stale) = get_resolve_cache_stale(&cache_key)
+            {
+                return Ok(stale);
+            }
+
+            Err(err)
+        }
     }
 }
 
@@ -601,7 +784,7 @@ async fn search_worlds_modrinth(query: &str, limit: u32) -> anyhow::Result<Vec<S
         .append_pair("facets", r#"[["project_type:world"]]"#);
 
     let resp: ModrinthSearchResponse =
-        fetch_json_with_retry(SaveSearchProvider::Modrinth, url, "modrinth_search").await?;
+        fetch_json_with_retry(MODRINTH_PROVIDER_ID, url, "modrinth_search").await?;
 
     let mut out = Vec::<SaveSearchHit>::new();
     for hit in resp.hits {
@@ -619,7 +802,7 @@ async fn search_worlds_modrinth(query: &str, limit: u32) -> anyhow::Result<Vec<S
         let page_url = build_modrinth_world_page_url(&slug_or_id);
 
         out.push(SaveSearchHit {
-            provider: SaveSearchProvider::Modrinth.as_str().to_string(),
+            provider: MODRINTH_PROVIDER_ID.to_string(),
             project_id,
             version_id,
             title,
@@ -642,12 +825,12 @@ async fn resolve_download_modrinth(
     let url = Url::parse(&format!("{MODRINTH_API_BASE}/version/{version_id}"))
         .expect("MODRINTH_API_BASE valid");
     let version: ModrinthVersionResponse =
-        fetch_json_with_retry(SaveSearchProvider::Modrinth, url, "modrinth_get_version").await?;
+        fetch_json_with_retry(MODRINTH_PROVIDER_ID, url, "modrinth_get_version").await?;
 
     if version.project_id.trim() != project_id {
         return Err(structured_error(
             "provider",
-            Some(SaveSearchProvider::Modrinth.as_str()),
+            Some(MODRINTH_PROVIDER_ID),
             "version_project_mismatch",
             false,
             "version does not belong to the selected project",
@@ -656,7 +839,7 @@ async fn resolve_download_modrinth(
     if version.id.trim() != version_id {
         return Err(structured_error(
             "provider",
-            Some(SaveSearchProvider::Modrinth.as_str()),
+            Some(MODRINTH_PROVIDER_ID),
             "version_id_mismatch",
             false,
             "version mismatch",
@@ -671,7 +854,7 @@ async fn resolve_download_modrinth(
         .ok_or_else(|| {
             structured_error(
                 "provider",
-                Some(SaveSearchProvider::Modrinth.as_str()),
+                Some(MODRINTH_PROVIDER_ID),
                 "version_file_missing",
                 false,
                 "modrinth version has no downloadable files",
@@ -680,7 +863,7 @@ async fn resolve_download_modrinth(
         .clone();
 
     let parsed = validate_allowed_https_url(
-        SaveSearchProvider::Modrinth,
+        MODRINTH_PROVIDER_ID,
         file.url.trim(),
         MODRINTH_ALLOWED_HOSTS,
     )?;
@@ -690,7 +873,7 @@ async fn resolve_download_modrinth(
         .unwrap_or_else(|| "modrinth world".to_string());
 
     Ok(ResolvedSaveDownload {
-        provider: SaveSearchProvider::Modrinth.as_str().to_string(),
+        provider: MODRINTH_PROVIDER_ID.to_string(),
         project_id: project_id.to_string(),
         version_id: version_id.to_string(),
         title: label,
@@ -703,7 +886,6 @@ pub async fn search_minecraft_worlds(
     query: &str,
     limit: Option<u32>,
 ) -> anyhow::Result<Vec<SaveSearchHit>> {
-    let provider = SaveSearchProvider::Modrinth;
     let q = query.trim();
     if q.is_empty() {
         return Err(structured_error(
@@ -716,47 +898,59 @@ pub async fn search_minecraft_worlds(
     }
 
     let limit = clamp_limit(limit);
-    let cache_key = SearchCacheKey {
-        provider,
-        query: normalize_query_for_cache(q),
-        limit,
-    };
-    if let Some(cached) = get_search_cache(&cache_key) {
-        return Ok(cached);
-    }
 
-    ensure_provider_ready(provider)?;
+    let mut out = Vec::<SaveSearchHit>::new();
+    let mut errors = Vec::<anyhow::Error>::new();
+    let mut had_any_success = false;
 
-    match search_worlds_with_provider(provider, q, limit).await {
-        Ok(mut out) => {
-            sort_hits_stably(&mut out);
-            put_search_cache(cache_key, out.clone());
-            mark_provider_success(provider);
-            Ok(out)
-        }
-        Err(err) => {
-            if is_retryable_provider_error(&err) {
-                let delay = mark_provider_retryable_failure(provider);
-                return Err(structured_error(
-                    "provider",
-                    Some(provider.as_str()),
-                    "provider_backoff_applied",
-                    true,
-                    format!(
-                        "provider request failed; applied backoff={}ms; cause={err}",
-                        delay.as_millis()
-                    ),
-                ));
+    for provider in providers() {
+        match search_worlds_cached(*provider, q, limit).await {
+            Ok(mut hits) => {
+                had_any_success = true;
+                out.append(&mut hits);
             }
-            Err(err)
+            Err(err) => errors.push(err),
         }
     }
+
+    if out.is_empty() {
+        if had_any_success {
+            return Ok(Vec::new());
+        }
+        if errors.is_empty() {
+            return Err(structured_error(
+                "internal",
+                None,
+                "no_providers_configured",
+                false,
+                "no save search providers configured",
+            ));
+        }
+
+        let message = errors
+            .iter()
+            .enumerate()
+            .map(|(idx, err)| format!("{}:{err}", idx + 1))
+            .collect::<Vec<_>>()
+            .join(" | ");
+        return Err(structured_error(
+            "provider",
+            None,
+            "all_providers_failed",
+            true,
+            format!("all save search providers failed: {message}"),
+        ));
+    }
+
+    sort_hits_stably(&mut out);
+    out.truncate(limit as usize);
+    Ok(out)
 }
 
 pub async fn resolve_save_download(
     input: ResolveSaveDownloadInput,
 ) -> anyhow::Result<ResolvedSaveDownload> {
-    let provider = SaveSearchProvider::from_input(&input.provider)?;
+    let provider = provider_from_input(&input.provider)?;
 
     let project_id = input.project_id.trim();
     if project_id.is_empty() {
@@ -779,38 +973,5 @@ pub async fn resolve_save_download(
         ));
     }
 
-    let cache_key = ResolveCacheKey {
-        provider,
-        project_id: project_id.to_string(),
-        version_id: version_id.to_string(),
-    };
-    if let Some(cached) = get_resolve_cache(&cache_key) {
-        return Ok(cached);
-    }
-
-    ensure_provider_ready(provider)?;
-
-    match resolve_download_with_provider(provider, project_id, version_id).await {
-        Ok(resolved) => {
-            put_resolve_cache(cache_key, resolved.clone());
-            mark_provider_success(provider);
-            Ok(resolved)
-        }
-        Err(err) => {
-            if is_retryable_provider_error(&err) {
-                let delay = mark_provider_retryable_failure(provider);
-                return Err(structured_error(
-                    "provider",
-                    Some(provider.as_str()),
-                    "provider_backoff_applied",
-                    true,
-                    format!(
-                        "provider request failed; applied backoff={}ms; cause={err}",
-                        delay.as_millis()
-                    ),
-                ));
-            }
-            Err(err)
-        }
-    }
+    resolve_download_cached(provider, project_id, version_id).await
 }

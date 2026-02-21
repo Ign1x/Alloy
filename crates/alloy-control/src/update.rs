@@ -150,14 +150,73 @@ fn fmt_version(v: SimpleVersion) -> String {
     format!("{}.{}.{}", v.major, v.minor, v.patch)
 }
 
-fn parse_version_bound(kind: &str, raw: &str) -> Result<SimpleVersion, UpdatePrecheck> {
-    parse_simple_version(raw).ok_or_else(|| {
+fn parse_version_bound(
+    kind: &str,
+    raw: &str,
+    allow_wildcard_patch: bool,
+) -> Result<SimpleVersion, UpdatePrecheck> {
+    let s = raw.trim().trim_start_matches('v');
+    let mut it = s.split(|c: char| matches!(c, '.' | '-' | '+'));
+
+    let major_raw = it.next().unwrap_or_default();
+    let minor_raw = it.next().unwrap_or_default();
+    let patch_raw = it.next();
+
+    let major: u64 = major_raw.parse().ok().ok_or_else(|| {
+        let expected = if allow_wildcard_patch {
+            "x.y.z or x.y.x"
+        } else {
+            "x.y.z"
+        };
         UpdatePrecheck::needs_manual(
             format!("{kind}_invalid"),
-            format!(
-                "compatibility {kind} `{raw}` is not a valid semantic version (expected x.y.z)"
-            ),
+            format!("compatibility {kind} `{raw}` is not a valid version (expected {expected})"),
         )
+    })?;
+
+    let minor: u64 = minor_raw.parse().ok().ok_or_else(|| {
+        let expected = if allow_wildcard_patch {
+            "x.y.z or x.y.x"
+        } else {
+            "x.y.z"
+        };
+        UpdatePrecheck::needs_manual(
+            format!("{kind}_invalid"),
+            format!("compatibility {kind} `{raw}` is not a valid version (expected {expected})"),
+        )
+    })?;
+
+    let patch: u64 = match patch_raw.map(|v| v.trim()) {
+        Some(p) if allow_wildcard_patch && matches!(p.to_ascii_lowercase().as_str(), "x" | "*") => {
+            u64::MAX
+        }
+        Some(p) => p.parse().ok().ok_or_else(|| {
+            let expected = if allow_wildcard_patch {
+                "x.y.z or x.y.x"
+            } else {
+                "x.y.z"
+            };
+            UpdatePrecheck::needs_manual(
+                format!("{kind}_invalid"),
+                format!(
+                    "compatibility {kind} `{raw}` is not a valid version (expected {expected})"
+                ),
+            )
+        })?,
+        None if allow_wildcard_patch => u64::MAX,
+        None => {
+            let expected = "x.y.z";
+            return Err(UpdatePrecheck::needs_manual(
+                format!("{kind}_invalid"),
+                format!("compatibility {kind} `{raw}` is not a valid version (expected {expected})"),
+            ));
+        }
+    };
+
+    Ok(SimpleVersion {
+        major,
+        minor,
+        patch,
     })
 }
 
@@ -208,16 +267,19 @@ fn evaluate_catalog_precheck(catalog: &UpdateCatalog) -> UpdatePrecheck {
         );
     };
 
-    let min = match compat.control_min_agent.as_deref() {
-        Some(raw) => match parse_version_bound("control_min_agent", raw) {
+    let min_raw = compat.control_min_agent.as_deref();
+    let max_raw = compat.control_max_agent.as_deref();
+
+    let min = match min_raw {
+        Some(raw) => match parse_version_bound("control_min_agent", raw, false) {
             Ok(v) => Some(v),
             Err(precheck) => return precheck,
         },
         None => None,
     };
 
-    let max = match compat.control_max_agent.as_deref() {
-        Some(raw) => match parse_version_bound("control_max_agent", raw) {
+    let max = match max_raw {
+        Some(raw) => match parse_version_bound("control_max_agent", raw, true) {
             Ok(v) => Some(v),
             Err(precheck) => return precheck,
         },
@@ -239,8 +301,8 @@ fn evaluate_catalog_precheck(catalog: &UpdateCatalog) -> UpdatePrecheck {
             "compatibility_window_invalid",
             format!(
                 "manifest compatibility window is invalid: min {} > max {}",
-                fmt_version(min_v),
-                fmt_version(max_v)
+                min_raw.unwrap_or(""),
+                max_raw.unwrap_or("")
             ),
         );
     }
@@ -265,12 +327,8 @@ fn evaluate_catalog_precheck(catalog: &UpdateCatalog) -> UpdatePrecheck {
     if min.map(|v| agent_version < v).unwrap_or(false)
         || max.map(|v| agent_version > v).unwrap_or(false)
     {
-        let min_text = min
-            .map(fmt_version)
-            .unwrap_or_else(|| "-inf".to_string());
-        let max_text = max
-            .map(fmt_version)
-            .unwrap_or_else(|| "+inf".to_string());
+        let min_text = min_raw.unwrap_or("-inf");
+        let max_text = max_raw.unwrap_or("+inf");
         return UpdatePrecheck::not_updatable(
             "incompatible_agent_version",
             format!(
@@ -669,6 +727,31 @@ pub fn watchtower_configured() -> bool {
 }
 
 pub async fn trigger_watchtower_update() -> anyhow::Result<String> {
+    let catalog = update_catalog_force()
+        .await
+        .context("fetch update catalog for compatibility precheck")?;
+    match catalog.precheck.status {
+        UpdatePrecheckStatus::Updatable => {}
+        UpdatePrecheckStatus::NotUpdatable => {
+            if catalog.precheck.reason_code != "already_latest" {
+                anyhow::bail!(
+                    "update blocked by compatibility gate: precheck={} reason={} detail={}. hint: update your agents to a compatible version (or fix the manifest compatibility window) before triggering one-click updates",
+                    catalog.precheck.status.as_str(),
+                    catalog.precheck.reason_code,
+                    catalog.precheck.detail
+                );
+            }
+        }
+        UpdatePrecheckStatus::NeedsManualConfirmation => {
+            anyhow::bail!(
+                "update requires manual confirmation: precheck={} reason={} detail={}. hint: ensure ALLOY_UPDATE_MANIFEST_URL points to an update-manifest.json with a valid compatibility window (control_min_agent/control_max_agent) and a paired agent release",
+                catalog.precheck.status.as_str(),
+                catalog.precheck.reason_code,
+                catalog.precheck.detail
+            );
+        }
+    }
+
     let url = std::env::var("ALLOY_UPDATE_WATCHTOWER_URL")
         .unwrap_or_else(|_| "".to_string())
         .trim()
@@ -703,6 +786,34 @@ pub async fn trigger_watchtower_update() -> anyhow::Result<String> {
         anyhow::bail!(
             "watchtower update failed: endpoint={endpoint}, token={token_state}, status={status}, body={body}. hint: verify WATCHTOWER_HTTP_API_TOKEN and /v1/update availability"
         );
+    }
+
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(text.trim()) {
+        let failed = v
+            .get("summary")
+            .and_then(|s| s.get("failed"))
+            .and_then(|n| n.as_u64())
+            .unwrap_or(0);
+        if failed > 0 {
+            let scanned = v
+                .get("summary")
+                .and_then(|s| s.get("scanned"))
+                .and_then(|n| n.as_u64())
+                .unwrap_or(0);
+            let updated = v
+                .get("summary")
+                .and_then(|s| s.get("updated"))
+                .and_then(|n| n.as_u64())
+                .unwrap_or(0);
+            let restarted = v
+                .get("summary")
+                .and_then(|s| s.get("restarted"))
+                .and_then(|n| n.as_u64())
+                .unwrap_or(0);
+            anyhow::bail!(
+                "watchtower update reported failures: scanned={scanned} updated={updated} failed={failed} restarted={restarted}. hint: check watchtower logs and image availability, then retry or update manually"
+            );
+        }
     }
 
     Ok(text)

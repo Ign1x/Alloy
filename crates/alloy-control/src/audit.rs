@@ -2,6 +2,44 @@ use alloy_db::entities::audit_events;
 use sea_orm::{ActiveModelTrait, Set};
 
 use crate::rpc::Ctx;
+use crate::request_meta::RequestMeta;
+
+fn meta_request_fields(meta: &RequestMeta) -> serde_json::Value {
+    serde_json::json!({
+        "request_id": meta.request_id,
+        "method": meta.method,
+        "path": meta.path,
+        "origin": meta.origin,
+        "referer": meta.referer,
+        "user_agent": meta.user_agent,
+        "client_ip": meta.client_ip,
+    })
+}
+
+pub async fn record_auth_failure(
+    ctx: &Ctx,
+    action: &str,
+    target: &str,
+    error_code: &str,
+    error_source: &str,
+    window_seconds: Option<i64>,
+    meta: &RequestMeta,
+) {
+    record(
+        ctx,
+        action,
+        target,
+        Some(serde_json::json!({
+            "error": {
+                "code": error_code,
+                "source": error_source,
+                "window_seconds": window_seconds,
+            },
+            "request": meta_request_fields(meta),
+        })),
+    )
+    .await;
+}
 
 pub async fn record(ctx: &Ctx, action: &str, target: &str, meta: Option<serde_json::Value>) {
     let user_id = ctx

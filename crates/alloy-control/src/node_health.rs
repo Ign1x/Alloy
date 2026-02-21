@@ -107,23 +107,21 @@ impl NodeHealthPoller {
                     .reason_detail
                     .as_deref()
                     .unwrap_or("no active tunnel");
-                update.last_error = Set(Some(
-                    format!(
-                        "agent is not connected (state={}, reason={}, detail={}, failures={}, recent_rtt_ms={}, last_success_unix_ms={}; check ALLOY_CONTROL_WS_URL(S) / ALLOY_NODE_TOKEN)",
-                        tunnel.state.as_str(),
-                        reason_code,
-                        reason_detail,
-                        tunnel.consecutive_failures,
-                        tunnel
-                            .recent_rtt_ms
-                            .map(|v| v.to_string())
-                            .unwrap_or_else(|| "unknown".to_string()),
-                        tunnel
-                            .last_success_unix_ms
-                            .map(|v| v.to_string())
-                            .unwrap_or_else(|| "unknown".to_string())
-                    ),
-                ));
+                update.last_error = Set(Some(format!(
+                    "agent is not connected (state={}, reason={}, detail={}, failures={}, recent_rtt_ms={}, last_success_unix_ms={}; try: verify node can reach ALLOY_CONTROL_WS_URL(S) (.../agent/ws), verify ALLOY_NODE_NAME/ALLOY_NODE_TOKEN, check proxy/WebSocket support, inspect node network stability)",
+                    tunnel.state.as_str(),
+                    reason_code,
+                    reason_detail,
+                    tunnel.consecutive_failures,
+                    tunnel
+                        .recent_rtt_ms
+                        .map(|v| v.to_string())
+                        .unwrap_or_else(|| "unknown".to_string()),
+                    tunnel
+                        .last_success_unix_ms
+                        .map(|v| v.to_string())
+                        .unwrap_or_else(|| "unknown".to_string())
+                )));
                 let _ = update.update(db).await;
                 continue;
             }
