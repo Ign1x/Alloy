@@ -136,9 +136,17 @@ export default function DownloadsTab(props: DownloadsTabProps) {
   const setView = setDownloadCenterView as (v: DownloadCenterView) => void
 
   const statusByTarget = createMemo(() => {
-    const raw = downloadStatus() as Map<DownloadTarget, DownloadStatus>
+    const raw = downloadStatus() as unknown
     const map = new Map<DownloadTarget, DownloadStatus>()
-    for (const [k, v] of raw.entries()) map.set(k, v)
+    if (raw && typeof raw === 'object' && 'entries' in (raw as any) && typeof (raw as any).entries === 'function') {
+      for (const [k, v] of (raw as Map<DownloadTarget, DownloadStatus>).entries()) map.set(k, v)
+      return map
+    }
+    if (raw && typeof raw === 'object') {
+      for (const [k, v] of Object.entries(raw as Record<string, DownloadStatus>)) {
+        map.set(k as DownloadTarget, v)
+      }
+    }
     return map
   })
   const status = (target: DownloadTarget) => statusByTarget().get(target) ?? null
