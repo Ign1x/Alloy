@@ -17,23 +17,24 @@ export default function DeleteInstanceModal(props: DeleteInstanceModalProps) {
     confirmDeleteText,
     selectedInstanceId,
     setSelectedInstanceId,
-    pushToast,
+    toastSuccessFromRspc,
     invalidateInstances,
     toastError,
     instanceDeletePreview,
     setConfirmDeleteText,
+    t,
   } = props as any
 
   return (
         <Modal
           open={confirmDeleteInstanceId() != null}
           onClose={() => setConfirmDeleteInstanceId(null)}
-          title="Delete instance"
+          title={t('instances.deleteModal.title')}
           size="sm"
           footer={
             <div class="flex gap-3">
               <Button variant="secondary" class="flex-1" onClick={() => setConfirmDeleteInstanceId(null)}>
-                Cancel
+                {t('instances.common.cancel')}
               </Button>
               <Button
                 variant="danger"
@@ -50,15 +51,15 @@ export default function DeleteInstanceModal(props: DeleteInstanceModalProps) {
                   try {
                     await deleteInstance.mutateAsync({ instance_id: id })
                     if (selectedInstanceId() === id) setSelectedInstanceId(null)
-                    pushToast('success', 'Deleted', id)
+                    toastSuccessFromRspc('instance.delete', t('instances.toast.deleted'), id)
                     setConfirmDeleteInstanceId(null)
                     await invalidateInstances()
                   } catch (e) {
-                    toastError('Delete failed', e)
+                    toastError(t('instances.toast.deleteFailed'), e)
                   }
                 }}
               >
-                Delete
+                {t('instances.actions.delete')}
               </Button>
             </div>
           }
@@ -66,48 +67,48 @@ export default function DeleteInstanceModal(props: DeleteInstanceModalProps) {
           <div class="space-y-4">
             <div class="rounded-2xl border border-slate-200 bg-white/60 p-4 text-[12px] text-slate-700 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-200">
               <div class="flex items-center justify-between gap-3">
-                <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Delete preview</div>
+                <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">{t('instances.deleteModal.previewTitle')}</div>
                 <Show when={instanceDeletePreview.isPending}>
-                  <span class="text-[11px] text-slate-400">loading…</span>
+                  <span class="text-[11px] text-slate-400">{t('instances.common.loading')}</span>
                 </Show>
                 <Show when={instanceDeletePreview.isError}>
-                  <span class="text-[11px] text-rose-600 dark:text-rose-300">failed</span>
+                  <span class="text-[11px] text-rose-600 dark:text-rose-300">{t('instances.common.failed')}</span>
                 </Show>
                 <Show when={!instanceDeletePreview.isPending && !instanceDeletePreview.isError}>
-                  <span class="text-[11px] text-slate-500 dark:text-slate-400">ok</span>
+                  <span class="text-[11px] text-slate-500 dark:text-slate-400">{t('instances.common.ok')}</span>
                 </Show>
               </div>
 
               <Show when={instanceDeletePreview.data}>
                 {(d) => (
-                  <div class="mt-3 space-y-2">
-                    <div class="flex items-center justify-between gap-3">
-                      <div class="text-slate-500 dark:text-slate-400">Path</div>
-                      <div class="min-w-0 truncate font-mono text-[11px]" title={d().path}>
-                        {d().path}
+                    <div class="mt-3 space-y-2">
+                      <div class="flex items-center justify-between gap-3">
+                        <div class="text-slate-500 dark:text-slate-400">{t('instances.deleteModal.path')}</div>
+                        <div class="min-w-0 truncate font-mono text-[11px]" title={d().path}>
+                          {d().path}
+                        </div>
+                      </div>
+                      <div class="flex items-center justify-between gap-3">
+                        <div class="text-slate-500 dark:text-slate-400">{t('instances.deleteModal.estimatedSize')}</div>
+                        <div class="font-mono text-[11px]">{formatBytes(Number(d().size_bytes))}</div>
                       </div>
                     </div>
-                    <div class="flex items-center justify-between gap-3">
-                      <div class="text-slate-500 dark:text-slate-400">Estimated size</div>
-                      <div class="font-mono text-[11px]">{formatBytes(Number(d().size_bytes))}</div>
-                    </div>
-                  </div>
-                )}
+                  )}
               </Show>
 
               <Show when={instanceDeletePreview.isError}>
                 <div class="mt-3 text-[11px] text-rose-700/80 dark:text-rose-200/70">
-                  Preview unavailable. You can still delete after confirmation.
+                  {t('instances.deleteModal.previewUnavailable')}
                 </div>
               </Show>
             </div>
 
             <Field
-              label="Type the instance id to confirm"
+              label={t('instances.deleteModal.typeToConfirm')}
               required
               error={
                 confirmDeleteText().trim().length > 0 && confirmDeleteText().trim() !== (confirmDeleteInstanceId() ?? '')
-                  ? 'Does not match.'
+                  ? t('instances.deleteModal.doesNotMatch')
                   : undefined
               }
             >

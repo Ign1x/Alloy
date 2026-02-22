@@ -8,14 +8,14 @@ export type InstancesTabProps = {
 }
 
 export default function InstancesTab(props: InstancesTabProps) {
-  const { tab } = props as any
+  const { tab, t } = props as any
   const panelProps = props as any
   let createInstanceNameEl: HTMLInputElement | undefined
 
   return (
     <Show when={tab() === 'instances'}>
       <InstancesPage
-        tabLabel="Instances"
+        tabLabel={t('tab.instances')}
         left={
           <InstancesCreatePanel
             {...panelProps}

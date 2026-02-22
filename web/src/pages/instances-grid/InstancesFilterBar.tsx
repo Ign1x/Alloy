@@ -1,10 +1,12 @@
-import { Show } from 'solid-js'
+import { For, Show, createEffect, createMemo, createSignal } from 'solid-js'
 import { ArrowUpDown, Search } from 'lucide-solid'
+import type { I18nTranslate } from '../../app/i18n'
 import { formatRelativeTime } from '../../app/helpers/format'
-import { Banner } from '../../components/ui/Banner'
+import { useSearchFocusShortcut } from '../../app/helpers/searchFocusShortcut'
+import { Badge } from '../../components/ui/Badge'
 import { Button } from '../../components/ui/Button'
+import { DataBoundary } from '../../components/ui/DataBoundary'
 import { Dropdown } from '../../components/Dropdown'
-import { ErrorState } from '../../components/ui/ErrorState'
 import { Input } from '../../components/ui/Input'
 
 export type InstancesFilterBarProps = {
@@ -12,7 +14,12 @@ export type InstancesFilterBarProps = {
 }
 
 export default function InstancesFilterBar(props: InstancesFilterBarProps) {
+  const DEFAULT_INSTANCE_SORT_KEY = 'updated'
+
   const {
+    activeInstanceViewPresetId,
+    applyInstanceViewPreset,
+    deleteInstanceViewPreset,
     filteredInstances,
     getCreateInstanceNameRef,
     instanceSearchInput,
@@ -25,25 +32,128 @@ export default function InstancesFilterBar(props: InstancesFilterBarProps) {
     instances,
     instancesLastUpdatedAtUnixMs,
     invalidateInstances,
+    instanceViewPresets,
     isReadOnly,
+    openSettingsTab,
+    saveInstanceViewPreset,
     setInstanceSearch,
     setInstanceSearchInput,
     setInstanceSortKey,
     setInstanceStatusFilter,
     setInstanceTemplateFilter,
+    t,
   } = props as any
+
+  type PresetLike = { id: string; name: string }
+
+  const translate = t as I18nTranslate
+  let searchInputEl: HTMLInputElement | undefined
+  const [presetNameInput, setPresetNameInput] = createSignal('')
+
+  const clearSearch = () => {
+    setInstanceSearchInput('')
+    setInstanceSearch('')
+  }
+
+  const clearStatus = () => setInstanceStatusFilter('all')
+  const clearTemplate = () => setInstanceTemplateFilter('all')
+  const clearSort = () => setInstanceSortKey(DEFAULT_INSTANCE_SORT_KEY)
+
+  const clearAllFilters = () => {
+    clearSearch()
+    clearStatus()
+    clearTemplate()
+    clearSort()
+  }
+
+  const selectedStatusLabel = createMemo(() => {
+    const current = instanceStatusFilter()
+    const option = instanceStatusFilterOptions().find((item: { value: string; label: string }) => item.value === current)
+    return option?.label ?? current
+  })
+
+  const selectedTemplateLabel = createMemo(() => {
+    const current = instanceTemplateFilter()
+    const option = instanceTemplateFilterOptions().find((item: { value: string; label: string }) => item.value === current)
+    return option?.label ?? current
+  })
+
+  const selectedSortLabel = createMemo(() => {
+    const current = instanceSortKey()
+    const option = instanceSortOptions().find((item: { value: string; label: string }) => item.value === current)
+    return option?.label ?? current
+  })
+
+  const activeFilterChips = createMemo(() => {
+    const chips: Array<{ id: string; label: string; value: string; onRemove: () => void }> = []
+    const search = String(instanceSearchInput()).trim()
+    if (search.length > 0) {
+      chips.push({ id: 'search', label: translate('instances.filters.search'), value: search, onRemove: clearSearch })
+    }
+    if (instanceStatusFilter() !== 'all') {
+      chips.push({ id: 'status', label: translate('instances.filters.status'), value: selectedStatusLabel(), onRemove: clearStatus })
+    }
+    if (instanceTemplateFilter() !== 'all') {
+      chips.push({ id: 'template', label: translate('instances.filters.template'), value: selectedTemplateLabel(), onRemove: clearTemplate })
+    }
+    if (instanceSortKey() !== DEFAULT_INSTANCE_SORT_KEY) {
+      chips.push({ id: 'sort', label: translate('instances.filters.sort'), value: selectedSortLabel(), onRemove: clearSort })
+    }
+    return chips
+  })
+
+  const presetOptions = createMemo(() => [
+    { value: '', label: translate('instances.filters.presets.none') },
+    ...instanceViewPresets().map((item: PresetLike) => ({ value: item.id, label: item.name })),
+  ])
+
+  const activePresetName = createMemo(() => {
+    const id = String(activeInstanceViewPresetId())
+    if (!id) return ''
+    const matched = instanceViewPresets().find((item: PresetLike) => item.id === id)
+    return matched?.name ?? ''
+  })
+
+  const canSavePreset = createMemo(() => presetNameInput().trim().length > 0)
+
+  const savePreset = () => {
+    if (!canSavePreset()) return
+    const id = saveInstanceViewPreset(presetNameInput().trim())
+    if (id) setPresetNameInput('')
+  }
+
+  const deleteActivePreset = () => {
+    const id = String(activeInstanceViewPresetId())
+    if (!id) return
+    deleteInstanceViewPreset(id)
+  }
+
+  createEffect(() => {
+    useSearchFocusShortcut({
+      input: () => searchInputEl,
+      queryValue: () => String(instanceSearchInput()),
+      clearQuery: clearSearch,
+    })
+  })
 
   return (
     <>
                       <div class="flex flex-wrap items-center justify-between gap-3">
                         <div class="min-w-0">
-                          <div class="text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">Instances</div>
-                          <div class="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400">
-                            <span>Updated {formatRelativeTime(instancesLastUpdatedAtUnixMs())}</span>
-                            <span class="text-slate-300 dark:text-slate-700">•</span>
+                          <div class="text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">
+                            {translate('instances.filter.title')}
+                          </div>
+                      <div class="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400">
+                        <span>{translate('instances.filter.updated', { value: formatRelativeTime(instancesLastUpdatedAtUnixMs()) })}</span>
+                        <span class="text-slate-300 dark:text-slate-700">•</span>
                             <span>
-                              Showing {filteredInstances().length}/{(instances.data ?? []).length}
+                              {translate('instances.filter.showing', {
+                                shown: filteredInstances().length,
+                                total: (instances.data ?? []).length,
+                              })}
                             </span>
+                            <span class="text-slate-300 dark:text-slate-700">•</span>
+                            <span>{translate('instances.filters.shortcutVisibleHint')}</span>
                           </div>
                         </div>
                         <div class="flex flex-wrap items-center gap-2">
@@ -60,7 +170,7 @@ export default function InstancesFilterBar(props: InstancesFilterBarProps) {
 	                                </svg>
 	                              }
 	                              disabled={isReadOnly()}
-	                              title={isReadOnly() ? 'Read-only mode' : 'Create a new instance'}
+	                              title={isReadOnly() ? translate('common.readOnlyMode') : translate('instances.filter.createTitle')}
 	                              onClick={() => {
                                 try {
                                   getCreateInstanceNameRef?.()?.scrollIntoView({ behavior: 'smooth', block: 'center' })
@@ -70,7 +180,7 @@ export default function InstancesFilterBar(props: InstancesFilterBarProps) {
                                 queueMicrotask(() => getCreateInstanceNameRef?.()?.focus?.())
                               }}
                             >
-                              Create
+                              {translate('instances.filter.create')}
                             </Button>
                         </div>
                       </div>
@@ -78,10 +188,13 @@ export default function InstancesFilterBar(props: InstancesFilterBarProps) {
                       <div class="mt-3 flex flex-wrap items-center gap-2">
                         <div class="w-full sm:w-40 lg:w-44">
                           <Input
+                            ref={(el) => {
+                              searchInputEl = el
+                            }}
                             value={instanceSearchInput()}
                             onInput={(e) => setInstanceSearchInput(e.currentTarget.value)}
-                            placeholder="Search…"
-                            aria-label="Search instances"
+                            placeholder={translate('instances.filter.searchPlaceholder')}
+                            aria-label={translate('instances.filter.searchAria')}
                             spellcheck={false}
                             leftIcon={<Search class="h-4 w-4" strokeWidth={1.9} />}
                             rightIcon={
@@ -89,11 +202,10 @@ export default function InstancesFilterBar(props: InstancesFilterBarProps) {
                                 <button
                                   type="button"
                                   class="rounded-md p-1 transition hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/30 dark:hover:bg-slate-900/60"
-                                  aria-label="Clear search"
-                                  title="Clear search"
+                                  aria-label={translate('instances.filter.clearSearch')}
+                                  title={translate('instances.filter.clearSearch')}
                                   onClick={() => {
-                                    setInstanceSearchInput('')
-                                    setInstanceSearch('')
+                                    clearSearch()
                                   }}
                                 >
                                   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
@@ -111,8 +223,8 @@ export default function InstancesFilterBar(props: InstancesFilterBarProps) {
                         <div class="w-full sm:w-36">
                           <Dropdown
                             label=""
-                            ariaLabel="Filter by status"
-                            title={instanceStatusFilter() === 'all' ? 'All statuses' : instanceStatusFilter()}
+                            ariaLabel={translate('instances.filter.statusAria')}
+                            title={instanceStatusFilter() === 'all' ? translate('instances.filter.statusAll') : instanceStatusFilter()}
                             leftIcon={
                               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
                                 <path
@@ -135,8 +247,8 @@ export default function InstancesFilterBar(props: InstancesFilterBarProps) {
                         <div class="w-full sm:w-36 lg:w-40">
                           <Dropdown
                             label=""
-                            ariaLabel="Filter by template"
-                            title={instanceTemplateFilter() === 'all' ? 'All templates' : instanceTemplateFilter()}
+                            ariaLabel={translate('instances.filter.templateAria')}
+                            title={instanceTemplateFilter() === 'all' ? translate('instances.filter.templateAll') : instanceTemplateFilter()}
                             leftIcon={
                               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
                                 <path d="M10 2.25l6.5 3.75v7.5L10 17.25 3.5 13.5V6L10 2.25z" />
@@ -155,8 +267,8 @@ export default function InstancesFilterBar(props: InstancesFilterBarProps) {
                         <div class="w-full sm:w-32">
                           <Dropdown
                             label=""
-                            ariaLabel="Sort instances"
-                            title="Sort"
+                            ariaLabel={translate('instances.filters.sort')}
+                            title={translate('instances.filter.sortTitle')}
                             leftIcon={<ArrowUpDown class="h-4 w-4" strokeWidth={1.9} />}
                             value={instanceSortKey()}
                             options={instanceSortOptions()}
@@ -165,28 +277,109 @@ export default function InstancesFilterBar(props: InstancesFilterBarProps) {
                         </div>
                       </div>
 
-                      <Show when={instances.isError && instances.data == null && (instances.error as unknown)}>
-                        <ErrorState
-                          class="mt-4"
-                          title="Failed to load instances"
-                          error={instances.error}
-                          onRetry={() => void invalidateInstances()}
-                        />
+                      <div class="mt-2 flex flex-wrap items-center gap-2">
+                        <div class="w-full sm:w-48 lg:w-56">
+                          <Dropdown
+                            label=""
+                            ariaLabel={translate('instances.filters.presets.label')}
+                            title={translate('instances.filters.presets.label')}
+                            value={String(activeInstanceViewPresetId())}
+                            options={presetOptions()}
+                            onChange={(value) => {
+                              if (!value) {
+                                applyInstanceViewPreset('')
+                                return
+                              }
+                              applyInstanceViewPreset(value)
+                            }}
+                          />
+                        </div>
+                        <div class="w-full sm:w-44 lg:w-48">
+                          <Input
+                            value={presetNameInput()}
+                            onInput={(e) => setPresetNameInput(e.currentTarget.value)}
+                            placeholder={translate('instances.filters.presets.namePlaceholder')}
+                            aria-label={translate('instances.filters.presets.nameAria')}
+                            spellcheck={false}
+                            onKeyDown={(e) => {
+                              if (e.key !== 'Enter') return
+                              e.preventDefault()
+                              savePreset()
+                            }}
+                          />
+                        </div>
+                        <Button size="xs" variant="secondary" disabled={!canSavePreset()} onClick={savePreset}>
+                          {translate('instances.filters.presets.save')}
+                        </Button>
+                        <Button size="xs" variant="ghost" disabled={!activePresetName()} onClick={deleteActivePreset}>
+                          {translate('instances.filters.presets.delete')}
+                        </Button>
+                      </div>
+
+                      <Show when={activeFilterChips().length > 0}>
+                        <div class="mt-3 flex flex-wrap items-center gap-2">
+                          <Show when={activePresetName()}>
+                            <Badge variant="neutral" class="max-w-full gap-1.5 pr-2">
+                              <span class="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                                {translate('instances.filters.presets.active')}
+                              </span>
+                              <span class="max-w-[12rem] truncate">{activePresetName()}</span>
+                            </Badge>
+                          </Show>
+                          <For each={activeFilterChips()}>
+                            {(chip) => (
+                              <Badge variant="neutral" class="max-w-full gap-1.5 pr-1">
+                                <span class="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">{chip.label}</span>
+                                <span class="max-w-[16rem] truncate">{chip.value}</span>
+                                <button
+                                  type="button"
+                                  class="rounded-full p-0.5 text-slate-500 transition hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/30 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+                                  aria-label={`${translate('instances.filters.remove')} ${chip.label}`}
+                                  title={`${translate('instances.filters.remove')} ${chip.label}`}
+                                  onClick={() => chip.onRemove()}
+                                >
+                                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-3.5 w-3.5">
+                                    <path
+                                      fill-rule="evenodd"
+                                      d="M4.47 4.47a.75.75 0 011.06 0L10 8.94l4.47-4.47a.75.75 0 111.06 1.06L11.06 10l4.47 4.47a.75.75 0 11-1.06 1.06L10 11.06l-4.47 4.47a.75.75 0 11-1.06-1.06L8.94 10 4.47 5.53a.75.75 0 010-1.06z"
+                                      clip-rule="evenodd"
+                                    />
+                                  </svg>
+                                </button>
+                              </Badge>
+                            )}
+                          </For>
+                          <Button size="xs" variant="ghost" onClick={clearAllFilters}>
+                            {translate('instances.filters.clearAll')}
+                          </Button>
+                        </div>
                       </Show>
 
-                      <Show when={instances.isError && instances.data != null}>
-                        <Banner
-                          class="mt-4"
-                          variant="warning"
-                          title="Refresh failed"
-                          message="Showing last known instance list."
-                          actions={
-                            <Button size="xs" variant="secondary" onClick={() => void invalidateInstances()}>
-                              Retry
-                            </Button>
-                          }
-                        />
-                      </Show>
+                      <div class="sr-only" aria-live="polite">
+                        {translate('instances.filters.shortcutHint')}
+                      </div>
+
+                      <DataBoundary
+                        t={translate}
+                        class="mt-4"
+                        loading={false}
+                        error={instances.error}
+                        errorTitle={translate('instances.filter.loadFailed')}
+                        hasData={(instances.data ?? []).length > 0}
+                        empty={false}
+                        onRetry={() => void invalidateInstances()}
+                        onOpenSettings={openSettingsTab}
+                        settingsCtaLabel={translate('tab.settings')}
+                        stale={{
+                          show: instances.isError && instances.data != null,
+                          title: translate('instances.filter.refreshFailed'),
+                          message: translate('instances.filter.snapshotInfo'),
+                          onRetry: () => void invalidateInstances(),
+                        }}
+                      >
+                        <></>
+                      </DataBoundary>
+
     </>
   )
 }

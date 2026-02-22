@@ -1,3 +1,9 @@
+#![allow(
+    clippy::result_large_err,
+    clippy::manual_clamp,
+    clippy::let_underscore_future
+)]
+
 use std::io::ErrorKind;
 use std::path::{Component, Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -67,7 +73,9 @@ fn status_from_io(op: &'static str, err: std::io::Error) -> Status {
         std::io::ErrorKind::InvalidInput => {
             Status::invalid_argument(format!("{op}: invalid input"))
         }
-        std::io::ErrorKind::AlreadyExists => Status::already_exists(format!("{op}: already exists")),
+        std::io::ErrorKind::AlreadyExists => {
+            Status::already_exists(format!("{op}: already exists"))
+        }
         std::io::ErrorKind::NotADirectory | std::io::ErrorKind::IsADirectory => {
             Status::failed_precondition(format!("{op}: path type mismatch"))
         }
@@ -224,7 +232,12 @@ fn log_io_error(op: &'static str, path: &Path, err: &std::io::Error) {
 }
 
 fn log_reject(op: &'static str, req_path: &str, reason: &'static str) {
-    tracing::warn!(operation = op, path = req_path, reason, "filesystem request rejected");
+    tracing::warn!(
+        operation = op,
+        path = req_path,
+        reason,
+        "filesystem request rejected"
+    );
 }
 
 fn temp_write_path(path: &Path) -> PathBuf {
@@ -265,7 +278,12 @@ fn data_root() -> PathBuf {
     minecraft::data_root()
 }
 
-fn ensure_within_root(root: &Path, canon: &Path, op: &'static str, req_path: &str) -> Result<(), Status> {
+fn ensure_within_root(
+    root: &Path,
+    canon: &Path,
+    op: &'static str,
+    req_path: &str,
+) -> Result<(), Status> {
     if canon.starts_with(root) {
         return Ok(());
     }
@@ -319,12 +337,10 @@ async fn enforce_scoped_existing_path(rel_path: &str, op: &'static str) -> Resul
     ensure_no_symlink_components(&root, &rel, rel_path, op).await?;
 
     let scoped = root.join(&rel);
-    let meta = tokio::fs::symlink_metadata(&scoped)
-        .await
-        .map_err(|e| {
-            log_io_error(op, &scoped, &e);
-            status_from_io("failed to stat path", e)
-        })?;
+    let meta = tokio::fs::symlink_metadata(&scoped).await.map_err(|e| {
+        log_io_error(op, &scoped, &e);
+        status_from_io("failed to stat path", e)
+    })?;
     if meta.file_type().is_symlink() {
         log_reject(op, rel_path, "symlink target is not allowed");
         return Err(Status::invalid_argument("symlinks are not allowed"));
@@ -416,7 +432,9 @@ async fn mkdir_rel(rel: &str, recursive: bool) -> Result<(), Status> {
                 }
                 if !m.is_dir() {
                     log_reject("mkdir", req_path, "path component is not a directory");
-                    return Err(Status::failed_precondition("path component is not a directory"));
+                    return Err(Status::failed_precondition(
+                        "path component is not a directory",
+                    ));
                 }
             }
             Err(e) => {
@@ -718,9 +736,8 @@ impl FilesystemService for FilesystemApi {
                 }
             }
 
-            let tmp = tmp.ok_or_else(|| {
-                Status::internal("failed to allocate temp file for atomic write")
-            })?;
+            let tmp = tmp
+                .ok_or_else(|| Status::internal("failed to allocate temp file for atomic write"))?;
 
             if cfg!(windows) && existing_meta.is_some() {
                 let mut backup: Option<PathBuf> = None;
@@ -793,9 +810,7 @@ impl FilesystemService for FilesystemApi {
             log_io_error("write_file", &path, &e);
             if policy.conflict_detection {
                 if existing_meta.is_some() && e.kind() == ErrorKind::NotFound {
-                    return Status::failed_precondition(
-                        "write conflict: target file disappeared",
-                    );
+                    return Status::failed_precondition("write conflict: target file disappeared");
                 }
                 if existing_meta.is_none() && e.kind() == ErrorKind::AlreadyExists {
                     return Status::failed_precondition("write conflict: target already exists");
@@ -904,27 +919,21 @@ impl FilesystemService for FilesystemApi {
 
         if meta.is_dir() {
             if req.recursive {
-                tokio::fs::remove_dir_all(&path)
-                    .await
-                    .map_err(|e| {
-                        log_io_error("remove", &path, &e);
-                        status_from_remove_io(e)
-                    })?;
-            } else {
-                tokio::fs::remove_dir(&path)
-                    .await
-                    .map_err(|e| {
-                        log_io_error("remove", &path, &e);
-                        status_from_remove_io(e)
-                    })?;
-            }
-        } else {
-            tokio::fs::remove_file(&path)
-                .await
-                .map_err(|e| {
+                tokio::fs::remove_dir_all(&path).await.map_err(|e| {
                     log_io_error("remove", &path, &e);
                     status_from_remove_io(e)
                 })?;
+            } else {
+                tokio::fs::remove_dir(&path).await.map_err(|e| {
+                    log_io_error("remove", &path, &e);
+                    status_from_remove_io(e)
+                })?;
+            }
+        } else {
+            tokio::fs::remove_file(&path).await.map_err(|e| {
+                log_io_error("remove", &path, &e);
+                status_from_remove_io(e)
+            })?;
         }
 
         Ok(Response::new(RemoveResponse { ok: true }))

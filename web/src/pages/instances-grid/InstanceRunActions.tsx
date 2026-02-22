@@ -1,5 +1,6 @@
 import { Show } from 'solid-js'
 import { canStartInstance, isStopping } from '../../app/helpers/instances'
+import { restartInstanceActionTitle, startInstanceActionTitle, stopInstanceActionTitle } from '../../app/helpers/instanceActionReasons'
 import { isAlloyApiError } from '../../rspc'
 import { Button } from '../../components/ui/Button'
 
@@ -15,12 +16,46 @@ export default function InstanceRunActions(props: InstanceRunActionsProps) {
     invalidateInstances,
     isReadOnly,
     pushToast,
+    toastSuccessFromRspc,
     restartInstance,
     runInstanceOp,
     startInstance,
     stopInstance,
+    t,
     toastError,
   } = props as any
+
+  const instanceContext = {
+    scope: 'instance' as const,
+    id: i.config.instance_id,
+    label: instanceDisplayName(i as any),
+  }
+
+  const operationInProgress = () => instanceOpById()[i.config.instance_id] != null
+
+  const stopTitle = () =>
+    stopInstanceActionTitle({
+      status: i.status,
+      isReadOnly: isReadOnly(),
+      operationInProgress: operationInProgress(),
+      t,
+    })
+
+  const startTitle = () =>
+    startInstanceActionTitle({
+      status: i.status,
+      isReadOnly: isReadOnly(),
+      operationInProgress: operationInProgress(),
+      t,
+    })
+
+  const restartTitle = () =>
+    restartInstanceActionTitle({
+      status: i.status,
+      isReadOnly: isReadOnly(),
+      operationInProgress: operationInProgress(),
+      t,
+    })
 
   return (
     <div class="flex flex-wrap items-center gap-2">
@@ -41,23 +76,29 @@ export default function InstanceRunActions(props: InstanceRunActionsProps) {
               instanceOpById()[i.config.instance_id] != null ||
               isStopping(i.status)
             }
-            title={isReadOnly() ? 'Read-only mode' : 'Stop instance'}
+            title={stopTitle()}
             onClick={async () => {
               try {
                 await runInstanceOp(i.config.instance_id, 'stopping', () =>
                   stopInstance.mutateAsync({ instance_id: i.config.instance_id, timeout_ms: 30_000 }),
                 )
                 await invalidateInstances()
-                pushToast('success', 'Stopped', instanceDisplayName(i as any))
+                toastSuccessFromRspc('instance.stop', t('instances.toast.stopped'), instanceDisplayName(i as any), {
+                  context: instanceContext,
+                })
               } catch (e) {
                 if (isAlloyApiError(e) && e.data.hint) {
-                  pushToast('info', 'Hint', e.data.hint, e.data.request_id)
+                  pushToast('info', t('instances.toast.hint'), e.data.hint, e.data.request_id, {
+                    context: instanceContext,
+                  })
                 }
-                toastError('Stop failed', e)
+                toastError(t('instances.toast.stopFailed'), e, {
+                  context: instanceContext,
+                })
               }
             }}
           >
-            Stop
+            {t('instances.actions.stop')}
           </Button>
         }
       >
@@ -71,23 +112,29 @@ export default function InstanceRunActions(props: InstanceRunActionsProps) {
           }
           loading={instanceOpById()[i.config.instance_id] === 'starting'}
           disabled={isReadOnly() || instanceOpById()[i.config.instance_id] != null}
-          title={isReadOnly() ? 'Read-only mode' : 'Start instance'}
+          title={startTitle()}
           onClick={async () => {
             try {
-              await runInstanceOp(i.config.instance_id, 'starting', () =>
-                startInstance.mutateAsync({ instance_id: i.config.instance_id }),
-              )
-              await invalidateInstances()
-              pushToast('success', 'Started', instanceDisplayName(i as any))
-              } catch (e) {
+                await runInstanceOp(i.config.instance_id, 'starting', () =>
+                  startInstance.mutateAsync({ instance_id: i.config.instance_id }),
+                )
+                await invalidateInstances()
+                toastSuccessFromRspc('instance.start', t('instances.toast.started'), instanceDisplayName(i as any), {
+                  context: instanceContext,
+                })
+            } catch (e) {
                 if (isAlloyApiError(e) && e.data.hint) {
-                  pushToast('info', 'Hint', e.data.hint, e.data.request_id)
+                  pushToast('info', t('instances.toast.hint'), e.data.hint, e.data.request_id, {
+                    context: instanceContext,
+                  })
                 }
-                toastError('Start failed', e)
+                toastError(t('instances.toast.startFailed'), e, {
+                  context: instanceContext,
+                })
               }
-            }}
+          }}
         >
-          Start
+          {t('instances.actions.start')}
         </Button>
       </Show>
 
@@ -110,23 +157,29 @@ export default function InstanceRunActions(props: InstanceRunActionsProps) {
             instanceOpById()[i.config.instance_id] != null ||
             isStopping(i.status)
           }
-          title={isReadOnly() ? 'Read-only mode' : 'Restart instance'}
+          title={restartTitle()}
           onClick={async () => {
             try {
-              await runInstanceOp(i.config.instance_id, 'restarting', () =>
-                restartInstance.mutateAsync({ instance_id: i.config.instance_id, timeout_ms: 30_000 }),
-              )
-              await invalidateInstances()
-              pushToast('success', 'Restarted', instanceDisplayName(i as any))
-              } catch (e) {
-                if (isAlloyApiError(e) && e.data.hint) {
-                  pushToast('info', 'Hint', e.data.hint, e.data.request_id)
-                }
-                toastError('Restart failed', e)
+                await runInstanceOp(i.config.instance_id, 'restarting', () =>
+                  restartInstance.mutateAsync({ instance_id: i.config.instance_id, timeout_ms: 30_000 }),
+                )
+                await invalidateInstances()
+                toastSuccessFromRspc('instance.restart', t('instances.toast.restarted'), instanceDisplayName(i as any), {
+                  context: instanceContext,
+                })
+            } catch (e) {
+              if (isAlloyApiError(e) && e.data.hint) {
+                pushToast('info', t('instances.toast.hint'), e.data.hint, e.data.request_id, {
+                  context: instanceContext,
+                })
               }
-            }}
+              toastError(t('instances.toast.restartFailed'), e, {
+                context: instanceContext,
+              })
+            }
+          }}
         >
-          Restart
+          {t('instances.actions.restart')}
         </Button>
       </Show>
     </div>

@@ -45,16 +45,27 @@ export function metricLevelClass(level: 'unknown' | 'low' | 'medium' | 'high' | 
 
 export function formatRelativeTime(unixMs: number | null | undefined): string {
   if (!unixMs || !Number.isFinite(unixMs) || unixMs <= 0) return '—'
-  const deltaMs = Date.now() - unixMs
-  const sec = Math.floor(deltaMs / 1000)
-  if (sec < 10) return 'just now'
-  if (sec < 60) return `${sec}s ago`
-  const min = Math.floor(sec / 60)
-  if (min < 60) return `${min}m ago`
-  const hr = Math.floor(min / 60)
-  if (hr < 48) return `${hr}h ago`
-  const day = Math.floor(hr / 24)
-  return `${day}d ago`
+
+  const docLang = typeof document !== 'undefined' ? document.documentElement.lang : ''
+  const locale = (docLang || 'en').trim() || 'en'
+  const rtf = new Intl.RelativeTimeFormat(locale, { numeric: 'auto' })
+
+  const diffSec = Math.round((unixMs - Date.now()) / 1000)
+  const absSec = Math.abs(diffSec)
+
+  if (absSec < 10) return rtf.format(0, 'second')
+  if (absSec < 60) return rtf.format(diffSec, 'second')
+
+  const diffMin = Math.round(diffSec / 60)
+  const absMin = Math.abs(diffMin)
+  if (absMin < 60) return rtf.format(diffMin, 'minute')
+
+  const diffHr = Math.round(diffMin / 60)
+  const absHr = Math.abs(diffHr)
+  if (absHr < 48) return rtf.format(diffHr, 'hour')
+
+  const diffDay = Math.round(diffHr / 24)
+  return rtf.format(diffDay, 'day')
 }
 
 export function formatDateTime(unixMs: number | null | undefined): string {

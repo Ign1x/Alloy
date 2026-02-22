@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use std::{collections::BTreeMap, fs, path::Path, path::PathBuf};
 
 #[derive(Debug, Clone)]

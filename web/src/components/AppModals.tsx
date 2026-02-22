@@ -5,6 +5,7 @@ import ControlDiagnosticsModal from './ControlDiagnosticsModal'
 import DeleteInstanceModal from './DeleteInstanceModal'
 import DownloadTaskModal from './DownloadTaskModal'
 import EditInstanceModal from './EditInstanceModal'
+import EventCenterDrawer from './EventCenterDrawer'
 import FrpNodeModal from './FrpNodeModal'
 import InstanceDetailsModal from './InstanceDetailsModal'
 import LoginModal from './LoginModal'
@@ -20,6 +21,7 @@ interface AppModalsProps {
   controlDiagnosticsModalProps: ComponentProps<typeof ControlDiagnosticsModal>
   instanceDetailsModalProps: ComponentProps<typeof InstanceDetailsModal>
   toastPortalProps: ComponentProps<typeof ToastPortal>
+  eventCenterDrawerProps: ComponentProps<typeof EventCenterDrawer>
 }
 
 export default function AppModals(props: AppModalsProps) {
@@ -34,6 +36,7 @@ export default function AppModals(props: AppModalsProps) {
       <ControlDiagnosticsModal {...props.controlDiagnosticsModalProps} />
       <InstanceDetailsModal {...props.instanceDetailsModalProps} />
       <ToastPortal {...props.toastPortalProps} />
+      <EventCenterDrawer {...props.eventCenterDrawerProps} />
     </>
   )
 }

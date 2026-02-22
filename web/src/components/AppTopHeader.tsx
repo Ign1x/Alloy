@@ -1,8 +1,9 @@
-import { Check, ChevronDown, Languages, Moon, Monitor, Sun } from 'lucide-solid'
+import { Bell, Check, ChevronDown, Languages, Moon, Monitor, Sun } from 'lucide-solid'
 import { For, Show, createEffect, createMemo, createSignal, type Setter } from 'solid-js'
 import { Portal } from 'solid-js/web'
 
 import type { AppLocale, I18nTranslate } from '../app/i18n'
+import type { ToastPushOptions } from '../app/types'
 import type { ThemePreference } from '../app/hooks/useThemePreference'
 import { StatusPill } from '../app/primitives/StatusPill'
 import { Badge } from './ui/Badge'
@@ -79,8 +80,10 @@ interface AppTopHeaderProps {
   agentNodeCount: number
   openNodesTab: () => void
   openSettingsTab: () => void
-  pushToast: (variant: 'info' | 'success' | 'error', title: string, message?: string, requestId?: string) => void
-  toastError: (title: string, error: unknown) => void
+  eventUnreadCount: number
+  openEventCenter: () => void
+  pushToast: (variant: 'info' | 'success' | 'error', title: string, message?: string, requestId?: string, options?: ToastPushOptions) => void
+  toastError: (title: string, error: unknown, options?: ToastPushOptions) => void
   openDiagnostics: () => void
   handleLogout: () => Promise<void>
 }
@@ -143,10 +146,14 @@ export default function AppTopHeader(props: AppTopHeaderProps) {
 
   async function triggerControlUpdate() {
     setControlUpdateSubmitting(true)
-    props.pushToast('info', props.t('header.checking'), props.t('header.triggerControlUpdate'))
+    props.pushToast('info', props.t('header.checking'), props.t('header.triggerControlUpdate'), undefined, {
+      context: { scope: 'system', label: props.t('header.updateCenterTitle') },
+    })
     try {
       const out = await props.triggerUpdate.mutateAsync(null)
-      props.pushToast('success', props.t('header.updateTriggered'), out.message || props.t('header.watchtowerUpdateRequested'))
+      props.pushToast('success', props.t('header.updateTriggered'), out.message || props.t('header.watchtowerUpdateRequested'), undefined, {
+        context: { scope: 'system', label: props.t('header.updateCenterTitle') },
+      })
       setTimeout(() => {
         try {
           window.location.reload()
@@ -155,7 +162,11 @@ export default function AppTopHeader(props: AppTopHeaderProps) {
         }
       }, 3000)
     } catch (error) {
-      props.toastError(props.t('header.updateFailed'), error)
+      props.toastError(props.t('header.updateFailed'), error, {
+        context: { scope: 'system', label: props.t('header.updateCenterTitle') },
+        retry: { key: 'update.triggerControlUpdate' },
+        onRetry: triggerControlUpdate,
+      })
     } finally {
       setControlUpdateSubmitting(false)
     }
@@ -164,7 +175,9 @@ export default function AppTopHeader(props: AppTopHeaderProps) {
   async function handleCheckNow() {
     if (checkNowSubmitting()) return
     setCheckNowSubmitting(true)
-    props.pushToast('info', props.t('header.checking'), 'Refreshing update catalog...')
+    props.pushToast('info', props.t('header.checking'), props.t('header.refreshingUpdateCatalog'), undefined, {
+      context: { scope: 'system', label: props.t('header.updateCenterTitle') },
+    })
     try {
       const csrf = await ensureCsrfCookie()
       const resp = await fetch('/rspc/update.checkNow', {
@@ -187,9 +200,15 @@ export default function AppTopHeader(props: AppTopHeaderProps) {
       const fetched = body?.result?.data?.fetched_at_unix_ms
       if (typeof fetched === 'string' && fetched.trim()) setCheckNowAtUnixMs(fetched)
       await props.updateCheck.refetch()
-      props.pushToast('success', props.t('header.latest'), 'Update catalog refreshed.')
+      props.pushToast('success', props.t('header.latest'), props.t('header.updateCatalogRefreshed'), undefined, {
+        context: { scope: 'system', label: props.t('header.updateCenterTitle') },
+      })
     } catch (error) {
-      props.toastError(props.t('header.failedCheckUpdates'), error)
+      props.toastError(props.t('header.failedCheckUpdates'), error, {
+        context: { scope: 'system', label: props.t('header.updateCenterTitle') },
+        retry: { key: 'update.checkNow' },
+        onRetry: handleCheckNow,
+      })
     } finally {
       setCheckNowSubmitting(false)
     }
@@ -334,6 +353,28 @@ export default function AppTopHeader(props: AppTopHeaderProps) {
             </Show>
           </button>
         </Show>
+
+        <button
+          type="button"
+          class="relative inline-flex h-8 w-8 items-center justify-center rounded-xl border border-slate-200 bg-white/70 text-slate-700 shadow-sm transition-colors hover:bg-white dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:hover:bg-slate-900"
+          title={props.t('eventCenter.title')}
+          aria-label={props.t('eventCenter.title')}
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={() => {
+            setShowLanguageMenu(false)
+            props.setShowAccountMenu(false)
+            props.setShowUpdateCenter(false)
+            props.openEventCenter()
+          }}
+        >
+          <Bell class="h-4 w-4" strokeWidth={2} />
+          <Show when={props.eventUnreadCount > 0}>
+            <span class="absolute -right-0.5 -top-0.5 inline-flex h-2.5 w-2.5">
+              <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400 opacity-75" />
+              <span class="relative inline-flex h-2.5 w-2.5 rounded-full bg-amber-500" />
+            </span>
+          </Show>
+        </button>
 
         <button
           class="sm:hidden rounded-xl border border-slate-200 bg-white/70 p-2 text-slate-700 shadow-sm transition-colors hover:bg-white dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-300 dark:hover:bg-slate-900"

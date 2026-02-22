@@ -16,6 +16,7 @@ export type MinecraftCreateSectionProps = {
 
 export default function MinecraftCreateSection(props: MinecraftCreateSectionProps) {
   const {
+    t,
     selectedTemplate,
     createFieldErrors,
     createTemplateId,
@@ -72,7 +73,7 @@ export default function MinecraftCreateSection(props: MinecraftCreateSectionProp
                           <div class="flex flex-wrap items-center justify-between gap-3">
                             <div class="flex flex-wrap items-center gap-3">
                               <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                                Minecraft
+                                {t('instancesCreate.section.minecraft')}
                               </div>
                               <Tabs
                                 value={mcCreateMode()}
@@ -87,10 +88,10 @@ export default function MinecraftCreateSection(props: MinecraftCreateSectionProp
                               size="xs"
                               variant={createAdvanced() ? 'secondary' : 'ghost'}
                               onClick={() => setCreateAdvanced((v: boolean) => !v)}
-                              title="Show or hide advanced fields"
+                              title={t('instancesCreate.advancedToggleTitle')}
                             >
                               <span class="inline-flex items-center gap-2">
-                                {createAdvanced() ? 'Hide advanced' : 'Advanced'}
+                                {createAdvanced() ? t('instancesCreate.hideAdvanced') : t('instancesCreate.advanced')}
                                 <Show when={!createAdvanced() && createAdvancedDirty()}>
                                   <span class="h-1.5 w-1.5 rounded-full bg-amber-500" aria-hidden="true" />
                                 </Show>
@@ -111,15 +112,15 @@ export default function MinecraftCreateSection(props: MinecraftCreateSectionProp
                                 onChange={(e) => setMcEula(e.currentTarget.checked)}
                               />
                               <span class="leading-tight">
-                                I accept the{' '}
-                                <Link href="https://aka.ms/MinecraftEULA" target="_blank" rel="noreferrer noopener">
-                                  Minecraft EULA
-                                </Link>
-                                <span class="mt-0.5 block text-xs text-slate-500 dark:text-slate-400">
-                                  Required to start server.
-                                </span>
-                              </span>
-                            </label>
+                                 {t('instancesCreate.minecraftEulaAcceptPrefix')}{' '}
+                                 <Link href="https://aka.ms/MinecraftEULA" target="_blank" rel="noreferrer noopener">
+                                   {t('instancesCreate.minecraftEulaLinkLabel')}
+                                 </Link>
+                                 <span class="mt-0.5 block text-xs text-slate-500 dark:text-slate-400">
+                                   {t('instancesCreate.minecraftEulaRequiredHint')}
+                                 </span>
+                               </span>
+                             </label>
                             <Show when={createFieldErrors().accept_eula}>
                               <div class="mt-2 text-[12px] text-rose-700 dark:text-rose-300">{createFieldErrors().accept_eula}</div>
                             </Show>
@@ -129,8 +130,8 @@ export default function MinecraftCreateSection(props: MinecraftCreateSectionProp
                             <Field
                               label={
                                 <LabelTip
-                                  label="Server pack (uploaded zip)"
-                                  content="Choose an uploaded zip from the list, or use the first item to upload a new zip."
+                                  label={t('instancesCreate.minecraftImport.packLabel')}
+                                  content={t('instancesCreate.minecraftImport.packHint')}
                                 />
                               }
                               required
@@ -142,7 +143,11 @@ export default function MinecraftCreateSection(props: MinecraftCreateSectionProp
                                     label=""
                                     value={mcImportPack()}
                                     options={mcImportPackOptions()}
-                                    placeholder={mcImportPacksPending() ? 'Loading uploaded zips...' : 'Select uploaded zip...'}
+                                    placeholder={
+                                      mcImportPacksPending()
+                                        ? t('instancesCreate.minecraftImport.loadingUploadedZips')
+                                        : t('instancesCreate.minecraftImport.selectUploadedZip')
+                                    }
                                     onChange={(value) => {
                                       if (value === '__upload__') {
                                         importPackFileEl?.click()
@@ -167,7 +172,9 @@ export default function MinecraftCreateSection(props: MinecraftCreateSectionProp
                                   }}
                                 />
                                 <Show when={mcImportUploadPending()}>
-                                  <div class="text-[11px] text-slate-500 dark:text-slate-400">Uploading zip...</div>
+                                  <div class="text-[11px] text-slate-500 dark:text-slate-400">
+                                    {t('instancesCreate.minecraftImport.uploadingZip')}
+                                  </div>
                                 </Show>
                               </div>
                             </Field>
@@ -176,7 +183,7 @@ export default function MinecraftCreateSection(props: MinecraftCreateSectionProp
                           <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
                             <Show when={createTemplateId() === 'minecraft:vanilla'}>
                               <Field
-                                label={<LabelTip label="Version" content="Used for version management and compatibility." />}
+                                label={<LabelTip label={t('instancesCreate.minecraft.versionLabel')} content={t('instancesCreate.minecraft.versionHint')} />}
                                 error={createFieldErrors().version}
                               >
                                 <Dropdown
@@ -190,7 +197,7 @@ export default function MinecraftCreateSection(props: MinecraftCreateSectionProp
 
                             <Field
                               class={createTemplateId() === 'minecraft:vanilla' ? '' : 'sm:col-span-2'}
-                              label={<LabelTip label="Memory (MiB)" content="Max heap size passed to Java (Xmx)." />}
+                              label={<LabelTip label={t('instancesCreate.minecraft.memoryLabel')} content={t('instancesCreate.minecraft.memoryHint')} />}
                               error={createFieldErrors().memory_mb}
                             >
                               <Input
@@ -209,7 +216,7 @@ export default function MinecraftCreateSection(props: MinecraftCreateSectionProp
                           <Show when={createAdvanced()}>
                             <div class="space-y-3">
                               <Field
-                                label={<LabelTip label="Port (optional)" content="Leave blank for auto-assign." />}
+                                label={<LabelTip label={t('instancesCreate.common.portOptionalLabel')} content={t('instancesCreate.common.portOptionalHint')} />}
                                 error={createFieldErrors().port}
                               >
                                 <Input
@@ -225,7 +232,7 @@ export default function MinecraftCreateSection(props: MinecraftCreateSectionProp
                               </Field>
 
                               <Field
-                                label={<LabelTip label="Public (Tunnels)" content="Optional. Paste a tunnel config to expose this instance (auto-detects INI/TOML/YAML/JSON)." />}
+                                label={<LabelTip label={t('instancesCreate.tunnels.publicLabel')} content={t('instancesCreate.tunnels.publicHint')} />}
                                 error={createFieldErrors().frp_config}
                               >
                                 <div class="space-y-2">
@@ -236,17 +243,17 @@ export default function MinecraftCreateSection(props: MinecraftCreateSectionProp
                                       checked={mcFrpEnabled()}
                                       onChange={(e) => setMcFrpEnabled(e.currentTarget.checked)}
                                     />
-                                    <span>Enable</span>
-                                  </label>
+                                     <span>{t('instancesCreate.enable')}</span>
+                                   </label>
                                   <Show when={mcFrpEnabled()}>
                                     <div class="space-y-2">
                                       <div class="flex flex-wrap items-center justify-between gap-2">
                                         <Tabs
                                           value={mcFrpMode()}
-                                          options={[
-                                            { value: 'paste', label: 'Paste' },
-                                            { value: 'node', label: 'Node' },
-                                          ]}
+                                           options={[
+                                             { value: 'paste', label: t('instancesCreate.tunnels.paste') },
+                                             { value: 'node', label: t('instancesCreate.tunnels.node') },
+                                           ]}
                                           onChange={(mode) => {
                                             setMcFrpMode(mode)
                                             if (mode === 'paste') setMcFrpNodeId('')
@@ -254,7 +261,7 @@ export default function MinecraftCreateSection(props: MinecraftCreateSectionProp
                                           }}
                                         />
                                         <Button size="xs" variant="secondary" onClick={() => setTab('frp')}>
-                                          Manage nodes
+                                          {t('instancesCreate.tunnels.manageNodes')}
                                         </Button>
                                       </div>
 
@@ -268,12 +275,14 @@ export default function MinecraftCreateSection(props: MinecraftCreateSectionProp
                                             label=""
                                             value={mcFrpNodeId()}
                                             options={frpNodeDropdownOptions()}
-                                            placeholder="Select node…"
+                                            placeholder={t('instancesCreate.tunnels.selectNode')}
                                             onChange={setMcFrpNodeId}
                                           />
                                         </div>
                                         <div class="text-[11px] text-slate-500 dark:text-slate-400">
-                                          Uses the saved node config and patches <span class="font-mono">local_port</span> (and auto remote port if needed).
+                                          {t('instancesCreate.tunnels.nodeHintPrefix')}{' '}
+                                          <span class="font-mono">local_port</span>{' '}
+                                          {t('instancesCreate.tunnels.nodeHintSuffix')}
                                         </div>
                                       </Show>
 
@@ -284,7 +293,7 @@ export default function MinecraftCreateSection(props: MinecraftCreateSectionProp
                                           }}
                                           value={mcFrpConfig()}
                                           onInput={(e) => setMcFrpConfig(e.currentTarget.value)}
-                                          placeholder="Paste tunnel config (auto: INI/TOML/YAML/JSON)"
+                                          placeholder={t('instancesCreate.tunnels.pastePlaceholder')}
                                           spellcheck={false}
                                           class="font-mono text-[11px]"
                                           invalid={Boolean(createFieldErrors().frp_config)}

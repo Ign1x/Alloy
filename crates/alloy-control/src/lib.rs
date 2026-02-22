@@ -1,3 +1,11 @@
+#![allow(
+    clippy::len_without_is_empty,
+    clippy::question_mark,
+    clippy::too_many_arguments,
+    clippy::enum_variant_names,
+    clippy::result_large_err
+)]
+
 pub mod agent_transport;
 pub mod agent_tunnel;
 pub mod audit;

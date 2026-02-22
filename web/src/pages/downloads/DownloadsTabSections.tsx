@@ -1,5 +1,6 @@
 import { For, Show, createMemo } from 'solid-js'
 import { ArrowDown, ArrowUp, Download, Pause, Play, RotateCw, Search, Trash2, X } from 'lucide-solid'
+import type { I18nTranslate } from '../../app/i18n'
 import type { DownloadJob } from '../../app/types'
 import {
   downloadJobPercent,
@@ -36,6 +37,7 @@ export type DownloadStatus = {
 export type VersionOption = { value: string; label: string; meta?: string }
 
 export function JobRow(props: {
+  t: I18nTranslate
   job: DownloadJob
   nowUnixMs: () => number
   compact?: boolean
@@ -57,13 +59,13 @@ export function JobRow(props: {
 
   const speedLabel = () => {
     const v = progressSpeed()
-    if (typeof v !== 'number' || !Number.isFinite(v) || v <= 0) return '—'
+    if (typeof v !== 'number' || !Number.isFinite(v) || v <= 0) return props.t('downloads.valueUnavailable')
     return `${formatBytes(v)}/s`
   }
 
   const progressLabel = () => {
     const pct = progressPercent()
-    if (pct == null) return 'running'
+    if (pct == null) return props.t('downloadTask.running')
     return `${pct.toFixed(1)}%`
   }
 
@@ -85,7 +87,7 @@ export function JobRow(props: {
 
   const etaLabel = () => {
     const sec = progressEtaSec()
-    if (typeof sec !== 'number' || !Number.isFinite(sec) || sec < 0) return '—'
+    if (typeof sec !== 'number' || !Number.isFinite(sec) || sec < 0) return props.t('downloads.valueUnavailable')
     if (sec < 60) return `${Math.floor(sec)}s`
     if (sec < 3600) {
       const m = Math.floor(sec / 60)
@@ -110,7 +112,7 @@ export function JobRow(props: {
             </span>
             <Badge variant={downloadJobStatusVariant(props.job.state)}>{downloadJobStatusLabel(props.job.state)}</Badge>
             <Show when={props.job.requestId && !props.compact}>
-              {(req) => <span class="font-mono text-[11px] text-slate-400 dark:text-slate-500">req {req()}</span>}
+              {(req) => <span class="font-mono text-[11px] text-slate-400 dark:text-slate-500">{props.t('common.requestId')} {req()}</span>}
             </Show>
           </div>
 
@@ -122,7 +124,7 @@ export function JobRow(props: {
               <DownloadProgress templateId={props.job.templateId} message={progressMessage()} />
               <div class="rounded-xl border border-slate-200 bg-white/70 px-3 py-2 text-[11px] dark:border-slate-800 dark:bg-slate-950/40">
                 <div class="mb-1.5 flex items-center justify-between text-[10px] uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                  <span>{props.job.progressStage || 'download'}</span>
+                  <span>{props.job.progressStage || props.t('downloadTask.progressDefaultStage')}</span>
                   <span class="font-mono text-slate-700 dark:text-slate-200">{progressLabel()}</span>
                 </div>
                 <div class="mb-2 h-2 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
@@ -134,22 +136,21 @@ export function JobRow(props: {
                 </div>
                 <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-slate-600 dark:text-slate-300">
                   <span>
-                    speed <span class="font-mono text-slate-800 dark:text-slate-100">{speedLabel()}</span>
+                    {props.t('downloadTask.speedLabel', { value: speedLabel() })}
                   </span>
                   <span>
-                    progress{' '}
-                    <span class="font-mono text-slate-800 dark:text-slate-100">
-                      {progressPercent() == null ? '—' : `${progressPercent()!.toFixed(1)}%`}
-                    </span>
+                    {props.t('downloadTask.progressLabel', {
+                      value: progressPercent() == null ? '—' : `${progressPercent()!.toFixed(1)}%`,
+                    })}
                   </span>
                   <span>
-                    size{' '}
-                    <span class="font-mono text-slate-800 dark:text-slate-100">
-                      {formatBytes(progressDownloaded())} / {formatBytes(progressTotal())}
-                    </span>
+                    {props.t('downloadTask.sizeLabel', {
+                      downloaded: formatBytes(progressDownloaded()),
+                      total: formatBytes(progressTotal()),
+                    })}
                   </span>
                   <span>
-                    eta <span class="font-mono text-slate-800 dark:text-slate-100">{etaLabel()}</span>
+                    {props.t('downloads.etaLabel', { value: etaLabel() })}
                   </span>
                 </div>
               </div>
@@ -164,37 +165,37 @@ export function JobRow(props: {
 
       <div class="flex flex-none items-center gap-1">
         <Button size="xs" variant="secondary" onClick={() => props.onOpenDetails(props.job.id)}>
-          Details
+          {props.t('downloads.details')}
         </Button>
 
         <Show when={showReorder()}>
           <>
-            <IconButton label="Move up" variant="ghost" onClick={() => void props.onMoveJob(props.job.id, -1)}>
+            <IconButton label={props.t('downloads.moveUp')} variant="ghost" onClick={() => void props.onMoveJob(props.job.id, -1)}>
               <ArrowUp class="h-4 w-4" aria-hidden="true" />
             </IconButton>
-            <IconButton label="Move down" variant="ghost" onClick={() => void props.onMoveJob(props.job.id, 1)}>
+            <IconButton label={props.t('downloads.moveDown')} variant="ghost" onClick={() => void props.onMoveJob(props.job.id, 1)}>
               <ArrowDown class="h-4 w-4" aria-hidden="true" />
             </IconButton>
           </>
         </Show>
 
         <Show when={props.job.state === 'queued'}>
-          <IconButton label="Pause" variant="secondary" onClick={() => void props.onPauseJob(props.job.id)}>
+          <IconButton label={props.t('downloads.pause')} variant="secondary" onClick={() => void props.onPauseJob(props.job.id)}>
             <Pause class="h-4 w-4" aria-hidden="true" />
           </IconButton>
         </Show>
         <Show when={props.job.state === 'paused'}>
-          <IconButton label="Resume" variant="secondary" onClick={() => void props.onResumeJob(props.job.id)}>
+          <IconButton label={props.t('downloads.resume')} variant="secondary" onClick={() => void props.onResumeJob(props.job.id)}>
             <Play class="h-4 w-4" aria-hidden="true" />
           </IconButton>
         </Show>
         <Show when={props.job.state === 'queued' || props.job.state === 'paused'}>
-          <IconButton label="Cancel" variant="danger" onClick={() => void props.onCancelJob(props.job.id)}>
+          <IconButton label={props.t('downloads.cancel')} variant="danger" onClick={() => void props.onCancelJob(props.job.id)}>
             <X class="h-4 w-4" aria-hidden="true" />
           </IconButton>
         </Show>
         <Show when={props.job.state === 'error' || props.job.state === 'success' || props.job.state === 'canceled'}>
-          <IconButton label="Retry" variant="secondary" onClick={() => void props.onRetryJob(props.job.id)}>
+          <IconButton label={props.t('eventCenter.retry')} variant="secondary" onClick={() => void props.onRetryJob(props.job.id)}>
             <RotateCw class="h-4 w-4" aria-hidden="true" />
           </IconButton>
         </Show>
@@ -204,6 +205,7 @@ export function JobRow(props: {
 }
 
 export function VersionManager(props: {
+  t: I18nTranslate
   title: string
   subtitle: string
   templateId: string
@@ -245,10 +247,14 @@ export function VersionManager(props: {
 
   const cachedSummary = createMemo(() => {
     const cached = props.cachedVersions()
-    if (cached.length === 0) return 'Not cached'
+    if (cached.length === 0) return props.t('downloads.notCached')
     const last = cached[0]
     const lastLabel = labelByValue().get(last.version) ?? last.version
-    return `${cached.length} cached · ${formatBytes(cachedTotalBytes())} · latest ${lastLabel}`
+    return props.t('downloads.cachedSummary', {
+      count: cached.length,
+      size: formatBytes(cachedTotalBytes()),
+      latest: lastLabel,
+    })
   })
 
   const selectedLabel = createMemo(() => labelByValue().get(props.value()) ?? props.value())
@@ -269,7 +275,9 @@ export function VersionManager(props: {
           <div class="mt-1 text-[12px] text-slate-600 dark:text-slate-400">{props.subtitle}</div>
         </div>
         <div class="flex flex-wrap items-center gap-2">
-          <Badge variant={props.cachedVersions().length > 0 ? 'success' : 'neutral'}>{props.cachedVersions().length > 0 ? 'Cached' : 'Missing'}</Badge>
+          <Badge variant={props.cachedVersions().length > 0 ? 'success' : 'neutral'}>
+            {props.cachedVersions().length > 0 ? props.t('downloads.cached') : props.t('downloads.missing')}
+          </Badge>
           <span class="rounded-full border border-slate-200 bg-white px-2 py-0.5 font-mono text-[11px] text-slate-700 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200">
             {cachedSummary()}
           </span>
@@ -280,14 +288,14 @@ export function VersionManager(props: {
         <section class={SURFACE}>
           <div class="border-b border-slate-200 px-4 py-3 dark:border-slate-800">
             <div class="flex flex-wrap items-center justify-between gap-3">
-              <div class="text-sm font-semibold text-slate-900 dark:text-slate-100">Versions</div>
-              <div class="text-[11px] text-slate-500 dark:text-slate-400">{filtered().length} shown</div>
+              <div class="text-sm font-semibold text-slate-900 dark:text-slate-100">{props.t('downloads.versions')}</div>
+              <div class="text-[11px] text-slate-500 dark:text-slate-400">{props.t('downloads.shownCount', { count: filtered().length })}</div>
             </div>
             <div class="mt-3">
               <Input
                 value={props.search()}
                 onInput={(e) => props.setSearch(e.currentTarget.value)}
-                placeholder="Search versions…"
+                placeholder={props.t('downloads.searchVersions')}
                 class="w-full"
                 leftIcon={<Search class="h-4 w-4" aria-hidden="true" />}
               />
@@ -297,7 +305,7 @@ export function VersionManager(props: {
           <div class="max-h-[60vh] overflow-auto">
             <Show
               when={filtered().length > 0}
-              fallback={<EmptyState title="No matching versions" description="Try a different search term." class="m-4" />}
+              fallback={<EmptyState title={props.t('downloads.noMatchingVersions')} description={props.t('downloads.tryDifferentSearch')} class="m-4" />}
             >
               <div class="divide-y divide-slate-200 dark:divide-slate-800">
                 <For each={filtered()}>
@@ -332,8 +340,10 @@ export function VersionManager(props: {
                               <Show when={cached()}>
                                 {(c) => (
                                   <span>
-                                    cached {formatBytes((c() as CachedVersionRow).sizeBytes)} ·{' '}
-                                    {formatRelativeTime((c() as CachedVersionRow).lastUsedUnixMs)}
+                                    {props.t('downloads.cachedLine', {
+                                      size: formatBytes((c() as CachedVersionRow).sizeBytes),
+                                      time: formatRelativeTime((c() as CachedVersionRow).lastUsedUnixMs),
+                                    })}
                                   </span>
                                 )}
                               </Show>
@@ -342,10 +352,12 @@ export function VersionManager(props: {
                         </div>
                         <div class="flex flex-none items-center gap-2">
                           <Show when={cached()}>
-                            <StatusPill ok>cached</StatusPill>
+                            <StatusPill ok>{props.t('downloads.cached')}</StatusPill>
                           </Show>
                           <Show when={selected() && !cached()}>
-                            <span class={`text-[11px] ${selected() ? 'text-white/85 dark:text-slate-700' : 'text-slate-500 dark:text-slate-400'}`}>selected</span>
+                            <span class={`text-[11px] ${selected() ? 'text-white/85 dark:text-slate-700' : 'text-slate-500 dark:text-slate-400'}`}>
+                              {props.t('downloads.selected')}
+                            </span>
                           </Show>
                         </div>
                       </button>
@@ -359,14 +371,14 @@ export function VersionManager(props: {
 
         <section class={SURFACE}>
           <div class="border-b border-slate-200 px-4 py-4 dark:border-slate-800">
-            <div class="text-sm font-semibold text-slate-900 dark:text-slate-100">Manage</div>
+            <div class="text-sm font-semibold text-slate-900 dark:text-slate-100">{props.t('downloads.manage')}</div>
             <div class="mt-1 text-[12px] text-slate-600 dark:text-slate-400">
-              Cache multiple versions side-by-side. Instances can reference any cached version.
+              {props.t('downloads.manageHint')}
             </div>
           </div>
           <div class="space-y-4 p-4">
             <div class="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-900/20">
-              <div class="text-[11px] font-medium text-slate-600 dark:text-slate-400">Selected</div>
+              <div class="text-[11px] font-medium text-slate-600 dark:text-slate-400">{props.t('downloads.selected')}</div>
               <div class="mt-1 truncate font-mono text-[12px] text-slate-900 dark:text-slate-100" title={selectedLabel()}>
                 {selectedLabel()}
               </div>
@@ -384,7 +396,7 @@ export function VersionManager(props: {
                 disabled={props.installDisabled()}
                 onClick={props.onInstall}
               >
-                Cache version
+                {props.t('downloads.cacheVersion')}
               </Button>
 
               <Show when={selectedCache()}>
@@ -397,7 +409,7 @@ export function VersionManager(props: {
                     disabled={props.deleteDisabled()}
                     onClick={() => props.onDeleteCacheKey((row() as CachedVersionRow).key, `${props.title} ${selectedLabel()}`)}
                   >
-                    Delete
+                    {props.t('downloads.delete')}
                   </Button>
                 )}
               </Show>
@@ -405,7 +417,7 @@ export function VersionManager(props: {
 
             <Show when={props.cachedVersions().length > 0}>
               <div>
-                <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Cached versions</div>
+                <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">{props.t('downloads.cachedVersions')}</div>
                 <div class="mt-2 overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-800">
                   <div class="divide-y divide-slate-200 dark:divide-slate-800">
                     <For each={props.cachedVersions()}>
@@ -415,7 +427,7 @@ export function VersionManager(props: {
                             type="button"
                             class="min-w-0 text-left"
                             onClick={() => props.onSelect(row.version)}
-                            title="Select version"
+                            title={props.t('downloads.selectVersion')}
                           >
                             <div class="truncate font-mono text-[12px] text-slate-900 dark:text-slate-100">
                               {labelByValue().get(row.version) ?? row.version}
@@ -437,7 +449,7 @@ export function VersionManager(props: {
                             disabled={props.deleteDisabled()}
                             onClick={() => props.onDeleteCacheKey(row.key, `${props.title} ${labelByValue().get(row.version) ?? row.version}`)}
                           >
-                            Delete
+                            {props.t('downloads.delete')}
                           </Button>
                         </div>
                       )}
@@ -452,9 +464,14 @@ export function VersionManager(props: {
                     leftIcon={<Trash2 class="h-4 w-4" aria-hidden="true" />}
                     loading={props.deletingKey() === props.aggregateCacheKey}
                     disabled={props.deleteDisabled()}
-                    onClick={() => props.onDeleteCacheKey(props.aggregateCacheKey, `${props.title} (all cached versions)`)}
+                    onClick={() =>
+                      props.onDeleteCacheKey(
+                        props.aggregateCacheKey,
+                        props.t('downloads.deleteAllCachedForTitle', { title: props.title }),
+                      )
+                    }
                   >
-                    Delete all cached
+                    {props.t('downloads.deleteAllCached')}
                   </Button>
                 </div>
               </div>
@@ -464,14 +481,16 @@ export function VersionManager(props: {
               {(s) => (
                 <div class="rounded-xl border border-slate-200 bg-white p-3 text-[12px] dark:border-slate-800 dark:bg-slate-950">
                   <div class="flex flex-wrap items-center justify-between gap-2">
-                    <div class="text-sm font-medium text-slate-900 dark:text-slate-100">Last result</div>
-                    <StatusPill ok={(s() as DownloadStatus).ok}>{(s() as DownloadStatus).ok ? 'ok' : 'failed'}</StatusPill>
+                    <div class="text-sm font-medium text-slate-900 dark:text-slate-100">{props.t('downloads.lastResult')}</div>
+                    <StatusPill ok={(s() as DownloadStatus).ok}>
+                      {(s() as DownloadStatus).ok ? props.t('instances.common.ok') : props.t('instances.common.failed')}
+                    </StatusPill>
                   </div>
                   <div class="mt-2 text-slate-700 dark:text-slate-200">{(s() as DownloadStatus).message}</div>
                   <div class="mt-2 flex flex-wrap items-center justify-between gap-2 font-mono text-[11px] text-slate-500 dark:text-slate-400">
                     <span>{formatRelativeTime((s() as DownloadStatus).atUnixMs)}</span>
                     <Show when={(s() as DownloadStatus).requestId}>
-                      {(req) => <span>req {req()}</span>}
+                      {(req) => <span>{props.t('common.requestId')} {req()}</span>}
                     </Show>
                   </div>
                 </div>

@@ -100,7 +100,7 @@ fn parse_cursor(cursor: &str) -> Result<CursorMode, &'static str> {
         return Ok(CursorMode::TailFromEnd);
     }
 
-    if c.as_bytes().len() >= 3 && (c.starts_with("v2;") || c.starts_with("V2;")) {
+    if c.len() >= 3 && (c.starts_with("v2;") || c.starts_with("V2;")) {
         let mut offset: Option<u64> = None;
         let mut dev: Option<u64> = None;
         let mut ino: Option<u64> = None;
@@ -110,25 +110,29 @@ fn parse_cursor(cursor: &str) -> Result<CursorMode, &'static str> {
             if part.is_empty() {
                 continue;
             }
-            let Some((k, v)) = part
-                .split_once('=')
-                .or_else(|| part.split_once(':'))
-            else {
+            let Some((k, v)) = part.split_once('=').or_else(|| part.split_once(':')) else {
                 continue;
             };
             let k = k.trim();
             let v = v.trim();
             match k {
                 "offset" | "off" => {
-                    offset = Some(v.parse::<u64>().map_err(|_| {
-                        "invalid cursor; v2 offset must be an integer"
-                    })?);
+                    offset = Some(
+                        v.parse::<u64>()
+                            .map_err(|_| "invalid cursor; v2 offset must be an integer")?,
+                    );
                 }
                 "dev" => {
-                    dev = Some(v.parse::<u64>().map_err(|_| "invalid cursor; v2 dev must be an integer")?);
+                    dev = Some(
+                        v.parse::<u64>()
+                            .map_err(|_| "invalid cursor; v2 dev must be an integer")?,
+                    );
                 }
                 "ino" => {
-                    ino = Some(v.parse::<u64>().map_err(|_| "invalid cursor; v2 ino must be an integer")?);
+                    ino = Some(
+                        v.parse::<u64>()
+                            .map_err(|_| "invalid cursor; v2 ino must be an integer")?,
+                    );
                 }
                 _ => {}
             }
@@ -150,10 +154,7 @@ fn parse_cursor(cursor: &str) -> Result<CursorMode, &'static str> {
         if part.is_empty() {
             continue;
         }
-        let Some((k, v)) = part
-            .split_once('=')
-            .or_else(|| part.split_once(':'))
-        else {
+        let Some((k, v)) = part.split_once('=').or_else(|| part.split_once(':')) else {
             continue;
         };
         let k = k.trim();
@@ -350,7 +351,10 @@ impl LogsService for LogsApi {
 
         let (mode, cursor) = match mode {
             CursorMode::TailFromEnd => (CursorMode::TailFromEnd, size.saturating_sub(limit_bytes)),
-            CursorMode::ResumeFrom { offset, file_id: cursor_file_id } => {
+            CursorMode::ResumeFrom {
+                offset,
+                file_id: cursor_file_id,
+            } => {
                 let id_mismatch = match (file_id, cursor_file_id) {
                     (Some(current), Some(expected)) => current != expected,
                     _ => false,

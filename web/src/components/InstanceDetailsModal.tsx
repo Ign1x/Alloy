@@ -2,6 +2,14 @@ import { createSignal, For, Show } from 'solid-js'
 import { ensureCsrfCookie } from '../auth'
 import { statusMessageParts } from '../app/helpers/agentErrors'
 import { formatBytes, formatCpuPercent, parseU64 } from '../app/helpers/format'
+import {
+  canEditOrDeleteInstance,
+  deleteInstanceActionTitle,
+  editInstanceActionTitle,
+  restartInstanceActionTitle,
+  startInstanceActionTitle,
+  stopInstanceActionTitle,
+} from '../app/helpers/instanceActionReasons'
 import { canStartInstance, instanceStateLabel, isStopping } from '../app/helpers/instances'
 import { buildDirectConnectAddress, instancePort, parseFrpEndpoint, parseFrpPublicEndpoint } from '../app/helpers/network'
 import { downloadJson, isSecretParamKey, safeCopy } from '../app/helpers/misc'
@@ -57,6 +65,9 @@ export default function InstanceDetailsModal(props: InstanceDetailsModalProps) {
     setProcessLogLive,
     setProcessLogLines,
     isAuthed,
+    t,
+    toastSuccessFromRspc,
+    locale,
   } = props as any
 
   const canTailProcessLogs = () => (typeof canTailProcessLogsProp === 'function' ? Boolean(canTailProcessLogsProp()) : true)
@@ -75,7 +86,7 @@ export default function InstanceDetailsModal(props: InstanceDetailsModalProps) {
         src={templateLogoSrc(selectedTemplateId())}
         title={selectedTemplateLabel()}
       />
-      <span class="truncate">{selectedInstanceDisplayName() ?? 'Instance details'}</span>
+      <span class="truncate">{selectedInstanceDisplayName() ?? t('instances.details.title')}</span>
     </span>
   )
 
@@ -86,13 +97,14 @@ export default function InstanceDetailsModal(props: InstanceDetailsModalProps) {
 	          title={modalTitle()}
 	          size="xl"
 	        >
-          <Show when={selectedInstance()} fallback={<div class="text-sm text-slate-500">No instance selected.</div>}>
+          <Show when={selectedInstance()} fallback={<div class="text-sm text-slate-500">{t('instances.details.noSelection')}</div>}>
 	            {(inst) => {
 	              const id = () => inst().config.instance_id
-	              const status = () => inst().status ?? null
-	              const displayName = () => instanceDisplayName(inst() as any)
-	              const uiName = () => selectedInstanceDisplayName() ?? displayName()
-	              const params = () => (inst().config.params as Record<string, unknown> | null | undefined) ?? null
+              const status = () => inst().status ?? null
+              const displayName = () => instanceDisplayName(inst() as any)
+              const uiName = () => selectedInstanceDisplayName() ?? displayName()
+              const operationInProgress = () => instanceOpById()[id()] != null
+              const params = () => (inst().config.params as Record<string, unknown> | null | undefined) ?? null
 	              const version = () => {
 	                const v = params()?.version
 	                return typeof v === 'string' && v.trim() ? v : null
@@ -138,23 +150,34 @@ export default function InstanceDetailsModal(props: InstanceDetailsModalProps) {
                 return 'neutral' as const
               }
 
+              const instanceToastContext = () => ({
+                scope: 'instance' as const,
+                id: id(),
+                label: uiName(),
+              })
+
               async function copyConnect() {
                 const c = connectInfo()
                 if (!c) return
                 await safeCopy(c)
-                pushToast('success', 'Copied', c)
+                pushToast('success', t('toast.copied'), c, undefined, {
+                  context: instanceToastContext(),
+                })
               }
 
               async function copyFrp() {
                 const c = frpEndpoint()
                 if (!c) return
                 await safeCopy(c)
-                pushToast('success', 'Copied', c)
+                pushToast('success', t('toast.copied'), c, undefined, {
+                  context: instanceToastContext(),
+                })
               }
 
               async function downloadDiagnostics() {
                 const instValue = inst()
                 try {
+                  const currentLocale = typeof locale === 'function' ? locale() : 'en'
                   const cfg = {
                     ...instValue.config,
                     params: { ...(instValue.config.params as Record<string, string>) },
@@ -173,6 +196,7 @@ export default function InstanceDetailsModal(props: InstanceDetailsModalProps) {
 
                   const payload = {
                     type: 'alloy-instance-diagnostics',
+                    locale: currentLocale,
                     ...diag,
                     config: cfg,
                     status: instValue.status ?? null,
@@ -180,15 +204,20 @@ export default function InstanceDetailsModal(props: InstanceDetailsModalProps) {
                   }
 
                   downloadJson(`alloy-${instValue.config.instance_id}-diagnostics.json`, payload)
-                  pushToast('success', 'Downloaded', 'Diagnostics report saved.')
+                  pushToast('success', t('toast.copied'), t('header.diagnostics'), undefined, {
+                    context: instanceToastContext(),
+                  })
                 } catch (e) {
-                  toastError('Diagnostics failed', e)
+                  toastError(t('instances.details.loadLogsFailed'), e, {
+                    context: instanceToastContext(),
+                  })
                 }
               }
 
               async function copyDiagnostics() {
                 const instValue = inst()
                 try {
+                  const currentLocale = typeof locale === 'function' ? locale() : 'en'
                   const cfg = {
                     ...instValue.config,
                     params: { ...(instValue.config.params as Record<string, string>) },
@@ -199,6 +228,7 @@ export default function InstanceDetailsModal(props: InstanceDetailsModalProps) {
                     }
                   }
                   const payload = {
+                    locale: currentLocale,
                     instance_id: instValue.config.instance_id,
                     template_id: instValue.config.template_id,
                     config: cfg,
@@ -206,9 +236,13 @@ export default function InstanceDetailsModal(props: InstanceDetailsModalProps) {
                     process_logs_tail: processLogLines().map((l: any) => l.text)
                   }
                   await safeCopy(JSON.stringify(payload, null, 2))
-                  pushToast('success', 'Copied', 'Diagnostics JSON copied.')
+                  pushToast('success', t('toast.copied'), t('header.diagnostics'), undefined, {
+                    context: instanceToastContext(),
+                  })
                 } catch (e) {
-                  toastError('Copy failed', e)
+                  toastError(t('instances.details.loadLogsFailed'), e, {
+                    context: instanceToastContext(),
+                  })
                 }
               }
 
@@ -221,7 +255,7 @@ export default function InstanceDetailsModal(props: InstanceDetailsModalProps) {
                       <div class="min-w-0">
 	                        <div class="mt-1 flex flex-wrap items-center gap-2">
 	                          <Badge variant={statusVariant()} title={status()?.state ?? 'PROCESS_STATE_EXITED'}>
-	                            {instanceStateLabel(status())}
+                                {instanceStateLabel(status(), t)}
 	                          </Badge>
 	                          <Show when={version()}>{(v) => <Badge variant="neutral">v{v()}</Badge>}</Show>
                           <Show when={connectInfo()}>
@@ -230,7 +264,7 @@ export default function InstanceDetailsModal(props: InstanceDetailsModalProps) {
                                 type="button"
                                 class="group inline-flex max-w-full cursor-pointer items-center gap-1 rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 font-mono text-[11px] text-slate-700 transition-all duration-150 hover:bg-white active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/35 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-50 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-200 dark:hover:bg-slate-900 dark:focus-visible:ring-amber-400/35 dark:focus-visible:ring-offset-slate-950"
                                 onClick={() => void copyConnect()}
-                                title="Copy connection info"
+                                title={t('toast.copied')}
                               >
                                 <span class="truncate">{c()}</span>
                                 <svg
@@ -252,9 +286,9 @@ export default function InstanceDetailsModal(props: InstanceDetailsModalProps) {
                                 type="button"
                                 class="group inline-flex max-w-full cursor-pointer items-center gap-1 rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 font-mono text-[11px] text-slate-700 transition-all duration-150 hover:bg-white active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/35 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-50 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-200 dark:hover:bg-slate-900 dark:focus-visible:ring-amber-400/35 dark:focus-visible:ring-offset-slate-950"
                                 onClick={() => void copyFrp()}
-                                title="Copy public endpoint (Tunnel)"
+                                 title={t('toast.copied')}
                               >
-                                <span class="truncate">Tunnel {c()}</span>
+                                <span class="truncate">{t('instances.details.tunnelPrefix', { value: c() })}</span>
                                 <svg
                                   xmlns="http://www.w3.org/2000/svg"
                                   viewBox="0 0 20 20"
@@ -287,25 +321,36 @@ export default function InstanceDetailsModal(props: InstanceDetailsModalProps) {
 	                                  <path d="M5.75 5.75A.75.75 0 016.5 5h7a.75.75 0 01.75.75v8.5a.75.75 0 01-.75.75h-7a.75.75 0 01-.75-.75v-8.5z" />
 	                                </svg>
 	                              }
-	                              loading={instanceOpById()[id()] === 'stopping'}
-	                              disabled={isReadOnly() || instanceOpById()[id()] != null || isStopping(status())}
-	                              title={isReadOnly() ? 'Read-only mode' : 'Stop instance'}
-	                            onClick={async () => {
+	                            loading={instanceOpById()[id()] === 'stopping'}
+	                            disabled={isReadOnly() || instanceOpById()[id()] != null || isStopping(status())}
+	                            title={stopInstanceActionTitle({ status: status(), isReadOnly: isReadOnly(), operationInProgress: operationInProgress(), t })}
+	                          onClick={async () => {
 	                              try {
 	                                await runInstanceOp(id(), 'stopping', () =>
 	                                  stopInstance.mutateAsync({ instance_id: id(), timeout_ms: 30_000 }),
 	                                )
 	                                await invalidateInstances()
-	                                pushToast('success', 'Stopped', uiName())
+	                                toastSuccessFromRspc('instance.stop', t('instances.toast.stopped'), uiName(), {
+                                  context: instanceToastContext(),
+                                })
                               } catch (e) {
                                 if (isAlloyApiError(e) && e.data.hint) {
-                                  pushToast('info', 'Hint', e.data.hint, e.data.request_id)
+	                                  pushToast('info', t('instances.toast.hint'), e.data.hint, e.data.request_id, {
+                                    context: instanceToastContext(),
+                                  })
                                 }
-                                toastError('Stop failed', e)
+	                                toastError(t('instances.toast.stopFailed'), e, {
+                                  context: instanceToastContext(),
+                                  retry: { key: `instance.stop:${id()}` },
+                                  onRetry: () =>
+                                    runInstanceOp(id(), 'stopping', () => stopInstance.mutateAsync({ instance_id: id(), timeout_ms: 30_000 })).then(
+                                      () => void invalidateInstances(),
+                                    ),
+                                })
                               }
                             }}
 	                          >
-                              Stop
+	                              {t('instances.actions.stop')}
                             </Button>
                           }
                         >
@@ -319,29 +364,40 @@ export default function InstanceDetailsModal(props: InstanceDetailsModalProps) {
 	                            }
 	                            loading={instanceOpById()[id()] === 'starting'}
 	                            disabled={isReadOnly() || instanceOpById()[id()] != null}
-	                            title={isReadOnly() ? 'Read-only mode' : 'Start instance'}
+	                            title={startInstanceActionTitle({ status: status(), isReadOnly: isReadOnly(), operationInProgress: operationInProgress(), t })}
 	                            onClick={async () => {
 	                              try {
 	                                await runInstanceOp(id(), 'starting', () => startInstance.mutateAsync({ instance_id: id() }))
 	                                await invalidateInstances()
-	                                pushToast('success', 'Started', uiName())
+	                                toastSuccessFromRspc('instance.start', t('instances.toast.started'), uiName(), {
+                                  context: instanceToastContext(),
+                                })
                               } catch (e) {
                                 if (isAlloyApiError(e) && e.data.hint) {
-                                  pushToast('info', 'Hint', e.data.hint, e.data.request_id)
+	                                  pushToast('info', t('instances.toast.hint'), e.data.hint, e.data.request_id, {
+                                    context: instanceToastContext(),
+                                  })
                                 }
-                                toastError('Start failed', e)
+	                                toastError(t('instances.toast.startFailed'), e, {
+                                  context: instanceToastContext(),
+                                  retry: { key: `instance.start:${id()}` },
+                                  onRetry: () =>
+                                    runInstanceOp(id(), 'starting', () => startInstance.mutateAsync({ instance_id: id() })).then(
+                                      () => void invalidateInstances(),
+                                    ),
+                                })
                               }
                             }}
 	                          >
-                            Start
+	                            {t('instances.actions.start')}
                           </Button>
                         </Show>
 
                         <Show when={status() != null}>
 	                          <IconButton
 	                            type="button"
-	                            label="Restart"
-	                            title={isReadOnly() ? 'Read-only mode' : 'Restart instance'}
+	                            label={t('instances.actions.restart')}
+	                            title={restartInstanceActionTitle({ status: status(), isReadOnly: isReadOnly(), operationInProgress: operationInProgress(), t })}
 	                            variant="secondary"
 	                            disabled={isReadOnly() || instanceOpById()[id()] != null}
 	                            onClick={async () => {
@@ -350,12 +406,23 @@ export default function InstanceDetailsModal(props: InstanceDetailsModalProps) {
 	                                  restartInstance.mutateAsync({ instance_id: id(), timeout_ms: 30_000 }),
 	                                )
 	                                await invalidateInstances()
-	                                pushToast('success', 'Restarted', uiName())
+	                                toastSuccessFromRspc('instance.restart', t('instances.toast.restarted'), uiName(), {
+                                  context: instanceToastContext(),
+                                })
                               } catch (e) {
                                 if (isAlloyApiError(e) && e.data.hint) {
-                                  pushToast('info', 'Hint', e.data.hint, e.data.request_id)
+	                                  pushToast('info', t('instances.toast.hint'), e.data.hint, e.data.request_id, {
+                                    context: instanceToastContext(),
+                                  })
                                 }
-                                toastError('Restart failed', e)
+	                                toastError(t('instances.toast.restartFailed'), e, {
+                                  context: instanceToastContext(),
+                                  retry: { key: `instance.restart:${id()}` },
+                                  onRetry: () =>
+                                    runInstanceOp(id(), 'restarting', () =>
+                                      restartInstance.mutateAsync({ instance_id: id(), timeout_ms: 30_000 }),
+                                    ).then(() => void invalidateInstances()),
+                                })
                               }
                             }}
 	                          >
@@ -377,7 +444,7 @@ export default function InstanceDetailsModal(props: InstanceDetailsModalProps) {
 	                                fill="none"
 	                                xmlns="http://www.w3.org/2000/svg"
 	                                role="status"
-	                                aria-label="Restarting"
+	                                aria-label={t('instances.details.restartingAria')}
 	                              >
 	                                <path d="M12 3a9 9 0 1 0 9 9" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" class="opacity-25" />
 	                                <path
@@ -394,8 +461,8 @@ export default function InstanceDetailsModal(props: InstanceDetailsModalProps) {
 
 	                        <IconButton
 	                          type="button"
-	                          label="Report"
-	                          title="Download diagnostics report"
+	                          label={t('instances.details.downloadReport')}
+	                          title={t('instances.details.downloadReport')}
 	                          variant="secondary"
 	                          disabled={instanceDiagnostics.isPending || selectedInstance() == null}
 	                          onClick={() => void downloadDiagnostics()}
@@ -410,8 +477,8 @@ export default function InstanceDetailsModal(props: InstanceDetailsModalProps) {
 	                        </IconButton>
 	                        <IconButton
 	                          type="button"
-	                          label="Copy"
-	                          title="Copy diagnostics JSON"
+	                          label={t('instances.details.copyDiagnosticsJson')}
+	                          title={t('instances.details.copyDiagnosticsJson')}
 	                          variant="secondary"
 	                          disabled={selectedInstance() == null}
 	                          onClick={() => void copyDiagnostics()}
@@ -424,16 +491,10 @@ export default function InstanceDetailsModal(props: InstanceDetailsModalProps) {
 
 	                        <IconButton
 	                          type="button"
-	                          label="Edit"
-	                          title={
-	                            isReadOnly()
-	                              ? 'Read-only mode'
-	                              : !canStartInstance(status())
-	                                ? 'Stop the instance before editing'
-	                                : 'Edit instance'
-	                          }
+	                          label={t('instances.actions.edit')}
+	                          title={editInstanceActionTitle({ status: status(), isReadOnly: isReadOnly(), t })}
 	                          variant="secondary"
-	                          disabled={isReadOnly() || !canStartInstance(status())}
+	                          disabled={!canEditOrDeleteInstance(status(), isReadOnly())}
 	                          onClick={() => {
 	                            setShowInstanceModal(false)
 	                            openEditModal(inst())
@@ -445,16 +506,10 @@ export default function InstanceDetailsModal(props: InstanceDetailsModalProps) {
 	                        </IconButton>
 	                        <IconButton
 	                          type="button"
-	                          label="Delete"
-	                          title={
-	                            isReadOnly()
-	                              ? 'Read-only mode'
-	                              : !canStartInstance(status())
-	                                ? 'Stop the instance before deleting'
-	                                : 'Delete instance'
-	                          }
+	                          label={t('instances.actions.delete')}
+	                          title={deleteInstanceActionTitle({ status: status(), isReadOnly: isReadOnly(), t })}
 	                          variant="danger"
-	                          disabled={isReadOnly() || !canStartInstance(status())}
+	                          disabled={!canEditOrDeleteInstance(status(), isReadOnly())}
 	                          onClick={() => {
 	                            setShowInstanceModal(false)
 	                            setConfirmDeleteInstanceId(id())
@@ -469,7 +524,7 @@ export default function InstanceDetailsModal(props: InstanceDetailsModalProps) {
 	                          </svg>
 	                        </IconButton>
 
-                        <IconButton type="button" label="Close" variant="ghost" onClick={() => setShowInstanceModal(false)}>
+                        <IconButton type="button" label={t('instances.details.close')} variant="ghost" onClick={() => setShowInstanceModal(false)}>
                           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
                             <path
                               fill-rule="evenodd"
@@ -485,10 +540,10 @@ export default function InstanceDetailsModal(props: InstanceDetailsModalProps) {
                       <Tabs
                         value={instanceDetailTab()}
                         options={[
-                          { value: 'overview', label: 'Overview' },
-                          { value: 'logs', label: 'Logs' },
-                          { value: 'files', label: 'Files' },
-                          { value: 'config', label: 'Config' },
+                          { value: 'overview', label: t('instances.details.tabOverview') },
+                          { value: 'logs', label: t('instances.details.tabLogs') },
+                          { value: 'files', label: t('instances.details.tabFiles') },
+                          { value: 'config', label: t('instances.details.tabConfig') },
                         ]}
                         onChange={setInstanceDetailTab}
                       />
@@ -499,21 +554,23 @@ export default function InstanceDetailsModal(props: InstanceDetailsModalProps) {
                     <div class="space-y-4">
                       <div class="grid gap-4 lg:grid-cols-2">
                         <div class="rounded-2xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
-                          <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Status</div>
+                          <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                            {t('instances.details.statusHeading')}
+                          </div>
                           <div class="mt-3 space-y-2 text-[12px] text-slate-600 dark:text-slate-300">
                             <div class="flex items-center justify-between gap-3">
-                              <div class="text-slate-500 dark:text-slate-400">State</div>
+                              <div class="text-slate-500 dark:text-slate-400">{t('instances.details.state')}</div>
                               <div class="font-mono text-[11px]">{status()?.state ?? 'PROCESS_STATE_EXITED'}</div>
                             </div>
                             <Show when={status()?.pid != null}>
                               <div class="flex items-center justify-between gap-3">
-                                <div class="text-slate-500 dark:text-slate-400">PID</div>
+                                <div class="text-slate-500 dark:text-slate-400">{t('instances.details.pid')}</div>
                                 <div class="font-mono text-[11px]">{status()?.pid}</div>
                               </div>
                             </Show>
                             <Show when={status()?.exit_code != null}>
                               <div class="flex items-center justify-between gap-3">
-                                <div class="text-slate-500 dark:text-slate-400">Exit</div>
+                                <div class="text-slate-500 dark:text-slate-400">{t('instances.details.exit')}</div>
                                 <div class="font-mono text-[11px]">{status()?.exit_code}</div>
                               </div>
                             </Show>
@@ -521,7 +578,7 @@ export default function InstanceDetailsModal(props: InstanceDetailsModalProps) {
 
                           <Show when={status()?.message != null}>
                             <div class="mt-3 rounded-xl border border-slate-200 bg-white/60 p-3 text-[12px] text-slate-700 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-200">
-                              <div class="font-semibold">Message</div>
+                              <div class="font-semibold">{t('instances.details.messageHeading')}</div>
                               <div class="mt-1 font-mono text-[11px] whitespace-pre-wrap">{selectedInstanceMessage() ?? ''}</div>
                               <Show when={statusMessageParts(status()).hint}>
                                 {(hint) => (
@@ -533,10 +590,12 @@ export default function InstanceDetailsModal(props: InstanceDetailsModalProps) {
                         </div>
 
                         <div class="rounded-2xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
-                          <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Resources</div>
+                          <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                            {t('instances.details.resourcesHeading')}
+                          </div>
                           <Show
                             when={status()?.resources}
-                            fallback={<div class="mt-3 text-[12px] text-slate-500">(no resource data)</div>}
+                            fallback={<div class="mt-3 text-[12px] text-slate-500">{t('instances.details.noResourceData')}</div>}
                           >
                             {(r) => (
                               <div class="mt-3 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
@@ -567,12 +626,14 @@ export default function InstanceDetailsModal(props: InstanceDetailsModalProps) {
                       >
                         <div class="rounded-2xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
                           <div class="flex items-center justify-between gap-3">
-                            <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Save</div>
+                            <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                              {t('instances.details.saveHeading')}
+                            </div>
                             <Show
                               when={canStartInstance(status())}
-                              fallback={<Badge variant="warning">Stop to import</Badge>}
+                              fallback={<Badge variant="warning">{t('instances.details.stopToImport')}</Badge>}
                             >
-                              <Badge variant="neutral">Search & Import</Badge>
+                              <Badge variant="neutral">{t('instances.details.searchImport')}</Badge>
                             </Show>
                           </div>
 
@@ -582,25 +643,25 @@ export default function InstanceDetailsModal(props: InstanceDetailsModalProps) {
                               fallback={
                                 <Show
                                   when={inst().config.template_id === 'dst:vanilla'}
-                                  fallback={<span>Terraria search import is not available yet.</span>}
+                                  fallback={<span>{t('instances.details.terrariaImportUnavailable')}</span>}
                                 >
-                                  <span>DST search import is not available yet.</span>
+                                  <span>{t('instances.details.dstImportUnavailable')}</span>
                                 </Show>
                               }
                             >
-                              <span>Search and import a Minecraft world from curated sources.</span>
+                              <span>{t('instances.details.searchImportDesc')}</span>
                             </Show>
                           </div>
 
                           <Show
                             when={canSearchSaveImport()}
-                            fallback={<div class="mt-3 text-[11px] text-slate-500 dark:text-slate-400">This template does not support save search/upload yet.</div>}
+                            fallback={<div class="mt-3 text-[11px] text-slate-500 dark:text-slate-400">{t('instances.details.saveUploadUnsupported')}</div>}
                           >
                             <div class="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
                               <Input
                                 value={saveSearchQuery()}
                                 onInput={(e) => setSaveSearchQuery(e.currentTarget.value)}
-                                placeholder="Search worlds (e.g. skyblock, survival...)"
+                                placeholder={t('instances.details.worldSearchPlaceholder')}
                                 spellcheck={false}
                                 class="flex-1"
                                 leftIcon={
@@ -616,11 +677,11 @@ export default function InstanceDetailsModal(props: InstanceDetailsModalProps) {
                             </div>
 
                             <Show when={saveSearchQuery().trim().length >= 2 && instanceSaveSearch.isPending}>
-                              <div class="mt-3 text-[11px] text-slate-500 dark:text-slate-400">Searching...</div>
+                              <div class="mt-3 text-[11px] text-slate-500 dark:text-slate-400">{t('instances.details.searching')}</div>
                             </Show>
                             <Show when={saveSearchQuery().trim().length >= 2 && instanceSaveSearch.isError}>
                               <div class="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/30 dark:text-rose-300">
-                                Search failed.
+                                {t('instances.details.searchFailed')}
                               </div>
                             </Show>
                             <Show when={(instanceSaveSearch.data?.results?.length ?? 0) > 0}>
@@ -631,7 +692,9 @@ export default function InstanceDetailsModal(props: InstanceDetailsModalProps) {
                                       <div class="flex items-start justify-between gap-3">
                                         <div class="min-w-0">
                                           <div class="truncate text-[12px] font-semibold text-slate-800 dark:text-slate-100">{result.title}</div>
-                                          <div class="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">by {result.author} · {result.provider}</div>
+                                          <div class="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+                                            {t('instances.details.resultBy', { author: result.author, provider: result.provider })}
+                                          </div>
                                           <Show when={result.summary}>
                                             <div class="mt-1 line-clamp-2 text-[11px] text-slate-600 dark:text-slate-300">{result.summary}</div>
                                           </Show>
@@ -649,14 +712,18 @@ export default function InstanceDetailsModal(props: InstanceDetailsModalProps) {
                                                 project_id: result.project_id,
                                                 version_id: result.version_id,
                                               })
-                                              pushToast('success', 'Imported', out.message || out.installed_path)
+                                              pushToast('success', t('instances.details.imported'), out.message || out.installed_path, undefined, {
+                                                context: instanceToastContext(),
+                                              })
                                               setSaveSearchQuery('')
                                             } catch (e) {
-                                              toastError('Import failed', e)
+                                              toastError(t('instances.details.importFailed'), e, {
+                                                context: instanceToastContext(),
+                                              })
                                             }
                                           }}
                                         >
-                                          Import
+                                          {t('instances.details.importAction')}
                                         </Button>
                                       </div>
                                     </div>
@@ -672,11 +739,13 @@ export default function InstanceDetailsModal(props: InstanceDetailsModalProps) {
                                 (instanceSaveSearch.data?.results?.length ?? 0) === 0
                               }
                             >
-                              <div class="mt-3 text-[11px] text-slate-500 dark:text-slate-400">No matching worlds.</div>
+                              <div class="mt-3 text-[11px] text-slate-500 dark:text-slate-400">{t('instances.details.noMatchingWorlds')}</div>
                             </Show>
 
                             <div class="mt-4 border-t border-slate-200 pt-3 dark:border-slate-800">
-                              <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Upload .zip world</div>
+                              <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                                {t('instances.details.uploadZipWorld')}
+                              </div>
                               <div class="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center">
                                 <input
                                   ref={(el) => {
@@ -719,26 +788,36 @@ export default function InstanceDetailsModal(props: InstanceDetailsModalProps) {
                                       })
                                       const payload = (await resp.json().catch(() => null)) as any
                                       if (!resp.ok) {
-                                        throw new Error(payload?.message || `upload failed: ${resp.status}`)
+                                        throw new Error(payload?.message || t('instances.details.uploadFailed', { status: resp.status }))
                                       }
-                                      pushToast('success', 'Imported', payload?.message || payload?.installed_path || 'Save imported')
+                                      pushToast(
+                                        'success',
+                                        t('instances.details.imported'),
+                                        payload?.message || payload?.installed_path || t('instances.details.imported'),
+                                        undefined,
+                                        {
+                                          context: instanceToastContext(),
+                                        },
+                                      )
                                       setUploadSaveFile(null)
                                       if (uploadSaveInputRef) uploadSaveInputRef.value = ''
                                     } catch (e) {
-                                      toastError('Import failed', e)
+                                      toastError(t('instances.details.importFailed'), e, {
+                                        context: instanceToastContext(),
+                                      })
                                     } finally {
                                       setUploadSavePending(false)
                                     }
                                   }}
                                 >
-                                  Upload & Import
+                                  {t('instances.details.uploadImport')}
                                 </Button>
                               </div>
                             </div>
                           </Show>
 
                           <div class="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
-                            The instance must be stopped. Old save is backed up automatically.
+                            {t('instances.details.saveStoppedHint')}
                           </div>
                         </div>
                       </Show>
@@ -748,18 +827,18 @@ export default function InstanceDetailsModal(props: InstanceDetailsModalProps) {
                   <Show when={instanceDetailTab() === 'logs'}>
                     <Show when={!canTailProcessLogs()}>
                       <div class="mt-3 rounded-xl border border-slate-200 bg-white/70 px-3 py-2 text-xs text-slate-500 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-400">
-                        Instance is not running. Start it to view live process logs.
+                        {t('instances.details.logsNotRunning')}
                       </div>
                     </Show>
                     <Show when={canTailProcessLogs() && processLogsTail.isError}>
-                      <ErrorState error={processLogsTail.error} title="Failed to load logs" onRetry={() => processLogsTail.refetch()} />
+                      <ErrorState t={t} error={processLogsTail.error} title={t('instances.details.loadLogsFailed')} onRetry={() => processLogsTail.refetch()} />
                     </Show>
                     <LogViewer
-                      title="Process logs"
+                      t={t}
+                      title={t('instances.details.processLogs')}
                       lines={processLogLines()}
                       loading={canTailProcessLogs() ? processLogsTail.isPending : false}
                       error={canTailProcessLogs() && processLogsTail.isError ? processLogsTail.error : undefined}
-                      minimal={true}
                       live={processLogLive()}
                       onLiveChange={setProcessLogLive}
                       onClear={() => setProcessLogLines([])}
@@ -771,8 +850,9 @@ export default function InstanceDetailsModal(props: InstanceDetailsModalProps) {
                   <Show when={instanceDetailTab() === 'files'}>
                     <div class="rounded-2xl border border-slate-200 bg-white/70 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
 	                      <FileBrowser
+	                        t={t}
 	                        enabled={isAuthed() && showInstanceModal() && instanceDetailTab() === 'files'}
-	                        title="Files"
+                        title={t('tab.files')}
 	                        rootPath={`instances/${id()}`}
 	                        rootLabel={uiName()}
 	                      />
@@ -782,17 +862,17 @@ export default function InstanceDetailsModal(props: InstanceDetailsModalProps) {
                   <Show when={instanceDetailTab() === 'config'}>
                     <div class="rounded-2xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
                       <div class="flex flex-wrap items-center justify-between gap-2">
-                        <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Parameters</div>
+                        <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">{t('instances.details.parameters')}</div>
                         <div class="text-[11px] text-slate-500 dark:text-slate-400">
-                          Edits require the instance to be stopped.
+                          {t('instances.details.editsRequireStop')}
                         </div>
                       </div>
 
                       <div class="mt-3 overflow-hidden rounded-xl border border-slate-200 dark:border-slate-800">
                         <div class="grid grid-cols-[160px_1fr_auto] gap-0 border-b border-slate-200 bg-slate-50 px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-400">
-                          <div>Key</div>
-                          <div>Value</div>
-                          <div class="text-right">Actions</div>
+                          <div>{t('instances.details.configKey')}</div>
+                          <div>{t('instances.details.configValue')}</div>
+                          <div class="text-right">{t('instances.details.configActions')}</div>
                         </div>
                         <div class="divide-y divide-slate-200 dark:divide-slate-800">
                           <For
@@ -829,7 +909,7 @@ export default function InstanceDetailsModal(props: InstanceDetailsModalProps) {
                                       variant="secondary"
                                       onClick={() => setRevealedSecrets((prev) => ({ ...prev, [k]: !(prev[k] ?? false) }))}
                                     >
-                                      {revealedSecrets()[k] ? 'Hide' : 'Show'}
+                                      {revealedSecrets()[k] ? t('instances.details.hide') : t('instances.details.show')}
                                     </Button>
                                   </Show>
                                   <Button
@@ -837,9 +917,9 @@ export default function InstanceDetailsModal(props: InstanceDetailsModalProps) {
                                     variant="secondary"
                                     onClick={() => safeCopy(String(v ?? ''))}
                                     disabled={String(v ?? '').length === 0}
-                                    title="Copy value"
+                                    title={t('instances.details.copyValue')}
                                   >
-                                    Copy
+                                    {t('instances.details.copy')}
                                   </Button>
                                 </div>
                               </div>

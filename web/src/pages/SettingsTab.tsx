@@ -1,7 +1,8 @@
 import { Show } from 'solid-js'
+import type { I18nTranslate } from '../app/i18n'
 import { Badge } from '../components/ui/Badge'
 import { Button } from '../components/ui/Button'
-import { EmptyState } from '../components/ui/EmptyState'
+import { DataBoundary } from '../components/ui/DataBoundary'
 import { Input } from '../components/ui/Input'
 import { Textarea } from '../components/ui/Textarea'
 import { VisibilityToggle } from '../app/primitives/VisibilityToggle'
@@ -9,12 +10,14 @@ import { queryClient } from '../rspc'
 
 export type SettingsTabProps = {
   tab: () => string
+  t: I18nTranslate
   [key: string]: unknown
 }
 
 export default function SettingsTab(props: SettingsTabProps) {
   const {
     tab,
+    t,
     settingsStatus,
     me,
     settingsDstKeyVisible,
@@ -56,6 +59,8 @@ export default function SettingsTab(props: SettingsTabProps) {
   } = props as any
 
   let settingsSteamcmdMaFileInputEl: HTMLInputElement | undefined
+  const settingsToastContext = { scope: 'system' as const, label: t('settings.title') }
+  const refreshSettings = () => queryClient.invalidateQueries({ queryKey: ['settings.status', null] })
 
   return (
               <Show when={tab() === 'settings'}>
@@ -63,32 +68,42 @@ export default function SettingsTab(props: SettingsTabProps) {
                   <div class="mx-auto w-full max-w-2xl space-y-4">
                     <div class="flex items-start justify-between gap-3">
                       <div>
-                        <div class="text-sm font-semibold text-slate-900 dark:text-slate-100">Settings</div>
+                        <div class="text-sm font-semibold text-slate-900 dark:text-slate-100">{t('settings.title')}</div>
                       </div>
                       <Show when={settingsStatus.isPending}>
-                        <Badge variant="neutral">Loading</Badge>
+                        <Badge variant="neutral">{t('settings.loading')}</Badge>
                       </Show>
                     </div>
 
-                    <Show when={me()?.is_admin} fallback={<EmptyState title="Forbidden" />}>
+                    <DataBoundary
+                      t={t}
+                      loading={settingsStatus.isPending}
+                      error={settingsStatus.error}
+                      errorTitle={t('settings.errorLoad')}
+                      hasData={Boolean(settingsStatus.data)}
+                      empty={!me()?.is_admin}
+                      emptyTitle={t('settings.forbidden')}
+                      onRetry={() => void refreshSettings()}
+                    >
+                    <Show when={me()?.is_admin}>
                       <div class="rounded-2xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
                         <div class="flex items-center justify-between gap-3">
-                          <div class="text-sm font-medium text-slate-900 dark:text-slate-100">Control account</div>
-                          <Badge variant="neutral">{me()?.username ?? 'current user'}</Badge>
+                          <div class="text-sm font-medium text-slate-900 dark:text-slate-100">{t('settings.controlAccount')}</div>
+                          <Badge variant="neutral">{me()?.username ?? t('settings.currentUserFallback')}</Badge>
                         </div>
                         <div class="mt-3 grid gap-2">
                           <Input
                             type={settingsCurrentPasswordVisible() ? 'text' : 'password'}
                             value={settingsCurrentPassword()}
                             onInput={(e) => setSettingsCurrentPassword(e.currentTarget.value)}
-                            placeholder="Current password…"
+                            placeholder={t('settings.currentPasswordPlaceholder')}
                             autocomplete="current-password"
                             class="w-full font-mono text-[11px]"
                             rightIcon={
                               <VisibilityToggle
                                 visible={settingsCurrentPasswordVisible()}
-                                labelWhenHidden="Show password"
-                                labelWhenVisible="Hide password"
+                                labelWhenHidden={t('settings.showPassword')}
+                                labelWhenVisible={t('settings.hidePassword')}
                                 onToggle={() => setSettingsCurrentPasswordVisible((v: boolean) => !v)}
                               />
                             }
@@ -97,7 +112,7 @@ export default function SettingsTab(props: SettingsTabProps) {
                           <Input
                             value={settingsNewUsername()}
                             onInput={(e) => setSettingsNewUsername(e.currentTarget.value)}
-                            placeholder={`New username… (current: ${me()?.username ?? 'admin'})`}
+                            placeholder={t('settings.newUsernamePlaceholder', { current: me()?.username ?? 'admin' })}
                             autocomplete="username"
                             spellcheck={false}
                             class="font-mono text-[11px]"
@@ -107,14 +122,14 @@ export default function SettingsTab(props: SettingsTabProps) {
                             type={settingsNewPasswordVisible() ? 'text' : 'password'}
                             value={settingsNewPassword()}
                             onInput={(e) => setSettingsNewPassword(e.currentTarget.value)}
-                            placeholder="New password…"
+                            placeholder={t('settings.newPasswordPlaceholder')}
                             autocomplete="new-password"
                             class="w-full font-mono text-[11px]"
                             rightIcon={
                               <VisibilityToggle
                                 visible={settingsNewPasswordVisible()}
-                                labelWhenHidden="Show password"
-                                labelWhenVisible="Hide password"
+                                labelWhenHidden={t('settings.showPassword')}
+                                labelWhenVisible={t('settings.hidePassword')}
                                 onToggle={() => setSettingsNewPasswordVisible((v: boolean) => !v)}
                               />
                             }
@@ -131,16 +146,16 @@ export default function SettingsTab(props: SettingsTabProps) {
                               await handleChangeCredentials()
                             }}
                           >
-                            Save account
+                            {t('settings.saveAccount')}
                           </Button>
                         </div>
                       </div>
 
                       <div class="rounded-2xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
                         <div class="flex items-center justify-between gap-3">
-                          <div class="text-sm font-medium text-slate-900 dark:text-slate-100">DST default Klei key</div>
+                          <div class="text-sm font-medium text-slate-900 dark:text-slate-100">{t('settings.dstDefaultKleiKey')}</div>
                           <Badge variant={settingsStatus.data?.dst_default_klei_key_set ? 'success' : 'warning'}>
-                            {settingsStatus.data?.dst_default_klei_key_set ? 'Configured' : 'Not set'}
+                            {settingsStatus.data?.dst_default_klei_key_set ? t('settings.configured') : t('settings.notSet')}
                           </Badge>
                         </div>
                         <div class="mt-3">
@@ -148,14 +163,14 @@ export default function SettingsTab(props: SettingsTabProps) {
                             type={settingsDstKeyVisible() ? 'text' : 'password'}
                             value={settingsDstKey()}
                             onInput={(e) => setSettingsDstKey(e.currentTarget.value)}
-                            placeholder="Paste key…"
+                            placeholder={t('settings.pasteKeyPlaceholder')}
                             spellcheck={false}
                             class="w-full font-mono text-[11px]"
                             rightIcon={
                               <VisibilityToggle
                                 visible={settingsDstKeyVisible()}
-                                labelWhenHidden="Show key"
-                                labelWhenVisible="Hide key"
+                                labelWhenHidden={t('settings.showKey')}
+                                labelWhenVisible={t('settings.hideKey')}
                                 onToggle={() => setSettingsDstKeyVisible((v: boolean) => !v)}
                               />
                             }
@@ -172,14 +187,18 @@ export default function SettingsTab(props: SettingsTabProps) {
                               try {
                                 await setDstDefaultKleiKey.mutateAsync({ key: settingsDstKey() })
                                 setSettingsDstKey('')
-                                void queryClient.invalidateQueries({ queryKey: ['settings.status', null] })
-                                pushToast('success', 'Saved', 'DST default key updated')
+                                void refreshSettings()
+                                pushToast('success', t('settings.saved'), t('settings.dstDefaultKeyUpdated'), undefined, {
+                                  context: settingsToastContext,
+                                })
                               } catch (e) {
-                                toastError('Save failed', e)
+                                toastError(t('settings.saveFailed'), e, {
+                                  context: settingsToastContext,
+                                })
                               }
                             }}
                           >
-                            Save
+                            {t('settings.save')}
                           </Button>
                           <Button
                             size="sm"
@@ -189,23 +208,27 @@ export default function SettingsTab(props: SettingsTabProps) {
                               try {
                                 await setDstDefaultKleiKey.mutateAsync({ key: '' })
                                 setSettingsDstKey('')
-                                void queryClient.invalidateQueries({ queryKey: ['settings.status', null] })
-                                pushToast('success', 'Cleared', 'DST default key cleared')
+                                void refreshSettings()
+                                pushToast('success', t('settings.cleared'), t('settings.dstDefaultKeyCleared'), undefined, {
+                                  context: settingsToastContext,
+                                })
                               } catch (e) {
-                                toastError('Clear failed', e)
+                                toastError(t('settings.clearFailed'), e, {
+                                  context: settingsToastContext,
+                                })
                               }
                             }}
                           >
-                            Clear
+                            {t('settings.clear')}
                           </Button>
                         </div>
                       </div>
 
                       <div class="rounded-2xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
                         <div class="flex items-center justify-between gap-3">
-                          <div class="text-sm font-medium text-slate-900 dark:text-slate-100">CurseForge API key</div>
+                          <div class="text-sm font-medium text-slate-900 dark:text-slate-100">{t('settings.curseforgeApiKey')}</div>
                           <Badge variant={settingsStatus.data?.curseforge_api_key_set ? 'success' : 'warning'}>
-                            {settingsStatus.data?.curseforge_api_key_set ? 'Configured' : 'Not set'}
+                            {settingsStatus.data?.curseforge_api_key_set ? t('settings.configured') : t('settings.notSet')}
                           </Badge>
                         </div>
                         <div class="mt-3">
@@ -213,14 +236,14 @@ export default function SettingsTab(props: SettingsTabProps) {
                             type={settingsCurseforgeKeyVisible() ? 'text' : 'password'}
                             value={settingsCurseforgeKey()}
                             onInput={(e) => setSettingsCurseforgeKey(e.currentTarget.value)}
-                            placeholder="Paste key…"
+                            placeholder={t('settings.pasteKeyPlaceholder')}
                             spellcheck={false}
                             class="w-full font-mono text-[11px]"
                             rightIcon={
                               <VisibilityToggle
                                 visible={settingsCurseforgeKeyVisible()}
-                                labelWhenHidden="Show key"
-                                labelWhenVisible="Hide key"
+                                labelWhenHidden={t('settings.showKey')}
+                                labelWhenVisible={t('settings.hideKey')}
                                 onToggle={() => setSettingsCurseforgeKeyVisible((v: boolean) => !v)}
                               />
                             }
@@ -237,14 +260,18 @@ export default function SettingsTab(props: SettingsTabProps) {
                               try {
                                 await setCurseforgeApiKey.mutateAsync({ key: settingsCurseforgeKey() })
                                 setSettingsCurseforgeKey('')
-                                void queryClient.invalidateQueries({ queryKey: ['settings.status', null] })
-                                pushToast('success', 'Saved', 'CurseForge API key updated')
+                                void refreshSettings()
+                                pushToast('success', t('settings.saved'), t('settings.curseforgeUpdated'), undefined, {
+                                  context: settingsToastContext,
+                                })
                               } catch (e) {
-                                toastError('Save failed', e)
+                                toastError(t('settings.saveFailed'), e, {
+                                  context: settingsToastContext,
+                                })
                               }
                             }}
                           >
-                            Save
+                            {t('settings.save')}
                           </Button>
                           <Button
                             size="sm"
@@ -254,33 +281,37 @@ export default function SettingsTab(props: SettingsTabProps) {
                               try {
                                 await setCurseforgeApiKey.mutateAsync({ key: '' })
                                 setSettingsCurseforgeKey('')
-                                void queryClient.invalidateQueries({ queryKey: ['settings.status', null] })
-                                pushToast('success', 'Cleared', 'CurseForge API key cleared')
+                                void refreshSettings()
+                                pushToast('success', t('settings.cleared'), t('settings.curseforgeCleared'), undefined, {
+                                  context: settingsToastContext,
+                                })
                               } catch (e) {
-                                toastError('Clear failed', e)
+                                toastError(t('settings.clearFailed'), e, {
+                                  context: settingsToastContext,
+                                })
                               }
                             }}
                           >
-                            Clear
+                            {t('settings.clear')}
                           </Button>
                         </div>
                       </div>
 
                       <div class="rounded-2xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
                         <div class="flex items-center justify-between gap-3">
-                          <div class="text-sm font-medium text-slate-900 dark:text-slate-100">SteamCMD credentials</div>
+                          <div class="text-sm font-medium text-slate-900 dark:text-slate-100">{t('settings.steamcmdCredentials')}</div>
                           <Badge variant={settingsStatus.data?.steamcmd_username_set && settingsStatus.data?.steamcmd_password_set ? 'success' : 'warning'}>
-                            {settingsStatus.data?.steamcmd_username_set && settingsStatus.data?.steamcmd_password_set ? 'Configured' : 'Not set'}
+                            {settingsStatus.data?.steamcmd_username_set && settingsStatus.data?.steamcmd_password_set ? t('settings.configured') : t('settings.notSet')}
                           </Badge>
                         </div>
                         <div class="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
                           <Badge variant={settingsStatus.data?.steamcmd_shared_secret_set ? 'success' : 'neutral'}>
-                            {settingsStatus.data?.steamcmd_shared_secret_set ? 'Auto 2FA enabled' : 'Auto 2FA disabled'}
+                            {settingsStatus.data?.steamcmd_shared_secret_set ? t('settings.auto2faEnabled') : t('settings.auto2faDisabled')}
                           </Badge>
                           <Show when={settingsStatus.data?.steamcmd_account_name}>
                             {(name) => (
                               <Badge variant="neutral">
-                                Account {name()}
+                                {t('settings.accountBadge', { name: name() })}
                               </Badge>
                             )}
                           </Show>
@@ -290,7 +321,7 @@ export default function SettingsTab(props: SettingsTabProps) {
                           <Input
                             value={settingsSteamcmdUsername()}
                             onInput={(e) => setSettingsSteamcmdUsername(e.currentTarget.value)}
-                            placeholder="Steam username…"
+                            placeholder={t('settings.steamUsernamePlaceholder')}
                             autocomplete="username"
                             spellcheck={false}
                             class="font-mono text-[11px]"
@@ -300,14 +331,14 @@ export default function SettingsTab(props: SettingsTabProps) {
                             type={settingsSteamcmdPasswordVisible() ? 'text' : 'password'}
                             value={settingsSteamcmdPassword()}
                             onInput={(e) => setSettingsSteamcmdPassword(e.currentTarget.value)}
-                            placeholder="Steam password…"
+                            placeholder={t('settings.steamPasswordPlaceholder')}
                             autocomplete="current-password"
                             class="w-full font-mono text-[11px]"
                             rightIcon={
                               <VisibilityToggle
                                 visible={settingsSteamcmdPasswordVisible()}
-                                labelWhenHidden="Show password"
-                                labelWhenVisible="Hide password"
+                                labelWhenHidden={t('settings.showPassword')}
+                                labelWhenVisible={t('settings.hidePassword')}
                                 onToggle={() => setSettingsSteamcmdPasswordVisible((v: boolean) => !v)}
                               />
                             }
@@ -316,7 +347,7 @@ export default function SettingsTab(props: SettingsTabProps) {
                           <Input
                             value={settingsSteamcmdGuardCode()}
                             onInput={(e) => setSettingsSteamcmdGuardCode(e.currentTarget.value)}
-                            placeholder="Steam Guard code…"
+                            placeholder={t('settings.steamGuardCodePlaceholder')}
                             autocomplete="one-time-code"
                             class="font-mono text-[11px]"
                           />
@@ -324,7 +355,7 @@ export default function SettingsTab(props: SettingsTabProps) {
                           <Textarea
                             value={settingsSteamcmdMaFile()}
                             onInput={(e) => setSettingsSteamcmdMaFile(e.currentTarget.value)}
-                            placeholder="maFile JSON…"
+                            placeholder={t('settings.mafileJsonPlaceholder')}
                             class="min-h-[96px] font-mono text-[11px]"
                           />
 
@@ -342,9 +373,13 @@ export default function SettingsTab(props: SettingsTabProps) {
                                 try {
                                   const text = await file.text()
                                   setSettingsSteamcmdMaFile(text)
-                                  pushToast('success', 'maFile imported', file.name)
+                                  pushToast('success', t('settings.mafileImported'), file.name, undefined, {
+                                    context: settingsToastContext,
+                                  })
                                 } catch {
-                                  pushToast('error', 'Import failed', 'Could not read maFile')
+                                  pushToast('error', t('settings.importFailed'), t('settings.couldNotReadMafile'), undefined, {
+                                    context: settingsToastContext,
+                                  })
                                 } finally {
                                   e.currentTarget.value = ''
                                 }
@@ -356,7 +391,7 @@ export default function SettingsTab(props: SettingsTabProps) {
                               type="button"
                               onClick={() => settingsSteamcmdMaFileInputEl?.click()}
                             >
-                              Import maFile
+                              {t('settings.importMafile')}
                             </Button>
                             <Show when={settingsSteamcmdMaFile().trim().length > 0}>
                               <Button
@@ -364,7 +399,7 @@ export default function SettingsTab(props: SettingsTabProps) {
                                 variant="secondary"
                                 onClick={() => setSettingsSteamcmdMaFile('')}
                               >
-                                Clear maFile
+                                {t('settings.clearMafile')}
                               </Button>
                             </Show>
                           </div>
@@ -382,7 +417,9 @@ export default function SettingsTab(props: SettingsTabProps) {
                               const steam_guard_code = settingsSteamcmdGuardCode().trim()
                               const mafile_json = settingsSteamcmdMaFile().trim()
                               if ((username && !password) || (!username && password)) {
-                                pushToast('error', 'Missing field', 'Enter both Steam username and password, or clear both.')
+                                pushToast('error', t('settings.missingField'), t('settings.enterSteamUsernameAndPassword'), undefined, {
+                                  context: settingsToastContext,
+                                })
                                 return
                               }
                               try {
@@ -397,14 +434,18 @@ export default function SettingsTab(props: SettingsTabProps) {
                                 setSettingsSteamcmdPassword('')
                                 setSettingsSteamcmdGuardCode('')
                                 setSettingsSteamcmdMaFile('')
-                                void queryClient.invalidateQueries({ queryKey: ['settings.status', null] })
-                                pushToast('success', 'Login successful', 'SteamCMD credentials verified and saved')
+                                void refreshSettings()
+                                pushToast('success', t('settings.loginSuccessful'), t('settings.steamCredentialsSaved'), undefined, {
+                                  context: settingsToastContext,
+                                })
                               } catch (e) {
-                                toastError('Login failed', e)
+                                toastError(t('settings.loginFailed'), e, {
+                                  context: settingsToastContext,
+                                })
                               }
                             }}
                           >
-                            Login
+                            {t('settings.login')}
                           </Button>
                           <Button
                             size="sm"
@@ -423,19 +464,24 @@ export default function SettingsTab(props: SettingsTabProps) {
                                 setSettingsSteamcmdPassword('')
                                 setSettingsSteamcmdGuardCode('')
                                 setSettingsSteamcmdMaFile('')
-                                void queryClient.invalidateQueries({ queryKey: ['settings.status', null] })
-                                pushToast('success', 'Cleared', 'SteamCMD credentials cleared')
+                                void refreshSettings()
+                                pushToast('success', t('settings.cleared'), t('settings.steamCredentialsCleared'), undefined, {
+                                  context: settingsToastContext,
+                                })
                               } catch (e) {
-                                toastError('Clear failed', e)
+                                toastError(t('settings.clearFailed'), e, {
+                                  context: settingsToastContext,
+                                })
                               }
                             }}
                           >
-                            Clear
+                            {t('settings.clear')}
                           </Button>
                         </div>
                       </div>
 
                     </Show>
+                    </DataBoundary>
                   </div>
                 </div>
               </Show>

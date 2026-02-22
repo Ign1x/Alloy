@@ -45,12 +45,36 @@ export type DownloadJob = {
 }
 
 export type ToastVariant = 'info' | 'success' | 'error'
+export type ToastContextScope = 'instance' | 'node' | 'job' | 'system'
+export type ToastContext = {
+  scope: ToastContextScope
+  id?: string
+  label?: string
+}
+export type ToastRetryAction = {
+  key: string
+}
+export type ToastPushOptions = {
+  context?: ToastContext
+  sticky?: boolean
+  groupKey?: string
+  retry?: ToastRetryAction
+  onRetry?: () => void | Promise<void>
+}
 export type Toast = {
   id: string
   variant: ToastVariant
   title: string
   message?: string
   requestId?: string
+  createdAtUnixMs: number
+  updatedAtUnixMs: number
+  count: number
+  groupKey: string
+  context?: ToastContext
+  sticky?: boolean
+  retry?: ToastRetryAction
+  isRead?: boolean
 }
 
 export const DOWNLOAD_VIEW_STORAGE_KEY = 'alloy.download.view.v2'

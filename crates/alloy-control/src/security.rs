@@ -9,10 +9,7 @@ use rand::RngCore;
 use tracing::Instrument;
 
 use crate::auth::{
-    ACCESS_COOKIE_NAME,
-    CSRF_COOKIE_NAME,
-    auth_error_response_with_context,
-    validate_access_jwt,
+    ACCESS_COOKIE_NAME, CSRF_COOKIE_NAME, auth_error_response_with_context, validate_access_jwt,
 };
 use crate::request_meta::RequestMeta;
 use crate::rpc::AuthUser;
@@ -222,10 +219,10 @@ pub async fn csrf_and_origin(req: Request<Body>, next: Next) -> Response {
         return resp;
     }
 
-    if request_has_cookie_header(headers) {
-        if let Err(resp) = validate_csrf(request_id.as_deref(), headers) {
-            return resp;
-        }
+    if request_has_cookie_header(headers)
+        && let Err(resp) = validate_csrf(request_id.as_deref(), headers)
+    {
+        return resp;
     }
 
     next.run(req).await
@@ -290,7 +287,10 @@ const HEADER_CF_CONNECTING_IP: &str = "cf-connecting-ip";
 const HEADER_X_FORWARDED_FOR: &str = "x-forwarded-for";
 const HEADER_X_REAL_IP: &str = "x-real-ip";
 
-fn header_value_to_string(headers: &HeaderMap, name: axum::http::header::HeaderName) -> Option<String> {
+fn header_value_to_string(
+    headers: &HeaderMap,
+    name: axum::http::header::HeaderName,
+) -> Option<String> {
     headers
         .get(name)
         .and_then(|v| v.to_str().ok())

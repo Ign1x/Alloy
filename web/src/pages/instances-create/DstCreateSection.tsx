@@ -13,6 +13,7 @@ export type DstCreateSectionProps = {
 
 export default function DstCreateSection(props: DstCreateSectionProps) {
   const {
+    t,
     selectedTemplate,
     createAdvanced,
     setCreateAdvanced,
@@ -50,16 +51,16 @@ export default function DstCreateSection(props: DstCreateSectionProps) {
                         <div class="space-y-3 border-t border-slate-200 pt-3 dark:border-slate-800">
                           <div class="flex items-center justify-between gap-3">
                             <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                              Don't Starve Together
+                              {t('instancesCreate.section.dst')}
                             </div>
                             <Button
                               size="xs"
                               variant={createAdvanced() ? 'secondary' : 'ghost'}
                               onClick={() => setCreateAdvanced((v: boolean) => !v)}
-                              title="Show or hide advanced fields"
+                              title={t('instancesCreate.advancedToggleTitle')}
                             >
                               <span class="inline-flex items-center gap-2">
-                                {createAdvanced() ? 'Hide advanced' : 'Advanced'}
+                                {createAdvanced() ? t('instancesCreate.hideAdvanced') : t('instancesCreate.advanced')}
                                 <Show when={!createAdvanced() && createAdvancedDirty()}>
                                   <span class="h-1.5 w-1.5 rounded-full bg-amber-500" aria-hidden="true" />
                                 </Show>
@@ -70,8 +71,8 @@ export default function DstCreateSection(props: DstCreateSectionProps) {
                           <Field
                             label={
                               <LabelTip
-                                label="Cluster token"
-                                content="Required. Paste your cluster_token.txt contents from Klei."
+                                label={t('instancesCreate.dst.clusterTokenLabel')}
+                                content={t('instancesCreate.dst.clusterTokenHint')}
                               />
                             }
                             required
@@ -85,15 +86,15 @@ export default function DstCreateSection(props: DstCreateSectionProps) {
                                 type={dstClusterTokenVisible() ? 'text' : 'password'}
                                 value={dstClusterToken()}
                                 onInput={(e) => setDstClusterToken(e.currentTarget.value)}
-                                placeholder="Paste token…"
+                                placeholder={t('instancesCreate.pasteTokenPlaceholder')}
                                 spellcheck={false}
                                 invalid={Boolean(createFieldErrors().cluster_token)}
                                 class="w-full flex-1 font-mono text-[11px]"
                                 rightIcon={
                                   <VisibilityToggle
                                     visible={dstClusterTokenVisible()}
-                                    labelWhenHidden="Show token"
-                                    labelWhenVisible="Hide token"
+                                    labelWhenHidden={t('instancesCreate.showToken')}
+                                    labelWhenVisible={t('instancesCreate.hideToken')}
                                     onToggle={() => setDstClusterTokenVisible((v: boolean) => !v)}
                                   />
                                 }
@@ -102,7 +103,7 @@ export default function DstCreateSection(props: DstCreateSectionProps) {
                                 type="button"
                                 size="sm"
                                 variant="secondary"
-                                label="Copy token"
+                                 label={t('instancesCreate.copyToken')}
                                 disabled={!dstClusterToken().trim()}
                                 onClick={() => void safeCopy(dstClusterToken().trim())}
                               >
@@ -115,20 +116,23 @@ export default function DstCreateSection(props: DstCreateSectionProps) {
                           </Field>
 
                           <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                            <Field label="Cluster name" error={createFieldErrors().cluster_name}>
+                            <Field label={t('instancesCreate.dst.clusterNameLabel')} error={createFieldErrors().cluster_name}>
                               <Input
                                 ref={(el) => {
                                   setCreateDstClusterNameEl?.(el)
                                 }}
                                 value={dstClusterName()}
                                 onInput={(e) => setDstClusterName(e.currentTarget.value)}
-                                placeholder="Alloy DST server"
+                                placeholder={t('instancesCreate.dst.defaultClusterNamePlaceholder')}
                                 spellcheck={false}
                                 invalid={Boolean(createFieldErrors().cluster_name)}
                               />
                             </Field>
 
-                            <Field label={<LabelTip label="Max players" content="Maximum concurrent players allowed to join." />} error={createFieldErrors().max_players}>
+                            <Field
+                              label={<LabelTip label={t('instancesCreate.common.maxPlayersLabel')} content={t('instancesCreate.common.maxPlayersHint')} />}
+                              error={createFieldErrors().max_players}
+                            >
                               <Input
                                 ref={(el) => {
                                   setCreateDstMaxPlayersEl?.(el)
@@ -142,7 +146,10 @@ export default function DstCreateSection(props: DstCreateSectionProps) {
                             </Field>
                           </div>
 
-                          <Field label={<LabelTip label="Password (optional)" content="Optional cluster password for joining players." />} error={createFieldErrors().password}>
+                          <Field
+                            label={<LabelTip label={t('instancesCreate.dst.passwordOptionalLabel')} content={t('instancesCreate.dst.passwordOptionalHint')} />}
+                            error={createFieldErrors().password}
+                          >
                             <div class="flex flex-wrap items-center gap-2">
                               <Input
                                 ref={(el) => {
@@ -157,8 +164,8 @@ export default function DstCreateSection(props: DstCreateSectionProps) {
                                 rightIcon={
                                   <VisibilityToggle
                                     visible={dstPasswordVisible()}
-                                    labelWhenHidden="Show password"
-                                    labelWhenVisible="Hide password"
+                                    labelWhenHidden={t('instancesCreate.showPassword')}
+                                    labelWhenVisible={t('instancesCreate.hidePassword')}
                                     onToggle={() => setDstPasswordVisible((v: boolean) => !v)}
                                   />
                                 }
@@ -167,7 +174,7 @@ export default function DstCreateSection(props: DstCreateSectionProps) {
                                 type="button"
                                 size="sm"
                                 variant="secondary"
-                                label="Copy password"
+                                 label={t('instancesCreate.copyPassword')}
                                 disabled={!dstPassword().trim()}
                                 onClick={() => void safeCopy(dstPassword().trim())}
                               >
@@ -181,7 +188,10 @@ export default function DstCreateSection(props: DstCreateSectionProps) {
 
                           <Show when={createAdvanced()}>
                             <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                              <Field label={<LabelTip label="Port (UDP)" content="Client connection port. Use 0 to auto-assign." />} error={createFieldErrors().port}>
+                              <Field
+                                label={<LabelTip label={t('instancesCreate.common.portUdpLabel')} content={t('instancesCreate.common.portUdpHintAutoAssign')} />}
+                                error={createFieldErrors().port}
+                              >
                                 <Input
                                   ref={(el) => {
                                     setCreateDstPortEl?.(el)
@@ -195,7 +205,7 @@ export default function DstCreateSection(props: DstCreateSectionProps) {
                               </Field>
 
                               <Field
-                                label={<LabelTip label="Master (UDP)" content="Steam master server port. Use 0 to auto-assign." />}
+                                label={<LabelTip label={t('instancesCreate.dst.masterPortUdpLabel')} content={t('instancesCreate.dst.masterPortUdpHint')} />}
                                 error={createFieldErrors().master_port}
                               >
                                 <Input
@@ -211,7 +221,7 @@ export default function DstCreateSection(props: DstCreateSectionProps) {
                               </Field>
 
                               <Field
-                                label={<LabelTip label="Auth (UDP)" content="Steam authentication port. Use 0 to auto-assign." />}
+                                label={<LabelTip label={t('instancesCreate.dst.authPortUdpLabel')} content={t('instancesCreate.dst.authPortUdpHint')} />}
                                 error={createFieldErrors().auth_port}
                               >
                                 <Input

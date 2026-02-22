@@ -1,9 +1,11 @@
 import { createSignal, Show } from 'solid-js'
+import type { I18nTranslate } from '../../app/i18n'
 import { isAlloyApiError } from '../../rspc'
 import { Button } from './Button'
 import { cn } from './cn'
 
 export type ErrorStateProps = {
+  t?: I18nTranslate
   title?: string
   error: unknown
   onRetry?: () => void
@@ -29,9 +31,11 @@ async function safeCopy(text: string) {
 
 export function ErrorState(props: ErrorStateProps) {
   const [expanded, setExpanded] = createSignal(false)
+  const t = (key: string, params?: Record<string, string | number>) =>
+    props.t ? props.t(key as never, params as never) : key
   const api = () => (isAlloyApiError(props.error) ? props.error : null)
-  const title = () => props.title ?? 'Something went wrong'
-  const message = () => api()?.data.message ?? (props.error instanceof Error ? props.error.message : 'Unknown error')
+  const title = () => props.title ?? t('errors.somethingWentWrong')
+  const message = () => api()?.data.message ?? (props.error instanceof Error ? props.error.message : t('errors.unknownError'))
   const requestId = () => api()?.data.request_id ?? ''
 
   return (
@@ -44,7 +48,7 @@ export function ErrorState(props: ErrorStateProps) {
         <div class="flex flex-wrap items-center gap-2">
           <Show when={props.onRetry}>
             <Button size="xs" variant="secondary" onClick={() => props.onRetry?.()}>
-              Retry
+              {t('banner.retry')}
             </Button>
           </Show>
           <Button
@@ -52,19 +56,21 @@ export function ErrorState(props: ErrorStateProps) {
             variant="secondary"
             onClick={() => safeCopy(api() ? JSON.stringify(api()!.data, null, 2) : stringifyError(props.error))}
           >
-            Copy details
+            {t('errors.copyDetails')}
           </Button>
           <Button size="xs" variant="ghost" onClick={() => setExpanded((v) => !v)}>
-            {expanded() ? 'Hide' : 'Details'}
+            {expanded() ? t('errors.hideDetails') : t('errors.showDetails')}
           </Button>
         </div>
       </div>
 
       <Show when={requestId()}>
         <div class="mt-3 flex flex-wrap items-center justify-between gap-2">
-          <div class="truncate font-mono text-[11px] text-rose-800/70 dark:text-rose-200/70">req {requestId()}</div>
+          <div class="truncate font-mono text-[11px] text-rose-800/70 dark:text-rose-200/70">
+            {t('common.requestId')} {requestId()}
+          </div>
           <Button size="xs" variant="secondary" onClick={() => safeCopy(requestId())}>
-            Copy request-id
+            {t('eventCenter.copyRequestId')}
           </Button>
         </div>
       </Show>

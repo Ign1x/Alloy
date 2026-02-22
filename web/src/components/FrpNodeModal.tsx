@@ -49,6 +49,7 @@ export default function FrpNodeModal(props: FrpNodeModalProps) {
     frpNodeDetectedFormat,
     invalidateFrpNodes,
     pushToast,
+    t,
   } = props as any
 
   let nameEl: HTMLInputElement | undefined
@@ -60,14 +61,14 @@ export default function FrpNodeModal(props: FrpNodeModalProps) {
         <Modal
           open={showFrpNodeModal()}
           onClose={() => closeFrpNodeModal()}
-          title={editingFrpNodeId() ? 'Edit tunnel node' : 'Add tunnel node'}
-          description="Store tunnel server info and optional config. Config format is auto-detected (INI/TOML/YAML/JSON)."
+          title={editingFrpNodeId() ? t('frp.modal.editTitle') : t('frp.modal.addTitle')}
+          description={t('frp.modal.description')}
           size="lg"
           initialFocus={() => nameEl}
           footer={
             <div class="flex gap-3">
               <Button variant="secondary" class="flex-1" onClick={() => closeFrpNodeModal()}>
-                Cancel
+                {t('instances.common.cancel')}
               </Button>
               <Button
                 variant="primary"
@@ -77,7 +78,7 @@ export default function FrpNodeModal(props: FrpNodeModalProps) {
                 loading={frpCreateNode.isPending || frpUpdateNode.isPending}
                 disabled={isReadOnly() || !frpNodeCanSave()}
               >
-                Save
+                {t('frp.modal.save')}
               </Button>
             </div>
           }
@@ -102,10 +103,10 @@ export default function FrpNodeModal(props: FrpNodeModalProps) {
                 }
                 if (!id) {
                   const out = await frpCreateNode.mutateAsync(input)
-                  pushToast('success', 'Saved', out.name)
+                  pushToast('success', t('app.saved'), out.name)
                 } else {
                   const out = await frpUpdateNode.mutateAsync({ id, ...input })
-                  pushToast('success', 'Saved', out.name)
+                  pushToast('success', t('app.saved'), out.name)
                 }
                 closeFrpNodeModal()
                 void invalidateFrpNodes()
@@ -121,79 +122,79 @@ export default function FrpNodeModal(props: FrpNodeModalProps) {
                   })
                   return
                 }
-                setFrpNodeFormError(err instanceof Error ? err.message : 'save failed')
+                setFrpNodeFormError(err instanceof Error ? err.message : t('app.saveFailed'))
               }
             }}
           >
-            <Field label="Name" required error={frpNodeFieldErrors().name}>
+            <Field label={t('frp.modal.name')} required error={frpNodeFieldErrors().name}>
               <Input
                 ref={(el) => {
                   nameEl = el
                 }}
                 value={frpNodeName()}
                 onInput={(e) => setFrpNodeName(e.currentTarget.value)}
-                placeholder="e.g. my-frp"
+                placeholder={t('frp.modal.namePlaceholder')}
                 spellcheck={false}
                 invalid={Boolean(frpNodeFieldErrors().name)}
               />
             </Field>
 
             <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <Field label="Tunnel server" required error={frpNodeFieldErrors().server_addr}>
+              <Field label={t('frp.modal.server')} required error={frpNodeFieldErrors().server_addr}>
                 <Input
                   ref={(el) => {
                     serverAddrEl = el
                   }}
                   value={frpNodeServerAddr()}
                   onInput={(e) => setFrpNodeServerAddr(e.currentTarget.value)}
-                  placeholder="e.g. 1.2.3.4 or frp.example.com"
+                  placeholder={t('frp.modal.serverPlaceholder')}
                   spellcheck={false}
                   invalid={Boolean(frpNodeFieldErrors().server_addr)}
                 />
               </Field>
 
-              <Field label="Server port" required error={frpNodeFieldErrors().server_port}>
+              <Field label={t('frp.modal.serverPort')} required error={frpNodeFieldErrors().server_port}>
                 <Input
                   ref={(el) => {
                     serverPortEl = el
                   }}
-                  type="number"
-                  value={frpNodeServerPort()}
-                  onInput={(e) => setFrpNodeServerPort(e.currentTarget.value)}
-                  placeholder="7000"
-                  invalid={Boolean(frpNodeFieldErrors().server_port)}
-                />
-              </Field>
+                   type="number"
+                   value={frpNodeServerPort()}
+                   onInput={(e) => setFrpNodeServerPort(e.currentTarget.value)}
+                   placeholder={t('frp.modal.serverPortPlaceholder')}
+                   invalid={Boolean(frpNodeFieldErrors().server_port)}
+                 />
+               </Field>
             </div>
 
             <Field
-              label={<LabelTip label="Allocatable ports" content="Optional. For example: 20000-20100,21000. Used when remote_port is auto." />}
+              label={<LabelTip label={t('frp.modal.allocatablePorts')} content={t('frp.modal.allocatablePortsHint')} />}
               error={frpNodeFieldErrors().allocatable_ports}
             >
-              <Input
-                value={frpNodeAllocatablePorts()}
-                onInput={(e) => setFrpNodeAllocatablePorts(e.currentTarget.value)}
-                placeholder="20000-20100,21000"
-                spellcheck={false}
-                class="font-mono text-[11px]"
-                invalid={Boolean(frpNodeFieldErrors().allocatable_ports)}
+                <Input
+                  value={frpNodeAllocatablePorts()}
+                  onInput={(e) => setFrpNodeAllocatablePorts(e.currentTarget.value)}
+                  placeholder={t('frp.modal.allocatablePortsPlaceholder')}
+                  spellcheck={false}
+                  class="font-mono text-[11px]"
+                  invalid={Boolean(frpNodeFieldErrors().allocatable_ports)}
               />
             </Field>
 
-            <Field label="Token (optional)" error={frpNodeFieldErrors().token}>
+            <Field label={t('frp.modal.tokenOptional')} error={frpNodeFieldErrors().token}>
               <Input
                 type={frpNodeTokenVisible() ? 'text' : 'password'}
                 value={frpNodeToken()}
                 onInput={(e) => setFrpNodeToken(e.currentTarget.value)}
-                placeholder="Tunnel token"
+                placeholder={t('frp.modal.tokenPlaceholder')}
                 spellcheck={false}
                 class="font-mono text-[11px]"
                 invalid={Boolean(frpNodeFieldErrors().token)}
                 rightIcon={
                   <VisibilityToggle
                     visible={frpNodeTokenVisible()}
-                    labelWhenHidden="Show token"
-                    labelWhenVisible="Hide token"
+                    labelWhenHidden={t('frp.modal.showToken')}
+                    labelWhenVisible={t('frp.modal.hideToken')}
                     onToggle={() => setFrpNodeTokenVisible((v: boolean) => !v)}
                   />
                 }
@@ -201,7 +202,7 @@ export default function FrpNodeModal(props: FrpNodeModalProps) {
             </Field>
 
             <Field
-              label={<LabelTip label="Config (optional)" content="Auto-detected: INI/TOML/YAML/JSON. If empty, Alloy generates a config from server fields above." />}
+              label={<LabelTip label={t('frp.modal.configOptional')} content={t('frp.modal.configHint')} />}
               error={frpNodeFieldErrors().config}
             >
               <Textarea
@@ -210,13 +211,13 @@ export default function FrpNodeModal(props: FrpNodeModalProps) {
                 }}
                 value={frpNodeConfig()}
                 onInput={(e) => setFrpNodeConfig(e.currentTarget.value)}
-                placeholder="Paste tunnel config (INI/TOML/YAML/JSON)"
+                placeholder={t('frp.modal.configPlaceholder')}
                 spellcheck={false}
                 class="font-mono text-[11px]"
                 invalid={Boolean(frpNodeFieldErrors().config)}
               />
               <div class="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
-                Detected format: <span class="font-mono uppercase">{frpNodeDetectedFormat()}</span>
+                {t('frp.modal.detectedFormat')} <span class="font-mono uppercase">{frpNodeDetectedFormat()}</span>
               </div>
             </Field>
 

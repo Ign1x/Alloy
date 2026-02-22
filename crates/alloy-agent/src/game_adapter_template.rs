@@ -1,3 +1,5 @@
+#![allow(clippy::too_many_arguments)]
+
 use std::collections::BTreeMap;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1142,7 +1144,7 @@ mod tests {
                     TemplateParamKind::String | TemplateParamKind::SecretString => {
                         if !p.enum_values.is_empty() {
                             assert!(
-                                p.enum_values.iter().any(|v| *v == p.default_value),
+                                p.enum_values.contains(&p.default_value),
                                 "default_value not in enum for {}:{} (default={})",
                                 t.template_id,
                                 p.key,

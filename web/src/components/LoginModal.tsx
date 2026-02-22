@@ -1,5 +1,6 @@
 import { Show } from 'solid-js'
 import { login } from '../auth'
+import type { I18nTranslate } from '../app/i18n'
 import { Button } from './ui/Button'
 import { Field } from './ui/Field'
 import { Input } from './ui/Input'
@@ -24,7 +25,10 @@ export default function LoginModal(props: LoginModalProps) {
     setLoginPass,
     refreshSession,
     setLoginUsernameEl,
+    t,
   } = props as any
+
+  const translate = t as I18nTranslate
 
   let usernameEl: HTMLInputElement | undefined
 
@@ -32,16 +36,16 @@ export default function LoginModal(props: LoginModalProps) {
         <Modal
           open={showLoginModal() && !me()}
           onClose={() => setShowLoginModal(false)}
-          title="Sign in"
+          title={translate('mobile.signIn')}
           size="sm"
           initialFocus={() => usernameEl}
           footer={
             <div class="flex gap-3">
               <Button variant="secondary" class="flex-1" onClick={() => setShowLoginModal(false)}>
-                Cancel
+                {translate('instances.common.cancel')}
               </Button>
               <Button variant="primary" class="flex-1" type="submit" form="alloy-login" loading={authLoading()}>
-                Sign in
+                {translate('mobile.signIn')}
               </Button>
             </div>
           }
@@ -58,13 +62,13 @@ export default function LoginModal(props: LoginModalProps) {
                 await refreshSession()
                 setShowLoginModal(false)
               } catch (err) {
-                setAuthError(err instanceof Error ? err.message : 'login failed')
+                setAuthError(err instanceof Error ? err.message : translate('login.failed'))
               } finally {
                 setAuthLoading(false)
               }
             }}
           >
-            <Field label="Username" required>
+            <Field label={translate('login.username')} required>
               <Input
                 ref={(el) => {
                   usernameEl = el
@@ -75,7 +79,7 @@ export default function LoginModal(props: LoginModalProps) {
                 autocomplete="username"
               />
             </Field>
-            <Field label="Password" required>
+            <Field label={translate('login.password')} required>
               <Input
                 type="password"
                 value={loginPass()}

@@ -452,8 +452,12 @@ pub async fn login(
                 .into_response();
         }
         Err(e) => {
-            return json_error_with_meta(&meta, StatusCode::INTERNAL_SERVER_ERROR, format!("db error: {e}"))
-                .into_response();
+            return json_error_with_meta(
+                &meta,
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("db error: {e}"),
+            )
+            .into_response();
         }
     };
 
@@ -491,8 +495,12 @@ pub async fn login(
     let access = match make_access_jwt(&user) {
         Ok(v) => v,
         Err(e) => {
-            return json_error_with_meta(&meta, StatusCode::INTERNAL_SERVER_ERROR, format!("jwt error: {e}"))
-                .into_response();
+            return json_error_with_meta(
+                &meta,
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("jwt error: {e}"),
+            )
+            .into_response();
         }
     };
 
@@ -513,8 +521,12 @@ pub async fn login(
         .exec(db)
         .await
     {
-        return json_error_with_meta(&meta, StatusCode::INTERNAL_SERVER_ERROR, format!("db error: {e}"))
-            .into_response();
+        return json_error_with_meta(
+            &meta,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("db error: {e}"),
+        )
+        .into_response();
     }
 
     let jar = jar
@@ -581,8 +593,12 @@ pub async fn change_credentials(
 
     let current_password = input.current_password;
     if current_password.trim().is_empty() {
-        return json_error_with_meta(&meta, StatusCode::BAD_REQUEST, "current password is required")
-            .into_response();
+        return json_error_with_meta(
+            &meta,
+            StatusCode::BAD_REQUEST,
+            "current password is required",
+        )
+        .into_response();
     }
 
     let next_username = input
@@ -619,8 +635,12 @@ pub async fn change_credentials(
                 .into_response();
         }
         Err(e) => {
-            return json_error_with_meta(&meta, StatusCode::INTERNAL_SERVER_ERROR, format!("db error: {e}"))
-                .into_response();
+            return json_error_with_meta(
+                &meta,
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("db error: {e}"),
+            )
+            .into_response();
         }
     };
 
@@ -632,29 +652,33 @@ pub async fn change_credentials(
     let mut active: alloy_db::entities::users::ActiveModel = user.clone().into();
     let mut changed = false;
 
-    if let Some(username) = next_username {
-        if username != user.username {
-            let exists = match alloy_db::entities::users::Entity::find()
-                .filter(alloy_db::entities::users::Column::Username.eq(username.clone()))
-                .filter(alloy_db::entities::users::Column::Id.ne(user.id))
-                .one(db)
-                .await
-            {
-                Ok(v) => v.is_some(),
-                Err(e) => {
-                    return json_error_with_meta(&meta, StatusCode::INTERNAL_SERVER_ERROR, format!("db error: {e}"))
-                        .into_response();
-                }
-            };
-
-            if exists {
-                return json_error_with_meta(&meta, StatusCode::CONFLICT, "username already exists")
-                    .into_response();
+    if let Some(username) = next_username
+        && username != user.username
+    {
+        let exists = match alloy_db::entities::users::Entity::find()
+            .filter(alloy_db::entities::users::Column::Username.eq(username.clone()))
+            .filter(alloy_db::entities::users::Column::Id.ne(user.id))
+            .one(db)
+            .await
+        {
+            Ok(v) => v.is_some(),
+            Err(e) => {
+                return json_error_with_meta(
+                    &meta,
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("db error: {e}"),
+                )
+                .into_response();
             }
+        };
 
-            active.username = Set(username);
-            changed = true;
+        if exists {
+            return json_error_with_meta(&meta, StatusCode::CONFLICT, "username already exists")
+                .into_response();
         }
+
+        active.username = Set(username);
+        changed = true;
     }
 
     if let Some(password) = next_password {
@@ -689,19 +713,31 @@ pub async fn change_credentials(
             if message.contains("idx_users_username_unique")
                 || message.contains("UNIQUE constraint failed: users.username")
             {
-                return json_error_with_meta(&meta, StatusCode::CONFLICT, "username already exists")
-                    .into_response();
-            }
-            return json_error_with_meta(&meta, StatusCode::INTERNAL_SERVER_ERROR, format!("db error: {e}"))
+                return json_error_with_meta(
+                    &meta,
+                    StatusCode::CONFLICT,
+                    "username already exists",
+                )
                 .into_response();
+            }
+            return json_error_with_meta(
+                &meta,
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("db error: {e}"),
+            )
+            .into_response();
         }
     };
 
     let access = match make_access_jwt(&updated) {
         Ok(v) => v,
         Err(e) => {
-            return json_error_with_meta(&meta, StatusCode::INTERNAL_SERVER_ERROR, format!("jwt error: {e}"))
-                .into_response();
+            return json_error_with_meta(
+                &meta,
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("jwt error: {e}"),
+            )
+            .into_response();
         }
     };
 

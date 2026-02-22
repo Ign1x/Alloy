@@ -8,8 +8,8 @@ use alloy_proto::agent_v1::agent_health_service_client::AgentHealthServiceClient
 use tonic::Request;
 
 pub(crate) fn tunnel_disconnect_grace() -> Duration {
-    const DEFAULT_MS: u64 = 600_000;
-    const MAX_MS: u64 = 900_000;
+    const DEFAULT_MS: u64 = 1_800_000;
+    const MAX_MS: u64 = 7_200_000;
 
     let raw = std::env::var("ALLOY_TUNNEL_DISCONNECT_GRACE_MS").ok();
     let ms = raw

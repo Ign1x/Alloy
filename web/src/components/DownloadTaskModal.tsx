@@ -1,22 +1,25 @@
 import { Show } from 'solid-js'
 import { downloadJobPercent, downloadJobStatusLabel, downloadJobStatusVariant, downloadTargetLabel } from '../app/helpers/downloads'
 import { formatBytes, formatDateTime } from '../app/helpers/format'
+import type { I18nTranslate } from '../app/i18n'
 import type { DownloadJob, DownloadTarget } from '../app/types'
 import { Badge } from './ui/Badge'
 import { Button } from './ui/Button'
 import { Modal } from './ui/Modal'
 
 export type DownloadTaskModalProps = {
+  t: I18nTranslate
   selectedDownloadJobId: () => string | null
   setSelectedDownloadJobId: (next: string | null) => void
   selectedDownloadJob: () => DownloadJob | null
-  latestDownloadFailureByTarget: () => Map<DownloadTarget, DownloadJob>
+  latestDownloadFailureByTarget: () => Record<string, string>
   copyDownloadJobDetails: (job: DownloadJob) => void | Promise<void>
-  copyDownloadFailureReason: (job: DownloadJob) => void | Promise<void>
+  copyDownloadFailureReason: (target: DownloadTarget) => void | Promise<void>
 }
 
 export default function DownloadTaskModal(props: DownloadTaskModalProps) {
   const {
+    t,
     selectedDownloadJobId,
     setSelectedDownloadJobId,
     selectedDownloadJob,
@@ -29,17 +32,17 @@ export default function DownloadTaskModal(props: DownloadTaskModalProps) {
         <Modal
           open={Boolean(selectedDownloadJobId())}
           onClose={() => setSelectedDownloadJobId(null)}
-          title="Download Task"
+          title={t('downloadTask.title')}
           size="md"
           footer={
             <div class="flex gap-3">
               <Button variant="secondary" class="flex-1" onClick={() => setSelectedDownloadJobId(null)}>
-                Close
+                {t('downloadTask.close')}
               </Button>
               <Show when={selectedDownloadJob()}>
                 {(job) => (
                   <Button variant="primary" class="flex-1" onClick={() => void copyDownloadJobDetails(job())}>
-                    Copy JSON
+                    {t('downloadTask.copyJson')}
                   </Button>
                 )}
               </Show>
@@ -48,15 +51,18 @@ export default function DownloadTaskModal(props: DownloadTaskModalProps) {
         >
           <Show
             when={selectedDownloadJob()}
-            fallback={<div class="rounded-xl border border-slate-200 bg-white/70 px-3 py-2 text-xs text-slate-500 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-300">This task is no longer in queue history.</div>}
+            fallback={
+              <div class="rounded-xl border border-slate-200 bg-white/70 px-3 py-2 text-xs text-slate-500 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-300">
+                {t('downloadTask.removedFromHistory')}
+              </div>
+            }
           >
             {(job) => {
-              const latestFailure = () => latestDownloadFailureByTarget().get(job().target)
-              const latestFailureText = () => (latestFailure()?.message ?? '').trim()
+              const latestFailureText = () => (latestDownloadFailureByTarget()[job().target] ?? '').trim()
               const progressPercent = () => downloadJobPercent(job())
               const progressLabel = () => {
                 const pct = progressPercent()
-                if (pct == null) return 'running'
+                if (pct == null) return t('downloadTask.running')
                 return `${pct.toFixed(1)}%`
               }
               const progressBarWidth = () => {
@@ -86,19 +92,26 @@ export default function DownloadTaskModal(props: DownloadTaskModalProps) {
                     <div class="mt-2 space-y-1 font-mono text-[11px] text-slate-600 dark:text-slate-300">
                       <div>id {job().id}</div>
                       <Show when={job().requestId}>
-                        <div>req {job().requestId}</div>
+                        <div>
+                          {t('common.requestId')} {job().requestId}
+                        </div>
                       </Show>
                     </div>
                     <div class="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
-                      started {formatDateTime(job().startedAtUnixMs)} · updated {formatDateTime(job().updatedAtUnixMs)}
+                      {t('downloadTask.startedUpdated', {
+                        started: formatDateTime(job().startedAtUnixMs),
+                        updated: formatDateTime(job().updatedAtUnixMs),
+                      })}
                     </div>
                   </div>
 
                   <Show when={job().state === 'running'}>
                     <div class="rounded-xl border border-slate-200 bg-white/70 px-3 py-2 text-xs dark:border-slate-800 dark:bg-slate-950/40">
-                      <div class="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Live Progress</div>
+                      <div class="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                        {t('downloadTask.progressHeading')}
+                      </div>
                       <div class="mt-1 flex items-center justify-between text-[10px] uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                        <span>{job().progressStage || 'download'}</span>
+                        <span>{job().progressStage || t('downloadTask.progressDefaultStage')}</span>
                         <span class="font-mono text-slate-700 dark:text-slate-200">{progressLabel()}</span>
                       </div>
                       <div class="mt-1 h-2 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
@@ -109,31 +122,42 @@ export default function DownloadTaskModal(props: DownloadTaskModalProps) {
                         />
                       </div>
                       <div class="mt-1 flex flex-wrap gap-x-4 gap-y-1 font-mono text-[11px] text-slate-700 dark:text-slate-200">
-                        <span>speed {job().progressSpeedBytesPerSec ? `${formatBytes(job().progressSpeedBytesPerSec)}/s` : '—'}</span>
                         <span>
-                          progress {progressPercent() == null ? '—' : `${progressPercent()!.toFixed(1)}%`}
+                          {t('downloadTask.speedLabel', {
+                            value: job().progressSpeedBytesPerSec ? `${formatBytes(job().progressSpeedBytesPerSec)}/s` : '—',
+                          })}
                         </span>
                         <span>
-                          size {formatBytes(job().progressDownloadedBytes)} / {formatBytes(job().progressTotalBytes)}
+                          {t('downloadTask.progressLabel', {
+                            value: progressPercent() == null ? '—' : `${progressPercent()!.toFixed(1)}%`,
+                          })}
+                        </span>
+                        <span>
+                          {t('downloadTask.sizeLabel', {
+                            downloaded: formatBytes(job().progressDownloadedBytes),
+                            total: formatBytes(job().progressTotalBytes),
+                          })}
                         </span>
                       </div>
                     </div>
                   </Show>
 
                   <div class="rounded-xl border border-slate-200 bg-white/70 px-3 py-2 text-xs dark:border-slate-800 dark:bg-slate-950/40">
-                    <div class="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Message</div>
+                    <div class="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                      {t('downloadTask.messageHeading')}
+                    </div>
                     <div class="mt-1 whitespace-pre-wrap break-words text-slate-700 dark:text-slate-200">{job().message || '—'}</div>
                   </div>
 
                   <div class="rounded-xl border border-rose-200 bg-rose-50/70 px-3 py-2 text-xs text-rose-900 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-200">
                     <div class="flex items-center justify-between gap-2">
-                      <div class="text-[11px] font-semibold uppercase tracking-wide">Latest failure reason</div>
-                      <Button size="xs" variant="secondary" onClick={() => void copyDownloadFailureReason(job())}>
-                        Copy
+                      <div class="text-[11px] font-semibold uppercase tracking-wide">{t('downloadTask.latestFailureHeading')}</div>
+                      <Button size="xs" variant="secondary" onClick={() => void copyDownloadFailureReason(job().target)}>
+                        {t('instances.details.copy')}
                       </Button>
                     </div>
                     <div class="mt-1 whitespace-pre-wrap break-words font-mono text-[11px]">
-                      {latestFailureText() || 'No failure recorded yet for this target.'}
+                      {latestFailureText() || t('downloadTask.noFailureRecorded')}
                     </div>
                   </div>
                 </div>

@@ -33,6 +33,8 @@ export type DrawerProps = {
   class?: string
   closeOnOverlayClick?: boolean
   closeOnEsc?: boolean
+  closeLabel?: string
+  closeAriaLabel?: string
 }
 
 export function Drawer(props: DrawerProps) {
@@ -142,9 +144,9 @@ export function Drawer(props: DrawerProps) {
                   type="button"
                   class="rounded-xl border border-slate-200 bg-white/70 px-2.5 py-1.5 text-xs text-slate-700 hover:bg-white dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:hover:bg-slate-900"
                   onClick={props.onClose}
-                  aria-label="Close"
+                  aria-label={props.closeAriaLabel ?? props.closeLabel ?? 'Close'}
                 >
-                  Close
+                  {props.closeLabel ?? 'Close'}
                 </button>
               </div>
               <div class="min-h-0 flex-1 overflow-auto px-5 py-4">{props.children}</div>
@@ -158,4 +160,3 @@ export function Drawer(props: DrawerProps) {
     </Show>
   )
 }
-

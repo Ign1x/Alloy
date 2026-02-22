@@ -1,0 +1,72 @@
+name: Web UX Gate
+
+on:
+  pull_request:
+    paths:
+      - 'web/**'
+      - '.github/workflows/web-ux-gate.yml'
+      - 'goals/uiux-top10-redesign-plan.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ux-gate:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build web app
+        run: npm run build
+
+      - name: Lighthouse CI (desktop)
+        run: |
+          npx --yes @lhci/cli@0.15.x autorun --config=.lighthouserc.json
+          rm -rf .lighthouseci-desktop
+          mv .lighthouseci .lighthouseci-desktop
+
+      - name: Lighthouse CI (mobile)
+        run: |
+          npx --yes @lhci/cli@0.15.x autorun --config=.lighthouserc.mobile.json
+          rm -rf .lighthouseci-mobile
+          mv .lighthouseci .lighthouseci-mobile
+
+      - name: Upload Lighthouse artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-lighthouse-report
+          path: |
+            web/.lighthouseci-desktop
+            web/.lighthouseci-mobile
+
+      - name: Publish UX checklist in summary
+        if: always()
+        run: |
+          {
+            echo '## UX quality checklist'
+            echo
+            echo '- [ ] Lighthouse desktop + mobile checks passed (accessibility enforced)'
+            echo '- [ ] Keyboard reachable: login, instances, nodes, files, logs'
+            echo '- [ ] Mobile touch usability: key CTAs and overflow actions'
+            echo '- [ ] Core flow timing checked: login, open instance, open logs, copy snippet'
+            echo '- [ ] Non-English locale smoke check: no obvious English leftovers on key flows'
+            echo
+            echo 'Reference: web/ux-quality-checklist.md'
+          } >> "$GITHUB_STEP_SUMMARY"

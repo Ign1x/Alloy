@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use std::{
     collections::{BTreeMap, HashMap},
     fs,
@@ -397,14 +399,14 @@ fn parse_source(source: &str) -> anyhow::Result<ModFileRef> {
     }
 
     // modId:fileId or modId/fileId
-    if let Some((a, b)) = s.split_once(':').or_else(|| s.split_once('/')) {
-        if let (Some(mod_id), Some(file_id)) = (parse_digits(a), parse_digits(b)) {
-            return Ok(ModFileRef {
-                mod_id: Some(mod_id),
-                file_id,
-                slug: None,
-            });
-        }
+    if let Some((a, b)) = s.split_once(':').or_else(|| s.split_once('/'))
+        && let (Some(mod_id), Some(file_id)) = (parse_digits(a), parse_digits(b))
+    {
+        return Ok(ModFileRef {
+            mod_id: Some(mod_id),
+            file_id,
+            slug: None,
+        });
     }
 
     anyhow::bail!("unsupported curseforge source; paste a file URL or modId:fileId");
@@ -579,10 +581,10 @@ pub async fn ensure_installed(
     source: &str,
     api_key: &str,
 ) -> anyhow::Result<InstalledMarker> {
-    if let Some(m) = read_marker(instance_dir) {
-        if m.source.trim() == source.trim() {
-            return Ok(m);
-        }
+    if let Some(m) = read_marker(instance_dir)
+        && m.source.trim() == source.trim()
+    {
+        return Ok(m);
     }
 
     let src = source.trim();

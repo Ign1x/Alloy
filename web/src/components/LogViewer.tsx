@@ -1,4 +1,5 @@
 import { createEffect, createMemo, createSignal, Show } from 'solid-js'
+import type { I18nTranslate } from '../app/i18n'
 import { IconButton } from './ui/IconButton'
 import { Input } from './ui/Input'
 import { VirtualLines } from './ui/VirtualLines'
@@ -16,9 +17,7 @@ function formatIsoMs(unixMs: number) {
 async function safeCopy(text: string) {
   try {
     await navigator.clipboard.writeText(text)
-  } catch {
-    // ignore
-  }
+  } catch {}
 }
 
 function clampNumber(value: number, min: number, max: number) {
@@ -27,6 +26,7 @@ function clampNumber(value: number, min: number, max: number) {
 }
 
 export type LogViewerProps = {
+  t: I18nTranslate
   title?: string
   lines: LogLine[]
   loading?: boolean
@@ -51,6 +51,7 @@ export function LogViewer(props: LogViewerProps) {
   const [matchIdx, setMatchIdx] = createSignal(0)
   const [selectedLineIdx, setSelectedLineIdx] = createSignal<number | null>(null)
   const [copyLastN, setCopyLastN] = createSignal('200')
+  const [goLineDraft, setGoLineDraft] = createSignal('')
 
   let scrollEl: HTMLDivElement | undefined
   let ignoreScrollOnce = false
@@ -66,9 +67,7 @@ export function LogViewer(props: LogViewerProps) {
       if (typeof parsed?.wrap === 'boolean') setWrap(parsed.wrap)
       if (typeof parsed?.fontSize === 'number') setFontSize(clampNumber(parsed.fontSize, 10, 18))
       if (typeof parsed?.includeTimestamp === 'boolean') setIncludeTimestamp(parsed.includeTimestamp)
-    } catch {
-      // ignore
-    }
+    } catch {}
   })
 
   createEffect(() => {
@@ -81,9 +80,7 @@ export function LogViewer(props: LogViewerProps) {
           includeTimestamp: includeTimestamp(),
         }),
       )
-    } catch {
-      // ignore
-    }
+    } catch {}
   })
 
   const lineHeight = createMemo(() => Math.round(fontSize() * 1.55))
@@ -100,13 +97,11 @@ export function LogViewer(props: LogViewerProps) {
   })
 
   createEffect(() => {
-    // Reset match navigation when query changes.
     query()
     setMatchIdx(0)
   })
 
   createEffect(() => {
-    // Keep match index in range when lines change.
     const list = matches()
     if (list.length === 0) {
       setMatchIdx(0)
@@ -123,7 +118,6 @@ export function LogViewer(props: LogViewerProps) {
     const el = scrollEl
     if (!el) return
     if (resumeLive) setLive(true)
-    // For virtualized mode, scrollHeight is based on total height.
     const doScroll = () => {
       ignoreScrollOnce = true
       el.scrollTop = el.scrollHeight
@@ -140,17 +134,16 @@ export function LogViewer(props: LogViewerProps) {
   }
 
   createEffect(() => {
-    // Auto-follow on new lines.
     props.lines.length
     if (!live()) return
     requestAnimationFrame(() => jumpToBottom(false))
   })
 
   const statusLabel = createMemo(() => {
-    if (props.error) return 'error'
-    if (props.loading) return 'loading'
-    if (!live()) return 'paused'
-    return 'live'
+    if (props.error) return props.t('logViewer.statusError')
+    if (props.loading) return props.t('logViewer.statusLoading')
+    if (!live()) return props.t('logViewer.statusPaused')
+    return props.t('logViewer.statusLive')
   })
 
   const statusDot = createMemo(() => {
@@ -202,7 +195,32 @@ export function LogViewer(props: LogViewerProps) {
     })
   }
 
-  const title = () => props.title ?? 'Logs'
+  const goLineNumber = createMemo(() => {
+    const raw = goLineDraft().trim()
+    if (!raw) return null
+    const n = Number.parseInt(raw, 10)
+    if (!Number.isFinite(n) || n <= 0) return null
+    return n
+  })
+
+  const goLineInvalid = createMemo(() => {
+    const raw = goLineDraft().trim()
+    if (!raw) return false
+    const n = goLineNumber()
+    if (n == null) return true
+    return n > props.lines.length
+  })
+
+  function jumpToLine() {
+    const n = goLineNumber()
+    if (n == null) return
+    if (n > props.lines.length) return
+    const idx = n - 1
+    setSelectedLineIdx(idx)
+    scrollToLine(idx)
+  }
+
+  const title = () => props.title ?? props.t('logViewer.title')
 
   return (
     <div class={props.class}>
@@ -219,7 +237,7 @@ export function LogViewer(props: LogViewerProps) {
           <Input
             value={query()}
             onInput={(e) => setQuery(e.currentTarget.value)}
-            placeholder="Search"
+            placeholder={props.t('logViewer.search')}
             class={minimal() ? 'w-40' : 'w-44'}
             leftIcon={
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
@@ -233,13 +251,19 @@ export function LogViewer(props: LogViewerProps) {
           />
           <Show
             when={matches().length > 0}
-            fallback={<span class="text-[11px] text-slate-500 dark:text-slate-400">0 matches</span>}
+            fallback={<span class="text-[11px] text-slate-500 dark:text-slate-400">{props.t('logViewer.matchesNone')}</span>}
           >
             <span class="text-[11px] text-slate-500 dark:text-slate-400">
-              {matchIdx() + 1}/{matches().length}
+              {props.t('logViewer.matchesCount', { current: matchIdx() + 1, total: matches().length })}
             </span>
           </Show>
-          <IconButton type="button" label="Previous match" variant="ghost" disabled={matches().length === 0} onClick={() => jumpToMatch(-1)}>
+          <IconButton
+            type="button"
+            label={props.t('logViewer.prevMatch')}
+            variant="ghost"
+            disabled={matches().length === 0}
+            onClick={() => jumpToMatch(-1)}
+          >
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
               <path
                 fill-rule="evenodd"
@@ -248,7 +272,13 @@ export function LogViewer(props: LogViewerProps) {
               />
             </svg>
           </IconButton>
-          <IconButton type="button" label="Next match" variant="ghost" disabled={matches().length === 0} onClick={() => jumpToMatch(1)}>
+          <IconButton
+            type="button"
+            label={props.t('logViewer.nextMatch')}
+            variant="ghost"
+            disabled={matches().length === 0}
+            onClick={() => jumpToMatch(1)}
+          >
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
               <path
                 fill-rule="evenodd"
@@ -259,11 +289,11 @@ export function LogViewer(props: LogViewerProps) {
           </IconButton>
 
           <Show when={!minimal()}>
-            <IconButton
-              type="button"
-              label={wrap() ? 'Wrap: on' : 'Wrap: off'}
-              variant="ghost"
-              onClick={() => setWrap((v) => !v)}
+              <IconButton
+                type="button"
+                label={wrap() ? props.t('logViewer.wrapOn') : props.t('logViewer.wrapOff')}
+                variant="ghost"
+                onClick={() => setWrap((v) => !v)}
             >
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class={`h-4 w-4 ${wrap() ? 'text-amber-500' : ''}`}>
                 <path
@@ -277,7 +307,7 @@ export function LogViewer(props: LogViewerProps) {
             <div class="flex items-center gap-1">
               <IconButton
                 type="button"
-                label="Decrease font size"
+                label={props.t('logViewer.fontDecrease')}
                 variant="ghost"
                 disabled={fontSize() <= 10}
                 onClick={() => setFontSize((v) => clampNumber(v - 1, 10, 18))}
@@ -289,7 +319,7 @@ export function LogViewer(props: LogViewerProps) {
               <span class="w-8 text-center text-[11px] text-slate-500 dark:text-slate-400">{fontSize()}px</span>
               <IconButton
                 type="button"
-                label="Increase font size"
+                label={props.t('logViewer.fontIncrease')}
                 variant="ghost"
                 disabled={fontSize() >= 18}
                 onClick={() => setFontSize((v) => clampNumber(v + 1, 10, 18))}
@@ -307,7 +337,7 @@ export function LogViewer(props: LogViewerProps) {
 
           <IconButton
             type="button"
-            label={live() ? 'Pause live updates' : 'Resume live updates'}
+            label={live() ? props.t('logViewer.pauseLive') : props.t('logViewer.resumeLive')}
             variant="ghost"
             onClick={() => {
               const next = !live()
@@ -329,7 +359,7 @@ export function LogViewer(props: LogViewerProps) {
             </Show>
           </IconButton>
 
-          <IconButton type="button" label="Jump to bottom" variant="ghost" onClick={() => jumpToBottom(true)}>
+          <IconButton type="button" label={props.t('logViewer.jumpBottom')} variant="ghost" onClick={() => jumpToBottom(true)}>
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
               <path
                 fill-rule="evenodd"
@@ -340,7 +370,7 @@ export function LogViewer(props: LogViewerProps) {
           </IconButton>
 
           <Show when={minimal()}>
-            <IconButton type="button" label="Copy tail" variant="ghost" onClick={() => copyLast()}>
+            <IconButton type="button" label={props.t('logViewer.copyTail')} variant="ghost" onClick={() => copyLast()}>
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
                 <path d="M5.75 2A2.75 2.75 0 003 4.75v9.5A2.75 2.75 0 005.75 17h1.5a.75.75 0 000-1.5h-1.5c-.69 0-1.25-.56-1.25-1.25v-9.5c0-.69.56-1.25 1.25-1.25h5.5c.69 0 1.25.56 1.25 1.25v1a.75.75 0 001.5 0v-1A2.75 2.75 0 0011.25 2h-5.5z" />
                 <path d="M8.75 6A2.75 2.75 0 006 8.75v6.5A2.75 2.75 0 008.75 18h5.5A2.75 2.75 0 0017 15.25v-6.5A2.75 2.75 0 0014.25 6h-5.5z" />
@@ -348,7 +378,76 @@ export function LogViewer(props: LogViewerProps) {
             </IconButton>
           </Show>
 
-          <IconButton type="button" label="Clear" variant="ghost" disabled={!props.onClear} onClick={() => props.onClear?.()}>
+          <Show when={!minimal()}>
+            <form
+              class="flex items-center gap-2"
+              onSubmit={(e) => {
+                e.preventDefault()
+                jumpToLine()
+              }}
+            >
+              <Input
+                value={goLineDraft()}
+                onInput={(e) => setGoLineDraft(e.currentTarget.value)}
+                class="w-24"
+                placeholder={props.t('logViewer.lineNumber')}
+                invalid={goLineInvalid()}
+              />
+              <IconButton
+                type="submit"
+                label={props.t('logViewer.goToLine')}
+                variant="secondary"
+                disabled={goLineInvalid() || !goLineDraft().trim()}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
+                  <path
+                    fill-rule="evenodd"
+                    d="M3 10a.75.75 0 01.75-.75h10.638L10.22 5.28a.75.75 0 111.06-1.06l5.25 5.25a.75.75 0 010 1.06l-5.25 5.25a.75.75 0 11-1.06-1.06l4.168-4.17H3.75A.75.75 0 013 10z"
+                    clip-rule="evenodd"
+                  />
+                </svg>
+              </IconButton>
+            </form>
+
+            <IconButton
+              type="button"
+              label={props.t('logViewer.copySelected')}
+              variant="secondary"
+              disabled={selectedLineIdx() == null}
+              onClick={() => copySelected()}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
+                <path d="M5.75 2A2.75 2.75 0 003 4.75v9.5A2.75 2.75 0 005.75 17h1.5a.75.75 0 000-1.5h-1.5c-.69 0-1.25-.56-1.25-1.25v-9.5c0-.69.56-1.25 1.25-1.25h5.5c.69 0 1.25.56 1.25 1.25v1a.75.75 0 001.5 0v-1A2.75 2.75 0 0011.25 2h-5.5z" />
+                <path d="M8.75 6A2.75 2.75 0 006 8.75v6.5A2.75 2.75 0 008.75 18h5.5A2.75 2.75 0 0017 15.25v-6.5A2.75 2.75 0 0014.25 6h-5.5z" />
+              </svg>
+            </IconButton>
+
+            <div class="flex items-center gap-2">
+              <Input value={copyLastN()} onInput={(e) => setCopyLastN(e.currentTarget.value)} class="w-16" />
+              <IconButton type="button" label={props.t('logViewer.copyLastN')} variant="secondary" onClick={() => copyLast()}>
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
+                  <path
+                    fill-rule="evenodd"
+                    d="M10 3a7 7 0 100 14 7 7 0 000-14zM8.75 7.5a.75.75 0 011.5 0v2.19l1.47.98a.75.75 0 11-.84 1.25l-1.8-1.2a.75.75 0 01-.33-.62V7.5z"
+                    clip-rule="evenodd"
+                  />
+                </svg>
+              </IconButton>
+            </div>
+
+            <IconButton type="button" label={props.t('logViewer.copyAll')} variant="secondary" onClick={() => copyAll()}>
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
+                <path
+                  fill-rule="evenodd"
+                  d="M3 4.75A2.75 2.75 0 015.75 2h5.5A2.75 2.75 0 0114 4.75v10.5A2.75 2.75 0 0111.25 18h-5.5A2.75 2.75 0 013 15.25V4.75zm5.5 1a.75.75 0 000 1.5h3a.75.75 0 000-1.5h-3zM7.75 9a.75.75 0 000 1.5h3.5a.75.75 0 000-1.5h-3.5zM7.75 12.25a.75.75 0 000 1.5h3.5a.75.75 0 000-1.5h-3.5z"
+                  clip-rule="evenodd"
+                />
+                <path d="M15.5 6.5a.75.75 0 01.75.75v8A3.25 3.25 0 0113 18.5h-.25a.75.75 0 010-1.5H13a1.75 1.75 0 001.75-1.75v-8a.75.75 0 01.75-.75z" />
+              </svg>
+            </IconButton>
+          </Show>
+
+          <IconButton type="button" label={props.t('logViewer.clear')} variant="ghost" disabled={!props.onClear} onClick={() => props.onClear?.()}>
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
               <path
                 fill-rule="evenodd"
@@ -363,45 +462,18 @@ export function LogViewer(props: LogViewerProps) {
       <Show when={!minimal()}>
         <div class="mt-3 flex flex-wrap items-center justify-between gap-2">
           <div class="flex items-center gap-2">
-            <label class="flex items-center gap-2 text-[12px] text-slate-600 dark:text-slate-300" title="Include timestamp when copying">
+            <label
+              class="flex items-center gap-2 text-[12px] text-slate-600 dark:text-slate-300"
+              title={props.t('logViewer.includeTimestampHint')}
+            >
               <input
                 type="checkbox"
                 class="h-4 w-4 rounded border-slate-300 text-amber-600 focus-visible:ring-2 focus-visible:ring-amber-500/35 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-50 dark:border-slate-700 dark:bg-slate-950/60 dark:text-amber-400 dark:focus-visible:ring-offset-slate-950"
                 checked={includeTimestamp()}
                 onChange={(e) => setIncludeTimestamp(e.currentTarget.checked)}
               />
-              Timestamps
+              {props.t('logViewer.timestamps')}
             </label>
-          </div>
-          <div class="flex flex-wrap items-center gap-2">
-            <IconButton type="button" label="Copy selected line" variant="secondary" disabled={selectedLineIdx() == null} onClick={() => copySelected()}>
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-                <path d="M5.75 2A2.75 2.75 0 003 4.75v9.5A2.75 2.75 0 005.75 17h1.5a.75.75 0 000-1.5h-1.5c-.69 0-1.25-.56-1.25-1.25v-9.5c0-.69.56-1.25 1.25-1.25h5.5c.69 0 1.25.56 1.25 1.25v1a.75.75 0 001.5 0v-1A2.75 2.75 0 0011.25 2h-5.5z" />
-                <path d="M8.75 6A2.75 2.75 0 006 8.75v6.5A2.75 2.75 0 008.75 18h5.5A2.75 2.75 0 0017 15.25v-6.5A2.75 2.75 0 0014.25 6h-5.5z" />
-              </svg>
-            </IconButton>
-            <div class="flex items-center gap-2">
-              <Input value={copyLastN()} onInput={(e) => setCopyLastN(e.currentTarget.value)} class="w-20" />
-              <IconButton type="button" label="Copy last N lines" variant="secondary" onClick={() => copyLast()}>
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-                  <path
-                    fill-rule="evenodd"
-                    d="M10 3a7 7 0 100 14 7 7 0 000-14zM8.75 7.5a.75.75 0 011.5 0v2.19l1.47.98a.75.75 0 11-.84 1.25l-1.8-1.2a.75.75 0 01-.33-.62V7.5z"
-                    clip-rule="evenodd"
-                  />
-                </svg>
-              </IconButton>
-            </div>
-            <IconButton type="button" label="Copy all lines" variant="secondary" onClick={() => copyAll()}>
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-                <path
-                  fill-rule="evenodd"
-                  d="M3 4.75A2.75 2.75 0 015.75 2h5.5A2.75 2.75 0 0114 4.75v10.5A2.75 2.75 0 0111.25 18h-5.5A2.75 2.75 0 013 15.25V4.75zm5.5 1a.75.75 0 000 1.5h3a.75.75 0 000-1.5h-3zM7.75 9a.75.75 0 000 1.5h3.5a.75.75 0 000-1.5h-3.5zM7.75 12.25a.75.75 0 000 1.5h3.5a.75.75 0 000-1.5h-3.5z"
-                  clip-rule="evenodd"
-                />
-                <path d="M15.5 6.5a.75.75 0 01.75.75v8A3.25 3.25 0 0113 18.5h-.25a.75.75 0 010-1.5H13a1.75 1.75 0 001.75-1.75v-8a.75.75 0 01.75-.75z" />
-              </svg>
-            </IconButton>
           </div>
         </div>
       </Show>
@@ -409,6 +481,8 @@ export function LogViewer(props: LogViewerProps) {
       <div class="mt-3">
         <VirtualLines
           lines={props.lines.map((l) => l.text)}
+          ariaLabel={props.t('logViewer.linesAria')}
+          defaultAriaLabel={props.t('logViewer.linesAria')}
           wrap={wrap()}
           fontSize={fontSize()}
           lineHeight={lineHeight()}
@@ -423,7 +497,6 @@ export function LogViewer(props: LogViewerProps) {
                 return
               }
               if (!live()) return
-              // If user scrolls away from the tail while live, pause updates.
               if (!isNearBottom(el)) setLive(false)
             }
             el.addEventListener('scroll', onScroll, { passive: true })
@@ -435,7 +508,7 @@ export function LogViewer(props: LogViewerProps) {
             return () => el.removeEventListener('scroll', onScroll)
           }}
           class="!bg-slate-950 !text-slate-100 !border-slate-800 max-h-[55vh] min-h-[240px]"
-          empty={<div class="p-3 text-[12px] text-slate-400">(no output yet)</div>}
+          empty={<div class="p-3 text-[12px] text-slate-400">{props.t('logViewer.empty')}</div>}
         />
       </div>
     </div>

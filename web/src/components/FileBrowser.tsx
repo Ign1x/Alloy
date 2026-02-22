@@ -1,7 +1,9 @@
 import { createEffect, createMemo, createSignal, For, Show } from 'solid-js'
+import type { I18nTranslate } from '../app/i18n'
 import { isAlloyApiError, rspc } from '../rspc'
 import { Badge } from './ui/Badge'
 import { cn } from './ui/cn'
+import { DataBoundary } from './ui/DataBoundary'
 import { EmptyState } from './ui/EmptyState'
 import { ErrorState } from './ui/ErrorState'
 import { IconButton } from './ui/IconButton'
@@ -24,18 +26,18 @@ function formatBytes(bytes: number | null | undefined): string {
   return `${sign}${v.toFixed(decimals)}${units[i]}`
 }
 
-function formatRelativeTime(unixMs: number | null | undefined): string {
+function formatRelativeTime(unixMs: number | null | undefined, t: I18nTranslate): string {
   if (!unixMs || !Number.isFinite(unixMs) || unixMs <= 0) return '—'
   const deltaMs = Date.now() - unixMs
   const sec = Math.floor(deltaMs / 1000)
-  if (sec < 10) return 'just now'
-  if (sec < 60) return `${sec}s ago`
+  if (sec < 10) return t('fileBrowser.relativeJustNow')
+  if (sec < 60) return t('fileBrowser.relativeSecondsAgo', { count: sec })
   const min = Math.floor(sec / 60)
-  if (min < 60) return `${min}m ago`
+  if (min < 60) return t('fileBrowser.relativeMinutesAgo', { count: min })
   const hr = Math.floor(min / 60)
-  if (hr < 48) return `${hr}h ago`
+  if (hr < 48) return t('fileBrowser.relativeHoursAgo', { count: hr })
   const day = Math.floor(hr / 24)
-  return `${day}d ago`
+  return t('fileBrowser.relativeDaysAgo', { count: day })
 }
 
 function parseUnixMs(raw: unknown): number | null {
@@ -113,32 +115,32 @@ function highlightKeyValueLine(line: string) {
   )
 }
 
-function fileErrorSuggestion(err: unknown): { title: string; hints: string[] } | null {
+function fileErrorSuggestion(err: unknown, t: I18nTranslate): { title: string; hints: string[] } | null {
   if (!isAlloyApiError(err)) return null
   const code = err.data.code
   if (code === 'not_found') {
-    return { title: 'Not found', hints: ['Refresh and retry.'] }
+    return { title: t('fileBrowser.errorNotFoundTitle'), hints: [t('fileBrowser.errorRefreshRetryHint')] }
   }
   if (code === 'permission_denied') {
     return {
-      title: 'Permission denied',
-      hints: ['Check agent data root and file permissions.'],
+      title: t('fileBrowser.errorPermissionDeniedTitle'),
+      hints: [t('fileBrowser.errorCheckPermissionsHint')],
     }
   }
   if (code === 'invalid_utf8') {
     return {
-      title: 'Unsupported file type',
-      hints: ['Preview supports UTF‑8 text only.'],
+      title: t('fileBrowser.errorUnsupportedFileTitle'),
+      hints: [t('fileBrowser.errorUtf8OnlyHint')],
     }
   }
   if (code === 'invalid_param') {
-    return { title: 'Invalid request', hints: ['Select a different entry.'] }
+    return { title: t('fileBrowser.errorInvalidRequestTitle'), hints: [t('fileBrowser.errorSelectDifferentHint')] }
   }
   if (code === 'agent_unreachable') {
-    return { title: 'Agent offline', hints: ['Retry after reconnecting.'] }
+    return { title: t('fileBrowser.errorAgentOfflineTitle'), hints: [t('fileBrowser.errorRetryReconnectHint')] }
   }
   if (code === 'timeout') {
-    return { title: 'Timed out', hints: ['Retry the request.'] }
+    return { title: t('fileBrowser.errorTimedOutTitle'), hints: [t('fileBrowser.errorRetryRequestHint')] }
   }
   return null
 }
@@ -157,10 +159,12 @@ function compareName(aRaw: string, bRaw: string): number {
 }
 
 export type FileBrowserProps = {
+  t: I18nTranslate
   enabled: boolean
   title?: string
   initialPath?: string
   initialSelectedFile?: string | null
+  onOpenSettings?: () => void
   rootPath?: string
   rootLabel?: string
   class?: string
@@ -344,11 +348,11 @@ export function FileBrowser(props: FileBrowserProps) {
   )
 
   createEffect(() => {
-    // Reset when file changes.
     selectedFile()
     setLogLive(true)
     setLogCursor(null)
     setLogLines([])
+    setSelectedLineIdx(null)
   })
 
   createEffect(() => {
@@ -377,6 +381,7 @@ export function FileBrowser(props: FileBrowserProps) {
   })
 
   const [goLineDraft, setGoLineDraft] = createSignal('')
+  const [selectedLineIdx, setSelectedLineIdx] = createSignal<number | null>(null)
   let codeScrollEl: HTMLDivElement | undefined
 
   const goLineNumber = createMemo(() => {
@@ -405,34 +410,63 @@ export function FileBrowser(props: FileBrowserProps) {
     const idx = n - 1
     const lh = 18
     if (codeScrollEl) codeScrollEl.scrollTop = Math.max(0, idx * lh - codeScrollEl.clientHeight * 0.25)
+    setSelectedLineIdx(idx)
+  }
+
+  async function copyPath(pathValue: string) {
+    try {
+      await navigator.clipboard.writeText(pathValue)
+    } catch {}
+  }
+
+  async function copyPreviewText() {
+    try {
+      await navigator.clipboard.writeText(fileText.data?.text ?? '')
+    } catch {}
+  }
+
+  async function copySelectedLine() {
+    const idx = selectedLineIdx()
+    if (idx == null) return
+    const line = fileLines()[idx]
+    if (line == null) return
+    try {
+      await navigator.clipboard.writeText(line)
+    } catch {}
   }
 
   return (
     <div class={cn('flex min-h-0 flex-1 flex-col md:flex-row', props.class)}>
-      <aside class="flex w-full flex-none flex-col border-b border-slate-200 bg-white/60 dark:border-slate-800 dark:bg-slate-950/60 md:w-[420px] md:border-b-0 md:border-r max-h-[45vh] md:max-h-none">
+      <aside class="flex w-full flex-none flex-col border-b border-slate-200 bg-white/60 dark:border-slate-800 dark:bg-slate-950/60 md:w-[360px] md:border-b-0 md:border-r max-h-[50vh] md:max-h-none">
           <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-white/60 px-4 py-3 dark:border-slate-800 dark:bg-slate-950/60">
             <div class="min-w-0">
-              <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">{props.title ?? 'Files'}</div>
+              <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">{props.title ?? props.t('fileBrowser.title')}</div>
               <div class="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400">
                 <Show when={lastRefreshAt()}>
-                  {(t) => <span>Updated {formatRelativeTime(t())}</span>}
+                  {(timeValue) => <span>{props.t('fileBrowser.updatedAt', { value: formatRelativeTime(timeValue(), props.t) })}</span>}
                 </Show>
                 <Show when={fsList.isPending}>
                   <span class="inline-flex items-center gap-1">
                     <span class="h-1.5 w-1.5 rounded-full bg-slate-500 animate-pulse" />
-                    loading
+                    {props.t('fileBrowser.statusLoading')}
                   </span>
                 </Show>
                 <Show when={fsList.isError}>
                   <span class="inline-flex items-center gap-1">
                     <span class="h-1.5 w-1.5 rounded-full bg-rose-500" />
-                    error
+                    {props.t('fileBrowser.statusError')}
                   </span>
                 </Show>
               </div>
             </div>
             <div class="flex items-center gap-2">
-              <IconButton type="button" label="Back" variant="ghost" disabled={backStack().length === 0} onClick={() => goBack()}>
+              <IconButton
+                type="button"
+                label={props.t('fileBrowser.back')}
+                variant="ghost"
+                disabled={backStack().length === 0}
+                onClick={() => goBack()}
+              >
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
                   <path
                     fill-rule="evenodd"
@@ -441,7 +475,13 @@ export function FileBrowser(props: FileBrowserProps) {
                   />
                 </svg>
               </IconButton>
-              <IconButton type="button" label="Forward" variant="ghost" disabled={forwardStack().length === 0} onClick={() => goForward()}>
+              <IconButton
+                type="button"
+                label={props.t('fileBrowser.forward')}
+                variant="ghost"
+                disabled={forwardStack().length === 0}
+                onClick={() => goForward()}
+              >
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
                   <path
                     fill-rule="evenodd"
@@ -452,7 +492,7 @@ export function FileBrowser(props: FileBrowserProps) {
               </IconButton>
               <IconButton
                 type="button"
-                label="Up"
+                label={props.t('fileBrowser.up')}
                 variant="ghost"
                 disabled={!path() || path() === rootPath()}
                 onClick={() => {
@@ -470,7 +510,7 @@ export function FileBrowser(props: FileBrowserProps) {
                   />
                 </svg>
               </IconButton>
-              <IconButton type="button" label="Refresh" variant="ghost" onClick={() => fsList.refetch()}>
+              <IconButton type="button" label={props.t('fileBrowser.refresh')} variant="ghost" onClick={() => fsList.refetch()}>
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
                   <path
                     fill-rule="evenodd"
@@ -523,7 +563,9 @@ export function FileBrowser(props: FileBrowserProps) {
               <Input
                 value={pathDraft()}
                 onInput={(e) => setPathDraft(e.currentTarget.value)}
-                placeholder={rootPath() ? 'Type a path (relative to this root)' : 'Type a path (relative to /data)'}
+                placeholder={
+                  rootPath() ? props.t('fileBrowser.pathPlaceholderRoot') : props.t('fileBrowser.pathPlaceholderData')
+                }
                 rightIcon={
                   <button
                     type="submit"
@@ -534,8 +576,8 @@ export function FileBrowser(props: FileBrowserProps) {
                         : '',
                     )}
                     disabled={!canNavigateToDraft()}
-                    aria-label="Go"
-                    title={canNavigateToDraft() ? 'Go (Enter)' : 'Already here'}
+                    aria-label={props.t('fileBrowser.go')}
+                    title={canNavigateToDraft() ? props.t('fileBrowser.goEnter') : props.t('fileBrowser.alreadyHere')}
                   >
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
                       <path
@@ -553,105 +595,103 @@ export function FileBrowser(props: FileBrowserProps) {
           <div class="min-h-0 flex-1 overflow-auto p-2">
             <div class="grid grid-cols-[1fr_110px_120px] gap-1 px-2 py-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
               <button type="button" class="text-left hover:text-slate-700 dark:hover:text-slate-200" onClick={() => toggleSort('name')}>
-                Name {sortKey() === 'name' ? (sortDir() === 'asc' ? '▲' : '▼') : ''}
+                {props.t('fileBrowser.columnName')} {sortKey() === 'name' ? (sortDir() === 'asc' ? '▲' : '▼') : ''}
               </button>
               <button type="button" class="text-right hover:text-slate-700 dark:hover:text-slate-200" onClick={() => toggleSort('size')}>
-                Size {sortKey() === 'size' ? (sortDir() === 'asc' ? '▲' : '▼') : ''}
+                {props.t('fileBrowser.columnSize')} {sortKey() === 'size' ? (sortDir() === 'asc' ? '▲' : '▼') : ''}
               </button>
               <button type="button" class="text-right hover:text-slate-700 dark:hover:text-slate-200" onClick={() => toggleSort('modified')}>
-                Modified {sortKey() === 'modified' ? (sortDir() === 'asc' ? '▲' : '▼') : ''}
+                {props.t('fileBrowser.columnModified')} {sortKey() === 'modified' ? (sortDir() === 'asc' ? '▲' : '▼') : ''}
               </button>
             </div>
 
-            <Show when={!fsList.isPending} fallback={<div class="p-2"><Skeleton lines={6} /></div>}>
-              <Show
-                when={!fsList.isError}
-                fallback={<ErrorState error={fsList.error} title="Failed to list directory" onRetry={() => fsList.refetch()} />}
-              >
-                <Show
-                  when={sortedEntries().length > 0}
-                  fallback={
-                    <EmptyState
-                      title="Empty directory"
-                      actions={
-                        <IconButton type="button" label="Refresh" variant="secondary" onClick={() => fsList.refetch()}>
-                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-                            <path
-                              fill-rule="evenodd"
-                              d="M15.312 11.424a5.5 5.5 0 01-9.201 2.466.75.75 0 00-1.06 1.06 7 7 0 0011.698-3.132.75.75 0 00-1.437-.394z"
-                              clip-rule="evenodd"
-                            />
-                            <path
-                              fill-rule="evenodd"
-                              d="M4.688 8.576a5.5 5.5 0 019.201-2.466.75.75 0 001.06-1.06A7 7 0 003.25 8.182a.75.75 0 001.438.394z"
-                              clip-rule="evenodd"
-                            />
-                          </svg>
-                        </IconButton>
-                      }
+            <DataBoundary
+              t={props.t}
+              loading={fsList.isPending}
+              loadingLines={6}
+              error={fsList.error}
+              errorTitle={props.t('fileBrowser.errorListDirTitle')}
+              hasData={sortedEntries().length > 0}
+              empty={sortedEntries().length === 0}
+              emptyTitle={props.t('fileBrowser.emptyDirectory')}
+              emptyActions={
+                <IconButton type="button" label={props.t('fileBrowser.refresh')} variant="secondary" onClick={() => fsList.refetch()}>
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
+                    <path
+                      fill-rule="evenodd"
+                      d="M15.312 11.424a5.5 5.5 0 01-9.201 2.466.75.75 0 00-1.06 1.06 7 7 0 0011.698-3.132.75.75 0 00-1.437-.394z"
+                      clip-rule="evenodd"
                     />
-                  }
-                >
-                  <div class="space-y-0.5">
-                    <For each={sortedEntries()}>
-                      {(e) => {
-                        const fullPath = () => joinPath(path(), e.name)
-                        const isSelected = () => selectedFile() === fullPath()
-                        const modified = () => parseUnixMs(e.modified_unix_ms)
-                        return (
-                          <button
-                            type="button"
-                            class={`grid w-full grid-cols-[1fr_110px_120px] items-center gap-1 rounded-xl px-2 py-2 text-left text-[12px] transition-colors ${
-                              isSelected()
-                                ? 'bg-amber-500/10 ring-1 ring-inset ring-amber-500/20'
-                                : 'hover:bg-slate-100 dark:hover:bg-slate-900/60'
-                            }`}
-                            onClick={() => {
-                              if (e.is_dir) {
-                                navigate(fullPath())
-                              } else {
-                                setSelectedFile(fullPath())
+                    <path
+                      fill-rule="evenodd"
+                      d="M4.688 8.576a5.5 5.5 0 019.201-2.466.75.75 0 001.06-1.06A7 7 0 003.25 8.182a.75.75 0 001.438.394z"
+                      clip-rule="evenodd"
+                    />
+                  </svg>
+                </IconButton>
+              }
+              onRetry={() => fsList.refetch()}
+              onOpenSettings={props.onOpenSettings}
+              settingsCtaLabel={props.t('downloads.openSettings')}
+            >
+              <div class="space-y-0.5">
+                <For each={sortedEntries()}>
+                  {(e) => {
+                    const fullPath = () => joinPath(path(), e.name)
+                    const isSelected = () => selectedFile() === fullPath()
+                    const modified = () => parseUnixMs(e.modified_unix_ms)
+                    return (
+                      <button
+                        type="button"
+                        class={`grid w-full grid-cols-[1fr_110px_120px] items-center gap-1 rounded-xl px-2 py-2 text-left text-[12px] transition-colors ${
+                          isSelected()
+                            ? 'bg-amber-500/10 ring-1 ring-inset ring-amber-500/20'
+                            : 'hover:bg-slate-100 dark:hover:bg-slate-900/60'
+                        }`}
+                        onClick={() => {
+                          if (e.is_dir) {
+                            navigate(fullPath())
+                          } else {
+                            setSelectedFile(fullPath())
+                          }
+                        }}
+                        title={fullPath()}
+                      >
+                        <div class="flex min-w-0 items-center gap-2">
+                          <span class="text-slate-500 dark:text-slate-400" aria-hidden="true">
+                            <Show
+                              when={e.is_dir}
+                              fallback={
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
+                                  <path
+                                    fill-rule="evenodd"
+                                    d="M4.75 3A2.75 2.75 0 002 5.75v8.5A2.75 2.75 0 004.75 17h10.5A2.75 2.75 0 0018 14.25V7.45A2.75 2.75 0 0015.25 4.7h-2.994a1.25 1.25 0 01-.884-.366l-.56-.56A2.75 2.75 0 009.69 3H4.75z"
+                                    clip-rule="evenodd"
+                                  />
+                                </svg>
                               }
-                            }}
-                            title={fullPath()}
-                          >
-                            <div class="flex min-w-0 items-center gap-2">
-                              <span class="text-slate-500 dark:text-slate-400" aria-hidden="true">
-                                <Show
-                                  when={e.is_dir}
-                                  fallback={
-                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-                                      <path
-                                        fill-rule="evenodd"
-                                        d="M4.75 3A2.75 2.75 0 002 5.75v8.5A2.75 2.75 0 004.75 17h10.5A2.75 2.75 0 0018 14.25V7.45A2.75 2.75 0 0015.25 4.7h-2.994a1.25 1.25 0 01-.884-.366l-.56-.56A2.75 2.75 0 009.69 3H4.75z"
-                                        clip-rule="evenodd"
-                                      />
-                                    </svg>
-                                  }
-                                >
-                                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-                                    <path d="M2 6.75A2.75 2.75 0 014.75 4h2.69c.73 0 1.429.29 1.945.806l.56.56c.214.214.504.334.806.334h4.504A2.75 2.75 0 0118 8.45v5.8A2.75 2.75 0 0115.25 17H4.75A2.75 2.75 0 012 14.25v-7.5z" />
-                                  </svg>
-                                </Show>
-                              </span>
-                              <span class="truncate font-mono text-slate-900 dark:text-slate-100">{e.name}</span>
-                            </div>
-                            <div class="text-right font-mono text-[11px] text-slate-500 dark:text-slate-400">
-                              {e.is_dir ? '—' : formatBytes(e.size_bytes)}
-                            </div>
-                            <div class="text-right font-mono text-[11px] text-slate-500 dark:text-slate-400">
-                              <Show when={modified()} fallback={<span>—</span>}>
-                                {(m) => <span title={new Date(m()).toLocaleString()}>{formatRelativeTime(m())}</span>}
-                              </Show>
-                            </div>
-                          </button>
-                        )
-                      }}
-                    </For>
-                  </div>
-                </Show>
-              </Show>
-            </Show>
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
+                                <path d="M2 6.75A2.75 2.75 0 014.75 4h2.69c.73 0 1.429.29 1.945.806l.56.56c.214.214.504.334.806.334h4.504A2.75 2.75 0 0118 8.45v5.8A2.75 2.75 0 0115.25 17H4.75A2.75 2.75 0 012 14.25v-7.5z" />
+                              </svg>
+                            </Show>
+                          </span>
+                          <span class="truncate font-mono text-slate-900 dark:text-slate-100">{e.name}</span>
+                        </div>
+                        <div class="text-right font-mono text-[11px] text-slate-500 dark:text-slate-400">
+                          {e.is_dir ? '—' : formatBytes(e.size_bytes)}
+                        </div>
+                        <div class="text-right font-mono text-[11px] text-slate-500 dark:text-slate-400">
+                          <Show when={modified()} fallback={<span>—</span>}>
+                            {(m) => <span title={new Date(m()).toLocaleString()}>{formatRelativeTime(m(), props.t)}</span>}
+                          </Show>
+                        </div>
+                      </button>
+                    )
+                  }}
+                </For>
+              </div>
+            </DataBoundary>
           </div>
       </aside>
 
@@ -661,7 +701,7 @@ export function FileBrowser(props: FileBrowserProps) {
             when={selectedFile()}
             fallback={
               <div class="flex flex-1 items-center justify-center">
-                <EmptyState title="Select a file" />
+                <EmptyState title={props.t('fileBrowser.selectFile')} />
               </div>
             }
           >
@@ -678,7 +718,7 @@ export function FileBrowser(props: FileBrowserProps) {
                         <div class="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400">
                           <Badge variant="neutral">{formatBytes(d().size_bytes)}</Badge>
                           <Show when={d().size_bytes > READ_LIMIT}>
-                            <Badge variant="warning">showing first {formatBytes(READ_LIMIT)}</Badge>
+                            <Badge variant="warning">{props.t('fileBrowser.showingFirst', { size: formatBytes(READ_LIMIT) })}</Badge>
                           </Show>
                           <Badge variant="neutral">{fileLanguage()}</Badge>
                         </div>
@@ -686,18 +726,18 @@ export function FileBrowser(props: FileBrowserProps) {
                     </Show>
                     <Show when={selectedIsLog()}>
                       <div class="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400">
-                        <Badge variant="neutral">log tail</Badge>
+                        <Badge variant="neutral">{props.t('fileBrowser.logTail')}</Badge>
                         <Show when={logTail.isPending}>
-                          <Badge variant="neutral">loading…</Badge>
+                          <Badge variant="neutral">{props.t('fileBrowser.statusLoading')}</Badge>
                         </Show>
                         <Show when={logTail.isError}>
-                          <Badge variant="danger">error</Badge>
+                          <Badge variant="danger">{props.t('fileBrowser.statusError')}</Badge>
                         </Show>
                       </div>
                     </Show>
                   </div>
                   <div class="flex flex-wrap items-center gap-2">
-                    <IconButton type="button" label="Copy path" variant="secondary" onClick={async () => navigator.clipboard.writeText(file())}>
+                    <IconButton type="button" label={props.t('fileBrowser.copyPath')} variant="secondary" onClick={() => void copyPath(file())}>
                       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
                         <path d="M5.75 2A2.75 2.75 0 003 4.75v9.5A2.75 2.75 0 005.75 17h1.5a.75.75 0 000-1.5h-1.5c-.69 0-1.25-.56-1.25-1.25v-9.5c0-.69.56-1.25 1.25-1.25h5.5c.69 0 1.25.56 1.25 1.25v1a.75.75 0 001.5 0v-1A2.75 2.75 0 0011.25 2h-5.5z" />
                         <path d="M8.75 6A2.75 2.75 0 006 8.75v6.5A2.75 2.75 0 008.75 18h5.5A2.75 2.75 0 0017 15.25v-6.5A2.75 2.75 0 0014.25 6h-5.5z" />
@@ -706,10 +746,10 @@ export function FileBrowser(props: FileBrowserProps) {
                     <Show when={!selectedIsLog()}>
                       <IconButton
                         type="button"
-                        label="Copy file"
+                        label={props.t('fileBrowser.copyFile')}
                         variant="secondary"
                         disabled={!fileText.data?.text}
-                        onClick={async () => navigator.clipboard.writeText(fileText.data?.text ?? '')}
+                        onClick={() => void copyPreviewText()}
                       >
                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
                           <path
@@ -726,10 +766,11 @@ export function FileBrowser(props: FileBrowserProps) {
                 <Show when={selectedIsLog()}>
                   <Show
                     when={!logTail.isError}
-                    fallback={<ErrorState error={logTail.error} title="Failed to tail log" onRetry={() => logTail.refetch()} />}
+                    fallback={<ErrorState t={props.t} error={logTail.error} title={props.t('fileBrowser.errorTailLogTitle')} onRetry={() => logTail.refetch()} />}
                   >
                     <LogViewer
-                      title="Tail"
+                      t={props.t}
+                      title={props.t('fileBrowser.tailTitle')}
                       lines={logLines()}
                       loading={logTail.isPending}
                       live={logLive()}
@@ -755,8 +796,8 @@ export function FileBrowser(props: FileBrowserProps) {
                         when={isAlloyApiError(fileText.error) && fileText.error.data.code === 'invalid_utf8'}
                         fallback={
                           <div class="space-y-3">
-                            <ErrorState error={fileText.error} title="Failed to read file" onRetry={() => fileText.refetch()} />
-                            <Show when={fileErrorSuggestion(fileText.error)}>
+                            <ErrorState t={props.t} error={fileText.error} title={props.t('fileBrowser.errorReadFileTitle')} onRetry={() => fileText.refetch()} />
+                            <Show when={fileErrorSuggestion(fileText.error, props.t)}>
                               {(s) => (
                                 <div class="rounded-2xl border border-slate-200 bg-white/70 p-4 text-[12px] text-slate-700 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-200 dark:shadow-none">
                                   <div class="text-sm font-semibold">{s().title}</div>
@@ -769,7 +810,7 @@ export function FileBrowser(props: FileBrowserProps) {
                           </div>
                         }
                       >
-                        <EmptyState title="Preview not supported" />
+                        <EmptyState title={props.t('fileBrowser.previewNotSupported')} />
                       </Show>
                     }
                   >
@@ -787,7 +828,7 @@ export function FileBrowser(props: FileBrowserProps) {
                               value={goLineDraft()}
                               onInput={(e) => setGoLineDraft(e.currentTarget.value)}
                               class="w-28"
-                              placeholder="Line #"
+                              placeholder={props.t('fileBrowser.lineNumber')}
                               invalid={goLineInvalid()}
                               rightIcon={
                                 <button
@@ -799,8 +840,8 @@ export function FileBrowser(props: FileBrowserProps) {
                                       : '',
                                   )}
                                   disabled={goLineInvalid() || !goLineDraft().trim()}
-                                  aria-label="Go to line"
-                                  title="Go (Enter)"
+                                  aria-label={props.t('fileBrowser.goToLine')}
+                                  title={props.t('fileBrowser.goEnter')}
                                 >
                                   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
                                     <path
@@ -813,15 +854,35 @@ export function FileBrowser(props: FileBrowserProps) {
                               }
                             />
                           </form>
-                          <div class="font-mono text-[11px] text-slate-500 dark:text-slate-400">{fileLines().length} lines</div>
+
+                          <IconButton
+                            type="button"
+                            label={props.t('fileBrowser.copySelectedLine')}
+                            variant="secondary"
+                            disabled={selectedLineIdx() == null}
+                            onClick={() => void copySelectedLine()}
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
+                              <path d="M5.75 2A2.75 2.75 0 003 4.75v9.5A2.75 2.75 0 005.75 17h1.5a.75.75 0 000-1.5h-1.5c-.69 0-1.25-.56-1.25-1.25v-9.5c0-.69.56-1.25 1.25-1.25h5.5c.69 0 1.25.56 1.25 1.25v1a.75.75 0 001.5 0v-1A2.75 2.75 0 0011.25 2h-5.5z" />
+                              <path d="M8.75 6A2.75 2.75 0 006 8.75v6.5A2.75 2.75 0 008.75 18h5.5A2.75 2.75 0 0017 15.25v-6.5A2.75 2.75 0 0014.25 6h-5.5z" />
+                            </svg>
+                          </IconButton>
+                          <div class="font-mono text-[11px] text-slate-500 dark:text-slate-400">
+                            {props.t('fileBrowser.lineCount', { count: fileLines().length })}
+                          </div>
                         </div>
 
                         <VirtualLines
                           lines={fileLines()}
+                          ariaLabel={props.t('fileBrowser.linesAria')}
+                          defaultAriaLabel={props.t('fileBrowser.linesAria')}
                           wrap={false}
                           showLineNumbers={true}
                           fontSize={12}
                           lineHeight={18}
+                          selectedIndex={selectedLineIdx()}
+                          onSelectIndex={(idx) => setSelectedLineIdx(idx)}
+                          empty={<div class="p-3 text-[12px] text-slate-500">{props.t('fileBrowser.emptyFile')}</div>}
                           onScrollEl={(el) => {
                             codeScrollEl = el
                           }}

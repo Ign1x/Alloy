@@ -67,8 +67,11 @@ type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 trait SaveSearchProviderBackend: Send + Sync {
     fn id(&self) -> ProviderId;
 
-    fn search_worlds<'a>(&'a self, query: &'a str, limit: u32)
-        -> BoxFuture<'a, anyhow::Result<Vec<SaveSearchHit>>>;
+    fn search_worlds<'a>(
+        &'a self,
+        query: &'a str,
+        limit: u32,
+    ) -> BoxFuture<'a, anyhow::Result<Vec<SaveSearchHit>>>;
 
     fn resolve_download<'a>(
         &'a self,
@@ -291,8 +294,7 @@ fn resolve_cache() -> &'static Mutex<HashMap<ResolveCacheKey, ResolveCacheEntry>
 }
 
 fn provider_state() -> &'static Mutex<HashMap<ProviderId, ProviderRuntimeState>> {
-    static STATE: OnceLock<Mutex<HashMap<ProviderId, ProviderRuntimeState>>> =
-        OnceLock::new();
+    static STATE: OnceLock<Mutex<HashMap<ProviderId, ProviderRuntimeState>>> = OnceLock::new();
     STATE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
@@ -471,9 +473,9 @@ fn put_resolve_cache(key: ResolveCacheKey, value: ResolvedSaveDownload) {
 }
 
 fn host_allowed(host: &str, allowlist: &[&str]) -> bool {
-    allowlist.iter().any(|allowed| {
-        host == *allowed || host.strip_suffix(&format!(".{allowed}")).is_some()
-    })
+    allowlist
+        .iter()
+        .any(|allowed| host == *allowed || host.strip_suffix(&format!(".{allowed}")).is_some())
 }
 
 fn validate_allowed_https_url(
@@ -810,7 +812,12 @@ async fn search_worlds_modrinth(query: &str, limit: u32) -> anyhow::Result<Vec<S
             summary: trim_non_empty(hit.description),
             page_url,
             icon_url: trim_non_empty(hit.icon_url),
-            game_versions: hit.versions.unwrap_or_default().into_iter().take(8).collect(),
+            game_versions: hit
+                .versions
+                .unwrap_or_default()
+                .into_iter()
+                .take(8)
+                .collect(),
             downloads: hit.downloads,
         });
     }

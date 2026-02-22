@@ -28,6 +28,8 @@ function highlightText(text: string, query: string): JSX.Element {
 
 export type VirtualLinesProps = {
   lines: string[]
+  ariaLabel?: string
+  defaultAriaLabel?: string
   fontSize?: number
   lineHeight?: number
   wrap?: boolean
@@ -94,9 +96,9 @@ export function VirtualLines(props: VirtualLinesProps) {
         'line-height': `${lineHeight()}px`,
       }}
       role="region"
-      aria-label="Lines"
+      aria-label={props.ariaLabel ?? props.defaultAriaLabel ?? 'Lines'}
     >
-      <Show when={props.lines.length > 0} fallback={props.empty ?? <div class="p-3 text-[12px] text-slate-500">(no output)</div>}>
+      <Show when={props.lines.length > 0} fallback={props.empty ?? <div class="p-3 text-[12px] text-slate-500" />}>
         <Show
           when={!props.wrap}
           fallback={

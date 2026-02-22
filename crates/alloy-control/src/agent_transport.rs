@@ -193,13 +193,12 @@ impl AgentTransport {
                                 let msg = status.message();
                                 let not_delivered = msg.contains("no active tunnel")
                                     || msg.contains("tunnel send failed");
-                                if not_delivered || safe_to_retry_over_direct(method) {
-                                    if let Ok(v) = self
+                                if (not_delivered || safe_to_retry_over_direct(method))
+                                    && let Ok(v) = self
                                         .call_direct_bytes::<Req, Res>(method, req_bytes, timeout)
                                         .await
-                                    {
-                                        return Ok(v);
-                                    }
+                                {
+                                    return Ok(v);
                                 }
                             }
                             return Err(status);
@@ -309,7 +308,7 @@ impl AgentTransport {
 
         let path = tonic::codegen::http::uri::PathAndQuery::from_static(method);
         let codec = tonic::codec::ProstCodec::default();
-        let resp = grpc.unary(request, path, codec).await.map_err(|s| s)?;
+        let resp = grpc.unary(request, path, codec).await?;
         Ok(resp.into_inner())
     }
 }

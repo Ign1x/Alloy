@@ -12,6 +12,7 @@ export type FactorioCreateSectionProps = {
 
 export default function FactorioCreateSection(props: FactorioCreateSectionProps) {
   const {
+    t,
     selectedTemplate,
     createAdvanced,
     setCreateAdvanced,
@@ -45,15 +46,17 @@ export default function FactorioCreateSection(props: FactorioCreateSectionProps)
     <Show when={selectedTemplate() === 'factorio:vanilla'}>
       <div class="space-y-3 border-t border-slate-200 pt-3 dark:border-slate-800">
         <div class="flex items-center justify-between gap-3">
-          <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Factorio</div>
+          <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+            {t('instancesCreate.section.factorio')}
+          </div>
           <Button
             size="xs"
             variant={createAdvanced() ? 'secondary' : 'ghost'}
             onClick={() => setCreateAdvanced((v: boolean) => !v)}
-            title="Show or hide advanced fields"
+            title={t('instancesCreate.advancedToggleTitle')}
           >
             <span class="inline-flex items-center gap-2">
-              {createAdvanced() ? 'Hide advanced' : 'Advanced'}
+              {createAdvanced() ? t('instancesCreate.hideAdvanced') : t('instancesCreate.advanced')}
               <Show when={!createAdvanced() && createAdvancedDirty()}>
                 <span class="h-1.5 w-1.5 rounded-full bg-amber-500" aria-hidden="true" />
               </Show>
@@ -62,7 +65,10 @@ export default function FactorioCreateSection(props: FactorioCreateSectionProps)
         </div>
 
         <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <Field label={<LabelTip label="Version" content="stable / experimental or explicit version." />} error={createFieldErrors().version}>
+          <Field
+            label={<LabelTip label={t('instancesCreate.factorio.versionLabel')} content={t('instancesCreate.factorio.versionHint')} />}
+            error={createFieldErrors().version}
+          >
             <Dropdown
               label=""
               value={fxVersion()}
@@ -71,7 +77,10 @@ export default function FactorioCreateSection(props: FactorioCreateSectionProps)
             />
           </Field>
 
-          <Field label={<LabelTip label="Max players" content="Maximum concurrent players." />} error={createFieldErrors().max_players}>
+          <Field
+            label={<LabelTip label={t('instancesCreate.common.maxPlayersLabel')} content={t('instancesCreate.factorio.maxPlayersHint')} />}
+            error={createFieldErrors().max_players}
+          >
             <Input
               type="number"
               value={fxMaxPlayers()}
@@ -83,16 +92,22 @@ export default function FactorioCreateSection(props: FactorioCreateSectionProps)
         </div>
 
         <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <Field label={<LabelTip label="Server name" content="Shown in multiplayer browser." />} error={createFieldErrors().server_name}>
+          <Field
+            label={<LabelTip label={t('instancesCreate.common.serverNameLabel')} content={t('instancesCreate.factorio.serverNameHint')} />}
+            error={createFieldErrors().server_name}
+          >
             <Input
               value={fxServerName()}
               onInput={(e) => setFxServerName(e.currentTarget.value)}
-              placeholder="Alloy Factorio server"
+              placeholder={t('instancesCreate.factorio.defaultServerNamePlaceholder')}
               invalid={Boolean(createFieldErrors().server_name)}
             />
           </Field>
 
-          <Field label={<LabelTip label="Port (UDP)" content="Game port. Use 0 to auto-assign." />} error={createFieldErrors().port}>
+          <Field
+            label={<LabelTip label={t('instancesCreate.common.portUdpLabel')} content={t('instancesCreate.factorio.portUdpHint')} />}
+            error={createFieldErrors().port}
+          >
             <Input
               ref={(el) => {
                 setCreateFxPortEl?.(el)
@@ -106,7 +121,10 @@ export default function FactorioCreateSection(props: FactorioCreateSectionProps)
           </Field>
         </div>
 
-        <Field label={<LabelTip label="Public listing" content="List this server publicly in Factorio browser." />} error={createFieldErrors().public}>
+        <Field
+          label={<LabelTip label={t('instancesCreate.common.publicListingLabel')} content={t('instancesCreate.factorio.publicListingHint')} />}
+          error={createFieldErrors().public}
+        >
           <label class="inline-flex items-center gap-2 text-[12px] text-slate-700 dark:text-slate-200">
             <input
               type="checkbox"
@@ -114,25 +132,28 @@ export default function FactorioCreateSection(props: FactorioCreateSectionProps)
               checked={fxPublic()}
               onChange={(e) => setFxPublic(e.currentTarget.checked)}
             />
-            <span>Enable public listing</span>
+            <span>{t('instancesCreate.enablePublicListing')}</span>
           </label>
         </Field>
 
         <Show when={createAdvanced()}>
           <>
             <Field
-              label={<LabelTip label="Description" content="Optional description for server browser." />}
+              label={<LabelTip label={t('instancesCreate.common.descriptionLabel')} content={t('instancesCreate.common.descriptionOptionalHint')} />}
               error={createFieldErrors().server_description}
             >
               <Input
                 value={fxServerDescription()}
                 onInput={(e) => setFxServerDescription(e.currentTarget.value)}
-                placeholder=""
+                placeholder={t('instancesCreate.common.descriptionPlaceholder')}
                 invalid={Boolean(createFieldErrors().server_description)}
               />
             </Field>
 
-            <Field label={<LabelTip label="RCON" content="Enable remote console access." />} error={createFieldErrors().rcon_enabled}>
+            <Field
+              label={<LabelTip label={t('instancesCreate.factorio.rconLabel')} content={t('instancesCreate.factorio.rconHint')} />}
+              error={createFieldErrors().rcon_enabled}
+            >
               <label class="inline-flex items-center gap-2 text-[12px] text-slate-700 dark:text-slate-200">
                 <input
                   type="checkbox"
@@ -140,13 +161,16 @@ export default function FactorioCreateSection(props: FactorioCreateSectionProps)
                   checked={fxRconEnabled()}
                   onChange={(e) => setFxRconEnabled(e.currentTarget.checked)}
                 />
-                <span>Enable RCON</span>
+                <span>{t('instancesCreate.enableRcon')}</span>
               </label>
             </Field>
 
             <Show when={fxRconEnabled()}>
               <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <Field label={<LabelTip label="RCON port" content="RCON TCP port. Use 0 to auto-assign." />} error={createFieldErrors().rcon_port}>
+                <Field
+                  label={<LabelTip label={t('instancesCreate.factorio.rconPortLabel')} content={t('instancesCreate.factorio.rconPortHint')} />}
+                  error={createFieldErrors().rcon_port}
+                >
                   <Input
                     ref={(el) => {
                       setCreateFxRconPortEl?.(el)
@@ -160,7 +184,7 @@ export default function FactorioCreateSection(props: FactorioCreateSectionProps)
                 </Field>
 
                 <Field
-                  label={<LabelTip label="RCON password" content="Required when RCON is enabled." />}
+                  label={<LabelTip label={t('instancesCreate.factorio.rconPasswordLabel')} content={t('instancesCreate.factorio.rconPasswordHint')} />}
                   error={createFieldErrors().rcon_password}
                 >
                   <Input
@@ -170,7 +194,7 @@ export default function FactorioCreateSection(props: FactorioCreateSectionProps)
                     type="password"
                     value={fxRconPassword()}
                     onInput={(e) => setFxRconPassword(e.currentTarget.value)}
-                    placeholder="required"
+                    placeholder={t('instancesCreate.common.requiredPlaceholder')}
                     invalid={Boolean(createFieldErrors().rcon_password)}
                   />
                 </Field>

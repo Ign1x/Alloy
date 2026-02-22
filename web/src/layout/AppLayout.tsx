@@ -1,5 +1,6 @@
 import type { JSX } from 'solid-js'
 import { Show } from 'solid-js'
+import type { I18nTranslate } from '../app/i18n'
 
 export type NavTab = 'instances' | 'files' | 'nodes'
 
@@ -7,6 +8,7 @@ export type AppLayoutProps = {
   tab: NavTab
   onTab: (t: NavTab) => void
   title: string
+  t: I18nTranslate
   status?: JSX.Element
   account?: JSX.Element
   children: JSX.Element
@@ -16,16 +18,16 @@ export default function AppLayout(props: AppLayoutProps) {
   return (
     <div class="flex min-h-screen bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
       <nav class="hidden sm:flex w-16 flex-none flex-col items-center gap-3 border-r border-slate-200 bg-white px-2 py-4 dark:border-slate-800 dark:bg-slate-950">
-        <img src="/logo.svg" class="mt-1 h-9 w-9 rounded-xl" alt="Alloy" />
+        <img src="/logo.svg" class="mt-1 h-9 w-9 rounded-xl" alt={props.t('app.controlPlane')} />
 
         <div class="mt-2 flex w-full flex-col items-center gap-2">
-          <NavButton active={props.tab === 'instances'} onClick={() => props.onTab('instances')} label="Instances">
+          <NavButton active={props.tab === 'instances'} onClick={() => props.onTab('instances')} label={props.t('tab.instances')}>
             <IconServer />
           </NavButton>
-          <NavButton active={props.tab === 'files'} onClick={() => props.onTab('files')} label="Files">
+          <NavButton active={props.tab === 'files'} onClick={() => props.onTab('files')} label={props.t('tab.files')}>
             <IconFolder />
           </NavButton>
-          <NavButton active={props.tab === 'nodes'} onClick={() => props.onTab('nodes')} label="Nodes">
+          <NavButton active={props.tab === 'nodes'} onClick={() => props.onTab('nodes')} label={props.t('tab.nodes')}>
             <IconNodes />
           </NavButton>
         </div>
@@ -37,7 +39,7 @@ export default function AppLayout(props: AppLayoutProps) {
         <header class="flex h-14 flex-none items-center justify-between border-b border-slate-200 bg-white/70 px-5 backdrop-blur dark:border-slate-800 dark:bg-slate-950/70">
           <div class="flex min-w-0 items-center gap-4">
             <div class="flex items-center gap-2">
-              <img src="/logo.svg" class="h-7 w-7 rounded-lg" alt="Alloy" />
+              <img src="/logo.svg" class="h-7 w-7 rounded-lg" alt={props.t('app.controlPlane')} />
               <div class="min-w-0">
                 <div class="text-base font-semibold tracking-tight font-display">{props.title}</div>
               </div>
@@ -53,13 +55,13 @@ export default function AppLayout(props: AppLayoutProps) {
 
         <nav class="sm:hidden flex h-12 flex-none items-center justify-around border-t border-slate-200 bg-white/70 px-2 dark:border-slate-800 dark:bg-slate-950/80">
           <BottomTab active={props.tab === 'instances'} onClick={() => props.onTab('instances')}>
-            Instances
+            {props.t('tab.instances')}
           </BottomTab>
           <BottomTab active={props.tab === 'files'} onClick={() => props.onTab('files')}>
-            Files
+            {props.t('tab.files')}
           </BottomTab>
           <BottomTab active={props.tab === 'nodes'} onClick={() => props.onTab('nodes')}>
-            Nodes
+            {props.t('tab.nodes')}
           </BottomTab>
         </nav>
       </div>

@@ -1,5 +1,6 @@
 import { For, Show } from 'solid-js'
 import { formatBytes, formatRelativeTime } from '../app/helpers/format'
+import type { I18nTranslate } from '../app/i18n'
 import { downloadJson, safeCopy } from '../app/helpers/misc'
 import { queryClient } from '../rspc'
 import { Button } from './ui/Button'
@@ -8,6 +9,7 @@ import { IconButton } from './ui/IconButton'
 import { Modal } from './ui/Modal'
 
 export type ControlDiagnosticsModalProps = {
+  t: I18nTranslate
   [key: string]: unknown
 }
 
@@ -21,18 +23,19 @@ export default function ControlDiagnosticsModal(props: ControlDiagnosticsModalPr
     cacheSelection,
     setCacheSelection,
     toastError,
+    t,
   } = props as any
 
   return (
         <Modal
           open={showDiagnosticsModal()}
           onClose={() => setShowDiagnosticsModal(false)}
-          title="Diagnostics"
+          title={t('controlDiagnostics.title')}
           description={
             controlDiagnostics.data?.request_id
-              ? `req ${controlDiagnostics.data.request_id}`
+              ? t('controlDiagnostics.descriptionReq', { id: controlDiagnostics.data.request_id })
               : controlDiagnostics.isPending
-                ? 'loading…'
+                ? t('controlDiagnostics.descriptionLoading')
                 : undefined
           }
           size="xl"
@@ -40,8 +43,8 @@ export default function ControlDiagnosticsModal(props: ControlDiagnosticsModalPr
             <div class="flex flex-wrap justify-end gap-2">
               <IconButton
                 type="button"
-                label="Refresh"
-                title="Refresh diagnostics"
+                label={t('controlDiagnostics.refresh')}
+                title={t('controlDiagnostics.refreshTitle')}
                 variant="secondary"
                 disabled={controlDiagnostics.isPending}
                 onClick={() => void queryClient.invalidateQueries({ queryKey: ['control.diagnostics', null] })}
@@ -66,10 +69,10 @@ export default function ControlDiagnosticsModal(props: ControlDiagnosticsModalPr
                 onClick={async () => {
                   if (!controlDiagnostics.data) return
                   await safeCopy(JSON.stringify(controlDiagnostics.data, null, 2))
-                  pushToast('success', 'Copied', 'Diagnostics copied to clipboard.')
+                  pushToast('success', t('controlDiagnostics.copied'), t('controlDiagnostics.copiedDiagnostics'))
                 }}
               >
-                Copy
+                {t('controlDiagnostics.copy')}
               </Button>
               <Button
                 size="sm"
@@ -80,10 +83,10 @@ export default function ControlDiagnosticsModal(props: ControlDiagnosticsModalPr
                   downloadJson(`alloy-control-diagnostics.json`, { type: 'alloy-control-diagnostics', ...controlDiagnostics.data })
                 }}
               >
-                Download
+                {t('controlDiagnostics.download')}
               </Button>
               <Button size="sm" variant="secondary" onClick={() => setShowDiagnosticsModal(false)}>
-                Close
+                {t('controlDiagnostics.close')}
               </Button>
             </div>
           }
@@ -98,7 +101,8 @@ export default function ControlDiagnosticsModal(props: ControlDiagnosticsModalPr
 
                 <Show when={controlDiagnostics.isError}>
                   <ErrorState
-                    title="Failed to load diagnostics"
+                    t={t}
+                    title={t('controlDiagnostics.loadFailed')}
                     error={controlDiagnostics.error}
                     onRetry={() => void queryClient.invalidateQueries({ queryKey: ['control.diagnostics', null] })}
                   />
@@ -110,7 +114,9 @@ export default function ControlDiagnosticsModal(props: ControlDiagnosticsModalPr
                       <div class="space-y-4 lg:col-span-2">
                         <div class="rounded-2xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
                           <div class="flex flex-wrap items-center justify-between gap-2">
-                            <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Control</div>
+                            <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                              {t('controlDiagnostics.controlHeading')}
+                            </div>
                             <div class="flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
                               <span class="rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 font-mono dark:border-slate-800 dark:bg-slate-950/40">
                                 v{d().control_version}
@@ -122,21 +128,25 @@ export default function ControlDiagnosticsModal(props: ControlDiagnosticsModalPr
                                     : 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/20 dark:text-emerald-200'
                                 }`}
                               >
-                                {d().read_only ? 'read-only' : 'writable'}
+                                {d().read_only ? t('controlDiagnostics.readOnly') : t('controlDiagnostics.writable')}
                               </span>
                               <span class="rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 font-mono dark:border-slate-800 dark:bg-slate-950/40">
-                                fs-write {d().fs.write_enabled ? 'on' : 'off'}
+                                {t('controlDiagnostics.fsWrite', {
+                                  value: d().fs.write_enabled ? t('controlDiagnostics.on') : t('controlDiagnostics.off'),
+                                })}
                               </span>
                             </div>
                           </div>
                           <div class="mt-3 text-[12px] text-slate-600 dark:text-slate-300">
-                            fetched {new Date(Number(d().fetched_at_unix_ms)).toLocaleString()}
+                            {t('controlDiagnostics.fetchedAt', { value: new Date(Number(d().fetched_at_unix_ms)).toLocaleString() })}
                           </div>
                         </div>
 
                         <div class="rounded-2xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
                           <div class="flex items-center justify-between">
-                            <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Agent</div>
+                            <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                              {t('controlDiagnostics.agentHeading')}
+                            </div>
                             <span
                               class={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${
                                 d().agent.ok
@@ -144,26 +154,26 @@ export default function ControlDiagnosticsModal(props: ControlDiagnosticsModalPr
                                   : 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-200'
                               }`}
                             >
-                              {d().agent.ok ? 'connected' : 'offline'}
+                              {d().agent.ok ? t('controlDiagnostics.connected') : t('controlDiagnostics.offline')}
                             </span>
                           </div>
 
                           <div class="mt-3 space-y-2 text-[12px] text-slate-600 dark:text-slate-300">
                             <div class="flex items-center justify-between gap-3">
-                              <div class="text-slate-500 dark:text-slate-400">Endpoint</div>
+                              <div class="text-slate-500 dark:text-slate-400">{t('controlDiagnostics.endpoint')}</div>
                               <div class="min-w-0 truncate font-mono text-[11px]" title={d().agent.endpoint}>
                                 {d().agent.endpoint}
                               </div>
                             </div>
                             <Show when={d().agent.agent_version}>
                               <div class="flex items-center justify-between gap-3">
-                                <div class="text-slate-500 dark:text-slate-400">Version</div>
+                                <div class="text-slate-500 dark:text-slate-400">{t('controlDiagnostics.version')}</div>
                                 <div class="font-mono text-[11px]">{d().agent.agent_version}</div>
                               </div>
                             </Show>
                             <Show when={d().agent.data_root}>
                               <div class="flex items-center justify-between gap-3">
-                                <div class="text-slate-500 dark:text-slate-400">Data root</div>
+                                <div class="text-slate-500 dark:text-slate-400">{t('controlDiagnostics.dataRoot')}</div>
                                 <div class="min-w-0 truncate font-mono text-[11px]" title={d().agent.data_root ?? ''}>
                                   {d().agent.data_root}
                                 </div>
@@ -171,7 +181,7 @@ export default function ControlDiagnosticsModal(props: ControlDiagnosticsModalPr
                             </Show>
                             <Show when={d().agent.data_root_free_bytes}>
                               <div class="flex items-center justify-between gap-3">
-                                <div class="text-slate-500 dark:text-slate-400">Free space</div>
+                                <div class="text-slate-500 dark:text-slate-400">{t('controlDiagnostics.freeSpace')}</div>
                                 <div class="font-mono text-[11px]">{formatBytes(Number(d().agent.data_root_free_bytes))}</div>
                               </div>
                             </Show>
@@ -185,7 +195,9 @@ export default function ControlDiagnosticsModal(props: ControlDiagnosticsModalPr
 
                         <div class="rounded-2xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
                           <div class="flex items-center justify-between gap-3">
-                            <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Cache</div>
+                            <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                              {t('controlDiagnostics.cacheHeading')}
+                            </div>
                             <Button
                               size="xs"
                               variant="danger"
@@ -195,20 +207,24 @@ export default function ControlDiagnosticsModal(props: ControlDiagnosticsModalPr
                                   .filter(([, v]) => v)
                                   .map(([k]) => k)
                                 if (!keys.length) {
-                                  pushToast('info', 'No selection', 'Select caches to clear first.')
+                                  pushToast('info', t('controlDiagnostics.noSelection'), t('controlDiagnostics.selectCachesFirst'))
                                   return
                                 }
                                 try {
                                   const out = await clearCache.mutateAsync({ keys })
-                                  pushToast('success', 'Cache cleared', `Freed ${formatBytes(Number(out.freed_bytes))}`)
+                                  pushToast(
+                                    'success',
+                                    t('controlDiagnostics.cacheCleared'),
+                                    t('controlDiagnostics.freedBytes', { value: formatBytes(Number(out.freed_bytes)) }),
+                                  )
                                   await queryClient.invalidateQueries({ queryKey: ['control.diagnostics', null] })
                                   await queryClient.invalidateQueries({ queryKey: ['process.cacheStats', null] })
                                 } catch (e) {
-                                  toastError('Clear cache failed', e)
+                                  toastError(t('controlDiagnostics.clearCacheFailed'), e)
                                 }
                               }}
                             >
-                              Clear selected
+                              {t('controlDiagnostics.clearSelected')}
                             </Button>
                           </div>
 
@@ -242,7 +258,7 @@ export default function ControlDiagnosticsModal(props: ControlDiagnosticsModalPr
                               )}
                             </For>
                             <div class="text-[11px] text-slate-500 dark:text-slate-400">
-                              Clearing cache removes downloaded jars/zips. Next start will re-download.
+                              {t('controlDiagnostics.clearingHint')}
                             </div>
                           </div>
                         </div>
@@ -250,10 +266,12 @@ export default function ControlDiagnosticsModal(props: ControlDiagnosticsModalPr
 
                       <div class="space-y-4">
                         <div class="rounded-2xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
-                          <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Agent log (tail)</div>
+                          <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                            {t('controlDiagnostics.agentLogHeading')}
+                          </div>
                           <Show
                             when={(d().agent_log_lines ?? []).length > 0}
-                            fallback={<div class="mt-3 text-[12px] text-slate-500">(no log data)</div>}
+                            fallback={<div class="mt-3 text-[12px] text-slate-500">{t('controlDiagnostics.noLogData')}</div>}
                           >
                             <pre class="mt-3 max-h-64 overflow-auto rounded-xl bg-slate-950 px-3 py-2 text-[11px] leading-relaxed text-slate-100">
                               <For each={d().agent_log_lines}>{(l) => <div class="whitespace-pre-wrap">{l}</div>}</For>
@@ -263,7 +281,7 @@ export default function ControlDiagnosticsModal(props: ControlDiagnosticsModalPr
                             <div class="mt-2 flex items-center justify-between gap-2 text-[11px] text-slate-500 dark:text-slate-400">
                               <span class="truncate font-mono">{d().agent_log_path}</span>
                               <Button size="xs" variant="secondary" onClick={() => safeCopy(d().agent_log_path ?? '')}>
-                                Copy
+                                {t('controlDiagnostics.copy')}
                               </Button>
                             </div>
                           </Show>

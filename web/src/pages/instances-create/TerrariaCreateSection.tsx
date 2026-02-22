@@ -16,6 +16,7 @@ export type TerrariaCreateSectionProps = {
 
 export default function TerrariaCreateSection(props: TerrariaCreateSectionProps) {
   const {
+    t,
     selectedTemplate,
     createAdvanced,
     setCreateAdvanced,
@@ -60,16 +61,16 @@ export default function TerrariaCreateSection(props: TerrariaCreateSectionProps)
                         <div class="space-y-3 border-t border-slate-200 pt-3 dark:border-slate-800">
                           <div class="flex items-center justify-between gap-3">
                             <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                              Terraria settings
+                              {t('instancesCreate.section.terrariaSettings')}
                             </div>
                             <Button
                               size="xs"
                               variant={createAdvanced() ? 'secondary' : 'ghost'}
                               onClick={() => setCreateAdvanced((v: boolean) => !v)}
-                              title="Show or hide advanced fields"
+                              title={t('instancesCreate.advancedToggleTitle')}
                             >
                               <span class="inline-flex items-center gap-2">
-                                {createAdvanced() ? 'Hide advanced' : 'Advanced'}
+                                {createAdvanced() ? t('instancesCreate.hideAdvanced') : t('instancesCreate.advanced')}
                                 <Show when={!createAdvanced() && createAdvancedDirty()}>
                                   <span class="h-1.5 w-1.5 rounded-full bg-amber-500" aria-hidden="true" />
                                 </Show>
@@ -81,8 +82,8 @@ export default function TerrariaCreateSection(props: TerrariaCreateSectionProps)
 		                            <Field
 		                              label={
 		                                <LabelTip
-		                                  label="Version"
-		                                  content="Package id used for version management and compatibility (e.g. 1453)."
+		                                  label={t('instancesCreate.terraria.versionLabel')}
+		                                  content={t('instancesCreate.terraria.versionHint')}
 		                                />
 		                              }
 		                              error={createFieldErrors().version}
@@ -98,7 +99,7 @@ export default function TerrariaCreateSection(props: TerrariaCreateSectionProps)
 		                            </Field>
 
 		                            <Field
-		                              label={<LabelTip label="Max players" content="Maximum concurrent players allowed to join." />}
+		                              label={<LabelTip label={t('instancesCreate.common.maxPlayersLabel')} content={t('instancesCreate.common.maxPlayersHint')} />}
 		                              error={createFieldErrors().max_players}
 		                            >
                               <Input
@@ -116,8 +117,8 @@ export default function TerrariaCreateSection(props: TerrariaCreateSectionProps)
 	                          <Field
 	                            label={
 	                              <LabelTip
-	                                label="World name"
-	                                content="Changing it uses a different world file (existing worlds are not deleted)."
+	                                label={t('instancesCreate.terraria.worldNameLabel')}
+	                                content={t('instancesCreate.terraria.worldNameHint')}
 	                              />
 	                            }
 	                            error={createFieldErrors().world_name}
@@ -135,7 +136,7 @@ export default function TerrariaCreateSection(props: TerrariaCreateSectionProps)
                           <Show when={createAdvanced()}>
                             <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
 	                              <Field
-	                                label={<LabelTip label="Port (optional)" content="Leave blank for auto-assign." />}
+	                                label={<LabelTip label={t('instancesCreate.common.portOptionalLabel')} content={t('instancesCreate.common.portOptionalHint')} />}
 	                                error={createFieldErrors().port}
 	                              >
                                 <Input
@@ -151,7 +152,7 @@ export default function TerrariaCreateSection(props: TerrariaCreateSectionProps)
                               </Field>
 
 		                              <Field
-		                                label={<LabelTip label="World size (1/2/3)" content="1=small, 2=medium, 3=large." />}
+		                                label={<LabelTip label={t('instancesCreate.terraria.worldSizeLabel')} content={t('instancesCreate.terraria.worldSizeHint')} />}
 		                                error={createFieldErrors().world_size}
 		                              >
                                 <Input
@@ -167,7 +168,7 @@ export default function TerrariaCreateSection(props: TerrariaCreateSectionProps)
                             </div>
 
 		                            <Field
-		                              label={<LabelTip label="Password (optional)" content="Optional join password." />}
+		                              label={<LabelTip label={t('instancesCreate.common.passwordOptionalLabel')} content={t('instancesCreate.common.passwordOptionalHint')} />}
 		                              error={createFieldErrors().password}
 		                            >
 	                              <div class="flex flex-wrap items-center gap-2">
@@ -183,8 +184,8 @@ export default function TerrariaCreateSection(props: TerrariaCreateSectionProps)
 	                                rightIcon={
 	                                  <VisibilityToggle
 	                                  visible={trPasswordVisible()}
-	                                  labelWhenHidden="Show password"
-	                                  labelWhenVisible="Hide password"
+	                                  labelWhenHidden={t('instancesCreate.showPassword')}
+	                                  labelWhenVisible={t('instancesCreate.hidePassword')}
 	                                  onToggle={() => setTrPasswordVisible((v: boolean) => !v)}
 	                                />
 	                                }
@@ -193,7 +194,7 @@ export default function TerrariaCreateSection(props: TerrariaCreateSectionProps)
 	                                  type="button"
 	                                  size="sm"
 	                                  variant="secondary"
-	                                  label="Copy password"
+	                                  label={t('instancesCreate.copyPassword')}
 	                                  disabled={!trPassword().trim()}
 	                                  onClick={() => void safeCopy(trPassword())}
 	                                >
@@ -206,7 +207,7 @@ export default function TerrariaCreateSection(props: TerrariaCreateSectionProps)
 	                            </Field>
 
 	                            <Field
-	                              label={<LabelTip label="Public (Tunnels)" content="Optional. Paste a tunnel config to expose this instance (auto-detects INI/TOML/YAML/JSON)." />}
+	                              label={<LabelTip label={t('instancesCreate.tunnels.publicLabel')} content={t('instancesCreate.tunnels.publicHint')} />}
 	                              error={createFieldErrors().frp_config}
 	                            >
 	                              <div class="space-y-2">
@@ -217,7 +218,7 @@ export default function TerrariaCreateSection(props: TerrariaCreateSectionProps)
 	                                    checked={trFrpEnabled()}
 	                                    onChange={(e) => setTrFrpEnabled(e.currentTarget.checked)}
 	                                  />
-	                                  <span>Enable</span>
+	                                  <span>{t('instancesCreate.enable')}</span>
 	                                </label>
 	                                <Show when={trFrpEnabled()}>
 	                                  <div class="space-y-2">
@@ -225,8 +226,8 @@ export default function TerrariaCreateSection(props: TerrariaCreateSectionProps)
 	                                      <Tabs
 	                                        value={trFrpMode()}
 	                                        options={[
-	                                          { value: 'paste', label: 'Paste' },
-	                                          { value: 'node', label: 'Node' },
+	                                          { value: 'paste', label: t('instancesCreate.tunnels.paste') },
+	                                          { value: 'node', label: t('instancesCreate.tunnels.node') },
 	                                        ]}
 	                                        onChange={(mode) => {
 	                                          setTrFrpMode(mode)
@@ -235,7 +236,7 @@ export default function TerrariaCreateSection(props: TerrariaCreateSectionProps)
 	                                        }}
 	                                      />
 	                                      <Button size="xs" variant="secondary" onClick={() => setTab('frp')}>
-	                                        Manage nodes
+	                                        {t('instancesCreate.tunnels.manageNodes')}
 	                                      </Button>
 	                                    </div>
 
@@ -249,12 +250,14 @@ export default function TerrariaCreateSection(props: TerrariaCreateSectionProps)
 	                                          label=""
 	                                          value={trFrpNodeId()}
 	                                          options={frpNodeDropdownOptions()}
-	                                          placeholder="Select node…"
+	                                          placeholder={t('instancesCreate.tunnels.selectNode')}
 	                                          onChange={setTrFrpNodeId}
 	                                        />
 	                                      </div>
 	                                      <div class="text-[11px] text-slate-500 dark:text-slate-400">
-	                                        Uses the saved node config and patches <span class="font-mono">local_port</span> (and auto remote port if needed).
+	                                        {t('instancesCreate.tunnels.nodeHintPrefix')}{' '}
+	                                        <span class="font-mono">local_port</span>{' '}
+	                                        {t('instancesCreate.tunnels.nodeHintSuffix')}
 	                                      </div>
 	                                    </Show>
 
@@ -265,7 +268,7 @@ export default function TerrariaCreateSection(props: TerrariaCreateSectionProps)
 	                                        }}
 	                                        value={trFrpConfig()}
 	                                        onInput={(e) => setTrFrpConfig(e.currentTarget.value)}
-	                                        placeholder="Paste tunnel config (auto: INI/TOML/YAML/JSON)"
+	                                        placeholder={t('instancesCreate.tunnels.pastePlaceholder')}
 	                                        spellcheck={false}
 	                                        class="font-mono text-[11px]"
 	                                        invalid={Boolean(createFieldErrors().frp_config)}

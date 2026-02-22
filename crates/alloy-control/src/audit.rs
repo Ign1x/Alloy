@@ -1,8 +1,8 @@
 use alloy_db::entities::audit_events;
 use sea_orm::{ActiveModelTrait, Set};
 
-use crate::rpc::Ctx;
 use crate::request_meta::RequestMeta;
+use crate::rpc::Ctx;
 
 fn meta_request_fields(meta: &RequestMeta) -> serde_json::Value {
     serde_json::json!({

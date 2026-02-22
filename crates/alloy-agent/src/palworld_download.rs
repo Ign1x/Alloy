@@ -1,4 +1,4 @@
-#![allow(dead_code)]
+#![allow(dead_code, clippy::manual_find)]
 
 use std::{
     collections::HashMap,

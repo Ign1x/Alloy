@@ -14,7 +14,7 @@ import {
 
 const ATTR_KEYS = ['title', 'placeholder', 'aria-label'] as const
 const SKIP_SELECTOR = 'pre, code, textarea, script, style, [data-no-auto-translate]'
-const NON_EN_LOCALES: ReadonlyArray<Exclude<AppLocale, 'en'>> = ['zh-CN', 'zh-TW', 'ja']
+const NON_EN_LOCALES: ReadonlyArray<Exclude<AppLocale, 'en'>> = ['zh-CN', 'zh-TW', 'ja', 'ko']
 const FULL_SYNC_BATCH_SIZE = 320
 
 const textOriginalByNode = new WeakMap<Text, string>()

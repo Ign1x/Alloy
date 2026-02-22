@@ -1,9 +1,11 @@
+#![allow(clippy::result_large_err)]
+
 use std::collections::{BTreeMap, HashSet};
 
 use tonic::Status;
 
-use crate::port_alloc;
 use crate::game_adapter_template::PortProtocol;
+use crate::port_alloc;
 
 pub fn ensure_adapter_ports(
     template_id: &str,

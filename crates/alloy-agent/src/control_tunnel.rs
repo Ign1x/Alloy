@@ -1,3 +1,5 @@
+#![allow(clippy::result_large_err)]
+
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use base64::Engine;
@@ -355,7 +357,7 @@ fn control_ws_urls() -> Vec<String> {
 }
 
 fn ws_ping_interval() -> Duration {
-    const DEFAULT_MS: u64 = 10_000;
+    const DEFAULT_MS: u64 = 5_000;
     const MIN_MS: u64 = 1_000;
     const MAX_MS: u64 = 120_000;
 
@@ -418,7 +420,7 @@ fn ws_reconnect_backoff_max(base: Duration) -> Duration {
 }
 
 fn ws_app_keepalive_interval(ping_interval: Duration) -> Option<Duration> {
-    const DEFAULT_MS: u64 = 15_000;
+    const DEFAULT_MS: u64 = 8_000;
     const MIN_MS: u64 = 1_000;
     const MAX_MS: u64 = 300_000;
 
@@ -522,7 +524,7 @@ fn control_tunnel_mode() -> ControlTunnelMode {
 }
 
 fn poll_wait() -> Duration {
-    const DEFAULT_MS: u64 = 25_000;
+    const DEFAULT_MS: u64 = 10_000;
     const MIN_MS: u64 = 1_000;
     const MAX_MS: u64 = 90_000;
 

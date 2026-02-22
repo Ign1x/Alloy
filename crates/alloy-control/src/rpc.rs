@@ -264,7 +264,7 @@ fn normalize_optional_allocatable_ports(value: &str) -> Result<Option<String>, (
         return Ok(None);
     }
 
-    let out = compact_allocatable_ports(expanded.into_iter());
+    let out = compact_allocatable_ports(expanded);
     Ok(Some(out))
 }
 
@@ -311,49 +311,49 @@ fn parse_frp_endpoint_from_text(config: &str) -> Option<(String, u16)> {
         return None;
     }
 
-    if let Ok(v) = serde_json::from_str::<serde_json::Value>(raw) {
-        if let Some(common) = v.get("common") {
-            let addr = common
-                .get("server_addr")
-                .and_then(|x| x.as_str())
-                .map(str::trim)
-                .filter(|x| !x.is_empty())?;
-            let port = common
-                .get("server_port")
-                .and_then(|x| x.as_u64())
-                .and_then(|x| u16::try_from(x).ok())?;
-            return Some((addr.to_string(), port));
-        }
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(raw)
+        && let Some(common) = v.get("common")
+    {
+        let addr = common
+            .get("server_addr")
+            .and_then(|x| x.as_str())
+            .map(str::trim)
+            .filter(|x| !x.is_empty())?;
+        let port = common
+            .get("server_port")
+            .and_then(|x| x.as_u64())
+            .and_then(|x| u16::try_from(x).ok())?;
+        return Some((addr.to_string(), port));
     }
 
-    if let Ok(v) = raw.parse::<toml::Value>() {
-        if let Some(common) = v.get("common") {
-            let addr = common
-                .get("server_addr")
-                .and_then(|x| x.as_str())
-                .map(str::trim)
-                .filter(|x| !x.is_empty())?;
-            let port = common
-                .get("server_port")
-                .and_then(|x| x.as_integer())
-                .and_then(|x| u16::try_from(x).ok())?;
-            return Some((addr.to_string(), port));
-        }
+    if let Ok(v) = raw.parse::<toml::Value>()
+        && let Some(common) = v.get("common")
+    {
+        let addr = common
+            .get("server_addr")
+            .and_then(|x| x.as_str())
+            .map(str::trim)
+            .filter(|x| !x.is_empty())?;
+        let port = common
+            .get("server_port")
+            .and_then(|x| x.as_integer())
+            .and_then(|x| u16::try_from(x).ok())?;
+        return Some((addr.to_string(), port));
     }
 
-    if let Ok(v) = serde_yaml::from_str::<serde_yaml::Value>(raw) {
-        if let Some(common) = v.get("common") {
-            let addr = common
-                .get("server_addr")
-                .and_then(|x| x.as_str())
-                .map(str::trim)
-                .filter(|x| !x.is_empty())?;
-            let port = common
-                .get("server_port")
-                .and_then(|x| x.as_u64())
-                .and_then(|x| u16::try_from(x).ok())?;
-            return Some((addr.to_string(), port));
-        }
+    if let Ok(v) = serde_yaml::from_str::<serde_yaml::Value>(raw)
+        && let Some(common) = v.get("common")
+    {
+        let addr = common
+            .get("server_addr")
+            .and_then(|x| x.as_str())
+            .map(str::trim)
+            .filter(|x| !x.is_empty())?;
+        let port = common
+            .get("server_port")
+            .and_then(|x| x.as_u64())
+            .and_then(|x| u16::try_from(x).ok())?;
+        return Some((addr.to_string(), port));
     }
 
     let mut in_common = false;
@@ -388,12 +388,11 @@ fn parse_frp_endpoint_from_text(config: &str) -> Option<(String, u16)> {
         }
         if key == "server_addr" {
             server_addr = Some(value.to_string());
-        } else if key == "server_port" {
-            if let Ok(port) = value.parse::<u16>() {
-                if port > 0 {
-                    server_port = Some(port);
-                }
-            }
+        } else if key == "server_port"
+            && let Ok(port) = value.parse::<u16>()
+            && port > 0
+        {
+            server_port = Some(port);
         }
     }
 
@@ -552,14 +551,14 @@ fn normalize_frp_node_payload(
         );
     }
 
-    if server_addr.is_none() || server_port.is_none() {
-        if let Some((addr, port)) = parse_frp_endpoint_from_text(&config) {
-            if server_addr.is_none() {
-                server_addr = Some(addr);
-            }
-            if server_port.is_none() {
-                server_port = Some(port);
-            }
+    if (server_addr.is_none() || server_port.is_none())
+        && let Some((addr, port)) = parse_frp_endpoint_from_text(&config)
+    {
+        if server_addr.is_none() {
+            server_addr = Some(addr);
+        }
+        if server_port.is_none() {
+            server_port = Some(port);
         }
     }
 
@@ -2027,7 +2026,7 @@ async fn recover_persisted_instances_from_legacy_table(ctx: &Ctx) -> Result<(), 
             display_name: sea_orm::Set(None),
             node_id: sea_orm::Set(row.node_id),
             node_name: sea_orm::Set(row.node_name),
-            created_at: sea_orm::Set(now.clone()),
+            created_at: sea_orm::Set(now),
             updated_at: sea_orm::Set(now),
         };
 
@@ -2277,8 +2276,8 @@ async fn save_instance_node_target(
         instance_id: Set(instance_id.to_string()),
         node_id: Set(parsed_node_id),
         node_name: Set(node.name.clone()),
-        created_at: Set(now.clone()),
-        updated_at: Set(now.clone()),
+        created_at: Set(now),
+        updated_at: Set(now),
     };
 
     instance_nodes::Entity::insert(model)
@@ -2329,7 +2328,7 @@ async fn purge_instance_local_state(ctx: &Ctx, instance_id: &str) {
     let _ = delete_persisted_instance_record(ctx, instance_id).await;
     let _ = delete_instance_node_target(ctx, instance_id).await;
     let legacy_key = legacy_instance_node_setting_key(instance_id);
-    let _ = setting_clear(&*ctx.db, &legacy_key).await;
+    let _ = setting_clear(&ctx.db, &legacy_key).await;
 }
 
 async fn load_legacy_instance_node_target(
@@ -2337,7 +2336,7 @@ async fn load_legacy_instance_node_target(
     instance_id: &str,
 ) -> Result<Option<NodeTarget>, ApiError> {
     let key = legacy_instance_node_setting_key(instance_id);
-    let Some(raw_node_id) = setting_get(&*ctx.db, &key)
+    let Some(raw_node_id) = setting_get(&ctx.db, &key)
         .await
         .map_err(|e| api_error(ctx, "db_error", format!("db error: {e}")))?
     else {
@@ -2410,7 +2409,7 @@ async fn load_instance_node_target(
     if let Some(legacy_target) = load_legacy_instance_node_target(ctx, instance_id).await? {
         let _ = save_instance_node_target(ctx, instance_id, &legacy_target).await;
         let legacy_key = legacy_instance_node_setting_key(instance_id);
-        let _ = setting_clear(&*ctx.db, &legacy_key).await;
+        let _ = setting_clear(&ctx.db, &legacy_key).await;
         return Ok(Some(legacy_target));
     }
 
@@ -3189,22 +3188,22 @@ async fn run_next_download_queue_job(runtime: &DownloadQueueRuntime) -> Result<b
 }
 
 async fn settings_status_output(ctx: &Ctx) -> Result<SettingsStatusOutput, ApiError> {
-    let dst_set = setting_is_set(&*ctx.db, SETTING_DST_DEFAULT_KLEI_KEY)
+    let dst_set = setting_is_set(&ctx.db, SETTING_DST_DEFAULT_KLEI_KEY)
         .await
         .map_err(|e| api_error(ctx, "db_error", format!("db error: {e}")))?;
-    let cf_set = setting_is_set(&*ctx.db, SETTING_CURSEFORGE_API_KEY)
+    let cf_set = setting_is_set(&ctx.db, SETTING_CURSEFORGE_API_KEY)
         .await
         .map_err(|e| api_error(ctx, "db_error", format!("db error: {e}")))?;
-    let steam_user_set = setting_is_set(&*ctx.db, SETTING_STEAMCMD_USERNAME)
+    let steam_user_set = setting_is_set(&ctx.db, SETTING_STEAMCMD_USERNAME)
         .await
         .map_err(|e| api_error(ctx, "db_error", format!("db error: {e}")))?;
-    let steam_pass_set = setting_is_set(&*ctx.db, SETTING_STEAMCMD_PASSWORD)
+    let steam_pass_set = setting_is_set(&ctx.db, SETTING_STEAMCMD_PASSWORD)
         .await
         .map_err(|e| api_error(ctx, "db_error", format!("db error: {e}")))?;
-    let steam_shared_secret_set = setting_is_set(&*ctx.db, SETTING_STEAMCMD_SHARED_SECRET)
+    let steam_shared_secret_set = setting_is_set(&ctx.db, SETTING_STEAMCMD_SHARED_SECRET)
         .await
         .map_err(|e| api_error(ctx, "db_error", format!("db error: {e}")))?;
-    let steam_account_name = setting_get(&*ctx.db, SETTING_STEAMCMD_ACCOUNT_NAME)
+    let steam_account_name = setting_get(&ctx.db, SETTING_STEAMCMD_ACCOUNT_NAME)
         .await
         .map_err(|e| api_error(ctx, "db_error", format!("db error: {e}")))?
         .map(|v| v.trim().to_string())
@@ -3605,7 +3604,7 @@ pub fn router() -> Router<Ctx> {
                     let transport = agent_transport(&ctx);
 
                     let template_id = input.template_id.clone();
-                    let params = prepare_warm_params(&*ctx.db, &template_id, input.params.clone())
+                    let params = prepare_warm_params(&ctx.db, &template_id, input.params.clone())
                         .await
                         .map_err(|e| {
                             let lower = e.to_ascii_lowercase();
@@ -3745,7 +3744,7 @@ pub fn router() -> Router<Ctx> {
         .procedure(
             "downloadQueue",
             Procedure::builder::<ApiError>().query(|ctx: Ctx, _: ()| async move {
-                download_queue_snapshot(&*ctx.db, &ctx.agent_hub)
+                download_queue_snapshot(&ctx.db, &ctx.agent_hub)
                     .await
                     .map_err(|e| api_error(&ctx, "db_error", format!("db error: {e}")))
             }),
@@ -3811,7 +3810,7 @@ pub fn router() -> Router<Ctx> {
                         })?;
 
                     let now: sea_orm::prelude::DateTimeWithTimeZone = chrono::Utc::now().into();
-                    let queue_position = download_queue_next_position(&*ctx.db)
+                    let queue_position = download_queue_next_position(&ctx.db)
                         .await
                         .map_err(|e| api_error(&ctx, "db_error", format!("db error: {e}")))?;
 
@@ -3837,7 +3836,7 @@ pub fn router() -> Router<Ctx> {
                         .await
                         .map_err(|e| api_error(&ctx, "db_error", format!("db error: {e}")))?;
 
-                    let _ = trim_download_history(&*ctx.db, 50).await;
+                    let _ = trim_download_history(&ctx.db, 50).await;
                     wake_download_queue_worker();
 
                     audit::record(
@@ -3863,7 +3862,7 @@ pub fn router() -> Router<Ctx> {
                     ensure_writable(&ctx)?;
                     enforce_rate_limit(&ctx)?;
 
-                    download_queue_set_paused(&*ctx.db, input.paused)
+                    download_queue_set_paused(&ctx.db, input.paused)
                         .await
                         .map_err(|e| api_error(&ctx, "db_error", format!("db error: {e}")))?;
                     wake_download_queue_worker();
@@ -4094,7 +4093,7 @@ pub fn router() -> Router<Ctx> {
                         .await
                         .map_err(|e| api_error(&ctx, "db_error", format!("db error: {e}")))?;
 
-                    let _ = trim_download_history(&*ctx.db, 50).await;
+                    let _ = trim_download_history(&ctx.db, 50).await;
                     wake_download_queue_worker();
                     Ok(DownloadQueueMutationOutput { ok: true })
                 },
@@ -4138,7 +4137,7 @@ pub fn router() -> Router<Ctx> {
                     }
 
                     let now: sea_orm::prelude::DateTimeWithTimeZone = chrono::Utc::now().into();
-                    let next_pos = download_queue_next_position(&*ctx.db)
+                    let next_pos = download_queue_next_position(&ctx.db)
                         .await
                         .map_err(|e| api_error(&ctx, "db_error", format!("db error: {e}")))?;
 
@@ -4317,8 +4316,8 @@ pub fn router() -> Router<Ctx> {
                     // Defaults and control-plane settings injection.
                     if template_id == "dst:vanilla" {
                         let current = params.get("cluster_token").map(|s| s.trim()).unwrap_or("");
-                        if current.is_empty() {
-                            if let Some(v) = setting_get(&*ctx.db, SETTING_DST_DEFAULT_KLEI_KEY)
+                        if current.is_empty()
+                            && let Some(v) = setting_get(&ctx.db, SETTING_DST_DEFAULT_KLEI_KEY)
                                 .await
                                 .map_err(|e| {
                                     api_error(&ctx, "db_error", format!("db error: {e}"))
@@ -4329,7 +4328,6 @@ pub fn router() -> Router<Ctx> {
                                     params.insert("cluster_token".to_string(), v);
                                 }
                             }
-                        }
                     }
 
                     if template_id == "minecraft:curseforge" {
@@ -4338,7 +4336,7 @@ pub fn router() -> Router<Ctx> {
                             .map(|s| s.trim())
                             .unwrap_or("");
                         if current.is_empty() {
-                            let v = setting_get(&*ctx.db, SETTING_CURSEFORGE_API_KEY)
+                            let v = setting_get(&ctx.db, SETTING_CURSEFORGE_API_KEY)
                                 .await
                                 .map_err(|e| {
                                     api_error(&ctx, "db_error", format!("db error: {e}"))
@@ -4891,14 +4889,12 @@ pub fn router() -> Router<Ctx> {
                     let mut err = api_error_from_agent_status(&ctx, "instance.start", status);
                     if err.code == "agent_unreachable"
                         && let Some(node) = node_target.as_ref()
-                    {
-                        if err.hint.is_none() {
+                        && err.hint.is_none() {
                             err.hint = Some(format!(
                                 "Instance host node '{}' appears offline. Wait for reconnect, then retry start.",
                                 node.name
                             ));
                         }
-                    }
                     return Err(err);
                 };
 
@@ -5918,11 +5914,11 @@ pub fn router() -> Router<Ctx> {
 
                     let v = input.key.trim().to_string();
                     if v.is_empty() {
-                        setting_clear(&*ctx.db, SETTING_DST_DEFAULT_KLEI_KEY)
+                        setting_clear(&ctx.db, SETTING_DST_DEFAULT_KLEI_KEY)
                             .await
                             .map_err(|e| api_error(&ctx, "db_error", format!("db error: {e}")))?;
                     } else {
-                        setting_set_secret(&*ctx.db, SETTING_DST_DEFAULT_KLEI_KEY, &v)
+                        setting_set_secret(&ctx.db, SETTING_DST_DEFAULT_KLEI_KEY, &v)
                             .await
                             .map_err(|e| api_error(&ctx, "db_error", format!("db error: {e}")))?;
                     }
@@ -5956,11 +5952,11 @@ pub fn router() -> Router<Ctx> {
 
                     let v = input.key.trim().to_string();
                     if v.is_empty() {
-                        setting_clear(&*ctx.db, SETTING_CURSEFORGE_API_KEY)
+                        setting_clear(&ctx.db, SETTING_CURSEFORGE_API_KEY)
                             .await
                             .map_err(|e| api_error(&ctx, "db_error", format!("db error: {e}")))?;
                     } else {
-                        setting_set_secret(&*ctx.db, SETTING_CURSEFORGE_API_KEY, &v)
+                        setting_set_secret(&ctx.db, SETTING_CURSEFORGE_API_KEY, &v)
                             .await
                             .map_err(|e| api_error(&ctx, "db_error", format!("db error: {e}")))?;
                     }
@@ -6040,13 +6036,12 @@ pub fn router() -> Router<Ctx> {
                             })?;
                     }
 
-                    if username.is_empty() {
-                        if let Some(acc) = account_name.clone()
+                    if username.is_empty()
+                        && let Some(acc) = account_name.clone()
                             && !acc.trim().is_empty()
                         {
                             username = acc.trim().to_string();
                         }
-                    }
 
                     let clear_requested = username.is_empty()
                         && password.is_empty()
@@ -6055,16 +6050,16 @@ pub fn router() -> Router<Ctx> {
                         && account_name.is_none();
 
                     if clear_requested {
-                        setting_clear(&*ctx.db, SETTING_STEAMCMD_USERNAME)
+                        setting_clear(&ctx.db, SETTING_STEAMCMD_USERNAME)
                             .await
                             .map_err(|e| api_error(&ctx, "db_error", format!("db error: {e}")))?;
-                        setting_clear(&*ctx.db, SETTING_STEAMCMD_PASSWORD)
+                        setting_clear(&ctx.db, SETTING_STEAMCMD_PASSWORD)
                             .await
                             .map_err(|e| api_error(&ctx, "db_error", format!("db error: {e}")))?;
-                        setting_clear(&*ctx.db, SETTING_STEAMCMD_SHARED_SECRET)
+                        setting_clear(&ctx.db, SETTING_STEAMCMD_SHARED_SECRET)
                             .await
                             .map_err(|e| api_error(&ctx, "db_error", format!("db error: {e}")))?;
-                        setting_clear(&*ctx.db, SETTING_STEAMCMD_ACCOUNT_NAME)
+                        setting_clear(&ctx.db, SETTING_STEAMCMD_ACCOUNT_NAME)
                             .await
                             .map_err(|e| api_error(&ctx, "db_error", format!("db error: {e}")))?;
                     } else if username.is_empty() || password.is_empty() {
@@ -6149,21 +6144,21 @@ pub fn router() -> Router<Ctx> {
                             ));
                         }
 
-                        setting_set_secret(&*ctx.db, SETTING_STEAMCMD_USERNAME, &username)
+                        setting_set_secret(&ctx.db, SETTING_STEAMCMD_USERNAME, &username)
                             .await
                             .map_err(|e| api_error(&ctx, "db_error", format!("db error: {e}")))?;
-                        setting_set_secret(&*ctx.db, SETTING_STEAMCMD_PASSWORD, &password)
+                        setting_set_secret(&ctx.db, SETTING_STEAMCMD_PASSWORD, &password)
                             .await
                             .map_err(|e| api_error(&ctx, "db_error", format!("db error: {e}")))?;
 
                         if let Some(secret) = shared_secret.as_deref() {
-                            setting_set_secret(&*ctx.db, SETTING_STEAMCMD_SHARED_SECRET, secret)
+                            setting_set_secret(&ctx.db, SETTING_STEAMCMD_SHARED_SECRET, secret)
                                 .await
                                 .map_err(|e| {
                                     api_error(&ctx, "db_error", format!("db error: {e}"))
                                 })?;
                         } else {
-                            setting_clear(&*ctx.db, SETTING_STEAMCMD_SHARED_SECRET)
+                            setting_clear(&ctx.db, SETTING_STEAMCMD_SHARED_SECRET)
                                 .await
                                 .map_err(|e| {
                                     api_error(&ctx, "db_error", format!("db error: {e}"))
@@ -6174,13 +6169,13 @@ pub fn router() -> Router<Ctx> {
                             .map(|v| v.trim().to_string())
                             .filter(|v| !v.is_empty())
                         {
-                            setting_set_secret(&*ctx.db, SETTING_STEAMCMD_ACCOUNT_NAME, &name)
+                            setting_set_secret(&ctx.db, SETTING_STEAMCMD_ACCOUNT_NAME, &name)
                                 .await
                                 .map_err(|e| {
                                     api_error(&ctx, "db_error", format!("db error: {e}"))
                                 })?;
                         } else {
-                            setting_set_secret(&*ctx.db, SETTING_STEAMCMD_ACCOUNT_NAME, &username)
+                            setting_set_secret(&ctx.db, SETTING_STEAMCMD_ACCOUNT_NAME, &username)
                                 .await
                                 .map_err(|e| {
                                     api_error(&ctx, "db_error", format!("db error: {e}"))

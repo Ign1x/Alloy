@@ -1,20 +1,24 @@
 import { For, Show, createMemo, createSignal } from 'solid-js'
 import { HardDrive, Pause, Play, RotateCw, Search, Trash2, ListChecks } from 'lucide-solid'
+import type { I18nTranslate } from '../app/i18n'
 import type { DownloadCenterView, DownloadJob, DownloadTarget } from '../app/types'
 import { formatBytes, formatRelativeTime } from '../app/helpers/format'
 import { templateDisplayLabel, templateLogoSrc } from '../app/helpers/templateBrand'
 import { queryClient } from '../rspc'
 import { Badge } from '../components/ui/Badge'
 import { Button } from '../components/ui/Button'
+import { DataBoundary } from '../components/ui/DataBoundary'
 import { EmptyState } from '../components/ui/EmptyState'
 import { GameAvatar } from '../components/ui/GameAvatar'
 import { IconButton } from '../components/ui/IconButton'
 import { Input } from '../components/ui/Input'
+import { Modal } from '../components/ui/Modal'
 import { NavItem, Section, SURFACE } from './downloads/DownloadsTabUi'
 import { JobRow, VersionManager, type CachedVersionRow, type DownloadStatus, type VersionOption } from './downloads/DownloadsTabSections'
 
 export type DownloadsTabProps = {
   tab: () => string
+  t: I18nTranslate
   [key: string]: unknown
 }
 
@@ -42,6 +46,8 @@ type CacheDisplayRow = {
   version?: string
 }
 
+type PendingCacheDelete = { key: string; label: string }
+
 
 const VERSION_COLLATOR = new Intl.Collator('en', { numeric: true, sensitivity: 'base' })
 
@@ -56,22 +62,23 @@ function compareVersionDesc(a: string, b: string): number {
   return VERSION_COLLATOR.compare(bv, av)
 }
 
-function groupTitle(groupId: CacheDisplayRow['groupId']): string {
-  if (groupId === 'minecraft') return 'Minecraft'
-  if (groupId === 'terraria') return 'Terraria'
-  if (groupId === 'dst') return "Don't Starve Together"
-  if (groupId === 'palworld') return 'Palworld'
-  if (groupId === 'factorio') return 'Factorio'
-  if (groupId === 'core_keeper') return 'Core Keeper'
-  if (groupId === 'seven_days') return '7 Days to Die'
-  if (groupId === 'the_forest') return 'The Forest'
-  if (groupId === 'sons_of_the_forest') return 'Sons of the Forest'
-  return 'Other'
+function groupTitle(groupId: CacheDisplayRow['groupId'], t: I18nTranslate): string {
+  if (groupId === 'minecraft') return t('downloads.nav.minecraft')
+  if (groupId === 'terraria') return t('downloads.nav.terraria')
+  if (groupId === 'dst') return t('downloads.nav.dst')
+  if (groupId === 'palworld') return t('downloads.nav.palworld')
+  if (groupId === 'factorio') return t('downloads.nav.factorio')
+  if (groupId === 'core_keeper') return t('downloads.nav.coreKeeper')
+  if (groupId === 'seven_days') return t('downloads.nav.sevenDays')
+  if (groupId === 'the_forest') return t('downloads.nav.theForest')
+  if (groupId === 'sons_of_the_forest') return t('downloads.nav.sonsOfTheForest')
+  return t('downloads.nav.other')
 }
 
 export default function DownloadsTab(props: DownloadsTabProps) {
   const {
     tab,
+    t,
     hasRunningDownloadJobs,
     downloadQueuePaused,
     downloadJobs,
@@ -122,6 +129,7 @@ export default function DownloadsTab(props: DownloadsTabProps) {
     setDownloadSonsOfTheForestVersion,
     sonsOfTheForestVersionOptions,
     downloadQueueEnqueue,
+    openSettingsTab,
   } = props as any
 
   const view = downloadCenterView as () => DownloadCenterView
@@ -324,23 +332,40 @@ export default function DownloadsTab(props: DownloadsTabProps) {
   })
 
   const [deletingKey, setDeletingKey] = createSignal<string | null>(null)
+  const [pendingCacheDelete, setPendingCacheDelete] = createSignal<PendingCacheDelete | null>(null)
   const deleteDisabled = createMemo(() => isReadOnly() || Boolean(clearCache.isPending) || Boolean(deletingKey()))
 
   async function deleteCacheKey(key: string, label: string) {
     if (isReadOnly()) return
-    const ok = window.confirm(`Delete cached data for ${label}?\n\nThis only removes downloaded server files on this node.`)
-    if (!ok) return
     try {
       setDeletingKey(key)
       const out = await clearCache.mutateAsync({ keys: [key] })
-      pushToast('success', 'Deleted', `Freed ${formatBytes(Number(out.freed_bytes))}`)
+      pushToast('success', t('downloads.toast.deleted'), t('downloads.toast.freed', { value: formatBytes(Number(out.freed_bytes)) }), undefined, {
+        context: { scope: 'job', id: key, label },
+      })
       await queryClient.invalidateQueries({ queryKey: ['control.diagnostics', null] })
       await queryClient.invalidateQueries({ queryKey: ['process.cacheStats', null] })
     } catch (e) {
-      toastError('Delete failed', e)
+      toastError(t('downloads.deleteFailed'), e, {
+        context: { scope: 'job', id: key, label },
+        retry: { key: `cache.delete:${key}` },
+        onRetry: () => deleteCacheKey(key, label),
+      })
     } finally {
       setDeletingKey(null)
     }
+  }
+
+  function requestDeleteCacheKey(key: string, label: string) {
+    if (isReadOnly()) return
+    setPendingCacheDelete({ key, label })
+  }
+
+  async function confirmDeleteCacheKey() {
+    const target = pendingCacheDelete()
+    if (!target) return
+    await deleteCacheKey(target.key, target.label)
+    setPendingCacheDelete(null)
   }
 
   const [cacheSearch, setCacheSearch] = createSignal('')
@@ -360,8 +385,8 @@ export default function DownloadsTab(props: DownloadsTabProps) {
         out.push({
           groupId: 'minecraft',
           kind: 'aggregate',
-          title: 'All cached versions',
-          meta: 'aggregate',
+          title: t('downloads.allCachedVersions'),
+          meta: t('downloads.aggregate'),
           ...base,
         })
         continue
@@ -382,8 +407,8 @@ export default function DownloadsTab(props: DownloadsTabProps) {
         out.push({
           groupId: 'terraria',
           kind: 'aggregate',
-          title: 'All cached versions',
-          meta: 'aggregate',
+          title: t('downloads.allCachedVersions'),
+          meta: t('downloads.aggregate'),
           ...base,
         })
         continue
@@ -404,8 +429,8 @@ export default function DownloadsTab(props: DownloadsTabProps) {
         out.push({
           groupId: 'dst',
           kind: 'aggregate',
-          title: 'All cached versions',
-          meta: 'aggregate',
+          title: t('downloads.allCachedVersions'),
+          meta: t('downloads.aggregate'),
           ...base,
         })
         continue
@@ -426,8 +451,8 @@ export default function DownloadsTab(props: DownloadsTabProps) {
         out.push({
           groupId: 'palworld',
           kind: 'aggregate',
-          title: 'All cached versions',
-          meta: 'aggregate',
+          title: t('downloads.allCachedVersions'),
+          meta: t('downloads.aggregate'),
           ...base,
         })
         continue
@@ -448,8 +473,8 @@ export default function DownloadsTab(props: DownloadsTabProps) {
         out.push({
           groupId: 'factorio',
           kind: 'aggregate',
-          title: 'All cached versions',
-          meta: 'aggregate',
+          title: t('downloads.allCachedVersions'),
+          meta: t('downloads.aggregate'),
           ...base,
         })
         continue
@@ -470,8 +495,8 @@ export default function DownloadsTab(props: DownloadsTabProps) {
         out.push({
           groupId: 'core_keeper',
           kind: 'aggregate',
-          title: 'All cached versions',
-          meta: 'aggregate',
+          title: t('downloads.allCachedVersions'),
+          meta: t('downloads.aggregate'),
           ...base,
         })
         continue
@@ -492,8 +517,8 @@ export default function DownloadsTab(props: DownloadsTabProps) {
         out.push({
           groupId: 'seven_days',
           kind: 'aggregate',
-          title: 'All cached versions',
-          meta: 'aggregate',
+          title: t('downloads.allCachedVersions'),
+          meta: t('downloads.aggregate'),
           ...base,
         })
         continue
@@ -514,8 +539,8 @@ export default function DownloadsTab(props: DownloadsTabProps) {
         out.push({
           groupId: 'the_forest',
           kind: 'aggregate',
-          title: 'All cached versions',
-          meta: 'aggregate',
+          title: t('downloads.allCachedVersions'),
+          meta: t('downloads.aggregate'),
           ...base,
         })
         continue
@@ -536,8 +561,8 @@ export default function DownloadsTab(props: DownloadsTabProps) {
         out.push({
           groupId: 'sons_of_the_forest',
           kind: 'aggregate',
-          title: 'All cached versions',
-          meta: 'aggregate',
+          title: t('downloads.allCachedVersions'),
+          meta: t('downloads.aggregate'),
           ...base,
         })
         continue
@@ -623,7 +648,7 @@ export default function DownloadsTab(props: DownloadsTabProps) {
       entries.sort(compareRow)
       const totalBytes = entries.reduce((sum, e) => sum + e.sizeBytes, 0)
       const lastUsedUnixMs = entries.reduce((max, e) => Math.max(max, e.lastUsedUnixMs), 0)
-      groups.push({ id, title: groupTitle(id), entries, totalBytes, lastUsedUnixMs })
+      groups.push({ id, title: groupTitle(id, t), entries, totalBytes, lastUsedUnixMs })
     }
     return groups
   })
@@ -642,24 +667,48 @@ export default function DownloadsTab(props: DownloadsTabProps) {
   const installTarget = downloadEnqueueTarget as () => DownloadTarget | null
 
   return (
-    <Show when={tab() === 'downloads'}>
+    <>
+      <Show when={tab() === 'downloads'}>
       <div class="flex min-h-0 flex-1 flex-col overflow-hidden md:flex-row">
         <aside class="flex w-full flex-none flex-col border-b border-slate-200 bg-white/60 p-3 backdrop-blur dark:border-slate-800 dark:bg-slate-950/60 md:w-[264px] md:border-b-0 md:border-r">
           <div class="px-2 py-2">
-            <div class="text-sm font-semibold text-slate-900 dark:text-slate-100">Downloads</div>
+            <div class="text-sm font-semibold text-slate-900 dark:text-slate-100">{t('downloads.title')}</div>
             <div class="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
-              Manage versions and download tasks per node.
+              {t('downloads.subtitle')}
             </div>
           </div>
 
-          <nav class="mt-2 space-y-1">
+          <DataBoundary
+            t={t}
+            class="mt-2"
+            loading={controlDiagnostics.isPending}
+            loadingLines={5}
+            error={controlDiagnostics.error}
+            errorTitle={t('downloads.errorLoadDiagnostics')}
+            hasData={Boolean(controlDiagnostics.data)}
+            empty={false}
+            onRetry={() => void queryClient.invalidateQueries({ queryKey: ['control.diagnostics', null] })}
+            stale={{
+              show: controlDiagnostics.isError && Boolean(controlDiagnostics.data),
+               title: t('downloads.refreshFailedTitle'),
+               message: t('downloads.refreshFailedMessage'),
+               onRetry: () => void queryClient.invalidateQueries({ queryKey: ['control.diagnostics', null] }),
+             }}
+            onOpenSettings={openSettingsTab}
+            settingsCtaLabel={t('downloads.openSettings')}
+          >
+          <nav class="space-y-1">
             <NavItem
               value="tasks"
               current={view}
               onSelect={setView}
               icon={<ListChecks class="h-4 w-4" aria-hidden="true" />}
-              label="Tasks"
-              meta={counts().active > 0 ? `${counts().running} running · ${counts().queued} queued` : 'No active tasks'}
+              label={t('downloads.nav.tasks')}
+              meta={
+                counts().active > 0
+                  ? t('downloads.nav.tasksMeta', { running: counts().running, queued: counts().queued })
+                  : t('downloads.noActiveTasks')
+              }
               right={
                 counts().active > 0 ? (
                   <span class="rounded-full bg-slate-900 px-2 py-0.5 text-[11px] text-white dark:bg-slate-100 dark:text-slate-900">
@@ -674,11 +723,11 @@ export default function DownloadsTab(props: DownloadsTabProps) {
               current={view}
               onSelect={setView}
               icon={<GameAvatar name={templateDisplayLabel('minecraft:vanilla')} src={templateLogoSrc('minecraft:vanilla')} />}
-              label="Minecraft"
+              label={t('downloads.nav.minecraft')}
               meta={
                 mcCachedVersions().length > 0
-                  ? `${mcCachedVersions().length} cached · latest ${mcCachedVersions()[0]?.version ?? ''}`.trim()
-                  : 'Not cached'
+                  ? t('downloads.nav.cachedMeta', { count: mcCachedVersions().length, latest: mcCachedVersions()[0]?.version ?? '' })
+                  : t('downloads.notCached')
               }
             />
             <NavItem
@@ -686,11 +735,11 @@ export default function DownloadsTab(props: DownloadsTabProps) {
               current={view}
               onSelect={setView}
               icon={<GameAvatar name={templateDisplayLabel('terraria:vanilla')} src={templateLogoSrc('terraria:vanilla')} />}
-              label="Terraria"
+              label={t('downloads.nav.terraria')}
               meta={
                 trCachedVersions().length > 0
-                  ? `${trCachedVersions().length} cached · latest ${trCachedVersions()[0]?.version ?? ''}`.trim()
-                  : 'Not cached'
+                  ? t('downloads.nav.cachedMeta', { count: trCachedVersions().length, latest: trCachedVersions()[0]?.version ?? '' })
+                  : t('downloads.notCached')
               }
             />
             <NavItem
@@ -698,11 +747,11 @@ export default function DownloadsTab(props: DownloadsTabProps) {
               current={view}
               onSelect={setView}
               icon={<GameAvatar name={templateDisplayLabel('dst:vanilla')} src={templateLogoSrc('dst:vanilla')} />}
-              label="Don't Starve Together"
+              label={t('downloads.nav.dst')}
               meta={
                 dstCachedVersions().length > 0
-                  ? `${dstCachedVersions().length} cached · latest ${dstCachedVersions()[0]?.version ?? ''}`.trim()
-                  : 'Not cached'
+                  ? t('downloads.nav.cachedMeta', { count: dstCachedVersions().length, latest: dstCachedVersions()[0]?.version ?? '' })
+                  : t('downloads.notCached')
               }
             />
             <NavItem
@@ -710,11 +759,11 @@ export default function DownloadsTab(props: DownloadsTabProps) {
               current={view}
               onSelect={setView}
               icon={<GameAvatar name={templateDisplayLabel('palworld:vanilla')} src={templateLogoSrc('palworld:vanilla')} />}
-              label="Palworld"
+              label={t('downloads.nav.palworld')}
               meta={
                 pwCachedVersions().length > 0
-                  ? `${pwCachedVersions().length} cached · latest ${pwCachedVersions()[0]?.version ?? ''}`.trim()
-                  : 'Not cached'
+                  ? t('downloads.nav.cachedMeta', { count: pwCachedVersions().length, latest: pwCachedVersions()[0]?.version ?? '' })
+                  : t('downloads.notCached')
               }
             />
             <NavItem
@@ -722,11 +771,11 @@ export default function DownloadsTab(props: DownloadsTabProps) {
               current={view}
               onSelect={setView}
               icon={<GameAvatar name={templateDisplayLabel('factorio:vanilla')} src={templateLogoSrc('factorio:vanilla')} />}
-              label="Factorio"
+              label={t('downloads.nav.factorio')}
               meta={
                 fxCachedVersions().length > 0
-                  ? `${fxCachedVersions().length} cached · latest ${fxCachedVersions()[0]?.version ?? ''}`.trim()
-                  : 'Not cached'
+                  ? t('downloads.nav.cachedMeta', { count: fxCachedVersions().length, latest: fxCachedVersions()[0]?.version ?? '' })
+                  : t('downloads.notCached')
               }
             />
             <NavItem
@@ -734,11 +783,11 @@ export default function DownloadsTab(props: DownloadsTabProps) {
               current={view}
               onSelect={setView}
               icon={<GameAvatar name={templateDisplayLabel('core_keeper:vanilla')} src={templateLogoSrc('core_keeper:vanilla')} />}
-              label="Core Keeper"
+              label={t('downloads.nav.coreKeeper')}
               meta={
                 coreKeeperCachedVersions().length > 0
-                  ? `${coreKeeperCachedVersions().length} cached · latest ${coreKeeperCachedVersions()[0]?.version ?? ''}`.trim()
-                  : 'Not cached'
+                  ? t('downloads.nav.cachedMeta', { count: coreKeeperCachedVersions().length, latest: coreKeeperCachedVersions()[0]?.version ?? '' })
+                  : t('downloads.notCached')
               }
             />
             <NavItem
@@ -746,11 +795,11 @@ export default function DownloadsTab(props: DownloadsTabProps) {
               current={view}
               onSelect={setView}
               icon={<GameAvatar name={templateDisplayLabel('seven_days:vanilla')} src={templateLogoSrc('seven_days:vanilla')} />}
-              label="7 Days to Die"
+              label={t('downloads.nav.sevenDays')}
               meta={
                 sevenDaysCachedVersions().length > 0
-                  ? `${sevenDaysCachedVersions().length} cached · latest ${sevenDaysCachedVersions()[0]?.version ?? ''}`.trim()
-                  : 'Not cached'
+                  ? t('downloads.nav.cachedMeta', { count: sevenDaysCachedVersions().length, latest: sevenDaysCachedVersions()[0]?.version ?? '' })
+                  : t('downloads.notCached')
               }
             />
             <NavItem
@@ -758,11 +807,11 @@ export default function DownloadsTab(props: DownloadsTabProps) {
               current={view}
               onSelect={setView}
               icon={<GameAvatar name={templateDisplayLabel('the_forest:vanilla')} src={templateLogoSrc('the_forest:vanilla')} />}
-              label="The Forest"
+              label={t('downloads.nav.theForest')}
               meta={
                 theForestCachedVersions().length > 0
-                  ? `${theForestCachedVersions().length} cached · latest ${theForestCachedVersions()[0]?.version ?? ''}`.trim()
-                  : 'Not cached'
+                  ? t('downloads.nav.cachedMeta', { count: theForestCachedVersions().length, latest: theForestCachedVersions()[0]?.version ?? '' })
+                  : t('downloads.notCached')
               }
             />
             <NavItem
@@ -770,11 +819,11 @@ export default function DownloadsTab(props: DownloadsTabProps) {
               current={view}
               onSelect={setView}
               icon={<GameAvatar name={templateDisplayLabel('sons_of_the_forest:vanilla')} src={templateLogoSrc('sons_of_the_forest:vanilla')} />}
-              label="Sons of the Forest"
+              label={t('downloads.nav.sonsOfTheForest')}
               meta={
                 sonsOfTheForestCachedVersions().length > 0
-                  ? `${sonsOfTheForestCachedVersions().length} cached · latest ${sonsOfTheForestCachedVersions()[0]?.version ?? ''}`.trim()
-                  : 'Not cached'
+                  ? t('downloads.nav.cachedMeta', { count: sonsOfTheForestCachedVersions().length, latest: sonsOfTheForestCachedVersions()[0]?.version ?? '' })
+                  : t('downloads.notCached')
               }
             />
             <NavItem
@@ -782,10 +831,11 @@ export default function DownloadsTab(props: DownloadsTabProps) {
               current={view}
               onSelect={setView}
               icon={<HardDrive class="h-4 w-4" aria-hidden="true" />}
-              label="Cache"
-              meta={`${cacheEntries().length} entries · ${formatBytes(cacheTotalBytes())}`}
+              label={t('downloads.nav.cache')}
+              meta={t('downloads.nav.cacheMeta', { count: cacheEntries().length, size: formatBytes(cacheTotalBytes()) })}
             />
           </nav>
+          </DataBoundary>
 
         </aside>
 
@@ -794,14 +844,14 @@ export default function DownloadsTab(props: DownloadsTabProps) {
             <Show when={view() === 'tasks'}>
               <div class="space-y-4">
                 <Section
-                  title="Tasks"
+                  title={t('downloads.nav.tasks')}
                   right={
                     <>
                       <Badge variant={hasRunningDownloadJobs() ? 'warning' : 'neutral'}>
-                        {hasRunningDownloadJobs() ? 'Running' : 'Idle'}
+                        {hasRunningDownloadJobs() ? t('downloads.running') : t('downloads.idle')}
                       </Badge>
                       <Show when={downloadQueuePaused()}>
-                        <Badge variant="warning">Queue paused</Badge>
+                        <Badge variant="warning">{t('downloads.queuePaused')}</Badge>
                       </Show>
                       <Button
                         size="xs"
@@ -809,7 +859,7 @@ export default function DownloadsTab(props: DownloadsTabProps) {
                         leftIcon={downloadQueuePaused() ? <Play class="h-4 w-4" aria-hidden="true" /> : <Pause class="h-4 w-4" aria-hidden="true" />}
                         onClick={() => void toggleDownloadQueuePaused()}
                       >
-                        {downloadQueuePaused() ? 'Resume' : 'Pause'}
+                        {downloadQueuePaused() ? t('downloads.resume') : t('downloads.pause')}
                       </Button>
                       <Button
                         size="xs"
@@ -817,9 +867,9 @@ export default function DownloadsTab(props: DownloadsTabProps) {
                         leftIcon={<Trash2 class="h-4 w-4" aria-hidden="true" />}
                         disabled={hasRunningDownloadJobs() || jobs().length === 0}
                         onClick={() => void clearDownloadHistory()}
-                        title={hasRunningDownloadJobs() ? 'Stop running jobs before clearing history' : 'Clear finished jobs'}
+                        title={hasRunningDownloadJobs() ? t('downloads.stopBeforeClearHistory') : t('downloads.clearFinishedJobs')}
                       >
-                        Clear history
+                        {t('downloads.clearHistory')}
                       </Button>
                     </>
                   }
@@ -828,7 +878,7 @@ export default function DownloadsTab(props: DownloadsTabProps) {
                     when={activeJobs().length > 0}
                     fallback={
                       <EmptyState
-                        title="No active tasks"
+                        title={t('downloads.noActiveTasks')}
                       />
                     }
                   >
@@ -837,6 +887,7 @@ export default function DownloadsTab(props: DownloadsTabProps) {
                         <For each={activeJobs()}>
                           {(job) => (
                             <JobRow
+                              t={t}
                               job={job}
                               nowUnixMs={downloadNowUnixMs}
                               canReorder
@@ -856,12 +907,13 @@ export default function DownloadsTab(props: DownloadsTabProps) {
                   <Show when={historyJobs().length > 0}>
                     <details class="mt-4 rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
                       <summary class="cursor-pointer select-none px-4 py-3 text-sm font-medium text-slate-900 hover:bg-slate-50 dark:text-slate-100 dark:hover:bg-slate-900/20">
-                        History ({historyJobs().length})
+                        {t('downloads.historyCount', { count: historyJobs().length })}
                       </summary>
                       <div class="divide-y divide-slate-200 dark:divide-slate-800">
                         <For each={historyJobs()}>
                           {(job) => (
                             <JobRow
+                              t={t}
                               job={job}
                               nowUnixMs={downloadNowUnixMs}
                               compact
@@ -883,8 +935,9 @@ export default function DownloadsTab(props: DownloadsTabProps) {
 
             <Show when={view() === 'minecraft'}>
               <VersionManager
-                title="Minecraft"
-                subtitle="Minecraft server bundles are version-managed (not “updated”). Cache the version you plan to use."
+                t={t}
+                title={t('downloads.nav.minecraft')}
+                subtitle={t('downloads.subtitleMinecraft')}
                 templateId="minecraft:vanilla"
                 aggregateCacheKey="minecraft:vanilla"
                 cachedVersions={mcCachedVersions}
@@ -905,8 +958,9 @@ export default function DownloadsTab(props: DownloadsTabProps) {
 
             <Show when={view() === 'terraria'}>
               <VersionManager
-                title="Terraria"
-                subtitle="Terraria server bundles are version-managed. Choose a build number and cache it."
+                t={t}
+                title={t('downloads.nav.terraria')}
+                subtitle={t('downloads.subtitleTerraria')}
                 templateId="terraria:vanilla"
                 aggregateCacheKey="terraria:vanilla"
                 cachedVersions={trCachedVersions}
@@ -927,8 +981,9 @@ export default function DownloadsTab(props: DownloadsTabProps) {
 
             <Show when={view() === 'dst'}>
               <VersionManager
-                title="Don't Starve Together"
-                subtitle="Don't Starve Together dedicated server is installed via SteamCMD and cached per install target."
+                t={t}
+                title={t('downloads.nav.dst')}
+                subtitle={t('downloads.subtitleDst')}
                 templateId="dst:vanilla"
                 aggregateCacheKey="dst:vanilla"
                 cachedVersions={dstCachedVersions}
@@ -949,8 +1004,9 @@ export default function DownloadsTab(props: DownloadsTabProps) {
 
             <Show when={view() === 'palworld'}>
               <VersionManager
-                title="Palworld"
-                subtitle="Palworld dedicated server is installed via SteamCMD and cached per install target."
+                t={t}
+                title={t('downloads.nav.palworld')}
+                subtitle={t('downloads.subtitlePalworld')}
                 templateId="palworld:vanilla"
                 aggregateCacheKey="palworld:vanilla"
                 cachedVersions={pwCachedVersions}
@@ -971,8 +1027,9 @@ export default function DownloadsTab(props: DownloadsTabProps) {
 
             <Show when={view() === 'factorio'}>
               <VersionManager
-                title="Factorio"
-                subtitle="Factorio headless packages are version-managed. Choose channel or version and cache it."
+                t={t}
+                title={t('downloads.nav.factorio')}
+                subtitle={t('downloads.subtitleFactorio')}
                 templateId="factorio:vanilla"
                 aggregateCacheKey="factorio:vanilla"
                 cachedVersions={fxCachedVersions}
@@ -993,8 +1050,9 @@ export default function DownloadsTab(props: DownloadsTabProps) {
 
             <Show when={view() === 'core_keeper'}>
               <VersionManager
-                title="Core Keeper"
-                subtitle="Core Keeper dedicated server is installed via SteamCMD and cached per install target."
+                t={t}
+                title={t('downloads.nav.coreKeeper')}
+                subtitle={t('downloads.subtitleCoreKeeper')}
                 templateId="core_keeper:vanilla"
                 aggregateCacheKey="core_keeper:vanilla"
                 cachedVersions={coreKeeperCachedVersions}
@@ -1015,8 +1073,9 @@ export default function DownloadsTab(props: DownloadsTabProps) {
 
             <Show when={view() === 'seven_days'}>
               <VersionManager
-                title="7 Days to Die"
-                subtitle="7 Days to Die dedicated server is installed via SteamCMD and cached per install target."
+                t={t}
+                title={t('downloads.nav.sevenDays')}
+                subtitle={t('downloads.subtitleSevenDays')}
                 templateId="seven_days:vanilla"
                 aggregateCacheKey="seven_days:vanilla"
                 cachedVersions={sevenDaysCachedVersions}
@@ -1037,8 +1096,9 @@ export default function DownloadsTab(props: DownloadsTabProps) {
 
             <Show when={view() === 'the_forest'}>
               <VersionManager
-                title="The Forest"
-                subtitle="The Forest dedicated server is installed via SteamCMD and cached per install target."
+                t={t}
+                title={t('downloads.nav.theForest')}
+                subtitle={t('downloads.subtitleTheForest')}
                 templateId="the_forest:vanilla"
                 aggregateCacheKey="the_forest:vanilla"
                 cachedVersions={theForestCachedVersions}
@@ -1059,8 +1119,9 @@ export default function DownloadsTab(props: DownloadsTabProps) {
 
             <Show when={view() === 'sons_of_the_forest'}>
               <VersionManager
-                title="Sons of the Forest"
-                subtitle="Sons of the Forest dedicated server is installed via SteamCMD and cached per install target."
+                t={t}
+                title={t('downloads.nav.sonsOfTheForest')}
+                subtitle={t('downloads.subtitleSonsOfTheForest')}
                 templateId="sons_of_the_forest:vanilla"
                 aggregateCacheKey="sons_of_the_forest:vanilla"
                 cachedVersions={sonsOfTheForestCachedVersions}
@@ -1083,14 +1144,14 @@ export default function DownloadsTab(props: DownloadsTabProps) {
               <div class="space-y-4">
                 <div class="flex flex-wrap items-start justify-between gap-3">
                   <div class="min-w-0">
-                    <div class="text-lg font-semibold tracking-tight text-slate-900 dark:text-slate-100">Cache</div>
+                    <div class="text-lg font-semibold tracking-tight text-slate-900 dark:text-slate-100">{t('downloads.nav.cache')}</div>
                     <div class="mt-1 text-[12px] text-slate-600 dark:text-slate-400">
-                      Diagnostic view of cached bundles on this node.
+                      {t('downloads.cacheSubtitle')}
                     </div>
                   </div>
                   <div class="flex flex-wrap items-center gap-2">
                     <span class="rounded-full border border-slate-200 bg-white px-2 py-0.5 font-mono text-[11px] text-slate-700 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200">
-                      {cacheEntries().length} entries
+                      {t('downloads.entriesCount', { count: cacheEntries().length })}
                     </span>
                     <span class="rounded-full border border-slate-200 bg-white px-2 py-0.5 font-mono text-[11px] text-slate-700 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200">
                       {formatBytes(cacheTotalBytes())}
@@ -1103,17 +1164,17 @@ export default function DownloadsTab(props: DownloadsTabProps) {
                     <Input
                       value={cacheSearch()}
                       onInput={(e) => setCacheSearch(e.currentTarget.value)}
-                      placeholder="Search by key or path…"
+                      placeholder={t('downloads.searchByKeyOrPath')}
                       leftIcon={<Search class="h-4 w-4" aria-hidden="true" />}
                     />
                     <div class="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
-                      Showing {cacheDisplayRows().length}/{cacheEntries().length}
+                      {t('downloads.showingEntries', { shown: cacheDisplayRows().length, total: cacheEntries().length })}
                     </div>
                   </div>
 
                   <Show
                     when={cacheDisplayRows().length > 0}
-                    fallback={<EmptyState title="No cache entries" class="m-4" />}
+                    fallback={<EmptyState title={t('downloads.noCacheEntries')} class="m-4" />}
                   >
                     <div class="space-y-4 p-4">
                       <For each={cacheGroups()}>
@@ -1123,7 +1184,7 @@ export default function DownloadsTab(props: DownloadsTabProps) {
                               <div class="text-sm font-semibold text-slate-900 dark:text-slate-100">{g.title}</div>
                               <div class="flex flex-wrap items-center gap-2">
                                 <span class="rounded-full border border-slate-200 bg-white px-2 py-0.5 font-mono text-[11px] text-slate-700 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200">
-                                  {g.entries.length} entries
+                                  {t('downloads.entriesCount', { count: g.entries.length })}
                                 </span>
                                 <span class="rounded-full border border-slate-200 bg-white px-2 py-0.5 font-mono text-[11px] text-slate-700 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200">
                                   {formatBytes(g.totalBytes)}
@@ -1163,10 +1224,10 @@ export default function DownloadsTab(props: DownloadsTabProps) {
                                         <div title={new Date(e.lastUsedUnixMs).toLocaleString()}>{formatRelativeTime(e.lastUsedUnixMs)}</div>
                                       </div>
                                       <IconButton
-                                        label="Delete cache entry"
+                                        label={t('downloads.deleteCacheEntry')}
                                         variant="danger"
                                         disabled={deleteDisabled()}
-                                        onClick={() => void deleteCacheKey(e.key, `${g.title} ${e.title}`)}
+                                        onClick={() => requestDeleteCacheKey(e.key, `${g.title} ${e.title}`)}
                                       >
                                         <Show
                                           when={deletingKey() === e.key}
@@ -1191,6 +1252,29 @@ export default function DownloadsTab(props: DownloadsTabProps) {
           </div>
         </main>
       </div>
-    </Show>
+      </Show>
+
+      <Modal
+        open={pendingCacheDelete() != null}
+        onClose={() => setPendingCacheDelete(null)}
+        title={t('downloads.deleteCacheEntry')}
+        size="sm"
+        footer={
+          <div class="flex items-center justify-end gap-2">
+            <Button variant="secondary" size="sm" onClick={() => setPendingCacheDelete(null)} disabled={clearCache.isPending}>
+              {t('downloads.cancel')}
+            </Button>
+            <Button variant="danger" size="sm" onClick={() => void confirmDeleteCacheKey()} disabled={clearCache.isPending}>
+              {t('downloads.delete')}
+            </Button>
+          </div>
+        }
+      >
+        <p class="text-sm text-slate-700 dark:text-slate-300">
+          {t('downloads.deleteCachedDataFor', { label: pendingCacheDelete()?.label ?? '' })}
+        </p>
+        <p class="mt-2 text-xs text-slate-500 dark:text-slate-400">{t('downloads.deleteCacheHint')}</p>
+      </Modal>
+    </>
   )
 }

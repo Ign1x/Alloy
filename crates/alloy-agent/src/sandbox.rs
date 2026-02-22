@@ -1,3 +1,5 @@
+#![allow(clippy::too_many_arguments)]
+
 use std::{
     collections::{BTreeMap, BTreeSet},
     io,
@@ -697,7 +699,7 @@ fn ensure_docker_ready(image: &str, docker_data_volume: Option<&str>) -> anyhow:
                 anyhow::bail!(
                     "docker sandbox preflight failed to create volume {}: {}",
                     volume_name,
-                    stderr.trim().to_string()
+                    stderr.trim()
                 );
             }
         }
@@ -722,7 +724,7 @@ fn ensure_docker_ready(image: &str, docker_data_volume: Option<&str>) -> anyhow:
             anyhow::bail!(
                 "docker sandbox preflight failed to pull image {}: {}",
                 image,
-                stderr.trim().to_string()
+                stderr.trim()
             );
         }
     }
@@ -878,88 +880,6 @@ fn sanitize_cgroup_name(raw: &str) -> String {
         "instance".to_string()
     } else {
         out
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{
-        detect_docker_data_volume_from_mountinfo, extract_docker_volume_from_mount_root,
-        mount_path_from_mountinfo, mountpoint_prefix_matches,
-        resolve_host_mount_path_from_mountinfo,
-    };
-    use std::path::Path;
-
-    #[test]
-    fn mountpoint_prefix_matching_works() {
-        assert!(mountpoint_prefix_matches("/data", "/data"));
-        assert!(mountpoint_prefix_matches("/data/instances/abc", "/data"));
-        assert!(!mountpoint_prefix_matches("/database", "/data"));
-    }
-
-    #[test]
-    fn extract_volume_name_from_mount_root() {
-        let root = "/var/lib/docker/volumes/alloy_alloy-agent-data/_data";
-        assert_eq!(
-            extract_docker_volume_from_mount_root(root),
-            Some("alloy_alloy-agent-data".to_string())
-        );
-    }
-
-    #[test]
-    fn detect_volume_prefers_longest_matching_mountpoint() {
-        let mountinfo = r#"
-425 411 0:27 /@/var/lib/docker/volumes/alloy_alloy-agent-data/_data /data rw,relatime - btrfs /dev/sdb3 rw
-426 411 0:27 /@/var/lib/docker/volumes/other/_data / rw,relatime - btrfs /dev/sdb3 rw
-"#;
-        let got = detect_docker_data_volume_from_mountinfo(mountinfo, Path::new("/data"));
-        assert_eq!(got, Some("alloy_alloy-agent-data".to_string()));
-    }
-
-    #[test]
-    fn detect_volume_for_instance_subdir() {
-        let mountinfo = r#"
-425 411 0:27 /@/var/lib/docker/volumes/alloy_alloy-agent-data/_data /data rw,relatime - btrfs /dev/sdb3 rw
-"#;
-        let got = detect_docker_data_volume_from_mountinfo(
-            mountinfo,
-            Path::new("/data/instances/23cb6f2a-2bb7-4af4-a4cf-4d54c7fa95c7"),
-        );
-        assert_eq!(got, Some("alloy_alloy-agent-data".to_string()));
-    }
-
-    #[test]
-    fn mount_path_from_mountinfo_handles_root_and_subpaths() {
-        assert_eq!(
-            mount_path_from_mountinfo("/", "/", "/tmp/work"),
-            Some(Path::new("/tmp/work").to_path_buf())
-        );
-        assert_eq!(
-            mount_path_from_mountinfo("/@/home/ign1x/Code/Alloy", "/app", "/app/crates"),
-            Some(Path::new("/@/home/ign1x/Code/Alloy/crates").to_path_buf())
-        );
-    }
-
-    #[test]
-    fn resolve_host_mount_path_skips_overlay_only_paths() {
-        let mountinfo = r#"
-100 90 0:59 / / rw,relatime - overlay overlay rw,lowerdir=/layers
-"#;
-        let got = resolve_host_mount_path_from_mountinfo(mountinfo, Path::new("/app"));
-        assert_eq!(got, None);
-    }
-
-    #[test]
-    fn resolve_host_mount_path_maps_bind_mount_subpaths() {
-        let mountinfo = r#"
-100 90 0:59 / / rw,relatime - overlay overlay rw,lowerdir=/layers
-101 100 0:27 /@/home/ign1x/Code/Alloy /app rw,relatime - btrfs /dev/sdb3 rw
-"#;
-        let got = resolve_host_mount_path_from_mountinfo(mountinfo, Path::new("/app/crates"));
-        assert_eq!(
-            got,
-            Some(Path::new("/@/home/ign1x/Code/Alloy/crates").to_path_buf())
-        );
     }
 }
 
@@ -1121,11 +1041,93 @@ fn is_executable_file(path: &Path) -> bool {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        return meta.permissions().mode() & 0o111 != 0;
+        meta.permissions().mode() & 0o111 != 0
     }
 
     #[cfg(not(unix))]
     {
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        detect_docker_data_volume_from_mountinfo, extract_docker_volume_from_mount_root,
+        mount_path_from_mountinfo, mountpoint_prefix_matches,
+        resolve_host_mount_path_from_mountinfo,
+    };
+    use std::path::Path;
+
+    #[test]
+    fn mountpoint_prefix_matching_works() {
+        assert!(mountpoint_prefix_matches("/data", "/data"));
+        assert!(mountpoint_prefix_matches("/data/instances/abc", "/data"));
+        assert!(!mountpoint_prefix_matches("/database", "/data"));
+    }
+
+    #[test]
+    fn extract_volume_name_from_mount_root() {
+        let root = "/var/lib/docker/volumes/alloy_alloy-agent-data/_data";
+        assert_eq!(
+            extract_docker_volume_from_mount_root(root),
+            Some("alloy_alloy-agent-data".to_string())
+        );
+    }
+
+    #[test]
+    fn detect_volume_prefers_longest_matching_mountpoint() {
+        let mountinfo = r#"
+425 411 0:27 /@/var/lib/docker/volumes/alloy_alloy-agent-data/_data /data rw,relatime - btrfs /dev/sdb3 rw
+426 411 0:27 /@/var/lib/docker/volumes/other/_data / rw,relatime - btrfs /dev/sdb3 rw
+"#;
+        let got = detect_docker_data_volume_from_mountinfo(mountinfo, Path::new("/data"));
+        assert_eq!(got, Some("alloy_alloy-agent-data".to_string()));
+    }
+
+    #[test]
+    fn detect_volume_for_instance_subdir() {
+        let mountinfo = r#"
+425 411 0:27 /@/var/lib/docker/volumes/alloy_alloy-agent-data/_data /data rw,relatime - btrfs /dev/sdb3 rw
+"#;
+        let got = detect_docker_data_volume_from_mountinfo(
+            mountinfo,
+            Path::new("/data/instances/23cb6f2a-2bb7-4af4-a4cf-4d54c7fa95c7"),
+        );
+        assert_eq!(got, Some("alloy_alloy-agent-data".to_string()));
+    }
+
+    #[test]
+    fn mount_path_from_mountinfo_handles_root_and_subpaths() {
+        assert_eq!(
+            mount_path_from_mountinfo("/", "/", "/tmp/work"),
+            Some(Path::new("/tmp/work").to_path_buf())
+        );
+        assert_eq!(
+            mount_path_from_mountinfo("/@/home/ign1x/Code/Alloy", "/app", "/app/crates"),
+            Some(Path::new("/@/home/ign1x/Code/Alloy/crates").to_path_buf())
+        );
+    }
+
+    #[test]
+    fn resolve_host_mount_path_skips_overlay_only_paths() {
+        let mountinfo = r#"
+100 90 0:59 / / rw,relatime - overlay overlay rw,lowerdir=/layers
+"#;
+        let got = resolve_host_mount_path_from_mountinfo(mountinfo, Path::new("/app"));
+        assert_eq!(got, None);
+    }
+
+    #[test]
+    fn resolve_host_mount_path_maps_bind_mount_subpaths() {
+        let mountinfo = r#"
+100 90 0:59 / / rw,relatime - overlay overlay rw,lowerdir=/layers
+101 100 0:27 /@/home/ign1x/Code/Alloy /app rw,relatime - btrfs /dev/sdb3 rw
+"#;
+        let got = resolve_host_mount_path_from_mountinfo(mountinfo, Path::new("/app/crates"));
+        assert_eq!(
+            got,
+            Some(Path::new("/@/home/ign1x/Code/Alloy/crates").to_path_buf())
+        );
     }
 }

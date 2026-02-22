@@ -1,3 +1,5 @@
+#![allow(clippy::too_many_arguments, clippy::cloned_ref_to_slice_refs)]
+
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap, VecDeque},
     path::{Path, PathBuf},
@@ -1294,10 +1296,7 @@ async fn docker_stop_container(container_id: &str, stop_timeout_secs: u64) -> an
         return Ok(());
     }
 
-    anyhow::bail!(
-        "docker stop failed for {container_id}: {}",
-        stderr.trim().to_string()
-    );
+    anyhow::bail!("docker stop failed for {container_id}: {}", stderr.trim());
 }
 
 async fn docker_kill_container(container_id: &str) -> anyhow::Result<()> {
@@ -1318,10 +1317,7 @@ async fn docker_kill_container(container_id: &str) -> anyhow::Result<()> {
         return Ok(());
     }
 
-    anyhow::bail!(
-        "docker kill failed for {container_id}: {}",
-        stderr.trim().to_string()
-    );
+    anyhow::bail!("docker kill failed for {container_id}: {}", stderr.trim());
 }
 
 async fn wait_for_local_tcp_port(port: u16, timeout: Duration) -> bool {
@@ -1451,7 +1447,7 @@ fn entry_message(e: &ProcessEntry) -> Option<String> {
         let reason = e
             .exit_reason
             .as_deref()
-            .or_else(|| e.message.as_deref())
+            .or(e.message.as_deref())
             .unwrap_or("");
         if reason.trim().is_empty() {
             return None;
@@ -2200,8 +2196,8 @@ impl ProcessManager {
                         };
 
                         if ok {
-                            if let (Some(cfg), Some(pgid)) = (frp_config.clone(), pgid) {
-                                if let Err(e) = start_frpc_sidecar(
+                            if let (Some(cfg), Some(pgid)) = (frp_config.clone(), pgid)
+                                && let Err(e) = start_frpc_sidecar(
                                     probe_sink.clone(),
                                     frp_instance_dir.clone(),
                                     pgid,
@@ -2214,7 +2210,6 @@ impl ProcessManager {
                                         .emit(format!("[alloy-agent] frpc start failed: {e}"))
                                         .await;
                                 }
-                            }
                             probe_sink
                                 .emit(format!(
                                     "[alloy-agent] minecraft port {} is accepting connections",
@@ -2567,8 +2562,8 @@ impl ProcessManager {
                         };
 
                         if ok {
-                            if let (Some(cfg), Some(pgid)) = (frp_config.clone(), pgid) {
-                                if let Err(e) = start_frpc_sidecar(
+                            if let (Some(cfg), Some(pgid)) = (frp_config.clone(), pgid)
+                                && let Err(e) = start_frpc_sidecar(
                                     probe_sink.clone(),
                                     frp_instance_dir.clone(),
                                     pgid,
@@ -2581,7 +2576,6 @@ impl ProcessManager {
                                         .emit(format!("[alloy-agent] frpc start failed: {e}"))
                                         .await;
                                 }
-                            }
                             probe_sink
                                 .emit(format!(
                                     "[alloy-agent] minecraft port {} is accepting connections",
@@ -2892,8 +2886,8 @@ impl ProcessManager {
                         };
 
                         if ok {
-                            if let (Some(cfg), Some(pgid)) = (frp_config.clone(), pgid) {
-                                if let Err(e) = start_frpc_sidecar(
+                            if let (Some(cfg), Some(pgid)) = (frp_config.clone(), pgid)
+                                && let Err(e) = start_frpc_sidecar(
                                     probe_sink.clone(),
                                     frp_instance_dir.clone(),
                                     pgid,
@@ -2906,7 +2900,6 @@ impl ProcessManager {
                                         .emit(format!("[alloy-agent] frpc start failed: {e}"))
                                         .await;
                                 }
-                            }
                             probe_sink
                                 .emit(format!(
                                     "[alloy-agent] minecraft port {} is accepting connections",
@@ -3224,8 +3217,8 @@ impl ProcessManager {
                         };
 
                         if ok {
-                            if let (Some(cfg), Some(pgid)) = (frp_config.clone(), pgid) {
-                                if let Err(e) = start_frpc_sidecar(
+                            if let (Some(cfg), Some(pgid)) = (frp_config.clone(), pgid)
+                                && let Err(e) = start_frpc_sidecar(
                                     probe_sink.clone(),
                                     frp_instance_dir.clone(),
                                     pgid,
@@ -3238,7 +3231,6 @@ impl ProcessManager {
                                         .emit(format!("[alloy-agent] frpc start failed: {e}"))
                                         .await;
                                 }
-                            }
                             probe_sink
                                 .emit(format!(
                                     "[alloy-agent] minecraft port {} is accepting connections",
@@ -3908,8 +3900,8 @@ impl ProcessManager {
                         };
 
                         if ok {
-                            if let (Some(cfg), Some(pgid)) = (frp_config.clone(), pgid) {
-                                if let Err(e) = start_frpc_sidecar(
+                            if let (Some(cfg), Some(pgid)) = (frp_config.clone(), pgid)
+                                && let Err(e) = start_frpc_sidecar(
                                     probe_sink.clone(),
                                     frp_instance_dir.clone(),
                                     pgid,
@@ -3922,7 +3914,6 @@ impl ProcessManager {
                                         .emit(format!("[alloy-agent] frpc start failed: {e}"))
                                         .await;
                                 }
-                            }
                             probe_sink
                                 .emit(format!(
                                     "[alloy-agent] terraria port {} is accepting connections",
@@ -5287,7 +5278,6 @@ impl ProcessManager {
         let logs: Arc<Mutex<LogBuffer>>;
         let log_tx: Option<mpsc::UnboundedSender<String>>;
         let mut graceful: Option<(ChildStdin, String)> = None;
-        let docker_container: Option<String>;
 
         {
             let mut inner = self.inner.lock().await;
@@ -5363,7 +5353,7 @@ impl ProcessManager {
         )
         .await;
 
-        docker_container = find_container_for_process(process_id).await;
+        let docker_container: Option<String> = find_container_for_process(process_id).await;
         if let Some(container_id) = docker_container.as_deref() {
             emit(
                 format!(

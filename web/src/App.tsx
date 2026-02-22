@@ -1,59 +1,131 @@
-import { isAlloyApiError, onAuthEvent, queryClient, rspc } from './rspc'
-import { createEffect, createMemo, createSignal, onCleanup } from 'solid-js'
-import type { ProcessStatusDto } from './bindings'
-import { changeCredentials, ensureCsrfCookie, logout, whoami } from './auth'
+import { queryClient, rspc } from './rspc'
+import { createEffect, createMemo, createSignal } from 'solid-js'
+import { changeCredentials, ensureCsrfCookie } from './auth'
 import AppModals from './components/AppModals'
 import AppShell from './components/AppShell'
 import { parseAgentErrorPayload } from './app/helpers/agentErrors'
-import { mapDownloadJobFromServer, downloadTargetLabel } from './app/helpers/downloads'
 import { buildCreatePreview, computeCreateAdvancedDirty } from './app/helpers/createInstancePreview'
 import {
   focusFirstCreateError as focusFirstCreateErrorInForm,
   focusFirstEditError as focusFirstEditErrorInForm,
 } from './app/helpers/formFocus'
-import { compactAllocatablePortsSpec, defaultControlWsUrl, detectFrpConfigFormat, formatLatencyMs, instancePort, parseFrpEndpoint } from './app/helpers/network'
 import { optionsWithCurrentValue, safeCopy } from './app/helpers/misc'
-import { isVersionLower } from './app/helpers/version'
 import { useSidebarState } from './app/hooks/useSidebarState'
 import { useAppLocale } from './app/hooks/useAppLocale'
 import { useThemePreference } from './app/hooks/useThemePreference'
 import { useToastBus } from './app/hooks/useToastBus'
+import { useInstancesDomain } from './app/hooks/useInstancesDomain'
+import { useAuthDomain } from './app/hooks/useAuthDomain'
+import { useDownloadsDomain } from './app/hooks/useDownloadsDomain'
+import { useNodesDomain } from './app/hooks/useNodesDomain'
+import {
+  buildTabUrl,
+  coerceUiTabForRole,
+  readUiRouteFromLocation,
+  type UiRouteSelection,
+  type UiTabRouteState,
+} from './app/tabRegistry'
 import {
   CREATE_TEMPLATE_MINECRAFT,
-  DOWNLOAD_VIEW_STORAGE_KEY,
   MINECRAFT_MODE_BY_TEMPLATE_ID,
   MINECRAFT_TEMPLATE_ID_BY_MODE,
-  type DownloadCenterView,
-  type DownloadJob,
-  type DownloadTarget,
   type FrpConfigMode,
   type MinecraftCreateMode,
   type UiTab,
 } from './app/types'
 function App() {
-  // Ensure CSRF cookie exists early so authenticated POSTs (auth/rspc mutations)
-  // can always attach x-csrf-token.
-  createEffect(() => {
-    void ensureCsrfCookie()
+  const initialRoute = readUiRouteFromLocation('instances')
+  const [selectedInstanceId, setSelectedInstanceId] = createSignal<string | null>(initialRoute.tab === 'instances' ? initialRoute.instanceId : null)
+  const [selectedFilePath, setSelectedFilePath] = createSignal<string | null>(initialRoute.tab === 'files' ? initialRoute.selectedFilePath : null)
+  const [fsPath, setFsPath] = createSignal<string>(initialRoute.tab === 'files' ? (initialRoute.fsPath ?? '') : '')
+  const { locale, setLocale, localeOptions, localeShort, t } = useAppLocale()
+
+  const {
+    me,
+    setMe,
+    authLoading,
+    setAuthLoading,
+    authError,
+    setAuthError,
+    loginUser,
+    setLoginUser,
+    loginPass,
+    setLoginPass,
+    showLoginModal,
+    setShowLoginModal,
+    refreshSession,
+    handleLogout,
+    isAuthed,
+    openLoginModal,
+    setLoginUsernameEl,
+  } = useAuthDomain({
+    t,
+    onClearSelections: () => {
+      setSelectedInstanceId(null)
+      setSelectedFilePath(null)
+    },
   })
 
-  const [me, setMe] = createSignal<{ username: string; is_admin: boolean } | null>(null)
-  const [authLoading, setAuthLoading] = createSignal(true)
-  const [authError, setAuthError] = createSignal<string | null>(null)
-  const [loginUser, setLoginUser] = createSignal('admin')
-  const [loginPass, setLoginPass] = createSignal('admin')
-  const [showLoginModal, setShowLoginModal] = createSignal(false)
   const [confirmDeleteInstanceId, setConfirmDeleteInstanceId] = createSignal<string | null>(null)
   const [confirmDeleteText, setConfirmDeleteText] = createSignal('')
   const [editingInstanceId, setEditingInstanceId] = createSignal<string | null>(null)
   const [showDiagnosticsModal, setShowDiagnosticsModal] = createSignal(false)
   const [showAccountMenu, setShowAccountMenu] = createSignal(false)
   const [showUpdateCenter, setShowUpdateCenter] = createSignal(false)
-  const { toasts, setToasts, pushToast, toastError, friendlyErrorMessage } = useToastBus()
+  const [showEventCenter, setShowEventCenter] = createSignal(false)
+  const { themePref, setThemePref, themeButtonTitle, theme } = useThemePreference()
+  const { sidebarExpanded, setSidebarExpanded } = useSidebarState()
+  const [mobileNavOpen, setMobileNavOpen] = createSignal(false)
+  const [tab, setTabSignal] = createSignal<UiTab>(initialRoute.tab)
+  const currentUiRoute = (nextTab: UiTab = tab()): UiRouteSelection => ({
+    tab: nextTab,
+    instanceId: nextTab === 'instances' ? selectedInstanceId() : null,
+    fsPath: nextTab === 'files' ? fsPath() || null : null,
+    selectedFilePath: nextTab === 'files' ? selectedFilePath() : null,
+  })
+  const setTab: typeof setTabSignal = (next) => {
+    const previous = tab()
+    const resolved = (typeof next === 'function' ? next(previous) : next) as UiTab
+    if (resolved !== previous && typeof window !== 'undefined') {
+      try {
+        const route = currentUiRoute(resolved)
+        const nextUrl = buildTabUrl(route)
+        const currentState = (window.history.state as UiTabRouteState | null) ?? {}
+        window.history.pushState({ ...currentState, ...route }, '', nextUrl)
+      } catch {}
+    }
+    setTabSignal(() => resolved)
+    return resolved
+  }
+  const setTabSilently = (next: UiTab): UiTab => {
+    setTabSignal(next)
+    return next
+  }
+  const replaceTabInHistory = (next: UiTab): void => {
+    if (typeof window === 'undefined') return
+    const route = currentUiRoute(next)
+    const nextUrl = buildTabUrl(route)
+    const currentUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`
+    if (currentUrl === nextUrl) return
+    try {
+      const currentState = (window.history.state as UiTabRouteState | null) ?? {}
+      window.history.replaceState({ ...currentState, ...route }, '', nextUrl)
+    } catch {}
+  }
+  const {
+    toasts,
+    dismissToast,
+    events,
+    clearEvents,
+    markAllEventsRead,
+    runRetryAction,
+    pushToast,
+    toastError,
+    toastSuccessFromRspc,
+    friendlyErrorMessage,
+  } = useToastBus(t)
   // Account menu uses a fixed overlay; refs are not needed.
 
-  const [focusLoginUsername, setFocusLoginUsername] = createSignal(false)
-  let loginUsernameEl: HTMLInputElement | undefined
   let createInstanceNameEl: HTMLInputElement | undefined
   let createSleepSecondsEl: HTMLInputElement | undefined
   let createMcEulaEl: HTMLInputElement | undefined
@@ -96,57 +168,17 @@ function App() {
   let editTrFrpConfigEl: HTMLTextAreaElement | undefined
   let editTrFrpNodeEl: HTMLDivElement | undefined
 
-  const { themePref, setThemePref, themeButtonTitle, theme } = useThemePreference()
-  const { locale, setLocale, localeOptions, localeShort, t } = useAppLocale()
-  const { sidebarExpanded, setSidebarExpanded } = useSidebarState()
-  const [mobileNavOpen, setMobileNavOpen] = createSignal(false)
-
-  // Prevent out-of-order session fetches from clobbering newer state.
-  let sessionFetchToken = 0
-
-  async function refreshSession() {
-    const token = ++sessionFetchToken
-    setAuthLoading(true)
-    setAuthError(null)
-    try {
-      const res = await whoami()
-      if (token !== sessionFetchToken) return
-      setMe(res ? { username: res.username, is_admin: res.is_admin } : null)
-    } catch (e) {
-      if (token !== sessionFetchToken) return
-      setAuthError(e instanceof Error ? e.message : 'auth error')
-      setMe(null)
-    } finally {
-      if (token === sessionFetchToken) setAuthLoading(false)
-    }
-  }
-
-  async function handleLogout() {
-    try {
-      setAuthError(null)
-      await logout()
-    } catch (e) {
-      setAuthError(e instanceof Error ? e.message : 'logout error')
-    } finally {
-      setMe(null)
-      setSelectedInstanceId(null)
-      setSelectedFilePath(null)
-      // Ensure we don't show stale data in a "logged-out" state.
-      queryClient.clear()
-    }
-  }
-
   async function handleChangeCredentials() {
     const current_password = settingsCurrentPassword()
     const new_username = settingsNewUsername().trim()
     const new_password = settingsNewPassword()
 
     if (!current_password.trim()) {
-      pushToast('error', 'Missing field', 'Current password is required.')
+      pushToast('error', t('app.missingField'), t('app.currentPasswordRequired'))
       return
     }
     if (!new_username && !new_password) {
-      pushToast('error', 'Missing field', 'Enter a new username or new password.')
+      pushToast('error', t('app.missingField'), t('app.enterUsernameOrPassword'))
       return
     }
 
@@ -165,35 +197,13 @@ function App() {
       setSettingsCurrentPasswordVisible(false)
       setSettingsNewPasswordVisible(false)
 
-      pushToast('success', 'Saved', 'Control account credentials updated')
+      pushToast('success', t('app.saved'), t('app.controlCredentialsUpdated'))
     } catch (e) {
-      toastError('Save failed', e)
+      toastError(t('app.saveFailed'), e)
     } finally {
       setChangeCredentialsPending(false)
     }
   }
-
-  createEffect(() => {
-    const off = onAuthEvent((e) => {
-      if (e.type !== 'auth-expired') return
-      // Session expired (access token missing/expired and refresh failed).
-      setMe(null)
-      setSelectedInstanceId(null)
-      setSelectedFilePath(null)
-      queryClient.clear()
-      setAuthError('Session expired. Please sign in again.')
-      setShowLoginModal(true)
-      setFocusLoginUsername(true)
-    })
-    return off
-  })
-
-  createEffect(() => {
-    if (!showLoginModal()) return
-    if (!focusLoginUsername()) return
-    setFocusLoginUsername(false)
-    queueMicrotask(() => loginUsernameEl?.focus())
-  })
 
   createEffect(() => {
     if (!showAccountMenu()) return
@@ -213,27 +223,6 @@ function App() {
     return () => window.removeEventListener('keydown', onKey)
   })
 
-  createEffect(() => {
-    if (!showLoginModal()) return
-    const onKeyDown = (ev: KeyboardEvent) => {
-      if (ev.key !== 'Escape') return
-      ev.preventDefault()
-      setShowLoginModal(false)
-    }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  })
-
-  createEffect(() => {
-    void refreshSession()
-    return () => {
-      // Invalidate any in-flight `whoami`.
-      sessionFetchToken++
-    }
-  })
-
-  const isAuthed = createMemo(() => !!me())
-
   const ping = rspc.createQuery(() => ['control.ping', null])
 
   const [lastBackendOkAtUnixMs, setLastBackendOkAtUnixMs] = createSignal<number | null>(null)
@@ -251,17 +240,17 @@ function App() {
 
   type TemplateCatalogItem = { template_id: string; display_name: string }
   const FALLBACK_TEMPLATE_CATALOG: TemplateCatalogItem[] = [
-    { template_id: 'demo:sleep', display_name: 'Demo: sleep' },
-    { template_id: 'minecraft:vanilla', display_name: 'Minecraft: Vanilla' },
-    { template_id: 'minecraft:import', display_name: 'Minecraft: Import Pack' },
-    { template_id: 'terraria:vanilla', display_name: 'Terraria: Vanilla' },
-    { template_id: 'dst:vanilla', display_name: "Don't Starve Together" },
-    { template_id: 'palworld:vanilla', display_name: 'Palworld: Vanilla' },
-    { template_id: 'factorio:vanilla', display_name: 'Factorio: Vanilla' },
-    { template_id: 'core_keeper:vanilla', display_name: 'Core Keeper: Dedicated' },
-    { template_id: 'seven_days:vanilla', display_name: '7 Days to Die: Dedicated' },
-    { template_id: 'the_forest:vanilla', display_name: 'The Forest: Dedicated' },
-    { template_id: 'sons_of_the_forest:vanilla', display_name: 'Sons of the Forest: Dedicated' },
+    { template_id: 'demo:sleep', display_name: t('template.demoSleep') },
+    { template_id: 'minecraft:vanilla', display_name: t('template.minecraftVanilla') },
+    { template_id: 'minecraft:import', display_name: t('template.minecraftImportPack') },
+    { template_id: 'terraria:vanilla', display_name: t('template.terrariaVanilla') },
+    { template_id: 'dst:vanilla', display_name: t('template.dstVanilla') },
+    { template_id: 'palworld:vanilla', display_name: t('template.palworldVanilla') },
+    { template_id: 'factorio:vanilla', display_name: t('template.factorioVanilla') },
+    { template_id: 'core_keeper:vanilla', display_name: t('template.coreKeeperDedicated') },
+    { template_id: 'seven_days:vanilla', display_name: t('template.sevenDaysDedicated') },
+    { template_id: 'the_forest:vanilla', display_name: t('template.theForestDedicated') },
+    { template_id: 'sons_of_the_forest:vanilla', display_name: t('template.sonsOfTheForestDedicated') },
   ]
 
   const templateCatalog = createMemo<TemplateCatalogItem[]>(() => {
@@ -285,22 +274,22 @@ function App() {
     const groupedMinecraft = new Set(Object.values(MINECRAFT_TEMPLATE_ID_BY_MODE))
     let insertedMinecraft = false
 
-    for (const t of list) {
-      if (groupedMinecraft.has(t.template_id)) {
+    for (const item of list) {
+      if (groupedMinecraft.has(item.template_id)) {
         if (!insertedMinecraft) {
           insertedMinecraft = true
           out.push({
             value: CREATE_TEMPLATE_MINECRAFT,
-            label: 'Minecraft',
-            meta: 'Vanilla / Import',
+            label: t('template.minecraft'),
+            meta: t('template.minecraftVanillaImport'),
           })
         }
         continue
       }
       out.push({
-        value: t.template_id,
-        label: t.display_name,
-        meta: t.template_id,
+        value: item.template_id,
+        label: item.display_name,
+        meta: item.template_id,
       })
     }
     return out
@@ -331,282 +320,40 @@ function App() {
     }
   })
 
-  const [instancesPollMs, setInstancesPollMs] = createSignal<number | false>(false)
-  const [instancesPollErrorStreak, setInstancesPollErrorStreak] = createSignal(0)
-  const instances = rspc.createQuery(
-    () => ['instance.list', null],
-    () => ({
-      enabled: isAuthed(),
-      refetchInterval: instancesPollMs(),
-      refetchOnWindowFocus: false,
-      retry: 3,
-      retryDelay: (attempt) => Math.min(400 * Math.pow(2, attempt), 4000),
-    }),
-  )
-
-  const [instancesLastUpdatedAtUnixMs, setInstancesLastUpdatedAtUnixMs] = createSignal<number | null>(null)
-  createEffect(() => {
-    // Treat any successful data arrival as a refresh.
-    if (!instances.data) return
-    setInstancesLastUpdatedAtUnixMs(Date.now())
-  })
-
-  type InstanceStatusFilter = 'all' | 'running' | 'stopped' | 'starting' | 'stopping' | 'failed'
-  type InstanceSortKey = 'name' | 'updated' | 'status' | 'port'
-
-  const INSTANCE_VIEW_STORAGE_KEY = 'alloy.instances.view'
-  const [instanceSearchInput, setInstanceSearchInput] = createSignal('')
-  const [instanceSearch, setInstanceSearch] = createSignal('')
-  const [instanceStatusFilter, setInstanceStatusFilter] = createSignal<InstanceStatusFilter>('all')
-  const [instanceTemplateFilter, setInstanceTemplateFilter] = createSignal<string>('all')
-  const [instanceSortKey, setInstanceSortKey] = createSignal<InstanceSortKey>('updated')
-  const instanceCompact = () => true
-  const [pinnedInstanceIds, setPinnedInstanceIds] = createSignal<Record<string, boolean>>({})
-
-  createEffect(() => {
-    // Debounced search input.
-    const v = instanceSearchInput()
-    const handle = window.setTimeout(() => setInstanceSearch(v.trim().toLowerCase()), 180)
-    return () => window.clearTimeout(handle)
-  })
-
-  createEffect(() => {
-    // Load view preferences once after mount.
-    try {
-      const raw = localStorage.getItem(INSTANCE_VIEW_STORAGE_KEY)
-      if (!raw) return
-      const parsed = JSON.parse(raw) as any
-      if (typeof parsed?.q === 'string') setInstanceSearchInput(parsed.q)
-      if (
-        parsed?.status === 'all' ||
-        parsed?.status === 'running' ||
-        parsed?.status === 'stopped' ||
-        parsed?.status === 'starting' ||
-        parsed?.status === 'stopping' ||
-        parsed?.status === 'failed'
-      ) {
-        setInstanceStatusFilter(parsed.status)
-      }
-      if (typeof parsed?.template === 'string') setInstanceTemplateFilter(parsed.template)
-      if (parsed?.sort_key === 'name' || parsed?.sort_key === 'updated' || parsed?.sort_key === 'status' || parsed?.sort_key === 'port') {
-        setInstanceSortKey(parsed.sort_key)
-      }
-      if (parsed?.pinned && typeof parsed.pinned === 'object') {
-        const next: Record<string, boolean> = {}
-        for (const [k, v] of Object.entries(parsed.pinned as Record<string, unknown>)) {
-          if (typeof v === 'boolean') next[k] = v
-        }
-        setPinnedInstanceIds(next)
-      }
-    } catch {
-      // ignore
-    }
-  })
-
-  createEffect(() => {
-    try {
-      localStorage.setItem(
-        INSTANCE_VIEW_STORAGE_KEY,
-        JSON.stringify({
-          q: instanceSearchInput(),
-          status: instanceStatusFilter(),
-          template: instanceTemplateFilter(),
-          sort_key: instanceSortKey(),
-          pinned: pinnedInstanceIds(),
-        }),
-      )
-    } catch {
-      // ignore
-    }
-  })
-
-  createEffect(() => {
-    if (!isAuthed()) {
-      setInstancesPollMs(false)
-      setInstancesPollErrorStreak(0)
-      return
-    }
-
-    const list = instances.data ?? []
-    const count = list.length
-    const anyStartingOrStopping = list.some((i: { status?: { state?: string } | null }) => {
-      const s = i.status?.state
-      return s === 'PROCESS_STATE_STARTING' || s === 'PROCESS_STATE_STOPPING'
-    })
-    const anyRunning = list.some((i: { status?: { state?: string } | null }) => i.status?.state === 'PROCESS_STATE_RUNNING')
-
-    let base = anyStartingOrStopping ? 800 : anyRunning ? 2000 : 5000
-    if (count >= 20) base = Math.min(base * 2, 15_000)
-    if (count >= 60) base = Math.min(base * 2, 30_000)
-
-    // On first load, transient backend/agent startup can fail once; retry quickly so users
-    // don't need to click "Retry" after refresh.
-    if (instances.isError && instances.data == null) {
-      base = 800
-    }
-
-    const nextStreak = instances.isError ? Math.min(instancesPollErrorStreak() + 1, 6) : 0
-    setInstancesPollErrorStreak(nextStreak)
-    const backoff = Math.min(base * Math.pow(2, nextStreak), 30_000)
-
-    // Add a small jitter to avoid thundering herd.
-    const jitter = Math.floor(Math.random() * 200)
-    setInstancesPollMs(backoff + jitter)
-  })
-
-  type InstanceListItem = {
-    config: {
-      instance_id: string
-      template_id: string
-      params: unknown
-      display_name: string | null
-      node_id?: string | null
-      node_name?: string | null
-    }
-    status: ProcessStatusDto | null
-  }
-  const [instanceStatusKeys, setInstanceStatusKeys] = createSignal<Record<string, { key: string; updated_at_unix_ms: number }>>({})
-
-  createEffect(() => {
-    const list = (instances.data ?? []) as InstanceListItem[]
-    setInstanceStatusKeys((prev) => {
-      const next: Record<string, { key: string; updated_at_unix_ms: number }> = { ...prev }
-      const seen = new Set<string>()
-      const now = Date.now()
-      for (const inst of list) {
-        const id = inst.config.instance_id
-        seen.add(id)
-        const s = inst.status
-        const key = s ? `${s.state}|${s.exit_code ?? ''}|${s.message ?? ''}` : 'PROCESS_STATE_EXITED||'
-        const existing = next[id]
-        if (!existing) next[id] = { key, updated_at_unix_ms: now }
-        else if (existing.key !== key) next[id] = { key, updated_at_unix_ms: now }
-      }
-      for (const id of Object.keys(next)) {
-        if (!seen.has(id)) delete next[id]
-      }
-      return next
-    })
-  })
-
-  function instanceDisplayName(i: InstanceListItem): string {
-    const params = i.config.params as Record<string, unknown> | null | undefined
-    const paramName = params?.name
-    if (typeof i.config.display_name === 'string' && i.config.display_name.trim()) return i.config.display_name
-    if (typeof paramName === 'string' && paramName.trim()) return paramName
-    return i.config.instance_id
-  }
-
-  function instanceStateForFilter(status: ProcessStatusDto | null): InstanceStatusFilter {
-    const s = status?.state ?? 'PROCESS_STATE_EXITED'
-    if (s === 'PROCESS_STATE_RUNNING') return 'running'
-    if (s === 'PROCESS_STATE_STARTING') return 'starting'
-    if (s === 'PROCESS_STATE_STOPPING') return 'stopping'
-    if (s === 'PROCESS_STATE_FAILED') return 'failed'
-    return 'stopped'
-  }
-
-  const instanceTemplateFilterOptions = createMemo(() => {
-    const list = (instances.data ?? []) as InstanceListItem[]
-    const set = new Set<string>()
-    for (const i of list) set.add(i.config.template_id)
-    const opts = [{ value: 'all', label: 'All' }]
-    for (const id of Array.from(set).sort()) opts.push({ value: id, label: id })
-    return opts
-  })
-
-  const instanceSortOptions = createMemo(() => [
-    { value: 'updated', label: 'Last update' },
-    { value: 'name', label: 'Name' },
-    { value: 'status', label: 'Status' },
-    { value: 'port', label: 'Port' },
-  ])
-
-  const instanceStatusFilterOptions = createMemo(() => [
-    { value: 'all', label: 'All' },
-    { value: 'running', label: 'Running' },
-    { value: 'starting', label: 'Starting' },
-    { value: 'stopping', label: 'Stopping' },
-    { value: 'failed', label: 'Failed' },
-    { value: 'stopped', label: 'Stopped' },
-  ])
-
-  function togglePinnedInstance(id: string) {
-    setPinnedInstanceIds((prev) => {
-      const next = { ...prev }
-      if (next[id]) delete next[id]
-      else next[id] = true
-      return next
-    })
-  }
-
-  function compareLabel(aRaw: string, bRaw: string): number {
-    const a = aRaw.trim()
-    const b = bRaw.trim()
-    const aNum = a.length > 0 && a.charCodeAt(0) >= 48 && a.charCodeAt(0) <= 57
-    const bNum = b.length > 0 && b.charCodeAt(0) >= 48 && b.charCodeAt(0) <= 57
-    if (aNum !== bNum) return aNum ? -1 : 1
-    return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' })
-  }
-
-  const filteredInstances = createMemo(() => {
-    const list = (instances.data ?? []) as InstanceListItem[]
-    const q = instanceSearch()
-    const statusFilter = instanceStatusFilter()
-    const templateFilter = instanceTemplateFilter()
-    const pinned = pinnedInstanceIds()
-    const sortKey = instanceSortKey()
-
-    const out = list.filter((i) => {
-      if (templateFilter !== 'all' && i.config.template_id !== templateFilter) return false
-      const st = instanceStateForFilter(i.status)
-      if (statusFilter !== 'all' && st !== statusFilter) return false
-      if (!q) return true
-      const hay = `${instanceDisplayName(i)} ${i.config.instance_id} ${i.config.template_id}`.toLowerCase()
-      return hay.includes(q)
-    })
-
-    const statusRank: Record<string, number> = {
-      PROCESS_STATE_RUNNING: 5,
-      PROCESS_STATE_STARTING: 4,
-      PROCESS_STATE_STOPPING: 3,
-      PROCESS_STATE_FAILED: 2,
-      PROCESS_STATE_EXITED: 1,
-    }
-
-    out.sort((a, b) => {
-      const ap = pinned[a.config.instance_id] ? 1 : 0
-      const bp = pinned[b.config.instance_id] ? 1 : 0
-      // Pinning always wins regardless of chosen sort direction.
-      if (ap !== bp) return bp - ap
-
-      if (sortKey === 'name') return compareLabel(instanceDisplayName(a), instanceDisplayName(b))
-      if (sortKey === 'port') {
-        const aPort = instancePort(a) ?? 0
-        const bPort = instancePort(b) ?? 0
-        if (aPort !== bPort) return aPort - bPort
-        return compareLabel(instanceDisplayName(a), instanceDisplayName(b))
-      }
-      if (sortKey === 'status') {
-        const ar = statusRank[a.status?.state ?? 'PROCESS_STATE_EXITED'] ?? 0
-        const br = statusRank[b.status?.state ?? 'PROCESS_STATE_EXITED'] ?? 0
-        if (ar !== br) return br - ar
-        return compareLabel(instanceDisplayName(a), instanceDisplayName(b))
-      }
-
-      const au = instanceStatusKeys()[a.config.instance_id]?.updated_at_unix_ms ?? 0
-      const bu = instanceStatusKeys()[b.config.instance_id]?.updated_at_unix_ms ?? 0
-      if (au !== bu) return bu - au
-      return compareLabel(instanceDisplayName(a), instanceDisplayName(b))
-    })
-    return out
-  })
+  const {
+    activeInstanceViewPresetId,
+    applyInstanceViewPreset,
+    deleteInstanceViewPreset,
+    filteredInstances,
+    instanceCompact,
+    instanceDisplayName,
+    instanceViewPresets,
+    instanceSearchInput,
+    instanceSortKey,
+    instanceSortOptions,
+    instanceStatusFilter,
+    instanceStatusFilterOptions,
+    instanceStatusKeys,
+    instanceTemplateFilter,
+    instanceTemplateFilterOptions,
+    instances,
+    instancesLastUpdatedAtUnixMs,
+    instancesPollErrorStreak,
+    invalidateInstances,
+    pinnedInstanceIds,
+    setInstanceSearch,
+    setInstanceSearchInput,
+    setInstanceSortKey,
+    setInstanceStatusFilter,
+    setInstanceTemplateFilter,
+    saveInstanceViewPreset,
+    togglePinnedInstance,
+  } = useInstancesDomain({ isAuthed, t })
 
   createEffect(() => {
     const req = pendingRevealInstance()
     if (!req) return
 
-    // Re-run when the instance list changes.
     filteredInstances().length
 
     requestAnimationFrame(() => {
@@ -614,23 +361,16 @@ function App() {
       if (el) {
         try {
           el.scrollIntoView({ behavior: 'smooth', block: 'center' })
-        } catch {
-          // ignore
-        }
+        } catch {}
         const focusEl = el.querySelector<HTMLElement>('[data-instance-card-focus]') ?? null
         queueMicrotask(() => focusEl?.focus())
         setPendingRevealInstance(null)
         return
       }
 
-      // Give up after a short window (filters may hide it).
       if (Date.now() - req.started_at_unix_ms > 2000) setPendingRevealInstance(null)
     })
   })
-
-  async function invalidateInstances() {
-    await queryClient.invalidateQueries({ queryKey: ['instance.list', null] })
-  }
 
   function closeEditModal() {
     setEditingInstanceId(null)
@@ -756,79 +496,6 @@ function App() {
     () => ({ enabled: isAuthed(), refetchOnWindowFocus: false }),
   )
 
-  const frpNodes = rspc.createQuery(
-    () => ['frp.list', null],
-    () => ({
-      enabled: isAuthed(),
-      refetchOnWindowFocus: false,
-      refetchInterval: isAuthed() && tab() === 'frp' ? 5000 : false,
-    }),
-  )
-  const frpCreateNode = rspc.createMutation(() => 'frp.create')
-  const frpUpdateNode = rspc.createMutation(() => 'frp.update')
-  const frpDeleteNode = rspc.createMutation(() => 'frp.delete')
-
-  async function invalidateFrpNodes() {
-    await queryClient.invalidateQueries({ queryKey: ['frp.list', null] })
-  }
-
-  const frpNodeDropdownOptions = createMemo(() => {
-    const list = (frpNodes.data ?? []) as unknown as FrpNodeDto[]
-    const out: { value: string; label: string; meta?: string }[] = []
-    out.push({
-      value: '',
-      label: list.length > 0 ? 'Select node…' : 'No nodes yet',
-      meta: list.length > 0 ? undefined : "Open Tunnels tab to add one.",
-    })
-    for (const n of list) {
-      const endpoint =
-        n.server_addr && n.server_port ? `${n.server_addr}:${n.server_port}` : parseFrpEndpoint(n.config)
-      const latency = formatLatencyMs(n.latency_ms)
-      out.push({ value: n.id, label: n.name, meta: endpoint ? `${endpoint} · ${latency}` : latency })
-    }
-    return out
-  })
-
-  function frpNodeConfigById(nodeId: string): string | null {
-    const id = nodeId.trim()
-    if (!id) return null
-    const list = (frpNodes.data ?? []) as unknown as FrpNodeDto[]
-    const n = list.find((x) => x.id === id) ?? null
-    if (!n) return null
-
-    const cfg = (n.config ?? '').trim()
-    if (cfg) {
-      const allocPorts = (n.allocatable_ports ?? '').trim()
-      if (!allocPorts) return cfg
-      const lines = cfg.split('\n')
-      const hasHint = lines.some((line) => {
-        const t = line.trim().toLowerCase()
-        if (!t) return false
-        const body = t.startsWith('#') ? t.slice(1).trim() : t.startsWith(';') ? t.slice(1).trim() : t
-        return body.startsWith('alloy_alloc_ports') || body.startsWith('allocatable_ports')
-      })
-      if (hasHint) return cfg
-      const idx = lines.findIndex((line) => {
-        const t = line.trim().toLowerCase()
-        return t === '[common]'
-      })
-      if (idx >= 0) {
-        lines.splice(idx + 1, 0, `# alloy_alloc_ports = ${allocPorts}`)
-        return lines.join('\n')
-      }
-      return `${cfg}\n# alloy_alloc_ports = ${allocPorts}`
-    }
-
-    if (!n.server_addr || !n.server_port) return null
-    const lines = ['[common]', `server_addr = ${n.server_addr}`, `server_port = ${n.server_port}`]
-    const token = (n.token ?? '').trim()
-    const allocPorts = (n.allocatable_ports ?? '').trim()
-    if (token) lines.push(`token = ${token}`)
-    if (allocPorts) lines.push(`# alloy_alloc_ports = ${allocPorts}`)
-    lines.push('', '[alloy]', 'type = tcp', 'local_ip = 127.0.0.1', 'local_port = 0', 'remote_port = 0')
-    return lines.join('\n')
-  }
-
   const instanceDeletePreview = rspc.createQuery(
     () => [
       'instance.deletePreview',
@@ -844,22 +511,6 @@ function App() {
 
   const warmCache = rspc.createMutation(() => 'process.warmCache')
   const clearCache = rspc.createMutation(() => 'process.clearCache')
-  const downloadQueue = rspc.createQuery(
-    () => ['process.downloadQueue', null],
-    () => ({
-      enabled: isAuthed(),
-      refetchOnWindowFocus: false,
-      refetchInterval: isAuthed() && tab() === 'downloads' ? 1500 : false,
-    }),
-  )
-  const downloadQueueEnqueue = rspc.createMutation(() => 'process.downloadQueueEnqueue')
-  const downloadQueueSetPaused = rspc.createMutation(() => 'process.downloadQueueSetPaused')
-  const downloadQueueMove = rspc.createMutation(() => 'process.downloadQueueMove')
-  const downloadQueuePauseJob = rspc.createMutation(() => 'process.downloadQueuePauseJob')
-  const downloadQueueResumeJob = rspc.createMutation(() => 'process.downloadQueueResumeJob')
-  const downloadQueueCancelJob = rspc.createMutation(() => 'process.downloadQueueCancelJob')
-  const downloadQueueRetryJob = rspc.createMutation(() => 'process.downloadQueueRetryJob')
-  const downloadQueueClearHistory = rspc.createMutation(() => 'process.downloadQueueClearHistory')
 
   const setDstDefaultKleiKey = rspc.createMutation(() => 'settings.setDstDefaultKleiKey')
   const setCurseforgeApiKey = rspc.createMutation(() => 'settings.setCurseforgeApiKey')
@@ -1039,14 +690,14 @@ function App() {
     const changed = editChangedKeys()
     const risky = new Set<string>()
     if (template === 'minecraft:vanilla') {
-      if (changed.includes('version')) risky.add('Changing Minecraft version may trigger downloads and mod/world incompatibilities.')
-      if (changed.includes('memory_mb')) risky.add('Changing memory affects JVM heap; take care on low-RAM hosts.')
-      if (changed.includes('port')) risky.add('Changing port affects client connection address.')
+      if (changed.includes('version')) risky.add(t('instances.edit.risk.minecraftVersion'))
+      if (changed.includes('memory_mb')) risky.add(t('instances.edit.risk.minecraftMemory'))
+      if (changed.includes('port')) risky.add(t('instances.edit.risk.port'))
     }
     if (template === 'terraria:vanilla') {
-      if (changed.includes('version')) risky.add('Changing Terraria version may require a re-download and can affect world compatibility.')
-      if (changed.includes('world_name')) risky.add('Changing world name may switch to a different world file (old world is not deleted).')
-      if (changed.includes('port')) risky.add('Changing port affects client connection address.')
+      if (changed.includes('version')) risky.add(t('instances.edit.risk.terrariaVersion'))
+      if (changed.includes('world_name')) risky.add(t('instances.edit.risk.worldName'))
+      if (changed.includes('port')) risky.add(t('instances.edit.risk.port'))
     }
     return Array.from(risky)
   })
@@ -1068,101 +719,6 @@ function App() {
   const [mcFrpNodeId, setMcFrpNodeId] = createSignal('')
 
   const [trVersion, setTrVersion] = createSignal('1453')
-  const [downloadMcVersion, setDownloadMcVersion] = createSignal('latest_release')
-  const [downloadTrVersion, setDownloadTrVersion] = createSignal('1453')
-  const [downloadDstVersion, setDownloadDstVersion] = createSignal('latest')
-  const [downloadPwVersion, setDownloadPwVersion] = createSignal('latest')
-  const [downloadFxVersion, setDownloadFxVersion] = createSignal('stable')
-  const [downloadCoreKeeperVersion, setDownloadCoreKeeperVersion] = createSignal('latest')
-  const [downloadSevenDaysVersion, setDownloadSevenDaysVersion] = createSignal('latest')
-  const [downloadTheForestVersion, setDownloadTheForestVersion] = createSignal('latest')
-  const [downloadSonsOfTheForestVersion, setDownloadSonsOfTheForestVersion] = createSignal('latest')
-  const [downloadCenterView, setDownloadCenterView] = createSignal<DownloadCenterView>((() => {
-    try {
-      const v = localStorage.getItem(DOWNLOAD_VIEW_STORAGE_KEY)
-      if (
-        v === 'tasks' ||
-        v === 'minecraft' ||
-        v === 'terraria' ||
-        v === 'dst' ||
-        v === 'palworld' ||
-        v === 'factorio' ||
-        v === 'core_keeper' ||
-        v === 'seven_days' ||
-        v === 'the_forest' ||
-        v === 'sons_of_the_forest' ||
-        v === 'cache'
-      ) {
-        return v
-      }
-    } catch {
-      // ignore
-    }
-    return 'tasks'
-  })())
-  const [downloadEnqueueTarget, setDownloadEnqueueTarget] = createSignal<DownloadTarget | null>(null)
-  const [downloadNowUnixMs, setDownloadNowUnixMs] = createSignal(Date.now())
-
-  createEffect(() => {
-    try {
-      localStorage.setItem(DOWNLOAD_VIEW_STORAGE_KEY, downloadCenterView())
-    } catch {
-      // ignore
-    }
-  })
-
-  const downloadJobs = createMemo<DownloadJob[]>(() => {
-    const rows = (downloadQueue.data?.jobs ?? []) as unknown[]
-    const out: DownloadJob[] = []
-    for (const row of rows) {
-      const mapped = mapDownloadJobFromServer(row)
-      if (mapped) out.push(mapped)
-    }
-    return out
-  })
-  const downloadQueuePaused = createMemo(() => Boolean(downloadQueue.data?.queue_paused))
-
-  const downloadStatus = createMemo(() => {
-    const out = new Map<DownloadTarget, { ok: boolean; message: string; requestId?: string; atUnixMs: number }>()
-    for (const job of downloadJobs()) {
-      if (job.state !== 'success' && job.state !== 'error' && job.state !== 'canceled') continue
-      if (out.has(job.target)) continue
-      out.set(job.target, {
-        ok: job.state === 'success',
-        message: job.message,
-        requestId: job.requestId,
-        atUnixMs: job.updatedAtUnixMs,
-      })
-    }
-    return out
-  })
-
-  const [selectedDownloadJobId, setSelectedDownloadJobId] = createSignal<string | null>(null)
-  const selectedDownloadJob = createMemo(() => {
-    const id = selectedDownloadJobId()
-    if (!id) return null
-    return downloadJobs().find((job) => job.id === id) ?? null
-  })
-
-  const latestDownloadFailureByTarget = createMemo(() => {
-    const out = new Map<DownloadTarget, DownloadJob>()
-    for (const job of downloadJobs()) {
-      if (job.state !== 'error') continue
-      const prev = out.get(job.target)
-      if (!prev || job.updatedAtUnixMs > prev.updatedAtUnixMs) {
-        out.set(job.target, job)
-      }
-    }
-    return out
-  })
-
-  createEffect(() => {
-    const selectedId = selectedDownloadJobId()
-    if (!selectedId) return
-    if (!downloadJobs().some((job) => job.id === selectedId)) {
-      setSelectedDownloadJobId(null)
-    }
-  })
 
   const [trPort, setTrPort] = createSignal('')
   const [trMaxPlayers, setTrMaxPlayers] = createSignal('8')
@@ -1192,14 +748,13 @@ function App() {
 
   const [dstClusterToken, setDstClusterToken] = createSignal('')
   const [dstClusterTokenVisible, setDstClusterTokenVisible] = createSignal(false)
-  const [dstClusterName, setDstClusterName] = createSignal('Alloy DST server')
+  const [dstClusterName, setDstClusterName] = createSignal(t('template.defaultDstServerName'))
   const [dstMaxPlayers, setDstMaxPlayers] = createSignal('6')
   const [dstPassword, setDstPassword] = createSignal('')
   const [dstPasswordVisible, setDstPasswordVisible] = createSignal(false)
   const [dstPort, setDstPort] = createSignal('0')
   const [dstMasterPort, setDstMasterPort] = createSignal('0')
   const [dstAuthPort, setDstAuthPort] = createSignal('0')
-  const [createNodeId, setCreateNodeId] = createSignal('')
 
   async function loadMcImportPacks() {
     if (!isAuthed()) {
@@ -1223,7 +778,7 @@ function App() {
       setMcImportPacks(Array.isArray(payload?.entries) ? payload!.entries! : [])
     } catch (e) {
       setMcImportPacks([])
-      toastError('Load uploaded packs failed', e)
+      toastError(t('app.loadUploadedPacksFailed'), e)
     } finally {
       setMcImportPacksPending(false)
     }
@@ -1231,7 +786,7 @@ function App() {
 
   async function uploadMcImportPackFile(file: File) {
     if (!file.name.toLowerCase().endsWith('.zip')) {
-      pushToast('error', 'Invalid file', 'Only .zip files are supported.')
+      pushToast('error', t('app.invalidFile'), t('app.onlyZipSupported'))
       return
     }
 
@@ -1260,9 +815,9 @@ function App() {
       const path = (payload?.path || '').trim()
       if (path) setMcImportPack(path)
       await loadMcImportPacks()
-      pushToast('success', 'Upload complete', path || file.name)
+      pushToast('success', t('app.uploadComplete'), path || file.name)
     } catch (e) {
-      toastError('Upload failed', e)
+      toastError(t('app.uploadFailed'), e)
     } finally {
       setMcImportUploadPending(false)
     }
@@ -1276,10 +831,17 @@ function App() {
       meta: `${p.path} · ${p.size_bytes} B`,
     }))
     const withCurrent = optionsWithCurrentValue(options, current)
-    return [{ value: '__upload__', label: 'Upload zip…', meta: mcImportUploadPending() ? 'Uploading...' : undefined }, ...withCurrent]
+    return [
+      {
+        value: '__upload__',
+        label: t('app.uploadZipOption'),
+        meta: mcImportUploadPending() ? t('app.uploading') : undefined,
+      },
+      ...withCurrent,
+    ]
   })
 
-  const [pwServerName, setPwServerName] = createSignal('Alloy Palworld server')
+  const [pwServerName, setPwServerName] = createSignal(t('template.defaultPalworldServerName'))
   const [pwServerDescription, setPwServerDescription] = createSignal('')
   const [pwMaxPlayers, setPwMaxPlayers] = createSignal('32')
   const [pwPassword, setPwPassword] = createSignal('')
@@ -1289,7 +851,7 @@ function App() {
   const [pwQueryPort, setPwQueryPort] = createSignal('27015')
 
   const [fxVersion, setFxVersion] = createSignal('stable')
-  const [fxServerName, setFxServerName] = createSignal('Alloy Factorio server')
+  const [fxServerName, setFxServerName] = createSignal(t('template.defaultFactorioServerName'))
   const [fxServerDescription, setFxServerDescription] = createSignal('')
   const [fxMaxPlayers, setFxMaxPlayers] = createSignal('8')
   const [fxPublic, setFxPublic] = createSignal(false)
@@ -1310,8 +872,8 @@ function App() {
 
   const minecraftCreateModeOptions = createMemo(() => {
     const labels: Record<MinecraftCreateMode, string> = {
-      vanilla: 'Vanilla',
-      import: 'Import',
+      vanilla: t('template.mode.vanilla'),
+      import: t('template.mode.import'),
     }
     return availableMinecraftCreateModes().map((value) => ({ value, label: labels[value] }))
   })
@@ -1349,15 +911,11 @@ function App() {
 
   const createPreview = createMemo(() =>
     buildCreatePreview({
+      t,
       templateId: createTemplateId(),
       templateLabel: templateDisplayName(createTemplateId()),
       instanceName: instanceName(),
-      nodeName: (() => {
-        const id = createNodeId().trim()
-        if (!id) return ''
-        return ((nodes.data ?? []) as { id: string; name: string; enabled: boolean }[]).find((n) => n.id === id && n.enabled)
-          ?.name ?? ''
-      })(),
+      nodeName: createSelectedNode()?.enabled ? (createSelectedNode()?.name ?? '') : '',
       sleepSeconds: sleepSeconds(),
       createAdvanced: createAdvanced(),
       createAdvancedDirty: createAdvancedDirty(),
@@ -1421,7 +979,6 @@ function App() {
     setTrFrpNodeId('')
     setDstClusterTokenVisible(false)
     setDstPasswordVisible(false)
-    setCreateNodeId('')
   })
 
   function focusFirstCreateError(errors: Record<string, string>) {
@@ -1466,218 +1023,57 @@ function App() {
       trFrpMode: trFrpMode(),
     })
   }
-  const hasRunningDownloadJobs = createMemo(() => downloadJobs().some((j) => j.state === 'running'))
-
-  createEffect(() => {
-    if (!hasRunningDownloadJobs()) return
-    setDownloadNowUnixMs(Date.now())
-    const timer = window.setInterval(() => setDownloadNowUnixMs(Date.now()), 1000)
-    onCleanup(() => window.clearInterval(timer))
+  const {
+    cancelDownloadJob,
+    clearDownloadHistory,
+    copyDownloadFailureReason,
+    copyDownloadJobDetails,
+    downloadCenterView,
+    downloadEnqueueTarget,
+    downloadFxVersion,
+    downloadJobs,
+    downloadMcVersion,
+    downloadNowUnixMs,
+    downloadQueueEnqueue,
+    downloadQueuePaused,
+    downloadSevenDaysVersion,
+    downloadSonsOfTheForestVersion,
+    downloadStatus,
+    downloadTheForestVersion,
+    downloadTrVersion,
+    downloadDstVersion,
+    downloadPwVersion,
+    downloadCoreKeeperVersion,
+    enqueueDownloadWarm,
+    hasRunningDownloadJobs,
+    latestDownloadFailureByTarget,
+    moveDownloadJob,
+    pauseDownloadJob,
+    resumeDownloadJob,
+    retryDownloadJob,
+    selectedDownloadJob,
+    selectedDownloadJobId,
+    setDownloadCenterView,
+    setDownloadFxVersion,
+    setDownloadMcVersion,
+    setDownloadSevenDaysVersion,
+    setDownloadSonsOfTheForestVersion,
+    setDownloadTheForestVersion,
+    setDownloadTrVersion,
+    setDownloadDstVersion,
+    setDownloadPwVersion,
+    setDownloadCoreKeeperVersion,
+    setSelectedDownloadJobId,
+    toggleDownloadQueuePaused,
+  } = useDownloadsDomain({
+    isAuthed,
+    tab,
+    isReadOnly,
+    t,
+    pushToast,
+    toastError,
+    friendlyErrorMessage,
   })
-
-  async function invalidateDownloadQueue() {
-    await queryClient.invalidateQueries({ queryKey: ['process.downloadQueue', null] })
-  }
-
-  async function toggleDownloadQueuePaused() {
-    try {
-      await downloadQueueSetPaused.mutateAsync({ paused: !downloadQueuePaused() })
-      await invalidateDownloadQueue()
-    } catch (e) {
-      toastError('Queue update failed', e)
-    }
-  }
-
-  async function clearDownloadHistory() {
-    try {
-      await downloadQueueClearHistory.mutateAsync(null)
-      await invalidateDownloadQueue()
-    } catch (e) {
-      toastError('Clear history failed', e)
-    }
-  }
-
-  async function moveDownloadJob(jobId: string, direction: -1 | 1) {
-    try {
-      await downloadQueueMove.mutateAsync({ job_id: jobId, direction })
-      await invalidateDownloadQueue()
-    } catch (e) {
-      toastError('Reorder failed', e)
-    }
-  }
-
-  async function pauseDownloadJob(jobId: string) {
-    try {
-      await downloadQueuePauseJob.mutateAsync({ job_id: jobId })
-      await invalidateDownloadQueue()
-    } catch (e) {
-      toastError('Pause failed', e)
-    }
-  }
-
-  async function resumeDownloadJob(jobId: string) {
-    try {
-      await downloadQueueResumeJob.mutateAsync({ job_id: jobId })
-      await invalidateDownloadQueue()
-    } catch (e) {
-      toastError('Resume failed', e)
-    }
-  }
-
-  async function cancelDownloadJob(jobId: string) {
-    try {
-      await downloadQueueCancelJob.mutateAsync({ job_id: jobId })
-      await invalidateDownloadQueue()
-    } catch (e) {
-      toastError('Cancel failed', e)
-    }
-  }
-
-  async function retryDownloadJob(jobId: string) {
-    try {
-      await downloadQueueRetryJob.mutateAsync({ job_id: jobId })
-      await invalidateDownloadQueue()
-    } catch (e) {
-      toastError('Retry failed', e)
-    }
-  }
-
-  async function copyDownloadFailureReason(job: DownloadJob) {
-    const latestFailure = latestDownloadFailureByTarget().get(job.target)
-    const message = (latestFailure?.message ?? '').trim() || (job.message ?? '').trim()
-    if (!message) {
-      pushToast('info', 'Nothing to copy', 'No failure reason found for this task yet.')
-      return
-    }
-    await safeCopy(message)
-    pushToast('success', 'Copied', 'Failure reason copied.')
-  }
-
-  async function copyDownloadJobDetails(job: DownloadJob) {
-    await safeCopy(
-      JSON.stringify(
-        {
-          id: job.id,
-          target: job.target,
-          template_id: job.templateId,
-          version: job.version,
-          state: job.state,
-          message: job.message,
-          request_id: job.requestId ?? null,
-          started_at_unix_ms: job.startedAtUnixMs,
-          updated_at_unix_ms: job.updatedAtUnixMs,
-          params: job.params,
-        },
-        null,
-        2,
-      ),
-    )
-    pushToast('success', 'Copied', 'Task details copied as JSON.')
-  }
-
-  function buildDownloadRequest(
-    target: DownloadTarget,
-  ): { templateId: string; version: string; params: Record<string, string> } | null {
-    if (target === 'minecraft_vanilla') {
-      const templateId = 'minecraft:vanilla'
-      const params: Record<string, string> = {}
-      const v = downloadMcVersion().trim()
-      params.version = v || 'latest_release'
-      const version = params.version
-      return { templateId, version, params }
-    }
-
-    if (target === 'terraria_vanilla') {
-      const templateId = 'terraria:vanilla'
-      const params: Record<string, string> = {}
-      const v = downloadTrVersion().trim()
-      params.version = v || '1453'
-      const version = params.version
-      return { templateId, version, params }
-    }
-
-    if (target === 'dst_vanilla') {
-      const templateId = 'dst:vanilla'
-      const version = downloadDstVersion().trim() || 'latest'
-      return { templateId, version, params: {} }
-    }
-
-    if (target === 'palworld_vanilla') {
-      const templateId = 'palworld:vanilla'
-      const version = downloadPwVersion().trim() || 'latest'
-      return { templateId, version, params: {} }
-    }
-
-    if (target === 'factorio_vanilla') {
-      const templateId = 'factorio:vanilla'
-      const params: Record<string, string> = {}
-      const v = downloadFxVersion().trim()
-      params.version = v || 'stable'
-      const version = params.version
-      return { templateId, version, params }
-    }
-
-    if (target === 'core_keeper_vanilla') {
-      const templateId = 'core_keeper:vanilla'
-      const version = downloadCoreKeeperVersion().trim() || 'latest'
-      return { templateId, version, params: {} }
-    }
-
-    if (target === 'seven_days_vanilla') {
-      const templateId = 'seven_days:vanilla'
-      const version = downloadSevenDaysVersion().trim() || 'latest'
-      return { templateId, version, params: {} }
-    }
-
-    if (target === 'the_forest_vanilla') {
-      const templateId = 'the_forest:vanilla'
-      const version = downloadTheForestVersion().trim() || 'latest'
-      return { templateId, version, params: {} }
-    }
-
-    if (target === 'sons_of_the_forest_vanilla') {
-      const templateId = 'sons_of_the_forest:vanilla'
-      const version = downloadSonsOfTheForestVersion().trim() || 'latest'
-      return { templateId, version, params: {} }
-    }
-
-    return null
-  }
-
-  async function enqueueDownloadWarm(target: DownloadTarget) {
-    if (isReadOnly()) {
-      pushToast('error', 'Read-only mode', 'Enable write mode before downloading server files.')
-      return
-    }
-
-    const req = buildDownloadRequest(target)
-    if (!req) return
-
-    try {
-      setDownloadEnqueueTarget(target)
-      await downloadQueueEnqueue.mutateAsync({
-        target,
-        template_id: req.templateId,
-        version: req.version,
-        params: req.params,
-      })
-      pushToast('info', 'Added to queue', `${downloadTargetLabel(target)} · ${req.version}`)
-      await invalidateDownloadQueue()
-    } catch (e) {
-      if (isAlloyApiError(e)) {
-        const fieldErrors = e.data.field_errors ?? {}
-        pushToast('error', 'Add to queue failed', e.data.message, e.data.request_id)
-        if (fieldErrors.steam_guard_code) {
-          pushToast('info', 'Steam Guard required', 'Enter latest Steam Guard code or enable Auto 2FA.', e.data.request_id)
-        }
-        if (e.data.hint) pushToast('info', 'Hint', e.data.hint, e.data.request_id)
-        return
-      }
-      pushToast('error', 'Add to queue failed', friendlyErrorMessage(e))
-    } finally {
-      setDownloadEnqueueTarget(null)
-    }
-  }
 
   function focusFirstEditError(errors: Record<string, string>) {
     focusFirstEditErrorInForm({
@@ -1707,7 +1103,7 @@ function App() {
     })
   }
   const trVersionOptions = createMemo(() => [
-    { value: '1453', label: '1.4.5.3 (1453)', meta: 'latest' },
+    { value: '1453', label: '1.4.5.3 (1453)', meta: t('template.latest') },
     { value: '1452', label: '1.4.5.2 (1452)' },
     { value: '1451', label: '1.4.5.1 (1451)' },
     { value: '1450', label: '1.4.5.0 (1450)' },
@@ -1721,29 +1117,37 @@ function App() {
   ])
 
   const fxVersionOptions = createMemo(() => [
-    { value: 'stable', label: 'Stable (latest stable)' },
-    { value: 'experimental', label: 'Experimental (latest)' },
+    { value: 'stable', label: t('template.factorioStableLatest') },
+    { value: 'experimental', label: t('template.factorioExperimentalLatest') },
   ])
 
-  const pwVersionOptions = createMemo(() => [{ value: 'latest', label: 'Latest (SteamCMD app update)' }])
-  const dstVersionOptions = createMemo(() => [{ value: 'latest', label: 'Latest (SteamCMD app update)' }])
-  const coreKeeperVersionOptions = createMemo(() => [{ value: 'latest', label: 'Latest (SteamCMD app update)' }])
-  const sevenDaysVersionOptions = createMemo(() => [{ value: 'latest', label: 'Latest (SteamCMD app update)' }])
-  const theForestVersionOptions = createMemo(() => [{ value: 'latest', label: 'Latest (SteamCMD app update)' }])
-  const sonsOfTheForestVersionOptions = createMemo(() => [{ value: 'latest', label: 'Latest (SteamCMD app update)' }])
+  const pwVersionOptions = createMemo(() => [{ value: 'latest', label: t('template.latestSteamcmdAppUpdate') }])
+  const dstVersionOptions = createMemo(() => [{ value: 'latest', label: t('template.latestSteamcmdAppUpdate') }])
+  const coreKeeperVersionOptions = createMemo(() => [{ value: 'latest', label: t('template.latestSteamcmdAppUpdate') }])
+  const sevenDaysVersionOptions = createMemo(() => [{ value: 'latest', label: t('template.latestSteamcmdAppUpdate') }])
+  const theForestVersionOptions = createMemo(() => [{ value: 'latest', label: t('template.latestSteamcmdAppUpdate') }])
+  const sonsOfTheForestVersionOptions = createMemo(() => [{ value: 'latest', label: t('template.latestSteamcmdAppUpdate') }])
 
   const mcVersionOptions = createMemo(() => {
     const data = mcVersions.data
     if (!data) {
       return [
-        { value: 'latest_release', label: 'Latest release', meta: 'recommended' },
-        { value: 'latest_snapshot', label: 'Latest snapshot', meta: 'unstable' },
+        { value: 'latest_release', label: t('template.latestRelease'), meta: t('template.recommended') },
+        { value: 'latest_snapshot', label: t('template.latestSnapshot'), meta: t('template.unstable') },
       ]
     }
 
     const out: { value: string; label: string; meta?: string }[] = [
-      { value: 'latest_release', label: `Latest release (${data.latest_release})`, meta: 'recommended' },
-      { value: 'latest_snapshot', label: `Latest snapshot (${data.latest_snapshot})`, meta: 'unstable' },
+      {
+        value: 'latest_release',
+        label: t('template.latestReleaseWithVersion', { version: data.latest_release }),
+        meta: t('template.recommended'),
+      },
+      {
+        value: 'latest_snapshot',
+        label: t('template.latestSnapshotWithVersion', { version: data.latest_snapshot }),
+        meta: t('template.unstable'),
+      },
     ]
 
     // Show a curated list of recent releases (no manual typing).
@@ -1754,11 +1158,45 @@ function App() {
     return out
   })
 
-  const [tab, setTab] = createSignal<UiTab>('instances')
+  createEffect(() => {
+    if (authLoading()) return
+    const nextTab = coerceUiTabForRole(tab(), Boolean(me()?.is_admin))
+    if (nextTab !== tab()) {
+      setTabSilently(nextTab)
+      replaceTabInHistory(nextTab)
+    }
+  })
+
+  createEffect(() => {
+    if (typeof window === 'undefined') return
+    const onPopState = () => {
+      const fromUrl = readUiRouteFromLocation('instances')
+      const nextTab = coerceUiTabForRole(fromUrl.tab, Boolean(me()?.is_admin))
+      setTabSilently(nextTab)
+      if (nextTab === 'instances') {
+        setSelectedInstanceId(fromUrl.instanceId)
+      }
+      if (nextTab === 'files') {
+        setFsPath(fromUrl.fsPath ?? '')
+        setSelectedFilePath(fromUrl.selectedFilePath)
+      }
+    }
+    window.addEventListener('popstate', onPopState)
+    return () => window.removeEventListener('popstate', onPopState)
+  })
+
+  createEffect(() => {
+    if (typeof window === 'undefined') return
+    const route = currentUiRoute(tab())
+    const nextUrl = buildTabUrl(route)
+    const currentUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`
+    if (currentUrl === nextUrl) return
+    const currentState = (window.history.state as UiTabRouteState | null) ?? {}
+    window.history.replaceState({ ...currentState, ...route }, '', nextUrl)
+  })
 
   // Nodes state/queries will be moved into NodesPage next.
 
-  const [selectedInstanceId, setSelectedInstanceId] = createSignal<string | null>(null)
   const selectedInstance = createMemo(() => {
     const id = selectedInstanceId()
     if (!id) return null
@@ -1872,83 +1310,81 @@ function App() {
     if (next) setProcessLogCursor(next)
   })
 
-  const [selectedNodeId, setSelectedNodeId] = createSignal<string | null>(null)
-
-  const nodes = rspc.createQuery(
-    () => ['node.list', null],
-    () => ({
-      enabled: isAuthed() && (tab() === 'nodes' || tab() === 'instances' || Boolean(me()?.is_admin)),
-      refetchInterval:
-        isAuthed() && (tab() === 'nodes' || tab() === 'instances')
-          ? 5000
-          : isAuthed() && Boolean(me()?.is_admin)
-            ? 30_000
-            : false,
-      refetchOnWindowFocus: false,
-    }),
-  )
-
-  const [nodesLastUpdatedAtUnixMs, setNodesLastUpdatedAtUnixMs] = createSignal<number | null>(null)
-  createEffect(() => {
-    if (!nodes.data) return
-    setNodesLastUpdatedAtUnixMs(Date.now())
-  })
-
-  const setNodeEnabled = rspc.createMutation(() => 'node.setEnabled')
-  const deleteNode = rspc.createMutation(() => 'node.delete')
-  const triggerNodeSelfUpdate = rspc.createMutation(() => 'node.triggerSelfUpdate')
-  const nodeSelfUpdateStatus = rspc.createQuery(
-    () => [
-      'node.selfUpdateStatus',
-      {
-        node_id: selectedNodeId() ?? '',
-      },
-    ],
-    () => ({
-      enabled: isAuthed() && Boolean(me()?.is_admin) && tab() === 'nodes' && Boolean(selectedNodeId()),
-      refetchOnWindowFocus: false,
-      refetchInterval: tab() === 'nodes' && selectedNodeId() ? 10000 : false,
-    }),
-  )
-  const [nodeEnabledOverride, setNodeEnabledOverride] = createSignal<Record<string, boolean>>({})
-
-  type NodeDto = {
-    id: string
-    name: string
-    endpoint: string
-    public_ip?: string | null
-    private_ip?: string | null
-    enabled: boolean
-    last_seen_at: string | null
-    agent_version: string | null
-    last_error: string | null
-    cpu_percent_x100?: number | null
-    memory_used_bytes?: string | null
-    memory_total_bytes?: string | null
-    network_rx_bytes_per_sec?: string | null
-    network_tx_bytes_per_sec?: string | null
-    disk_read_bytes_per_sec?: string | null
-    disk_write_bytes_per_sec?: string | null
-    has_connect_token?: boolean
-  }
-  type NodeCreateResult = { node: NodeDto; connect_token: string; watchtower_token: string }
-
-  const createNodeDropdownOptions = createMemo(() => {
-    const list = (nodes.data ?? []) as NodeDto[]
-    return list
-      .filter((n) => n.enabled)
-      .map((n) => ({
-        value: n.id,
-        label: n.name,
-        meta: n.endpoint?.trim() || undefined,
-      }))
-  })
-
-  createEffect(() => {
-    const id = createNodeId().trim()
-    if (!id) return
-    const valid = createNodeDropdownOptions().some((opt) => opt.value === id)
-    if (!valid) setCreateNodeId('')
+  const {
+    closeCreateNode,
+    closeFrpNodeModal,
+    createNode,
+    createNodeComposeYaml,
+    createNodeControlWsUrl,
+    createNodeId,
+    createNodeDropdownOptions,
+    createNodeFieldErrors,
+    createNodeFormError,
+    createNodeInstallCommand,
+    createNodeName,
+    createNodeResult,
+    createSelectedNode,
+    defaultCreateNodeControlWsUrl,
+    deleteNode,
+    editingFrpNodeId,
+    frpCreateNode,
+    frpDeleteNode,
+    frpNodeCanSave,
+    frpNodeConfig,
+    frpNodeConfigById,
+    frpNodeDetectedFormat,
+    frpNodeDropdownOptions,
+    frpNodeFieldErrors,
+    frpNodeFormError,
+    frpNodeName,
+    frpNodeServerAddr,
+    frpNodeServerPort,
+    frpNodeAllocatablePorts,
+    frpNodeToken,
+    frpNodeTokenVisible,
+    frpNodes,
+    frpUpdateNode,
+    invalidateFrpNodes,
+    invalidateNodes,
+    nodeAgentOutdatedCount,
+    nodeCount,
+    nodeEnabledOverride,
+    nodeSelfUpdateStatus,
+    nodes,
+    nodesLastUpdatedAtUnixMs,
+    openCreateFrpNodeModal,
+    openCreateNode,
+    openEditFrpNodeModal,
+    selectedNode,
+    selectedNodeId,
+    setCreateNodeControlWsUrl,
+    setCreateNodeId,
+    setCreateNodeFieldErrors,
+    setCreateNodeFormError,
+    setCreateNodeName,
+    setCreateNodeResult,
+    setFrpNodeAllocatablePorts,
+    setFrpNodeConfig,
+    setFrpNodeFieldErrors,
+    setFrpNodeFormError,
+    setFrpNodeName,
+    setFrpNodeServerAddr,
+    setFrpNodeServerPort,
+    setFrpNodeToken,
+    setFrpNodeTokenVisible,
+    setNodeEnabled,
+    setNodeEnabledOverride,
+    setSelectedNodeId,
+    showCreateNodeModal,
+    showFrpNodeModal,
+    triggerNodeSelfUpdate,
+  } = useNodesDomain({
+    isAuthed,
+    me,
+    tab,
+    t,
+    updateCheck,
+    controlDiagnostics,
   })
 
   createEffect(() => {
@@ -1957,231 +1393,6 @@ function App() {
     createNodeId()
     void loadMcImportPacks()
   })
-
-  type FrpNodeDto = {
-    id: string
-    name: string
-    server_addr: string | null
-    server_port: number | null
-    allocatable_ports: string | null
-    token: string | null
-    config: string
-    latency_ms: number | null
-    created_at: string
-    updated_at: string
-  }
-
-  const [showFrpNodeModal, setShowFrpNodeModal] = createSignal(false)
-  const [editingFrpNodeId, setEditingFrpNodeId] = createSignal<string | null>(null)
-  const [frpNodeName, setFrpNodeName] = createSignal('')
-  const [frpNodeServerAddr, setFrpNodeServerAddr] = createSignal('')
-  const [frpNodeServerPort, setFrpNodeServerPort] = createSignal('')
-  const [frpNodeAllocatablePorts, setFrpNodeAllocatablePorts] = createSignal('')
-  const [frpNodeToken, setFrpNodeToken] = createSignal('')
-  const [frpNodeTokenVisible, setFrpNodeTokenVisible] = createSignal(false)
-  const [frpNodeConfig, setFrpNodeConfig] = createSignal('')
-  const [frpNodeFieldErrors, setFrpNodeFieldErrors] = createSignal<Record<string, string>>({})
-  const [frpNodeFormError, setFrpNodeFormError] = createSignal<string | null>(null)
-
-  function closeFrpNodeModal() {
-    setShowFrpNodeModal(false)
-    setEditingFrpNodeId(null)
-    setFrpNodeName('')
-    setFrpNodeServerAddr('')
-    setFrpNodeServerPort('')
-    setFrpNodeAllocatablePorts('')
-    setFrpNodeToken('')
-    setFrpNodeTokenVisible(false)
-    setFrpNodeConfig('')
-    setFrpNodeFieldErrors({})
-    setFrpNodeFormError(null)
-  }
-
-  function openCreateFrpNodeModal() {
-    setEditingFrpNodeId(null)
-    setFrpNodeName('')
-    setFrpNodeServerAddr('')
-    setFrpNodeServerPort('7000')
-    setFrpNodeAllocatablePorts('')
-    setFrpNodeToken('')
-    setFrpNodeTokenVisible(false)
-    setFrpNodeConfig('')
-    setFrpNodeFieldErrors({})
-    setFrpNodeFormError(null)
-    setShowFrpNodeModal(true)
-  }
-
-  function openEditFrpNodeModal(node: FrpNodeDto) {
-    setEditingFrpNodeId(node.id)
-    setFrpNodeName(node.name)
-    setFrpNodeServerAddr(node.server_addr ?? '')
-    setFrpNodeServerPort(node.server_port != null ? String(node.server_port) : '')
-    setFrpNodeAllocatablePorts(compactAllocatablePortsSpec(node.allocatable_ports))
-    setFrpNodeToken(node.token ?? '')
-    setFrpNodeTokenVisible(false)
-    setFrpNodeConfig(node.config)
-    setFrpNodeFieldErrors({})
-    setFrpNodeFormError(null)
-    setShowFrpNodeModal(true)
-  }
-
-  const frpNodeDetectedFormat = createMemo(() => detectFrpConfigFormat(frpNodeConfig()))
-  const frpNodeCanSave = createMemo(() => {
-    if (!frpNodeName().trim()) return false
-    if (frpNodeConfig().trim()) return true
-
-    const addr = frpNodeServerAddr().trim()
-    const port = Number.parseInt(frpNodeServerPort().trim(), 10)
-    return Boolean(addr) && Number.isFinite(port) && port > 0 && port <= 65535
-  })
-
-  const createNode = rspc.createMutation(() => 'node.create')
-  const [showCreateNodeModal, setShowCreateNodeModal] = createSignal(false)
-  const [createNodeName, setCreateNodeName] = createSignal('')
-  const defaultCreateNodeControlWsUrl = createMemo(() =>
-    defaultControlWsUrl(controlDiagnostics.data?.suggested_control_ws_url ?? null),
-  )
-  const [createNodeControlWsUrl, setCreateNodeControlWsUrl] = createSignal(defaultCreateNodeControlWsUrl())
-  const [createNodeFieldErrors, setCreateNodeFieldErrors] = createSignal<Record<string, string>>({})
-  const [createNodeFormError, setCreateNodeFormError] = createSignal<string | null>(null)
-  const [createNodeResult, setCreateNodeResult] = createSignal<NodeCreateResult | null>(null)
-
-  const createNodeWatchtowerPort = createMemo(() => {
-    const nodeId = createNodeResult()?.node?.id ?? ''
-    let h = 0
-    for (let i = 0; i < nodeId.length; i++) {
-      h = (h * 33 + nodeId.charCodeAt(i)) >>> 0
-    }
-    return 45000 + (h % 20000)
-  })
-
-  const createNodeComposeYaml = createMemo(() => {
-    const r = createNodeResult()
-    if (!r) return ''
-    const rawUrls = createNodeControlWsUrl().trim() || defaultCreateNodeControlWsUrl()
-    const parsedUrls = rawUrls
-      .split(/[,\s;]+/g)
-      .map((v) => v.trim())
-      .filter((v) => v.length > 0)
-    const wsUrls = parsedUrls.length > 0 ? parsedUrls : [rawUrls]
-    const primaryUrl = wsUrls[0]
-    const wsUrlsEnv = wsUrls.join(',')
-    const name = r.node.name
-    const token = r.connect_token
-    const watchtowerToken = r.watchtower_token
-
-    return [
-      'services:',
-      '  alloy-agent:',
-      '    image: ghcr.io/ign1x/alloy-agent:latest',
-      '    network_mode: \"host\"',
-      '    restart: unless-stopped',
-      '    environment:',
-      '      - RUST_LOG=info',
-      '      - ALLOY_DATA_ROOT=/data',
-      '      - ALLOY_FS_WRITE_ENABLED=true',
-      `      - ALLOY_CONTROL_WS_URL=${primaryUrl}`,
-      `      - ALLOY_CONTROL_WS_URLS=${wsUrlsEnv}`,
-      '      - ALLOY_CONTROL_TUNNEL_MODE=poll',
-      '      - ALLOY_CONTROL_WS_PING_INTERVAL_MS=5000',
-      '      - ALLOY_CONTROL_WS_APP_KEEPALIVE_MS=12000',
-      '      - ALLOY_CONTROL_WS_CONNECT_TIMEOUT_MS=15000',
-      '      - ALLOY_CONTROL_WS_RECONNECT_MAX_MS=8000',
-      `      - ALLOY_NODE_NAME=${name}`,
-      `      - ALLOY_NODE_TOKEN=${token}`,
-      `      - ALLOY_AGENT_SELF_UPDATE_WATCHTOWER_URL=http://watchtower:${createNodeWatchtowerPort()}`,
-      `      - ALLOY_AGENT_SELF_UPDATE_WATCHTOWER_TOKEN=${watchtowerToken}`,
-      '    volumes:',
-      '      - alloy-agent-data:/data',
-      '      - /var/run/docker.sock:/var/run/docker.sock',
-      '    labels:',
-      '      - "com.centurylinklabs.watchtower.enable=true"',
-      '  watchtower:',
-      '    image: nickfedor/watchtower:latest',
-      '    restart: unless-stopped',
-      '    ports:',
-      `      - "${createNodeWatchtowerPort()}:8080"`,
-      '    volumes:',
-      '      - /var/run/docker.sock:/var/run/docker.sock',
-      '    environment:',
-      '      - WATCHTOWER_LABEL_ENABLE=true',
-      '      - WATCHTOWER_HTTP_API_UPDATE=true',
-      `      - WATCHTOWER_HTTP_API_TOKEN=${watchtowerToken}`,
-      '      - WATCHTOWER_CLEANUP=true',
-      '    labels:',
-      '      - "com.centurylinklabs.watchtower.enable=false"',
-      'volumes:',
-      '  alloy-agent-data:',
-      '',
-    ].join('\n')
-  })
-
-  const createNodeInstallCommand = createMemo(() => {
-    const compose = createNodeComposeYaml()
-    if (!compose) return ''
-
-    const bytes = new TextEncoder().encode(compose)
-    let binary = ''
-    for (const byte of bytes) binary += String.fromCharCode(byte)
-    const b64 = window.btoa(binary)
-
-    return `mkdir -p alloy-node && cd alloy-node && printf '%s' '${b64}' | base64 -d > docker-compose.yml && docker compose up -d`
-  })
-
-  function openCreateNode() {
-    setCreateNodeName('')
-    setCreateNodeControlWsUrl(defaultCreateNodeControlWsUrl())
-    setCreateNodeFieldErrors({})
-    setCreateNodeFormError(null)
-    setCreateNodeResult(null)
-    setShowCreateNodeModal(true)
-  }
-
-  function closeCreateNode() {
-    setShowCreateNodeModal(false)
-    setCreateNodeFieldErrors({})
-    setCreateNodeFormError(null)
-    setCreateNodeResult(null)
-  }
-
-  createEffect(() => {
-    if (tab() !== 'nodes') return
-    const list = nodes.data ?? []
-    if (!list.length) return
-    const current = selectedNodeId()
-    if (!current || !list.some((n: { id: string }) => n.id === current)) {
-      setSelectedNodeId(list[0].id)
-    }
-  })
-
-  async function invalidateNodes() {
-    await queryClient.invalidateQueries({ queryKey: ['node.list', null] })
-  }
-
-  const selectedNode = createMemo(() => {
-    const id = selectedNodeId()
-    if (!id) return null
-    return (nodes.data ?? []).find((n: { id: string }) => n.id === id) ?? null
-  })
-
-  const nodeAgentOutdatedCount = createMemo(() => {
-    const latest = updateCheck.data?.agent_latest
-    const target = latest?.version ?? latest?.tag ?? null
-    if (!target) return 0
-
-    let count = 0
-    for (const node of (nodes.data ?? []) as NodeDto[]) {
-      if (isVersionLower(node.agent_version, target) === true) {
-        count += 1
-      }
-    }
-    return count
-  })
-
-  const nodeCount = createMemo(() => ((nodes.data ?? []) as NodeDto[]).length)
-
-  const [fsPath, setFsPath] = createSignal<string>('')
-  const [selectedFilePath, setSelectedFilePath] = createSignal<string | null>(null)
 
   const selectedInstanceError = createMemo(() => parseAgentErrorPayload(selectedInstanceStatus()?.message ?? null))
   const selectedInstanceMessage = createMemo(() => selectedInstanceError()?.message ?? selectedInstanceStatus()?.message ?? null)
@@ -2208,18 +1419,18 @@ function App() {
   })
 
   function openInFiles(path: string) {
-    setTab('files')
     setFsPath(path)
     setSelectedFilePath(null)
+    setTab('files')
   }
 
   function openFileInFiles(filePath: string) {
     const cleaned = filePath.replace(/\/+$/, '')
     const idx = cleaned.lastIndexOf('/')
     const dir = idx <= 0 ? '' : cleaned.slice(0, idx)
-    setTab('files')
     setFsPath(dir)
     setSelectedFilePath(cleaned)
+    setTab('files')
   }
 
   // selectedInstance UI is handled by the terminal modal.
@@ -2228,6 +1439,7 @@ function App() {
 
   const instancesTabProps = {
     createNodeDropdownOptions,
+    createSelectedNode,
     createNodeId,
     createAdvanced,
     createAdvancedDirty,
@@ -2254,6 +1466,7 @@ function App() {
     instanceCardEls,
     instanceCompact,
     instanceDisplayName,
+    instanceViewPresets,
     instanceName,
     instanceOpById,
     instanceSearchInput,
@@ -2269,6 +1482,9 @@ function App() {
     instancesLastUpdatedAtUnixMs,
     invalidateInstances,
     isReadOnly,
+    activeInstanceViewPresetId,
+    applyInstanceViewPreset,
+    deleteInstanceViewPreset,
     mcCreateMode,
     mcEffectiveFrpConfig,
     mcEula,
@@ -2289,8 +1505,10 @@ function App() {
     openEditModal,
     openFileInFiles,
     openInFiles,
+    openSettingsTab: () => setTab('settings'),
     pinnedInstanceIds,
     pushToast,
+    toastSuccessFromRspc,
     restartInstance,
     revealInstance,
     runInstanceOp,
@@ -2346,6 +1564,7 @@ function App() {
     setInstanceSortKey,
     setInstanceStatusFilter,
     setInstanceTemplateFilter,
+    saveInstanceViewPreset,
     setMcCreateMode,
     setMcEula,
     setMcFrpConfig,
@@ -2414,6 +1633,7 @@ function App() {
     startInstance,
     stopInstance,
     tab,
+    t,
     templateOptions,
     templates,
     toastError,
@@ -2436,6 +1656,7 @@ function App() {
 
   const downloadsTabProps = {
     tab,
+    t,
     hasRunningDownloadJobs,
     downloadQueuePaused,
     downloadJobs,
@@ -2486,10 +1707,12 @@ function App() {
     setDownloadSonsOfTheForestVersion,
     sonsOfTheForestVersionOptions,
     downloadQueueEnqueue,
+    openSettingsTab: () => setTab('settings'),
   }
 
   const frpTabProps = {
     tab,
+    t,
     frpNodes,
     isAuthed,
     isReadOnly,
@@ -2497,12 +1720,14 @@ function App() {
     openEditFrpNodeModal,
     frpDeleteNode,
     invalidateFrpNodes,
+    openSettingsTab: () => setTab('settings'),
     pushToast,
     toastError,
   }
 
   const settingsTabProps = {
     tab,
+    t,
     settingsStatus,
     me,
     settingsDstKeyVisible,
@@ -2549,6 +1774,7 @@ function App() {
 
   const nodesTabProps = {
     tab,
+    t,
     me,
     openCreateNode,
     nodesLastUpdatedAtUnixMs,
@@ -2564,17 +1790,13 @@ function App() {
     nodeEnabledOverride,
     setNodeEnabledOverride,
     updateCheck,
+    openSettingsTab: () => setTab('settings'),
     pushToast,
     toastError,
   }
 
-  const openLoginModal = () => {
-    setAuthError(null)
-    setShowLoginModal(true)
-    setFocusLoginUsername(true)
-  }
-
   const downloadTaskModalProps = {
+    t,
     selectedDownloadJobId,
     setSelectedDownloadJobId,
     selectedDownloadJob,
@@ -2596,9 +1818,8 @@ function App() {
     loginPass,
     setLoginPass,
     refreshSession,
-    setLoginUsernameEl: (el: HTMLInputElement) => {
-      loginUsernameEl = el
-    },
+    setLoginUsernameEl,
+    t,
   }
 
   const addNodeModalProps = {
@@ -2621,6 +1842,7 @@ function App() {
     setSelectedNodeId,
     createNodeComposeYaml,
     createNodeInstallCommand,
+    t,
   }
 
   const frpNodeModalProps = {
@@ -2652,6 +1874,7 @@ function App() {
     frpNodeDetectedFormat,
     invalidateFrpNodes,
     pushToast,
+    t,
   }
 
   const deleteInstanceModalProps = {
@@ -2666,6 +1889,8 @@ function App() {
     toastError,
     instanceDeletePreview,
     setConfirmDeleteText,
+    toastSuccessFromRspc,
+    t,
   }
 
   const editInstanceModalProps = {
@@ -2776,6 +2001,7 @@ function App() {
     editTrFrpConfig,
     setEditTrFrpConfig,
     frpNodeConfigById,
+    t,
   }
 
   const controlDiagnosticsModalProps = {
@@ -2787,6 +2013,7 @@ function App() {
     cacheSelection,
     setCacheSelection,
     toastError,
+    t,
   }
 
   const instanceDetailsModalProps = {
@@ -2800,6 +2027,7 @@ function App() {
     instanceDiagnostics,
     processLogLines,
     toastError,
+    toastSuccessFromRspc,
     instanceOpById,
     isReadOnly,
     runInstanceOp,
@@ -2822,11 +2050,27 @@ function App() {
     setProcessLogLive,
     setProcessLogLines,
     isAuthed,
+    t,
+    locale,
   }
 
   const toastPortalProps = {
     toasts,
-    setToasts,
+    dismissToast,
+    t,
+  }
+
+  const eventCenterDrawerProps = {
+    get open() {
+      return showEventCenter()
+    },
+    onClose: () => setShowEventCenter(false),
+    events,
+    markAllEventsRead,
+    clearEvents,
+    runRetryAction,
+    pushToast,
+    t,
   }
 
   const openDiagnostics = () => setShowDiagnosticsModal(true)
@@ -2913,6 +2157,10 @@ function App() {
     },
     openNodesTab: () => setTab('nodes'),
     openSettingsTab: () => setTab('settings'),
+    get eventUnreadCount() {
+      return events().filter((event) => !event.isRead).length
+    },
+    openEventCenter: () => setShowEventCenter(true),
     pushToast,
     toastError,
     openDiagnostics,
@@ -2978,6 +2226,7 @@ function App() {
 
   const mainPanelsProps = {
     tab,
+    setTab,
     isAuthed,
     fsPath,
     selectedFilePath,
@@ -2999,6 +2248,7 @@ function App() {
     controlDiagnosticsModalProps,
     instanceDetailsModalProps,
     toastPortalProps,
+    eventCenterDrawerProps,
   }
 
   return (

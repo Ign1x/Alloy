@@ -33,6 +33,7 @@ export default function InstanceCard(props: InstanceCardProps) {
     setShowInstanceModal,
     startInstance,
     stopInstance,
+    t,
     toastError,
     togglePinnedInstance,
   } = props as any
@@ -92,6 +93,7 @@ export default function InstanceCard(props: InstanceCardProps) {
           instanceStatusKeys={instanceStatusKeys}
           pinnedInstanceIds={pinnedInstanceIds}
           pushToast={pushToast}
+          t={t}
           togglePinnedInstance={togglePinnedInstance}
         />
       </div>
@@ -103,7 +105,7 @@ export default function InstanceCard(props: InstanceCardProps) {
         }
       >
         <div class="relative z-10 mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] text-rose-800 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-200">
-          <span class="font-semibold">Failed:</span>
+          <span class="font-semibold">{t('instances.card.failedLabel')}</span>
           <span class="ml-1">
             <Show when={i.status?.exit_code != null}>
               exit {i.status?.exit_code}
@@ -153,6 +155,7 @@ export default function InstanceCard(props: InstanceCardProps) {
         setConfirmDeleteInstanceId={setConfirmDeleteInstanceId}
         startInstance={startInstance}
         stopInstance={stopInstance}
+        t={t}
         toastError={toastError}
       />
     </div>

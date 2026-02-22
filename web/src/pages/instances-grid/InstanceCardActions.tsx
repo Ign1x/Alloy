@@ -21,6 +21,7 @@ export default function InstanceCardActions(props: InstanceCardActionsProps) {
     setConfirmDeleteInstanceId,
     startInstance,
     stopInstance,
+    t,
     toastError,
   } = props as any
 
@@ -37,6 +38,7 @@ export default function InstanceCardActions(props: InstanceCardActionsProps) {
         runInstanceOp={runInstanceOp}
         startInstance={startInstance}
         stopInstance={stopInstance}
+        t={t}
         toastError={toastError}
       />
       <InstanceQuickActions
@@ -46,6 +48,7 @@ export default function InstanceCardActions(props: InstanceCardActionsProps) {
         openFileInFiles={openFileInFiles}
         openInFiles={openInFiles}
         setConfirmDeleteInstanceId={setConfirmDeleteInstanceId}
+        t={t}
       />
     </div>
   )

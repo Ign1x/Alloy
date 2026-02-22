@@ -106,7 +106,7 @@ pub struct UpdateCatalog {
 
 pub fn parse_simple_version(raw: &str) -> Option<SimpleVersion> {
     let s = raw.trim().trim_start_matches('v');
-    let mut it = s.split(|c: char| matches!(c, '.' | '-' | '+'));
+    let mut it = s.split(['.', '-', '+']);
     let major = it.next()?.parse().ok()?;
     let minor = it.next()?.parse().ok()?;
     let patch = it.next()?.parse().ok()?;
@@ -156,7 +156,7 @@ fn parse_version_bound(
     allow_wildcard_patch: bool,
 ) -> Result<SimpleVersion, UpdatePrecheck> {
     let s = raw.trim().trim_start_matches('v');
-    let mut it = s.split(|c: char| matches!(c, '.' | '-' | '+'));
+    let mut it = s.split(['.', '-', '+']);
 
     let major_raw = it.next().unwrap_or_default();
     let minor_raw = it.next().unwrap_or_default();
@@ -208,7 +208,9 @@ fn parse_version_bound(
             let expected = "x.y.z";
             return Err(UpdatePrecheck::needs_manual(
                 format!("{kind}_invalid"),
-                format!("compatibility {kind} `{raw}` is not a valid version (expected {expected})"),
+                format!(
+                    "compatibility {kind} `{raw}` is not a valid version (expected {expected})"
+                ),
             ));
         }
     };
@@ -225,9 +227,7 @@ fn evaluate_catalog_precheck(catalog: &UpdateCatalog) -> UpdatePrecheck {
     let Some(current_control) = parse_simple_version(current_control_raw) else {
         return UpdatePrecheck::needs_manual(
             "control_version_invalid",
-            format!(
-                "control version `{current_control_raw}` is invalid; verify build metadata"
-            ),
+            format!("control version `{current_control_raw}` is invalid; verify build metadata"),
         );
     };
 
@@ -346,7 +346,9 @@ fn evaluate_catalog_precheck(catalog: &UpdateCatalog) -> UpdatePrecheck {
 }
 
 fn precheck_warning(precheck: &UpdatePrecheck) -> Option<String> {
-    if precheck.status == UpdatePrecheckStatus::Updatable || precheck.reason_code == "already_latest" {
+    if precheck.status == UpdatePrecheckStatus::Updatable
+        || precheck.reason_code == "already_latest"
+    {
         return None;
     }
     Some(format!(
@@ -412,7 +414,10 @@ fn cache() -> &'static Mutex<Option<CachedCatalog>> {
     CACHE.get_or_init(|| Mutex::new(None))
 }
 
-fn fallback_catalog_without_cache(policy: CatalogFetchPolicy, err: &anyhow::Error) -> UpdateCatalog {
+fn fallback_catalog_without_cache(
+    policy: CatalogFetchPolicy,
+    err: &anyhow::Error,
+) -> UpdateCatalog {
     let manifest_url = update_manifest_url();
     let source = if manifest_url.is_some() {
         UpdateSource::Manifest
@@ -526,7 +531,7 @@ async fn fetch_update_catalog() -> anyhow::Result<UpdateCatalog> {
         agent: None,
         source: UpdateSource::GithubReleaseLatest,
         channel: None,
-        manifest_url: manifest_url,
+        manifest_url,
         compatibility: None,
         precheck: UpdatePrecheck::needs_manual("not_evaluated", "precheck not evaluated yet"),
         warning: manifest_error.map(|msg| {
@@ -767,7 +772,11 @@ pub async fn trigger_watchtower_update() -> anyhow::Result<String> {
         .filter(|v| !v.is_empty());
 
     let endpoint = format!("{}/v1/update", url.trim_end_matches('/'));
-    let token_state = if token.is_some() { "present" } else { "missing" };
+    let token_state = if token.is_some() {
+        "present"
+    } else {
+        "missing"
+    };
 
     let mut req = http_client().get(&endpoint);
     if let Some(token) = token {

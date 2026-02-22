@@ -1,8 +1,10 @@
 import type { JSX } from 'solid-js'
+import type { I18nTranslate } from '../../app/i18n'
 
 export type SpinnerProps = {
   class?: string
   title?: string
+  t?: I18nTranslate
 }
 
 export function Spinner(props: SpinnerProps): JSX.Element {
@@ -13,7 +15,7 @@ export function Spinner(props: SpinnerProps): JSX.Element {
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
       role="status"
-      aria-label={props.title ?? 'Loading'}
+      aria-label={props.title ?? (props.t ? props.t('common.loading') : 'Loading')}
     >
       <path
         d="M12 3a9 9 0 1 0 9 9"
@@ -32,4 +34,3 @@ export function Spinner(props: SpinnerProps): JSX.Element {
     </svg>
   )
 }
-

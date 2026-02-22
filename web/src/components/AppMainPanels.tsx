@@ -11,6 +11,7 @@ import SettingsTab, { type SettingsTabProps } from '../pages/SettingsTab'
 
 interface AppMainPanelsProps {
   tab: () => UiTab
+  setTab: (next: UiTab) => void
   isAuthed: () => boolean
   fsPath: () => string
   selectedFilePath: () => string | null
@@ -30,10 +31,12 @@ export default function AppMainPanels(props: AppMainPanelsProps) {
 
       <Show when={props.tab() === 'files'}>
         <FileBrowser
+          t={props.t}
           enabled={props.isAuthed() && props.tab() === 'files'}
           title={props.t('tab.files')}
           initialPath={props.fsPath()}
           initialSelectedFile={props.selectedFilePath()}
+          onOpenSettings={() => props.setTab('settings')}
           rootLabel="/data"
         />
       </Show>

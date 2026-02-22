@@ -1,7 +1,9 @@
+#![allow(clippy::too_many_arguments)]
+
 use std::collections::BTreeMap;
 
-use alloy_proto::agent_v1::{ParamType, TemplateParam};
 use crate::game_adapter_template::TemplateParamKind;
+use alloy_proto::agent_v1::{ParamType, TemplateParam};
 
 #[derive(Debug, Clone)]
 pub struct ProcessTemplate {
@@ -248,7 +250,9 @@ fn param_bool(
     }
 }
 
-fn from_adapter_template_param(p: &crate::game_adapter_template::AdapterTemplateParam) -> TemplateParam {
+fn from_adapter_template_param(
+    p: &crate::game_adapter_template::AdapterTemplateParam,
+) -> TemplateParam {
     let (param_type, min_int, max_int, secret) = match p.kind {
         TemplateParamKind::String => (ParamType::String as i32, 0, 0, false),
         TemplateParamKind::Int { min, max } => (ParamType::Int as i32, min, max, false),
@@ -269,47 +273,6 @@ fn from_adapter_template_param(p: &crate::game_adapter_template::AdapterTemplate
         placeholder: p.placeholder.to_string(),
         help: p.help.to_string(),
         advanced: p.advanced,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn adapter_template_param_mapping_preserves_advanced_and_secret() {
-        let p1 = crate::game_adapter_template::AdapterTemplateParam {
-            key: "x",
-            label: "X",
-            kind: TemplateParamKind::SecretString,
-            required: true,
-            default_value: "",
-            enum_values: &[],
-            placeholder: "",
-            help: "",
-            advanced: true,
-        };
-        let out = from_adapter_template_param(&p1);
-        assert_eq!(out.key, "x");
-        assert_eq!(out.advanced, true);
-        assert_eq!(out.secret, true);
-        assert_eq!(out.r#type, ParamType::String as i32);
-
-        let p2 = crate::game_adapter_template::AdapterTemplateParam {
-            key: "p",
-            label: "P",
-            kind: TemplateParamKind::Int { min: 0, max: 10 },
-            required: false,
-            default_value: "5",
-            enum_values: &[],
-            placeholder: "",
-            help: "",
-            advanced: false,
-        };
-        let out2 = from_adapter_template_param(&p2);
-        assert_eq!(out2.r#type, ParamType::Int as i32);
-        assert_eq!(out2.min_int, 0);
-        assert_eq!(out2.max_int, 10);
     }
 }
 
@@ -408,4 +371,45 @@ pub fn apply_params(
     let _ = crate::game_adapter_template::validate_template_params(&t.template_id, params)?;
 
     Ok(t)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn adapter_template_param_mapping_preserves_advanced_and_secret() {
+        let p1 = crate::game_adapter_template::AdapterTemplateParam {
+            key: "x",
+            label: "X",
+            kind: TemplateParamKind::SecretString,
+            required: true,
+            default_value: "",
+            enum_values: &[],
+            placeholder: "",
+            help: "",
+            advanced: true,
+        };
+        let out = from_adapter_template_param(&p1);
+        assert_eq!(out.key, "x");
+        assert!(out.advanced);
+        assert!(out.secret);
+        assert_eq!(out.r#type, ParamType::String as i32);
+
+        let p2 = crate::game_adapter_template::AdapterTemplateParam {
+            key: "p",
+            label: "P",
+            kind: TemplateParamKind::Int { min: 0, max: 10 },
+            required: false,
+            default_value: "5",
+            enum_values: &[],
+            placeholder: "",
+            help: "",
+            advanced: false,
+        };
+        let out2 = from_adapter_template_param(&p2);
+        assert_eq!(out2.r#type, ParamType::Int as i32);
+        assert_eq!(out2.min_int, 0);
+        assert_eq!(out2.max_int, 10);
+    }
 }

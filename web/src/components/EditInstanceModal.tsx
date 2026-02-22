@@ -98,13 +98,14 @@ export default function EditInstanceModal(props: EditInstanceModalProps) {
     editTrFrpConfig,
     setEditTrFrpConfig,
     frpNodeConfigById,
+    t,
   } = props as any
 
   return (
         <Modal
           open={editingInstanceId() != null && editBase() != null}
           onClose={() => closeEditModal()}
-          title="Edit instance"
+          title={t('instances.edit.title')}
           size="lg"
         >
           <div class="px-6 py-6">
@@ -116,7 +117,7 @@ export default function EditInstanceModal(props: EditInstanceModalProps) {
                     </svg>
                   </div>
                   <div class="min-w-0">
-                    <h3 class="text-base font-semibold text-slate-900 dark:text-slate-100">Edit instance</h3>
+                    <h3 class="text-base font-semibold text-slate-900 dark:text-slate-100">{t('instances.edit.title')}</h3>
                     <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">
                       <span class="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[12px] text-slate-700 dark:bg-slate-800 dark:text-slate-200">
                         {editBase()!.instance_id}
@@ -133,20 +134,20 @@ export default function EditInstanceModal(props: EditInstanceModalProps) {
                           : 'border-slate-200 bg-white/60 text-slate-500 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-400'
                       }`}
                     >
-                      {editHasChanges() ? `${editChangedKeys().length} change(s)` : 'No changes'}
+                      {editHasChanges() ? t('instances.edit.changeCount', { count: editChangedKeys().length }) : t('instances.edit.noChanges')}
                     </span>
                   </div>
                 </div>
 
                 <div class="mt-4 rounded-xl border border-slate-200 bg-slate-50/60 p-3 text-[12px] text-slate-700 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-200">
-                  <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Notes</div>
+                  <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">{t('instances.edit.notes')}</div>
                   <ul class="mt-2 space-y-1 text-[12px] text-slate-600 dark:text-slate-300">
-                    <li>Changes apply on next start.</li>
-                    <li>Stop the instance before editing (required).</li>
+                    <li>{t('instances.edit.noteApplyNextStart')}</li>
+                    <li>{t('instances.edit.noteStopBeforeEdit')}</li>
                   </ul>
                   <Show when={editRisk().length > 0}>
                     <div class="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-200">
-                      <div class="text-xs font-semibold uppercase tracking-wider text-amber-700/80 dark:text-amber-200/80">Risk</div>
+                      <div class="text-xs font-semibold uppercase tracking-wider text-amber-700/80 dark:text-amber-200/80">{t('instances.edit.risk')}</div>
                       <ul class="mt-1 space-y-1">
                         <For each={editRisk()}>{(r) => <li>{r}</li>}</For>
                       </ul>
@@ -155,21 +156,21 @@ export default function EditInstanceModal(props: EditInstanceModalProps) {
                 </div>
 
                 <div class="mt-5 space-y-3">
-                  <Field label="Display name (optional)" error={editFieldErrors().display_name}>
+                  <Field label={t('instances.edit.displayNameOptional')} error={editFieldErrors().display_name}>
                     <Input
                       ref={(el) => {
                         setEditDisplayNameEl?.(el)
                       }}
                       value={editDisplayName()}
                       onInput={(e) => setEditDisplayName(e.currentTarget.value)}
-                      placeholder="e.g. friends-survival"
+                      placeholder={t('instances.edit.displayNamePlaceholder')}
                       invalid={Boolean(editFieldErrors().display_name)}
                       spellcheck={false}
                     />
                   </Field>
 
                   <Show when={editTemplateId() === 'demo:sleep'}>
-                    <Field label="Seconds" required error={editFieldErrors().seconds}>
+                    <Field label={t('instancesCreate.sleepSecondsLabel')} required error={editFieldErrors().seconds}>
                       <Input
                         ref={(el) => {
                           setEditSleepSecondsEl?.(el)
@@ -185,19 +186,19 @@ export default function EditInstanceModal(props: EditInstanceModalProps) {
                   <Show when={editTemplateId() === 'minecraft:vanilla'}>
                     <div class="space-y-3 rounded-xl border border-slate-200 bg-white/60 p-3 dark:border-slate-800 dark:bg-slate-950/40">
                       <div class="flex items-center justify-between gap-3">
-                        <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Minecraft</div>
+                        <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">{t('template.minecraft')}</div>
                         <div class="flex items-center gap-2">
                           <span class="rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 text-[11px] font-mono text-slate-600 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-300">
-                            EULA accepted
+                            {t('instances.edit.eulaAccepted')}
                           </span>
                           <Button
                             size="xs"
                             variant={editAdvanced() ? 'secondary' : 'ghost'}
                             onClick={() => setEditAdvanced((v: boolean) => !v)}
-                            title="Show or hide advanced fields"
+                            title={t('instances.edit.toggleAdvancedTitle')}
                           >
                             <span class="inline-flex items-center gap-2">
-                              {editAdvanced() ? 'Hide advanced' : 'Advanced'}
+                              {editAdvanced() ? t('instances.edit.hideAdvanced') : t('instances.edit.advanced')}
                               <Show when={!editAdvanced() && editAdvancedDirty()}>
                                 <span class="h-1.5 w-1.5 rounded-full bg-amber-500" aria-hidden="true" />
                               </Show>
@@ -210,8 +211,8 @@ export default function EditInstanceModal(props: EditInstanceModalProps) {
 		                        <Field
 		                          label={
 		                            <LabelTip
-		                              label="Version"
-		                              content="Changing version may trigger downloads and compatibility issues."
+                              label={t('instances.edit.version')}
+                              content={t('instances.edit.minecraftVersionHint')}
 		                            />
 		                          }
 		                          error={editFieldErrors().version}
@@ -229,8 +230,8 @@ export default function EditInstanceModal(props: EditInstanceModalProps) {
 	                        <Field
 	                          label={
 	                            <LabelTip
-	                              label="Memory (MB)"
-	                              content="Sets JVM heap size. Too low can crash; too high can starve the host."
+                              label={t('instances.edit.memoryMb')}
+                              content={t('instances.edit.minecraftMemoryHint')}
 	                            />
 	                          }
 	                          error={editFieldErrors().memory_mb}
@@ -242,7 +243,7 @@ export default function EditInstanceModal(props: EditInstanceModalProps) {
                             type="number"
                             value={editMcMemory()}
                             onInput={(e) => setEditMcMemory(e.currentTarget.value)}
-                            placeholder="2048"
+                            placeholder={t('instances.edit.memoryPlaceholder')}
                             invalid={Boolean(editFieldErrors().memory_mb)}
                           />
                         </Field>
@@ -253,8 +254,8 @@ export default function EditInstanceModal(props: EditInstanceModalProps) {
 	                          <Field
 	                            label={
 	                              <LabelTip
-	                                label="Port (0 = auto)"
-	                                content="Applied on next start. Use 0 to auto-assign a free port."
+                                label={t('instances.edit.portAuto')}
+                                content={t('instances.edit.portAutoHint')}
 	                              />
 	                            }
 	                            error={editFieldErrors().port}
@@ -266,13 +267,13 @@ export default function EditInstanceModal(props: EditInstanceModalProps) {
                                 type="number"
                                 value={editMcPort()}
                                 onInput={(e) => setEditMcPort(e.currentTarget.value)}
-                                placeholder="0 for auto"
+                                placeholder={t('instances.edit.portAutoPlaceholder')}
                                 invalid={Boolean(editFieldErrors().port)}
                               />
                             </Field>
 
 	                          <Field
-	                            label={<LabelTip label="Public (Tunnels)" content="Optional. Paste a tunnel config to expose this instance (auto-detects INI/TOML/YAML/JSON)." />}
+                            label={<LabelTip label={t('instances.edit.publicTunnels')} content={t('instances.edit.publicTunnelsHint')} />}
 	                            error={editFieldErrors().frp_config}
 	                          >
 	                            <div class="space-y-2">
@@ -290,7 +291,7 @@ export default function EditInstanceModal(props: EditInstanceModalProps) {
 	                                    }
 	                                  }}
 	                                />
-	                                <span>Enable</span>
+                                <span>{t('instances.edit.enable')}</span>
 	                              </label>
 	                              <Show when={editMcFrpEnabled()}>
 	                                <div class="space-y-2">
@@ -298,8 +299,8 @@ export default function EditInstanceModal(props: EditInstanceModalProps) {
 	                                    <Tabs
 	                                      value={editMcFrpMode()}
 	                                      options={[
-	                                        { value: 'paste', label: 'Paste' },
-	                                        { value: 'node', label: 'Node' },
+                                        { value: 'paste', label: t('instances.edit.paste') },
+                                        { value: 'node', label: t('instances.edit.node') },
 	                                      ]}
 	                                      onChange={(mode) => {
 	                                        setEditMcFrpMode(mode)
@@ -308,7 +309,7 @@ export default function EditInstanceModal(props: EditInstanceModalProps) {
 	                                      }}
 	                                    />
 	                                    <Button size="xs" variant="secondary" onClick={() => setTab('frp')}>
-	                                      Manage nodes
+                                      {t('instances.edit.manageNodes')}
 	                                    </Button>
 	                                  </div>
 
@@ -322,12 +323,12 @@ export default function EditInstanceModal(props: EditInstanceModalProps) {
 	                                        label=""
 	                                        value={editMcFrpNodeId()}
 	                                        options={frpNodeDropdownOptions()}
-	                                        placeholder="Select node…"
+                                        placeholder={t('instancesCreate.nodeSelectPlaceholder')}
 	                                        onChange={setEditMcFrpNodeId}
 	                                      />
 	                                    </div>
 	                                    <div class="text-[11px] text-slate-500 dark:text-slate-400">
-	                                      If you don’t select a node, the existing config (if any) stays unchanged.
+                                      {t('instances.edit.nodeSelectionHint')}
 	                                    </div>
 	                                  </Show>
 
@@ -338,7 +339,7 @@ export default function EditInstanceModal(props: EditInstanceModalProps) {
 	                                      }}
 	                                      value={editMcFrpConfig()}
 	                                      onInput={(e) => setEditMcFrpConfig(e.currentTarget.value)}
-	                                      placeholder="Paste tunnel config to set/replace (auto: INI/TOML/YAML/JSON)"
+                                      placeholder={t('instances.edit.tunnelConfigReplacePlaceholder')}
 	                                      spellcheck={false}
 	                                      class="font-mono text-[11px]"
 	                                      invalid={Boolean(editFieldErrors().frp_config)}
@@ -356,15 +357,15 @@ export default function EditInstanceModal(props: EditInstanceModalProps) {
                   <Show when={editTemplateId() === 'terraria:vanilla'}>
                     <div class="space-y-3 rounded-xl border border-slate-200 bg-white/60 p-3 dark:border-slate-800 dark:bg-slate-950/40">
                       <div class="flex items-center justify-between gap-3">
-                        <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Terraria</div>
+                        <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">{t('instances.edit.terraria')}</div>
                         <Button
                           size="xs"
                           variant={editAdvanced() ? 'secondary' : 'ghost'}
                           onClick={() => setEditAdvanced((v: boolean) => !v)}
-                          title="Show or hide advanced fields"
+                          title={t('instances.edit.toggleAdvancedTitle')}
                         >
                           <span class="inline-flex items-center gap-2">
-                            {editAdvanced() ? 'Hide advanced' : 'Advanced'}
+                            {editAdvanced() ? t('instances.edit.hideAdvanced') : t('instances.edit.advanced')}
                             <Show when={!editAdvanced() && editAdvancedDirty()}>
                               <span class="h-1.5 w-1.5 rounded-full bg-amber-500" aria-hidden="true" />
                             </Show>
@@ -376,8 +377,8 @@ export default function EditInstanceModal(props: EditInstanceModalProps) {
 		                        <Field
 		                          label={
 		                            <LabelTip
-		                              label="Version"
-		                              content="Package id (e.g. 1453). Changing version may require re-download and can affect world compatibility."
+                              label={t('instances.edit.version')}
+                              content={t('instances.edit.terrariaVersionHint')}
 		                            />
 		                          }
 		                          error={editFieldErrors().version}
@@ -393,7 +394,7 @@ export default function EditInstanceModal(props: EditInstanceModalProps) {
 	                        </Field>
 
 	                        <Field
-	                          label={<LabelTip label="Max players" content="Maximum concurrent players allowed to join." />}
+                            label={<LabelTip label={t('instances.edit.maxPlayers')} content={t('instances.edit.maxPlayersHint')} />}
 	                          error={editFieldErrors().max_players}
 	                        >
                           <Input
@@ -403,7 +404,7 @@ export default function EditInstanceModal(props: EditInstanceModalProps) {
                             type="number"
                             value={editTrMaxPlayers()}
                             onInput={(e) => setEditTrMaxPlayers(e.currentTarget.value)}
-                            placeholder="8"
+                            placeholder={t('instances.edit.maxPlayersPlaceholder')}
                             invalid={Boolean(editFieldErrors().max_players)}
                           />
                         </Field>
@@ -412,8 +413,8 @@ export default function EditInstanceModal(props: EditInstanceModalProps) {
 	                      <Field
 	                        label={
 	                          <LabelTip
-	                            label="World name"
-	                            content="Changing world name will use a different world file (existing worlds are not deleted)."
+                            label={t('instances.edit.worldName')}
+                            content={t('instances.edit.worldNameHint')}
 	                          />
 	                        }
 	                        error={editFieldErrors().world_name}
@@ -424,7 +425,7 @@ export default function EditInstanceModal(props: EditInstanceModalProps) {
                           }}
                           value={editTrWorldName()}
                           onInput={(e) => setEditTrWorldName(e.currentTarget.value)}
-                          placeholder="world"
+                          placeholder={t('instances.edit.worldNamePlaceholder')}
                           invalid={Boolean(editFieldErrors().world_name)}
                         />
                       </Field>
@@ -434,8 +435,8 @@ export default function EditInstanceModal(props: EditInstanceModalProps) {
 	                          <Field
 	                            label={
 	                              <LabelTip
-	                                label="Port (0 = auto)"
-	                                content="Applied on next start. Use 0 to auto-assign a free port."
+                                label={t('instances.edit.portAuto')}
+                                content={t('instances.edit.portAutoHint')}
 	                              />
 	                            }
 	                            error={editFieldErrors().port}
@@ -447,13 +448,13 @@ export default function EditInstanceModal(props: EditInstanceModalProps) {
                               type="number"
                               value={editTrPort()}
                               onInput={(e) => setEditTrPort(e.currentTarget.value)}
-                              placeholder="0 for auto"
+                              placeholder={t('instances.edit.portAutoPlaceholder')}
                               invalid={Boolean(editFieldErrors().port)}
                             />
                           </Field>
 
 	                          <Field
-	                            label={<LabelTip label="World size (1/2/3)" content="1=small, 2=medium, 3=large." />}
+                            label={<LabelTip label={t('instances.edit.worldSize')} content={t('instances.edit.worldSizeHint')} />}
 	                            error={editFieldErrors().world_size}
 	                          >
                             <Input
@@ -463,14 +464,14 @@ export default function EditInstanceModal(props: EditInstanceModalProps) {
                               type="number"
                               value={editTrWorldSize()}
                               onInput={(e) => setEditTrWorldSize(e.currentTarget.value)}
-                              placeholder="1"
+                              placeholder={t('instances.edit.worldSizePlaceholder')}
                               invalid={Boolean(editFieldErrors().world_size)}
                             />
                           </Field>
                         </div>
 
 	                        <Field
-	                          label={<LabelTip label="Password (optional)" content="Leave blank to keep existing; set a value to change." />}
+                          label={<LabelTip label={t('instances.edit.passwordOptional')} content={t('instances.edit.passwordOptionalHint')} />}
 	                          error={editFieldErrors().password}
 	                        >
 	                          <div class="flex flex-wrap items-center gap-2">
@@ -481,14 +482,14 @@ export default function EditInstanceModal(props: EditInstanceModalProps) {
 	                          type={editTrPasswordVisible() ? 'text' : 'password'}
 	                          value={editTrPassword()}
 	                          onInput={(e) => setEditTrPassword(e.currentTarget.value)}
-	                          placeholder="(leave blank to keep)"
+                          placeholder={t('instances.edit.passwordKeepPlaceholder')}
 	                          invalid={Boolean(editFieldErrors().password)}
 	                          class="w-full flex-1"
 	                            rightIcon={
 	                              <VisibilityToggle
 	                              visible={editTrPasswordVisible()}
-	                              labelWhenHidden="Show password"
-	                              labelWhenVisible="Hide password"
+                              labelWhenHidden={t('instances.edit.showPassword')}
+                              labelWhenVisible={t('instances.edit.hidePassword')}
 	                              onToggle={() => setEditTrPasswordVisible((v: boolean) => !v)}
 	                            />
 	                            }
@@ -497,7 +498,7 @@ export default function EditInstanceModal(props: EditInstanceModalProps) {
 	                              type="button"
 	                              size="sm"
 	                              variant="secondary"
-	                              label="Copy password"
+                              label={t('instances.edit.copyPassword')}
 	                              disabled={!editTrPassword().trim()}
 	                              onClick={() => void safeCopy(editTrPassword())}
 	                            >
@@ -510,7 +511,7 @@ export default function EditInstanceModal(props: EditInstanceModalProps) {
 	                        </Field>
 
 	                        <Field
-	                          label={<LabelTip label="Public (Tunnels)" content="Optional. Paste a tunnel config to expose this instance (auto-detects INI/TOML/YAML/JSON)." />}
+                          label={<LabelTip label={t('instances.edit.publicTunnels')} content={t('instances.edit.publicTunnelsHint')} />}
 	                          error={editFieldErrors().frp_config}
 	                        >
 	                          <div class="space-y-2">
@@ -528,7 +529,7 @@ export default function EditInstanceModal(props: EditInstanceModalProps) {
 	                                  }
 	                                }}
 	                              />
-	                              <span>Enable</span>
+                              <span>{t('instances.edit.enable')}</span>
 	                            </label>
 	                            <Show when={editTrFrpEnabled()}>
 	                              <div class="space-y-2">
@@ -536,8 +537,8 @@ export default function EditInstanceModal(props: EditInstanceModalProps) {
 	                                  <Tabs
 	                                    value={editTrFrpMode()}
 	                                    options={[
-	                                      { value: 'paste', label: 'Paste' },
-	                                      { value: 'node', label: 'Node' },
+                                      { value: 'paste', label: t('instances.edit.paste') },
+                                      { value: 'node', label: t('instances.edit.node') },
 	                                    ]}
 	                                    onChange={(mode) => {
 	                                      setEditTrFrpMode(mode)
@@ -546,7 +547,7 @@ export default function EditInstanceModal(props: EditInstanceModalProps) {
 	                                    }}
 	                                  />
 	                                  <Button size="xs" variant="secondary" onClick={() => setTab('frp')}>
-	                                    Manage nodes
+                                    {t('instances.edit.manageNodes')}
 	                                  </Button>
 	                                </div>
 
@@ -560,12 +561,12 @@ export default function EditInstanceModal(props: EditInstanceModalProps) {
 	                                      label=""
 	                                      value={editTrFrpNodeId()}
 	                                      options={frpNodeDropdownOptions()}
-	                                      placeholder="Select node…"
+                                      placeholder={t('instancesCreate.nodeSelectPlaceholder')}
 	                                      onChange={setEditTrFrpNodeId}
 	                                    />
 	                                  </div>
 	                                  <div class="text-[11px] text-slate-500 dark:text-slate-400">
-	                                    If you don’t select a node, the existing config (if any) stays unchanged.
+                                    {t('instances.edit.nodeSelectionHint')}
 	                                  </div>
 	                                </Show>
 
@@ -576,7 +577,7 @@ export default function EditInstanceModal(props: EditInstanceModalProps) {
 	                                    }}
 	                                    value={editTrFrpConfig()}
 	                                    onInput={(e) => setEditTrFrpConfig(e.currentTarget.value)}
-	                                    placeholder="Paste tunnel config to set/replace (auto: INI/TOML/YAML/JSON)"
+                                    placeholder={t('instances.edit.tunnelConfigReplacePlaceholder')}
 	                                    spellcheck={false}
 	                                    class="font-mono text-[11px]"
 	                                    invalid={Boolean(editFieldErrors().frp_config)}
@@ -592,15 +593,15 @@ export default function EditInstanceModal(props: EditInstanceModalProps) {
 
                   <Show when={editFormError()}>
                     <div class="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-200">
-                      <div class="font-semibold">Update failed</div>
+                      <div class="font-semibold">{t('instances.edit.updateFailed')}</div>
                       <div class="mt-1">{editFormError()!.message}</div>
 	                      <Show when={editFormError()!.requestId}>
 	                        <div class="mt-2 flex items-center justify-between gap-2">
-	                          <div class="text-[11px] text-rose-700/80 dark:text-rose-200/70 font-mono">req {editFormError()!.requestId}</div>
+                          <div class="text-[11px] text-rose-700/80 dark:text-rose-200/70 font-mono">{t('common.requestId')} {editFormError()!.requestId}</div>
 	                          <IconButton
 	                            size="sm"
 	                            variant="danger"
-	                            label="Copy request id"
+	                            label={t('instances.edit.copyRequestId')}
 	                            onClick={() => safeCopy(editFormError()!.requestId ?? '')}
 	                          >
 	                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
@@ -616,7 +617,7 @@ export default function EditInstanceModal(props: EditInstanceModalProps) {
 
                 <div class="mt-6 flex gap-3">
                   <Button type="button" variant="secondary" size="md" class="flex-1" onClick={() => closeEditModal()}>
-                    Cancel
+                    {t('instances.common.cancel')}
                   </Button>
                   <Button
                     type="button"
@@ -641,7 +642,10 @@ export default function EditInstanceModal(props: EditInstanceModalProps) {
                             ? frpNodeConfigById(editMcFrpNodeId()) ?? ''
                             : editMcFrpConfig().trim()
                         if (editMcFrpEnabled() && !existing && !nextCfg)
-                          localErrors.frp_config = editMcFrpMode() === 'node' ? 'Select a tunnel node.' : 'Paste tunnel config.'
+                          localErrors.frp_config =
+                            editMcFrpMode() === 'node'
+                              ? t('instancesCreate.errors.tunnelNodeRequired')
+                              : t('instancesCreate.errors.tunnelConfigRequired')
                       }
 
                       if (base.template_id === 'terraria:vanilla') {
@@ -651,7 +655,10 @@ export default function EditInstanceModal(props: EditInstanceModalProps) {
                             ? frpNodeConfigById(editTrFrpNodeId()) ?? ''
                             : editTrFrpConfig().trim()
                         if (editTrFrpEnabled() && !existing && !nextCfg)
-                          localErrors.frp_config = editTrFrpMode() === 'node' ? 'Select a tunnel node.' : 'Paste tunnel config.'
+                          localErrors.frp_config =
+                            editTrFrpMode() === 'node'
+                              ? t('instancesCreate.errors.tunnelNodeRequired')
+                              : t('instancesCreate.errors.tunnelConfigRequired')
                       }
 
                       if (Object.keys(localErrors).length > 0) {
@@ -666,7 +673,7 @@ export default function EditInstanceModal(props: EditInstanceModalProps) {
                           params,
                           display_name: editDisplayName().trim() ? editDisplayName().trim() : null,
                         })
-                        pushToast('success', 'Updated', 'Instance parameters saved.')
+                        pushToast('success', t('instances.edit.toastUpdated'), t('instances.edit.toastSaved'))
                         closeEditModal()
                         await invalidateInstances()
                         revealInstance(base.instance_id)
@@ -681,7 +688,7 @@ export default function EditInstanceModal(props: EditInstanceModalProps) {
                       }
                     }}
                   >
-                    Save changes
+                    {t('instances.edit.saveChanges')}
                   </Button>
                 </div>
           </div>

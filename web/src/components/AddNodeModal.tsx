@@ -34,14 +34,15 @@ export default function AddNodeModal(props: AddNodeModalProps) {
     setSelectedNodeId,
     createNodeComposeYaml,
     createNodeInstallCommand,
+    t,
   } = props as any
 
   return (
         <Modal
           open={showCreateNodeModal()}
           onClose={() => closeCreateNode()}
-          title="Add node"
-          description="Create a node and copy one install command. No manual token edits needed."
+          title={t('nodes.addNode')}
+          description={t('nodes.addModal.description')}
           size="lg"
           footer={
             <Show
@@ -49,7 +50,7 @@ export default function AddNodeModal(props: AddNodeModalProps) {
               fallback={
                 <div class="flex gap-3">
                   <Button variant="secondary" class="flex-1" onClick={() => closeCreateNode()}>
-                    Cancel
+                    {t('instances.common.cancel')}
                   </Button>
                   <Button
                     variant="primary"
@@ -59,14 +60,14 @@ export default function AddNodeModal(props: AddNodeModalProps) {
                     loading={createNode.isPending}
                     disabled={!createNodeName().trim()}
                   >
-                    Create
+                    {t('nodes.addModal.create')}
                   </Button>
                 </div>
               }
             >
               <div class="flex gap-3">
                 <Button variant="secondary" class="flex-1" onClick={() => closeCreateNode()}>
-                  Close
+                  {t('nodes.addModal.close')}
                 </Button>
               </div>
             </Show>
@@ -85,7 +86,7 @@ export default function AddNodeModal(props: AddNodeModalProps) {
                   try {
                     const out = await createNode.mutateAsync({ name: createNodeName().trim() })
                     setCreateNodeResult(out as any)
-                    pushToast('success', 'Node created', (out as any).node?.name ?? '')
+                    pushToast('success', t('nodes.addModal.createdTitle'), (out as any).node?.name ?? '')
                     await invalidateNodes()
                     if ((out as any).node?.id) setSelectedNodeId((out as any).node.id)
                   } catch (err) {
@@ -94,21 +95,25 @@ export default function AddNodeModal(props: AddNodeModalProps) {
                       setCreateNodeFormError(err.data.message)
                       return
                     }
-                    setCreateNodeFormError(err instanceof Error ? err.message : 'create failed')
+                    setCreateNodeFormError(err instanceof Error ? err.message : t('nodes.addModal.createFailed'))
                   }
                 }}
               >
-                <Field label="Name" required error={createNodeFieldErrors().name}>
+                <Field label={t('nodes.addModal.name')} required error={createNodeFieldErrors().name}>
                   <Input
                     value={createNodeName()}
                     onInput={(e) => setCreateNodeName(e.currentTarget.value)}
-                    placeholder="e.g. node-1"
+                    placeholder={t('nodes.addModal.namePlaceholder')}
                     spellcheck={false}
                     invalid={Boolean(createNodeFieldErrors().name)}
                   />
                 </Field>
 
-                <Field label={<LabelTip label="Control WS URL" content="The agent connects to this websocket endpoint. You can provide multiple URLs separated by commas for failover." />}>
+                <Field
+                  label={
+                    <LabelTip label={t('nodes.addModal.controlWsUrl')} content={t('nodes.addModal.controlWsUrlHint')} />
+                  }
+                >
                   <Input
                     value={createNodeControlWsUrl()}
                     onInput={(e) => setCreateNodeControlWsUrl(e.currentTarget.value)}
@@ -131,14 +136,16 @@ export default function AddNodeModal(props: AddNodeModalProps) {
               <div class="space-y-4">
                 <div class="rounded-2xl border border-slate-200 bg-white/60 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
                   <div class="flex items-center justify-between gap-3">
-                    <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">One-command install</div>
+                    <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                      {t('nodes.addModal.oneCommandInstall')}
+                    </div>
                     <IconButton
                       type="button"
-                      label="Copy command"
+                      label={t('nodes.addModal.copyCommand')}
                       variant="secondary"
                       onClick={() => {
                         void safeCopy(createNodeInstallCommand())
-                        pushToast('success', 'Copied', `Install command copied for ${r().node.name}.`)
+                        pushToast('success', t('toast.copied'), t('nodes.addModal.commandCopiedFor', { name: r().node.name }))
                       }}
                     >
                       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
@@ -148,19 +155,21 @@ export default function AddNodeModal(props: AddNodeModalProps) {
                     </IconButton>
                   </div>
                   <Textarea value={createNodeInstallCommand()} readOnly class="mt-2 font-mono text-[11px]" />
-                  <div class="mt-2 text-[11px] text-slate-500 dark:text-slate-400">Run this on the target host. It writes docker-compose.yml and starts the services.</div>
+                  <div class="mt-2 text-[11px] text-slate-500 dark:text-slate-400">{t('nodes.addModal.runOnHostHint')}</div>
                 </div>
 
                 <div class="rounded-2xl border border-slate-200 bg-white/60 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
                   <div class="flex items-center justify-between gap-3">
-                    <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">docker-compose.yml (advanced)</div>
+                    <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                      {t('nodes.addModal.composeAdvanced')}
+                    </div>
                     <IconButton
                       type="button"
-                      label="Copy compose"
+                      label={t('nodes.addModal.copyCompose')}
                       variant="secondary"
                       onClick={() => {
                         void safeCopy(createNodeComposeYaml())
-                        pushToast('success', 'Copied', 'Compose copied.')
+                        pushToast('success', t('toast.copied'), t('nodes.addModal.composeCopied'))
                       }}
                     >
                       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
@@ -171,7 +180,14 @@ export default function AddNodeModal(props: AddNodeModalProps) {
                   </div>
 
                   <div class="mt-3">
-                    <Field label={<LabelTip label="Control WS URL" content="Use one or more websocket URLs (comma-separated). The agent will fail over in order." />}>
+                    <Field
+                      label={
+                        <LabelTip
+                          label={t('nodes.addModal.controlWsUrl')}
+                          content={t('nodes.addModal.controlWsUrlHintAdvanced')}
+                        />
+                      }
+                    >
                       <Input
                         value={createNodeControlWsUrl()}
                         onInput={(e) => setCreateNodeControlWsUrl(e.currentTarget.value)}

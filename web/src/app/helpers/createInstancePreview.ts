@@ -1,4 +1,5 @@
 import { parseFrpEndpoint, parseFrpPublicEndpoint } from './network'
+import type { I18nTranslate } from '../i18n'
 
 export type CreatePreviewRow = {
   label: string
@@ -35,6 +36,7 @@ export type CreateAdvancedDirtyInput = {
 }
 
 export type BuildCreatePreviewInput = {
+  t: I18nTranslate
   templateId: string
   templateLabel: string
   instanceName: string
@@ -84,13 +86,14 @@ export type BuildCreatePreviewInput = {
   fxRconPassword: string
 }
 
-function asPortLabel(raw: string): string {
+function asPortLabel(raw: string, t: I18nTranslate): string {
   const portRaw = raw.trim()
-  return !portRaw || portRaw === '0' ? 'auto' : portRaw
+  return !portRaw || portRaw === '0' ? t('instancesCreate.preview.value.auto') : portRaw
 }
 
-function connectValue(label: string): string {
-  return label === 'auto' ? 'TBD (auto port)' : `127.0.0.1:${label}`
+function connectValue(rawPort: string, label: string, t: I18nTranslate): string {
+  const portRaw = rawPort.trim()
+  return !portRaw || portRaw === '0' ? t('instancesCreate.preview.value.tbdAutoPort') : `127.0.0.1:${label}`
 }
 
 export function computeCreateAdvancedDirty(input: CreateAdvancedDirtyInput): boolean {
@@ -139,6 +142,7 @@ export function computeCreateAdvancedDirty(input: CreateAdvancedDirtyInput): boo
 }
 
 export function buildCreatePreview(input: BuildCreatePreviewInput): CreatePreviewResult {
+  const tt = input.t
   const template_id = input.templateId
   const templateLabel = input.templateLabel
 
@@ -146,131 +150,131 @@ export function buildCreatePreview(input: BuildCreatePreviewInput): CreatePrevie
   const warnings: string[] = []
 
   const name = input.instanceName.trim()
-  if (name) rows.push({ label: 'Name', value: name })
+  if (name) rows.push({ label: tt('instancesCreate.preview.label.name'), value: name })
 
   const nodeName = input.nodeName.trim()
-  if (nodeName) rows.push({ label: 'Node', value: nodeName })
+  if (nodeName) rows.push({ label: tt('instancesCreate.preview.label.node'), value: nodeName })
 
   if (template_id === 'demo:sleep') {
-    rows.push({ label: 'Seconds', value: input.sleepSeconds.trim() || '60' })
+    rows.push({ label: tt('instancesCreate.preview.label.seconds'), value: input.sleepSeconds.trim() || '60' })
   }
 
   if (template_id === 'minecraft:vanilla') {
     const v = input.mcVersion.trim() || 'latest_release'
-    rows.push({ label: 'Version', value: v })
-    rows.push({ label: 'Memory (MB)', value: input.mcMemory.trim() || '2048' })
+    rows.push({ label: tt('instancesCreate.preview.label.version'), value: v })
+    rows.push({ label: tt('instancesCreate.preview.label.memoryMb'), value: input.mcMemory.trim() || '2048' })
 
-    const portLabel = asPortLabel(input.mcPort)
-    rows.push({ label: 'Port', value: portLabel })
-    rows.push({ label: 'Connect', value: connectValue(portLabel) })
+    const portLabel = asPortLabel(input.mcPort, tt)
+    rows.push({ label: tt('instancesCreate.preview.label.port'), value: portLabel })
+    rows.push({ label: tt('instancesCreate.preview.label.connect'), value: connectValue(input.mcPort, portLabel, tt) })
 
     if (input.mcFrpEnabled) {
       const ep = parseFrpPublicEndpoint(input.mcEffectiveFrpConfig, Number.parseInt(portLabel, 10)) ?? parseFrpEndpoint(input.mcEffectiveFrpConfig)
-      rows.push({ label: 'Tunnel', value: ep ?? '(enabled)' })
-      if (!input.mcEffectiveFrpConfig.trim()) warnings.push('Paste tunnel config or disable tunnels.')
+      rows.push({ label: tt('instancesCreate.preview.label.tunnel'), value: ep ?? tt('instancesCreate.preview.value.enabled') })
+      if (!input.mcEffectiveFrpConfig.trim()) warnings.push(tt('instancesCreate.preview.warning.pasteTunnelOrDisable'))
     }
 
-    if (!input.mcEula) warnings.push('Accept the Minecraft EULA to start.')
+    if (!input.mcEula) warnings.push(tt('instancesCreate.preview.warning.acceptMinecraftEula'))
   }
 
   if (template_id === 'minecraft:import') {
     const src = input.mcImportPack.trim()
-    rows.push({ label: 'Pack', value: src || '(not set)' })
-    rows.push({ label: 'Memory (MB)', value: input.mcMemory.trim() || '2048' })
+    rows.push({ label: tt('instancesCreate.preview.label.pack'), value: src || tt('instancesCreate.preview.value.notSet') })
+    rows.push({ label: tt('instancesCreate.preview.label.memoryMb'), value: input.mcMemory.trim() || '2048' })
 
-    const portLabel = asPortLabel(input.mcPort)
-    rows.push({ label: 'Port', value: portLabel })
-    rows.push({ label: 'Connect', value: connectValue(portLabel) })
+    const portLabel = asPortLabel(input.mcPort, tt)
+    rows.push({ label: tt('instancesCreate.preview.label.port'), value: portLabel })
+    rows.push({ label: tt('instancesCreate.preview.label.connect'), value: connectValue(input.mcPort, portLabel, tt) })
 
     if (input.mcFrpEnabled) {
       const ep = parseFrpPublicEndpoint(input.mcEffectiveFrpConfig, Number.parseInt(portLabel, 10)) ?? parseFrpEndpoint(input.mcEffectiveFrpConfig)
-      rows.push({ label: 'Tunnel', value: ep ?? '(enabled)' })
-      if (!input.mcEffectiveFrpConfig.trim()) warnings.push('Paste tunnel config or disable tunnels.')
+      rows.push({ label: tt('instancesCreate.preview.label.tunnel'), value: ep ?? tt('instancesCreate.preview.value.enabled') })
+      if (!input.mcEffectiveFrpConfig.trim()) warnings.push(tt('instancesCreate.preview.warning.pasteTunnelOrDisable'))
     }
 
-    if (!input.mcEula) warnings.push('Accept the Minecraft EULA to start.')
-    if (!src) warnings.push('Provide an uploaded server pack zip path under /data.')
+    if (!input.mcEula) warnings.push(tt('instancesCreate.preview.warning.acceptMinecraftEula'))
+    if (!src) warnings.push(tt('instancesCreate.preview.warning.provideServerPackPath'))
   }
 
   if (template_id === 'dst:vanilla') {
-    rows.push({ label: 'Cluster token', value: input.dstClusterToken.trim() ? '(set)' : '(not set)', isSecret: true })
-    rows.push({ label: 'Cluster name', value: input.dstClusterName.trim() || 'Alloy DST server' })
-    rows.push({ label: 'Max players', value: input.dstMaxPlayers.trim() || '6' })
-    rows.push({ label: 'Password', value: input.dstPassword.trim() ? '(set)' : '(none)', isSecret: true })
+    rows.push({ label: tt('instancesCreate.preview.label.clusterToken'), value: input.dstClusterToken.trim() ? tt('instancesCreate.preview.value.set') : tt('instancesCreate.preview.value.notSet'), isSecret: true })
+    rows.push({ label: tt('instancesCreate.preview.label.clusterName'), value: input.dstClusterName.trim() || tt('instancesCreate.dst.defaultClusterNamePlaceholder') })
+    rows.push({ label: tt('instancesCreate.preview.label.maxPlayers'), value: input.dstMaxPlayers.trim() || '6' })
+    rows.push({ label: tt('instancesCreate.preview.label.password'), value: input.dstPassword.trim() ? tt('instancesCreate.preview.value.set') : tt('instancesCreate.preview.value.none'), isSecret: true })
 
-    const portLabel = asPortLabel(input.dstPort)
-    rows.push({ label: 'UDP port', value: portLabel })
-    rows.push({ label: 'Connect', value: connectValue(portLabel) })
+    const portLabel = asPortLabel(input.dstPort, tt)
+    rows.push({ label: tt('instancesCreate.preview.label.udpPort'), value: portLabel })
+    rows.push({ label: tt('instancesCreate.preview.label.connect'), value: connectValue(input.dstPort, portLabel, tt) })
 
     if (input.createAdvanced || input.createAdvancedDirty) {
-      const masterLabel = asPortLabel(input.dstMasterPort)
-      rows.push({ label: 'Master port', value: masterLabel })
+      const masterLabel = asPortLabel(input.dstMasterPort, tt)
+      rows.push({ label: tt('instancesCreate.preview.label.masterPort'), value: masterLabel })
 
-      const authLabel = asPortLabel(input.dstAuthPort)
-      rows.push({ label: 'Auth port', value: authLabel })
+      const authLabel = asPortLabel(input.dstAuthPort, tt)
+      rows.push({ label: tt('instancesCreate.preview.label.authPort'), value: authLabel })
     }
 
     if (!input.dstClusterToken.trim()) {
-      if (input.dstDefaultKleiKeySet) warnings.push('No cluster token provided; default key from Settings will be used.')
-      else warnings.push('Paste your Klei cluster token to start (or set a default in Settings).')
+      if (input.dstDefaultKleiKeySet) warnings.push(tt('instancesCreate.preview.warning.noClusterTokenUseDefault'))
+      else warnings.push(tt('instancesCreate.preview.warning.pasteKleiTokenOrSetDefault'))
     }
   }
 
   if (template_id === 'terraria:vanilla') {
     const v = input.trVersion.trim() || '1453'
-    rows.push({ label: 'Version', value: v })
+    rows.push({ label: tt('instancesCreate.preview.label.version'), value: v })
 
-    const portLabel = asPortLabel(input.trPort)
-    rows.push({ label: 'Port', value: portLabel })
-    rows.push({ label: 'Connect', value: connectValue(portLabel) })
+    const portLabel = asPortLabel(input.trPort, tt)
+    rows.push({ label: tt('instancesCreate.preview.label.port'), value: portLabel })
+    rows.push({ label: tt('instancesCreate.preview.label.connect'), value: connectValue(input.trPort, portLabel, tt) })
 
     if (input.trFrpEnabled) {
       const ep = parseFrpPublicEndpoint(input.trEffectiveFrpConfig, Number.parseInt(portLabel, 10)) ?? parseFrpEndpoint(input.trEffectiveFrpConfig)
-      rows.push({ label: 'Tunnel', value: ep ?? '(enabled)' })
-      if (!input.trEffectiveFrpConfig.trim()) warnings.push('Paste tunnel config or disable tunnels.')
+      rows.push({ label: tt('instancesCreate.preview.label.tunnel'), value: ep ?? tt('instancesCreate.preview.value.enabled') })
+      if (!input.trEffectiveFrpConfig.trim()) warnings.push(tt('instancesCreate.preview.warning.pasteTunnelOrDisable'))
     }
 
-    rows.push({ label: 'Max players', value: input.trMaxPlayers.trim() || '8' })
-    rows.push({ label: 'World name', value: input.trWorldName.trim() || 'world' })
-    rows.push({ label: 'World size', value: input.trWorldSize.trim() || '1' })
-    rows.push({ label: 'Password', value: input.trPassword.trim() ? '(set)' : '(none)', isSecret: true })
+    rows.push({ label: tt('instancesCreate.preview.label.maxPlayers'), value: input.trMaxPlayers.trim() || '8' })
+    rows.push({ label: tt('instancesCreate.preview.label.worldName'), value: input.trWorldName.trim() || 'world' })
+    rows.push({ label: tt('instancesCreate.preview.label.worldSize'), value: input.trWorldSize.trim() || '1' })
+    rows.push({ label: tt('instancesCreate.preview.label.password'), value: input.trPassword.trim() ? tt('instancesCreate.preview.value.set') : tt('instancesCreate.preview.value.none'), isSecret: true })
   }
 
   if (template_id === 'palworld:vanilla') {
-    rows.push({ label: 'Server name', value: input.pwServerName.trim() || 'Alloy Palworld server' })
-    rows.push({ label: 'Max players', value: input.pwMaxPlayers.trim() || '32' })
-    rows.push({ label: 'Public', value: input.pwPublic ? 'yes' : 'no' })
+    rows.push({ label: tt('instancesCreate.preview.label.serverName'), value: input.pwServerName.trim() || tt('instancesCreate.palworld.defaultServerNamePlaceholder') })
+    rows.push({ label: tt('instancesCreate.preview.label.maxPlayers'), value: input.pwMaxPlayers.trim() || '32' })
+    rows.push({ label: tt('instancesCreate.preview.label.public'), value: input.pwPublic ? tt('instancesCreate.preview.value.yes') : tt('instancesCreate.preview.value.no') })
 
-    const portLabel = asPortLabel(input.pwPort)
-    rows.push({ label: 'Port', value: portLabel })
-    rows.push({ label: 'Connect', value: connectValue(portLabel) })
+    const portLabel = asPortLabel(input.pwPort, tt)
+    rows.push({ label: tt('instancesCreate.preview.label.port'), value: portLabel })
+    rows.push({ label: tt('instancesCreate.preview.label.connect'), value: connectValue(input.pwPort, portLabel, tt) })
 
     if (input.createAdvanced || input.createAdvancedDirty) {
-      rows.push({ label: 'Query port', value: asPortLabel(input.pwQueryPort) })
-      rows.push({ label: 'Password', value: input.pwPassword.trim() ? '(set)' : '(none)', isSecret: true })
-      rows.push({ label: 'Admin password', value: input.pwAdminPassword.trim() ? '(set)' : '(none)', isSecret: true })
-      if (input.pwServerDescription.trim()) rows.push({ label: 'Description', value: input.pwServerDescription.trim() })
+      rows.push({ label: tt('instancesCreate.preview.label.queryPort'), value: asPortLabel(input.pwQueryPort, tt) })
+      rows.push({ label: tt('instancesCreate.preview.label.password'), value: input.pwPassword.trim() ? tt('instancesCreate.preview.value.set') : tt('instancesCreate.preview.value.none'), isSecret: true })
+      rows.push({ label: tt('instancesCreate.preview.label.adminPassword'), value: input.pwAdminPassword.trim() ? tt('instancesCreate.preview.value.set') : tt('instancesCreate.preview.value.none'), isSecret: true })
+      if (input.pwServerDescription.trim()) rows.push({ label: tt('instancesCreate.preview.label.description'), value: input.pwServerDescription.trim() })
     }
   }
 
   if (template_id === 'factorio:vanilla') {
-    rows.push({ label: 'Version', value: input.fxVersion.trim() || 'stable' })
-    rows.push({ label: 'Server name', value: input.fxServerName.trim() || 'Alloy Factorio server' })
-    rows.push({ label: 'Max players', value: input.fxMaxPlayers.trim() || '8' })
-    rows.push({ label: 'Public', value: input.fxPublic ? 'yes' : 'no' })
+    rows.push({ label: tt('instancesCreate.preview.label.version'), value: input.fxVersion.trim() || 'stable' })
+    rows.push({ label: tt('instancesCreate.preview.label.serverName'), value: input.fxServerName.trim() || tt('instancesCreate.factorio.defaultServerNamePlaceholder') })
+    rows.push({ label: tt('instancesCreate.preview.label.maxPlayers'), value: input.fxMaxPlayers.trim() || '8' })
+    rows.push({ label: tt('instancesCreate.preview.label.public'), value: input.fxPublic ? tt('instancesCreate.preview.value.yes') : tt('instancesCreate.preview.value.no') })
 
-    const portLabel = asPortLabel(input.fxPort)
-    rows.push({ label: 'Port (UDP)', value: portLabel })
-    rows.push({ label: 'Connect', value: connectValue(portLabel) })
+    const portLabel = asPortLabel(input.fxPort, tt)
+    rows.push({ label: tt('instancesCreate.preview.label.portUdp'), value: portLabel })
+    rows.push({ label: tt('instancesCreate.preview.label.connect'), value: connectValue(input.fxPort, portLabel, tt) })
 
     if (input.createAdvanced || input.createAdvancedDirty) {
-      rows.push({ label: 'RCON', value: input.fxRconEnabled ? 'enabled' : 'disabled' })
+      rows.push({ label: tt('instancesCreate.preview.label.rcon'), value: input.fxRconEnabled ? tt('instancesCreate.preview.value.enabled') : tt('instancesCreate.preview.value.disabled') })
       if (input.fxRconEnabled) {
-        rows.push({ label: 'RCON port', value: asPortLabel(input.fxRconPort) })
-        rows.push({ label: 'RCON password', value: input.fxRconPassword.trim() ? '(set)' : '(not set)', isSecret: true })
-        if (!input.fxRconPassword.trim()) warnings.push('Set RCON password or disable RCON.')
+        rows.push({ label: tt('instancesCreate.preview.label.rconPort'), value: asPortLabel(input.fxRconPort, tt) })
+        rows.push({ label: tt('instancesCreate.preview.label.rconPassword'), value: input.fxRconPassword.trim() ? tt('instancesCreate.preview.value.set') : tt('instancesCreate.preview.value.notSet'), isSecret: true })
+        if (!input.fxRconPassword.trim()) warnings.push(tt('instancesCreate.preview.warning.setRconPasswordOrDisable'))
       }
-      if (input.fxServerDescription.trim()) rows.push({ label: 'Description', value: input.fxServerDescription.trim() })
+      if (input.fxServerDescription.trim()) rows.push({ label: tt('instancesCreate.preview.label.description'), value: input.fxServerDescription.trim() })
     }
   }
 

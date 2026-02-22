@@ -73,6 +73,12 @@ function parseApiErrorFromLegacyMessage(raw: string): AlloyApiErrorData | null {
 
 type OperationType = 'query' | 'mutation' | 'subscription' | 'subscriptionStop'
 
+const lastRequestIdByOpKey = new Map<string, string>()
+
+export function getLastRspcRequestId(operation: OperationType, key: string): string | undefined {
+  return lastRequestIdByOpKey.get(`${operation}:${key}`)
+}
+
 class AlloyFetchTransport {
   private url: string
   private fetch: typeof globalThis.fetch
@@ -200,6 +206,7 @@ class AlloyFetchTransport {
       headers,
     })
     const requestId = (resp.headers.get('x-request-id') || '').trim()
+    if (requestId) lastRequestIdByOpKey.set(`${operation}:${key}`, requestId)
 
     const respBody = (await (async () => {
       try {

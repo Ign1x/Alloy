@@ -1,4 +1,5 @@
 import type { ProcessStatusDto } from '../../bindings'
+import type { I18nTranslate } from '../i18n'
 
 type InstanceCardBackdrop = {
   src: string
@@ -21,19 +22,19 @@ export function instanceCardBackdrop(templateId: string): InstanceCardBackdrop |
   return null
 }
 
-export function instanceStateLabel(status: ProcessStatusDto | null) {
-  if (!status) return 'Stopped'
+export function instanceStateLabel(status: ProcessStatusDto | null, t?: I18nTranslate) {
+  if (!status) return t ? t('instances.filters.statusOption.stopped') : 'Stopped'
   switch (status.state) {
     case 'PROCESS_STATE_STARTING':
-      return 'Starting'
+      return t ? t('instances.filters.statusOption.starting') : 'Starting'
     case 'PROCESS_STATE_RUNNING':
-      return 'Running'
+      return t ? t('instances.filters.statusOption.running') : 'Running'
     case 'PROCESS_STATE_STOPPING':
-      return 'Stopping'
+      return t ? t('instances.filters.statusOption.stopping') : 'Stopping'
     case 'PROCESS_STATE_EXITED':
-      return 'Stopped'
+      return t ? t('instances.filters.statusOption.stopped') : 'Stopped'
     case 'PROCESS_STATE_FAILED':
-      return 'Failed'
+      return t ? t('instances.filters.statusOption.failed') : 'Failed'
     default:
       return status.state
   }

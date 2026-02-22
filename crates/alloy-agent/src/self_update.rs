@@ -1,6 +1,5 @@
 use std::{sync::OnceLock, time::Duration};
 
-use anyhow::Context;
 use alloy_proto::agent_v1::agent_update_service_server::{
     AgentUpdateService, AgentUpdateServiceServer,
 };
@@ -8,6 +7,7 @@ use alloy_proto::agent_v1::{
     GetSelfUpdateStatusRequest, GetSelfUpdateStatusResponse, TriggerSelfUpdateRequest,
     TriggerSelfUpdateResponse,
 };
+use anyhow::Context;
 use tonic::{Request, Response, Status};
 
 const DEFAULT_WATCHTOWER_URL: &str = "http://watchtower:8080";
@@ -24,7 +24,7 @@ struct SimpleVersion {
 
 fn parse_simple_version(raw: &str) -> Option<SimpleVersion> {
     let s = raw.trim().trim_start_matches('v');
-    let mut it = s.split(|c: char| matches!(c, '.' | '-' | '+'));
+    let mut it = s.split(['.', '-', '+']);
     let major = it.next()?.parse().ok()?;
     let minor = it.next()?.parse().ok()?;
     let patch = it.next()?.parse().ok()?;
@@ -41,7 +41,7 @@ fn parse_version_bound(
     allow_wildcard_patch: bool,
 ) -> Result<SimpleVersion, String> {
     let s = raw.trim().trim_start_matches('v');
-    let mut it = s.split(|c: char| matches!(c, '.' | '-' | '+'));
+    let mut it = s.split(['.', '-', '+']);
     let major_raw = it.next().unwrap_or_default();
     let minor_raw = it.next().unwrap_or_default();
     let patch_raw = it.next();
@@ -52,22 +52,20 @@ fn parse_version_bound(
         "x.y.z"
     };
 
-    let major: u64 = major_raw
-        .parse()
-        .map_err(|_| format!("compatibility {kind} `{raw}` is not a valid version (expected {expected})"))?;
-    let minor: u64 = minor_raw
-        .parse()
-        .map_err(|_| format!("compatibility {kind} `{raw}` is not a valid version (expected {expected})"))?;
+    let major: u64 = major_raw.parse().map_err(|_| {
+        format!("compatibility {kind} `{raw}` is not a valid version (expected {expected})")
+    })?;
+    let minor: u64 = minor_raw.parse().map_err(|_| {
+        format!("compatibility {kind} `{raw}` is not a valid version (expected {expected})")
+    })?;
 
     let patch: u64 = match patch_raw.map(|v| v.trim()) {
-        Some(p)
-            if allow_wildcard_patch && matches!(p.to_ascii_lowercase().as_str(), "x" | "*") =>
-        {
+        Some(p) if allow_wildcard_patch && matches!(p.to_ascii_lowercase().as_str(), "x" | "*") => {
             u64::MAX
         }
-        Some(p) => p
-            .parse()
-            .map_err(|_| format!("compatibility {kind} `{raw}` is not a valid version (expected {expected})"))?,
+        Some(p) => p.parse().map_err(|_| {
+            format!("compatibility {kind} `{raw}` is not a valid version (expected {expected})")
+        })?,
         None if allow_wildcard_patch => u64::MAX,
         None => {
             return Err(format!(
@@ -203,9 +201,8 @@ fn update_manifest_url_latest() -> String {
 }
 
 fn manifest_release_version(rel: &ManifestRelease) -> Option<String> {
-    trim_non_empty(rel.version.clone()).or_else(|| {
-        trim_non_empty(rel.tag.clone()).map(|t| t.trim_start_matches('v').to_string())
-    })
+    trim_non_empty(rel.version.clone())
+        .or_else(|| trim_non_empty(rel.tag.clone()).map(|t| t.trim_start_matches('v').to_string()))
 }
 
 async fn fetch_update_manifest(url: &str) -> anyhow::Result<UpdateManifest> {
@@ -513,9 +510,7 @@ async fn evaluate_self_update_compatibility_gate() -> CompatibilityGateDecision 
 
     CompatibilityGateDecision::updatable(
         "compatible",
-        format!(
-            "target agent {target_agent_raw} is compatible with control {control_version}"
-        ),
+        format!("target agent {target_agent_raw} is compatible with control {control_version}"),
     )
 }
 
@@ -694,10 +689,7 @@ impl AgentUpdateService for SelfUpdateApi {
         if gate.status != CompatibilityGateStatus::Updatable {
             let (code, msg, hint) = gate.into_error_payload();
             return Err(Status::failed_precondition(crate::error_payload::encode(
-                &code,
-                msg,
-                None,
-                hint,
+                &code, msg, None, hint,
             )));
         }
 

@@ -1,7 +1,8 @@
-import { Show, type Setter } from 'solid-js'
+import { For, Show, type Setter } from 'solid-js'
 
 import type { I18nTranslate } from '../app/i18n'
 import type { ThemePreference } from '../app/hooks/useThemePreference'
+import { getVisibleUiTabs } from '../app/tabRegistry'
 import type { UiTab } from '../app/types'
 import { Badge } from './ui/Badge'
 import { Button } from './ui/Button'
@@ -25,6 +26,8 @@ interface AppMobileDrawerProps {
 }
 
 export default function AppMobileDrawer(props: AppMobileDrawerProps) {
+  const visibleTabs = () => getVisibleUiTabs(Boolean(props.me?.is_admin))
+
   const themeModeLabel = () => {
     const pref = props.themePref
     if (pref === 'system') return props.t('theme.system')
@@ -32,94 +35,32 @@ export default function AppMobileDrawer(props: AppMobileDrawerProps) {
   }
 
   return (
-    <Drawer open={props.mobileNavOpen} onClose={() => props.setMobileNavOpen(false)} title={props.t('mobile.menu')}>
+    <Drawer
+      open={props.mobileNavOpen}
+      onClose={() => props.setMobileNavOpen(false)}
+      title={props.t('mobile.menu')}
+      closeLabel={props.t('common.close')}
+      closeAriaLabel={props.t('common.close')}
+    >
       <div class="space-y-2">
-        <button
-          type="button"
-          class={`w-full rounded-xl border px-3 py-2 text-left text-sm font-medium transition-colors ${
-            props.tab === 'instances'
-              ? 'border-amber-500/20 bg-amber-500/10 text-amber-900 dark:border-amber-500/25 dark:bg-amber-500/15 dark:text-amber-100'
-              : 'border-slate-200 bg-white/70 text-slate-800 hover:bg-white dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:hover:bg-slate-900'
-          }`}
-          onClick={() => {
-            props.setTab('instances')
-            props.setMobileNavOpen(false)
-          }}
-        >
-          {props.t('tab.instances')}
-        </button>
-        <button
-          type="button"
-          class={`w-full rounded-xl border px-3 py-2 text-left text-sm font-medium transition-colors ${
-            props.tab === 'downloads'
-              ? 'border-amber-500/20 bg-amber-500/10 text-amber-900 dark:border-amber-500/25 dark:bg-amber-500/15 dark:text-amber-100'
-              : 'border-slate-200 bg-white/70 text-slate-800 hover:bg-white dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:hover:bg-slate-900'
-          }`}
-          onClick={() => {
-            props.setTab('downloads')
-            props.setMobileNavOpen(false)
-          }}
-        >
-          {props.t('tab.downloads')}
-        </button>
-        <button
-          type="button"
-          class={`w-full rounded-xl border px-3 py-2 text-left text-sm font-medium transition-colors ${
-            props.tab === 'files'
-              ? 'border-amber-500/20 bg-amber-500/10 text-amber-900 dark:border-amber-500/25 dark:bg-amber-500/15 dark:text-amber-100'
-              : 'border-slate-200 bg-white/70 text-slate-800 hover:bg-white dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:hover:bg-slate-900'
-          }`}
-          onClick={() => {
-            props.setTab('files')
-            props.setMobileNavOpen(false)
-          }}
-        >
-          {props.t('tab.files')}
-        </button>
-        <button
-          type="button"
-          class={`w-full rounded-xl border px-3 py-2 text-left text-sm font-medium transition-colors ${
-            props.tab === 'nodes'
-              ? 'border-amber-500/20 bg-amber-500/10 text-amber-900 dark:border-amber-500/25 dark:bg-amber-500/15 dark:text-amber-100'
-              : 'border-slate-200 bg-white/70 text-slate-800 hover:bg-white dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:hover:bg-slate-900'
-          }`}
-          onClick={() => {
-            props.setTab('nodes')
-            props.setMobileNavOpen(false)
-          }}
-        >
-          {props.t('tab.nodes')}
-        </button>
-        <button
-          type="button"
-          class={`w-full rounded-xl border px-3 py-2 text-left text-sm font-medium transition-colors ${
-            props.tab === 'frp'
-              ? 'border-amber-500/20 bg-amber-500/10 text-amber-900 dark:border-amber-500/25 dark:bg-amber-500/15 dark:text-amber-100'
-              : 'border-slate-200 bg-white/70 text-slate-800 hover:bg-white dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:hover:bg-slate-900'
-          }`}
-          onClick={() => {
-            props.setTab('frp')
-            props.setMobileNavOpen(false)
-          }}
-        >
-          {props.t('tab.frp')}
-        </button>
-        <Show when={props.me?.is_admin}>
-          <button
-            type="button"
-            class={`w-full rounded-xl border px-3 py-2 text-left text-sm font-medium transition-colors ${
-              props.tab === 'settings'
-                ? 'border-amber-500/20 bg-amber-500/10 text-amber-900 dark:border-amber-500/25 dark:bg-amber-500/15 dark:text-amber-100'
-                : 'border-slate-200 bg-white/70 text-slate-800 hover:bg-white dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:hover:bg-slate-900'
-            }`}
-            onClick={() => {
-              props.setTab('settings')
-              props.setMobileNavOpen(false)
-            }}
-          >
-            {props.t('tab.settings')}
-          </button>
-        </Show>
+        <For each={visibleTabs()}>
+          {(item) => (
+            <button
+              type="button"
+              class={`w-full rounded-xl border px-3 py-2 text-left text-sm font-medium transition-colors ${
+                props.tab === item.id
+                  ? 'border-amber-500/20 bg-amber-500/10 text-amber-900 dark:border-amber-500/25 dark:bg-amber-500/15 dark:text-amber-100'
+                  : 'border-slate-200 bg-white/70 text-slate-800 hover:bg-white dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:hover:bg-slate-900'
+              }`}
+              onClick={() => {
+                props.setTab(item.id)
+                props.setMobileNavOpen(false)
+              }}
+            >
+              {props.t(item.labelKey)}
+            </button>
+          )}
+        </For>
       </div>
 
       <div class="mt-4 flex flex-wrap items-center gap-2">

@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use std::{
     collections::{BTreeMap, HashMap},
     fs,
@@ -216,31 +218,31 @@ async fn resolve_mrpack_url(source: &str) -> anyhow::Result<String> {
     if host.contains("modrinth.com") {
         // Common format: https://modrinth.com/modpack/<slug>/version/<version_id>
         let segs: Vec<&str> = url.path().split('/').filter(|s| !s.is_empty()).collect();
-        if let Some(i) = segs.iter().position(|s| *s == "version") {
-            if let Some(version_id) = segs.get(i + 1) {
-                let api = format!("https://api.modrinth.com/v2/version/{version_id}");
-                let resp = http_client()
-                    .get(api)
-                    .send()
-                    .await
-                    .context("fetch modrinth version")?
-                    .error_for_status()
-                    .context("fetch modrinth version (status)")?
-                    .json::<ModrinthVersionResp>()
-                    .await
-                    .context("parse modrinth version json")?;
+        if let Some(i) = segs.iter().position(|s| *s == "version")
+            && let Some(version_id) = segs.get(i + 1)
+        {
+            let api = format!("https://api.modrinth.com/v2/version/{version_id}");
+            let resp = http_client()
+                .get(api)
+                .send()
+                .await
+                .context("fetch modrinth version")?
+                .error_for_status()
+                .context("fetch modrinth version (status)")?
+                .json::<ModrinthVersionResp>()
+                .await
+                .context("parse modrinth version json")?;
 
-                let mut candidates: Vec<&ModrinthVersionFile> = resp
-                    .files
-                    .iter()
-                    .filter(|f| f.filename.to_ascii_lowercase().ends_with(".mrpack"))
-                    .collect();
-                candidates.sort_by_key(|f| !(f.primary.unwrap_or(false)));
-                let file = candidates
-                    .first()
-                    .ok_or_else(|| anyhow::anyhow!("no .mrpack file found for that version"))?;
-                return Ok(file.url.clone());
-            }
+            let mut candidates: Vec<&ModrinthVersionFile> = resp
+                .files
+                .iter()
+                .filter(|f| f.filename.to_ascii_lowercase().ends_with(".mrpack"))
+                .collect();
+            candidates.sort_by_key(|f| !(f.primary.unwrap_or(false)));
+            let file = candidates
+                .first()
+                .ok_or_else(|| anyhow::anyhow!("no .mrpack file found for that version"))?;
+            return Ok(file.url.clone());
         }
     }
 
@@ -424,14 +426,14 @@ fn write_marker(instance_dir: &Path, marker: &InstalledMarker) -> anyhow::Result
 }
 
 pub async fn ensure_installed(instance_dir: &Path, source: &str) -> anyhow::Result<InstalledPack> {
-    if let Some(m) = read_marker(instance_dir) {
-        if m.source.trim() == source.trim() {
-            return Ok(InstalledPack {
-                minecraft: m.minecraft,
-                loader: m.loader,
-                loader_version: m.loader_version,
-            });
-        }
+    if let Some(m) = read_marker(instance_dir)
+        && m.source.trim() == source.trim()
+    {
+        return Ok(InstalledPack {
+            minecraft: m.minecraft,
+            loader: m.loader,
+            loader_version: m.loader_version,
+        });
     }
 
     let resolved_url = resolve_mrpack_url(source).await?;
@@ -484,10 +486,11 @@ pub async fn ensure_installed(instance_dir: &Path, source: &str) -> anyhow::Resu
             tokio::fs::create_dir_all(parent).await?;
         }
 
-        if let (Ok(meta), Some(expected)) = (tokio::fs::metadata(&dst).await, f.file_size) {
-            if meta.is_file() && meta.len() == expected {
-                continue;
-            }
+        if let (Ok(meta), Some(expected)) = (tokio::fs::metadata(&dst).await, f.file_size)
+            && meta.is_file()
+            && meta.len() == expected
+        {
+            continue;
         }
 
         let url = f
