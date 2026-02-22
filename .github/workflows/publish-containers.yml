@@ -335,23 +335,23 @@ jobs:
 
           ### Component Versions / 组件版本
 
-          - \\`alloy-control\\`: \\`${CONTROL_VERSION}\\` (tag: \\`${CONTROL_TAG}\\`)
-          - \\`alloy-agent\\`: \\`${AGENT_VERSION}\\` (tag: \\`${AGENT_TAG}\\`)
+          - `alloy-control`: `${CONTROL_VERSION}` (tag: `${CONTROL_TAG}`)
+          - `alloy-agent`: `${AGENT_VERSION}` (tag: `${AGENT_TAG}`)
 
           ### Images / 镜像
 
           - GHCR
-            - \\`ghcr.io/${owner_lc}/alloy-control:${CONTROL_TAG}\\`
-            - \\`ghcr.io/${owner_lc}/alloy-agent:${AGENT_TAG}\\`
-            - \\`ghcr.io/${owner_lc}/alloy-web:${TAG}\\`
+            - `ghcr.io/${owner_lc}/alloy-control:${CONTROL_TAG}`
+            - `ghcr.io/${owner_lc}/alloy-agent:${AGENT_TAG}`
+            - `ghcr.io/${owner_lc}/alloy-web:${TAG}`
           EOF
 
           if [ "$PUBLISH_DOCKERHUB" = "true" ] && [ -n "$dockerhub_namespace" ]; then
             cat >> release-notes.md <<EOF
           - DockerHub mirror / DockerHub 镜像站
-            - \\`${dockerhub_namespace}/alloy-control:${CONTROL_TAG}\\`
-            - \\`${dockerhub_namespace}/alloy-agent:${AGENT_TAG}\\`
-            - \\`${dockerhub_namespace}/alloy-web:${TAG}\\`
+            - `${dockerhub_namespace}/alloy-control:${CONTROL_TAG}`
+            - `${dockerhub_namespace}/alloy-agent:${AGENT_TAG}`
+            - `${dockerhub_namespace}/alloy-web:${TAG}`
           EOF
           else
             cat >> release-notes.md <<EOF
@@ -364,8 +364,8 @@ jobs:
 
           ### Assets / 附件
 
-          - \\`update-manifest.json\\` is attached to this release and used by one-click update.
-          - 本 Release 已附带 \\`update-manifest.json\\`，用于一键更新流程。
+          - `update-manifest.json` is attached to this release and used by one-click update.
+          - 本 Release 已附带 `update-manifest.json`，用于一键更新流程。
           EOF
 
       - name: Create/update GitHub release and upload manifest
