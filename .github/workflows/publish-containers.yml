@@ -327,10 +327,11 @@ jobs:
           dockerhub_namespace="$(printf '%s' "${DOCKERHUB_NAMESPACE:-}" | tr -d '[:space:]')"
 
           cat > release-notes.md <<EOF
-          ## Release Notes / 更新日志
+          更新日志
 
-          This release updates core capabilities across agent/control/web and refreshes delivery metadata.
-          本次发布更新了 agent/control/web 的核心能力，并同步刷新了发布元数据。
+          - 新增：Web 端节点与实例管理体验重构，补齐关键交互与错误引导。
+          - 调整：统一控制面与代理版本到 ${TAG}，并刷新发布元数据与更新清单。
+          - 修复：修复 Web 更新后可能出现的初始化顺序异常，避免页面白屏。
 
           ### Component Versions / 组件版本
 
