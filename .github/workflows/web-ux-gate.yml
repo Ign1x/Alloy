@@ -6,6 +6,8 @@ on:
       - 'web/**'
       - '.github/workflows/web-ux-gate.yml'
       - 'goals/uiux-top10-redesign-plan.md'
+      - 'goals/web-ux-250-updates-ulw.md'
+      - 'web/ux-quality-checklist.md'
   workflow_dispatch:
 
 permissions:
@@ -35,6 +37,9 @@ jobs:
       - name: Build web app
         run: npm run build
 
+      - name: Bundle budget check
+        run: npm run bundle:check
+
       - name: Lighthouse CI (desktop)
         run: |
           npx --yes @lhci/cli@0.15.x autorun --config=.lighthouserc.json
@@ -60,13 +65,16 @@ jobs:
         if: always()
         run: |
           {
-            echo '## UX quality checklist'
+            echo '## UX quality checklist (Thread J)'
             echo
-            echo '- [ ] Lighthouse desktop + mobile checks passed (accessibility enforced)'
-            echo '- [ ] Keyboard reachable: login, instances, nodes, files, logs'
-            echo '- [ ] Mobile touch usability: key CTAs and overflow actions'
-            echo '- [ ] Core flow timing checked: login, open instance, open logs, copy snippet'
-            echo '- [ ] Non-English locale smoke check: no obvious English leftovers on key flows'
+            echo '- [x] J02 Build gate executed in CI (`npm run build`)'
+            echo '- [x] J23 Bundle budget review executed in CI (`npm run bundle:check`)'
+            echo '- [x] Lighthouse desktop + mobile checks executed in CI (accessibility enforced)'
+            echo '- [ ] J03/J04 Key page walkthrough (desktop + mobile)'
+            echo '- [ ] J05-J10 Core flow walkthrough coverage'
+            echo '- [ ] J11-J22 Content/a11y/interaction/perf manual checks'
+            echo '- [ ] J24 Multi-language smoke check'
+            echo '- [ ] J25 Release sign-off record archived in `web/ux-release-archive/`'
             echo
             echo 'Reference: web/ux-quality-checklist.md'
           } >> "$GITHUB_STEP_SUMMARY"

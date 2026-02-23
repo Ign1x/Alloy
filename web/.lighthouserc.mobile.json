@@ -9,7 +9,16 @@
         "http://127.0.0.1:4173/"
       ],
       "settings": {
-        "preset": "mobile"
+        "formFactor": "mobile",
+        "screenEmulation": {
+          "mobile": true,
+          "width": 360,
+          "height": 640,
+          "deviceScaleFactor": 2.625,
+          "disabled": false
+        },
+        "emulatedUserAgent":
+          "Mozilla/5.0 (Linux; Android 7.0; Moto G (4)) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/98.0.4695.0 Mobile Safari/537.36 Chrome-Lighthouse"
       }
     },
     "assert": {
