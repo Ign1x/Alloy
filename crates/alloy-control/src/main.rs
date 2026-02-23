@@ -16,6 +16,7 @@ use axum::{
 };
 use sea_orm_migration::MigratorTrait;
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 
 #[derive(Debug, serde::Deserialize)]
 struct ModpackPacksQuery {
@@ -629,9 +630,21 @@ async fn upload_modpack_pack(
             ));
         }
 
+        if safe_filename
+            .chars()
+            .any(|c| matches!(c, '/' | '\\') || c.is_ascii_control())
+        {
+            return Err(upload_error(
+                StatusCode::BAD_REQUEST,
+                &meta.request_id,
+                "invalid file name",
+            ));
+        }
+
         let nonce = alloy_process::ProcessId::new().0;
-        let final_file = format!("modpack-{nonce}-{safe_filename}");
-        let upload_rel = format!("uploads/modpacks/{final_file}");
+        let temp_file = format!("modpack-upload-{nonce}.part");
+        let upload_rel_tmp = format!("uploads/modpacks/{temp_file}");
+        let mut hasher = Sha256::new();
 
         let _mkdir_resp: alloy_proto::agent_v1::MkdirResponse = transport
             .call(
@@ -674,7 +687,7 @@ async fn upload_modpack_pack(
                     .call(
                         "/alloy.agent.v1.FilesystemService/WriteFile",
                         alloy_proto::agent_v1::WriteFileRequest {
-                            path: upload_rel.clone(),
+                            path: upload_rel_tmp.clone(),
                             data: part.to_vec(),
                             offset,
                             truncate: offset == 0,
@@ -689,9 +702,55 @@ async fn upload_modpack_pack(
                         )
                     })?;
 
+                hasher.update(part);
+
                 offset = offset.saturating_add(part.len() as u64);
                 consumed = end;
                 wrote_any_chunk = true;
+            }
+        }
+
+        let digest_hex = hex::encode(hasher.finalize());
+        let final_file = format!("sha256-{digest_hex}.zip");
+        let upload_rel = format!("uploads/modpacks/{final_file}");
+
+        match transport
+            .call::<_, alloy_proto::agent_v1::RenameResponse>(
+                "/alloy.agent.v1.FilesystemService/Rename",
+                alloy_proto::agent_v1::RenameRequest {
+                    from_path: upload_rel_tmp.clone(),
+                    to_path: upload_rel.clone(),
+                },
+            )
+            .await
+        {
+            Ok(_) => {}
+            Err(status) if status.code() == tonic::Code::AlreadyExists => {
+                let _ = transport
+                    .call::<_, alloy_proto::agent_v1::RemoveResponse>(
+                        "/alloy.agent.v1.FilesystemService/Remove",
+                        alloy_proto::agent_v1::RemoveRequest {
+                            path: upload_rel_tmp,
+                            recursive: false,
+                        },
+                    )
+                    .await;
+            }
+            Err(status) => {
+                let _ = transport
+                    .call::<_, alloy_proto::agent_v1::RemoveResponse>(
+                        "/alloy.agent.v1.FilesystemService/Remove",
+                        alloy_proto::agent_v1::RemoveRequest {
+                            path: upload_rel_tmp,
+                            recursive: false,
+                        },
+                    )
+                    .await;
+                return Err(upload_error(
+                    status_code_from_agent(&status),
+                    &meta.request_id,
+                    format!("failed to finalize upload: {}", status.message()),
+                ));
             }
         }
 
