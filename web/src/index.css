@@ -9,14 +9,15 @@
   color-scheme: light dark;
 
   /* Design tokens (RGB triplets for modern `rgb(var(--x) / <alpha>)`). */
-  --app-bg: 248 250 252; /* slate-50 */
-  --app-surface: 255 255 255; /* white */
-  --app-surface-2: 241 245 249; /* slate-100 */
-  --app-fg: 15 23 42; /* slate-900 */
-  --app-muted: 71 85 105; /* slate-600 */
-  --app-muted-2: 100 116 139; /* slate-500 */
-  --app-border: 226 232 240; /* slate-200 */
+  --app-bg: 244 247 252;
+  --app-surface: 255 255 255;
+  --app-surface-2: 247 250 255;
+  --app-fg: 10 18 34;
+  --app-muted: 69 82 108;
+  --app-muted-2: 106 121 148;
+  --app-border: 220 228 242;
   --app-primary: 245 158 11; /* amber-500 */
+  --app-primary-2: 251 191 36;
   --app-danger: 244 63 94; /* rose-500 */
   --app-success: 16 185 129; /* emerald-500 */
   --app-info: 59 130 246; /* blue-500 */
@@ -25,9 +26,21 @@
   --app-radius-md: 14px;
   --app-radius-lg: 18px;
 
-  --app-shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.08), 0 1px 1px rgba(15, 23, 42, 0.04);
-  --app-shadow-md: 0 8px 30px rgba(15, 23, 42, 0.08);
-  --app-shadow-lg: 0 24px 70px rgba(15, 23, 42, 0.14);
+  --app-shadow-sm: 0 1px 2px rgba(10, 18, 34, 0.07), 0 1px 1px rgba(10, 18, 34, 0.04);
+  --app-shadow-md: 0 14px 34px rgba(10, 18, 34, 0.08);
+  --app-shadow-lg: 0 26px 70px rgba(10, 18, 34, 0.15);
+  --app-shadow-xl: 0 34px 110px rgba(10, 18, 34, 0.2);
+
+  --z-popover: 900;
+  --z-toast: 920;
+  --z-overlay: 940;
+  --z-tooltip: 960;
+}
+
+@theme inline {
+  --radius-sm: var(--app-radius-sm);
+  --radius-md: var(--app-radius-md);
+  --radius-lg: var(--app-radius-lg);
 }
 
 html:not(.dark) {
@@ -37,13 +50,14 @@ html:not(.dark) {
 html.dark {
   color-scheme: dark;
 
-  --app-bg: 2 6 23; /* slate-950 */
-  --app-surface: 2 6 23; /* slate-950 */
-  --app-surface-2: 15 23 42; /* slate-900 */
-  --app-fg: 226 232 240; /* slate-200 */
-  --app-muted: 148 163 184; /* slate-400 */
-  --app-muted-2: 100 116 139; /* slate-500 */
-  --app-border: 30 41 59; /* slate-800 */
+  --app-bg: 2 6 23;
+  --app-surface: 5 11 32;
+  --app-surface-2: 14 22 45;
+  --app-fg: 229 237 249;
+  --app-muted: 158 173 198;
+  --app-muted-2: 114 131 158;
+  --app-border: 36 50 78;
+  --app-primary-2: 217 119 6;
 }
 
 html,
@@ -56,8 +70,41 @@ body {
     "Apple Color Emoji", "Segoe UI Emoji";
   line-height: 1.5;
   font-size: 14px;
+  color: rgb(var(--app-fg));
+  background-color: rgb(var(--app-bg));
+  background-image:
+    radial-gradient(88rem 44rem at -4% -10%, rgb(var(--app-primary) / 0.12), transparent 58%),
+    radial-gradient(80rem 40rem at 108% -8%, rgb(var(--app-info) / 0.12), transparent 58%),
+    linear-gradient(180deg, rgb(var(--app-bg) / 0.98), rgb(var(--app-bg) / 1));
+  background-attachment: fixed;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+::selection {
+  background: rgb(var(--app-primary) / 0.24);
+  color: rgb(var(--app-fg));
+}
+
+html {
+  scrollbar-color: rgb(var(--app-muted-2) / 0.65) rgb(var(--app-surface-2) / 0.85);
+  scrollbar-width: thin;
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+  background-color: rgb(var(--app-muted-2) / 0.45);
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 @layer utilities {
@@ -103,6 +150,17 @@ button:disabled {
   }
 }
 
+@keyframes slide-up-soft {
+  from {
+    transform: translateY(10px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
 .animate-in {
   animation-duration: 150ms;
   animation-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1);
@@ -115,6 +173,10 @@ button:disabled {
 
 .zoom-in-95 {
   animation-name: zoom-in-95;
+}
+
+.slide-up-soft {
+  animation-name: slide-up-soft;
 }
 
 :root {
@@ -148,6 +210,15 @@ body {
 }
 
 @layer base {
+  *:focus-visible {
+    outline: none;
+  }
+
+  a {
+    text-decoration-thickness: 1.5px;
+    text-underline-offset: 2px;
+  }
+
   h1 {
     @apply text-xl font-semibold tracking-tight text-slate-900 dark:text-slate-100;
     font-family: "Sora", ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Noto Sans";
@@ -175,6 +246,54 @@ body {
   }
   .text-mono-muted {
     @apply font-mono text-[11px] text-slate-500 dark:text-slate-400;
+  }
+
+  .text-caption {
+    @apply text-[11px] font-medium text-slate-500 dark:text-slate-400;
+  }
+
+  .text-kicker {
+    @apply text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400;
+  }
+
+  .feedback-stack {
+    @apply space-y-3;
+  }
+
+  .feedback-actions {
+    @apply flex flex-wrap items-center gap-2;
+  }
+
+  .feedback-card {
+    @apply rounded-2xl border px-4 py-3;
+  }
+
+  .ring-focus {
+    @apply focus-visible:ring-2 focus-visible:ring-amber-500/45 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-50 dark:focus-visible:ring-amber-300/45 dark:focus-visible:ring-offset-slate-950;
+  }
+
+  .surface-card {
+    @apply rounded-2xl border border-slate-200 bg-white/70 shadow-sm backdrop-blur dark:border-slate-800 dark:bg-slate-950/45 dark:shadow-none;
+    transition-property: background-color, border-color, box-shadow, transform, opacity;
+    transition-duration: var(--motion-normal);
+    transition-timing-function: var(--motion-ease);
+  }
+
+  .surface-glass {
+    @apply rounded-2xl border border-slate-200 bg-white/78 shadow-md backdrop-blur-xl dark:border-slate-800 dark:bg-slate-950/62 dark:shadow-none;
+    transition-property: background-color, border-color, box-shadow, transform, opacity;
+    transition-duration: var(--motion-normal);
+    transition-timing-function: var(--motion-ease);
+  }
+
+  .lift-on-hover {
+    transition-property: transform, filter;
+    transition-duration: var(--motion-fast);
+    transition-timing-function: var(--motion-ease);
+  }
+
+  .lift-on-hover:hover {
+    @apply hover:-translate-y-0.5 hover:shadow-md;
   }
 
   .motion-surface {

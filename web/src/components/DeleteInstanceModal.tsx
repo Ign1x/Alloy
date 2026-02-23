@@ -31,6 +31,7 @@ export default function DeleteInstanceModal(props: DeleteInstanceModalProps) {
           onClose={() => setConfirmDeleteInstanceId(null)}
           title={t('instances.deleteModal.title')}
           size="sm"
+          description={t('instances.deleteModal.dangerHint')}
           footer={
             <div class="flex gap-3">
               <Button variant="secondary" class="flex-1" onClick={() => setConfirmDeleteInstanceId(null)}>
@@ -65,18 +66,23 @@ export default function DeleteInstanceModal(props: DeleteInstanceModalProps) {
           }
         >
           <div class="space-y-4">
-            <div class="rounded-2xl border border-slate-200 bg-white/60 p-4 text-[12px] text-slate-700 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-200">
-              <div class="flex items-center justify-between gap-3">
-                <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">{t('instances.deleteModal.previewTitle')}</div>
-                <Show when={instanceDeletePreview.isPending}>
-                  <span class="text-[11px] text-slate-400">{t('instances.common.loading')}</span>
-                </Show>
+              <div class="rounded-2xl border border-rose-200 bg-rose-50/75 p-4 text-[12px] text-rose-900 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-200">
+                <div class="flex items-center justify-between gap-3">
+                  <div class="text-xs font-semibold uppercase tracking-wider text-rose-700/85 dark:text-rose-200/80">{t('instances.deleteModal.previewTitle')}</div>
+                  <Show when={instanceDeletePreview.isPending}>
+                    <span class="text-[11px] text-slate-400">{t('instances.common.loading')}</span>
+                  </Show>
                 <Show when={instanceDeletePreview.isError}>
                   <span class="text-[11px] text-rose-600 dark:text-rose-300">{t('instances.common.failed')}</span>
                 </Show>
                 <Show when={!instanceDeletePreview.isPending && !instanceDeletePreview.isError}>
                   <span class="text-[11px] text-slate-500 dark:text-slate-400">{t('instances.common.ok')}</span>
                 </Show>
+              </div>
+
+              <div class="mt-2 inline-flex items-center gap-1.5 rounded-md border border-rose-300/70 bg-rose-100/80 px-2 py-1 text-[11px] font-semibold text-rose-800 dark:border-rose-800/55 dark:bg-rose-950/45 dark:text-rose-200">
+                <span aria-hidden="true">!</span>
+                <span>{t('instances.deleteModal.dangerHint')}</span>
               </div>
 
               <Show when={instanceDeletePreview.data}>

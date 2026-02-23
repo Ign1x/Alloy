@@ -90,7 +90,7 @@ export function VirtualLines(props: VirtualLinesProps) {
     <div
       ref={(el) => (scrollEl = el)}
       data-no-auto-translate
-      class={cn('relative overflow-auto rounded-xl border border-slate-200 bg-slate-50 text-slate-900 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200', props.class)}
+      class={cn('relative overflow-auto rounded-xl border border-slate-200/95 bg-slate-50/95 text-slate-900 dark:border-slate-800 dark:bg-slate-950/90 dark:text-slate-200', props.class)}
       style={{
         'font-size': `${fontSize()}px`,
         'line-height': `${lineHeight()}px`,
@@ -98,7 +98,7 @@ export function VirtualLines(props: VirtualLinesProps) {
       role="region"
       aria-label={props.ariaLabel ?? props.defaultAriaLabel ?? 'Lines'}
     >
-      <Show when={props.lines.length > 0} fallback={props.empty ?? <div class="p-3 text-[12px] text-slate-500" />}>
+      <Show when={props.lines.length > 0} fallback={props.empty ?? <div class="p-3 text-[12px] text-slate-600 dark:text-slate-300" />}>
         <Show
           when={!props.wrap}
           fallback={
@@ -132,7 +132,10 @@ export function VirtualLines(props: VirtualLinesProps) {
         >
           {/* Virtualized rendering assumes fixed line height (wrap = false). */}
           <div style={{ height: `${totalHeightPx()}px` }} />
-          <div class="absolute left-0 right-0 top-0 font-mono" style={{ transform: `translateY(${range().offsetTopPx}px)` }}>
+          <div
+            class="absolute left-0 right-0 top-0 font-mono"
+            style={{ transform: `translateY(${range().offsetTopPx}px)`, 'will-change': 'transform' }}
+          >
             <For each={visibleLines()}>
               {(line, idx) => {
                 const i = () => range().start + idx()

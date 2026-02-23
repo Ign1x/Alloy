@@ -26,12 +26,12 @@ export default function AppSidebarNav(props: AppSidebarNavProps) {
 
   return (
     <nav
-      class={`hidden sm:flex ${props.sidebarExpanded ? 'w-56' : 'w-16'} flex-none flex-col gap-3 border-r border-slate-200 bg-white px-2 py-4 dark:border-slate-800 dark:bg-slate-950`}
+      class={`motion-surface hidden sm:flex ${props.sidebarExpanded ? 'w-56' : 'w-[4.5rem]'} flex-none flex-col gap-3 border-r border-slate-200/95 bg-white/76 px-2 py-4 shadow-sm backdrop-blur dark:border-slate-800 dark:bg-slate-950/58 dark:shadow-none`}
       aria-label={props.t('nav.primary')}
     >
       <button
         type="button"
-        class={`mt-1 flex items-center gap-3 rounded-xl px-2 py-2 text-left transition-colors hover:bg-slate-100 dark:hover:bg-slate-900/60 ${
+        class={`ring-focus motion-surface mt-1 flex items-center gap-3 rounded-xl px-2 py-2 text-left hover:bg-slate-100/90 dark:hover:bg-slate-900/70 ${
           props.sidebarExpanded ? '' : 'justify-center'
         }`}
         onClick={() => props.setTab('instances')}
@@ -55,14 +55,15 @@ export default function AppSidebarNav(props: AppSidebarNavProps) {
             return (
               <button
                 type="button"
-                class={`group flex items-center gap-3 rounded-xl px-3 py-2 transition-colors ${
+                class={`ring-focus motion-surface group flex items-center gap-3 rounded-xl px-3 py-2.5 ${
                   props.tab === item.id
-                    ? 'bg-amber-500/10 text-amber-800 ring-1 ring-inset ring-amber-500/20 dark:text-amber-200'
-                    : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-900/60 dark:hover:text-slate-100'
+                    ? 'bg-amber-500/12 text-amber-800 ring-1 ring-inset ring-amber-500/25 shadow-sm dark:text-amber-200'
+                    : 'text-slate-600 hover:bg-slate-100/90 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-900/70 dark:hover:text-slate-100'
                 } ${props.sidebarExpanded ? '' : 'justify-center'}`}
                 onClick={() => props.setTab(item.id)}
                 aria-label={props.t(item.labelKey)}
                 title={props.t(item.labelKey)}
+                aria-current={props.tab === item.id ? 'page' : undefined}
               >
                 <Icon class="h-5 w-5" />
                 <Show when={props.sidebarExpanded}>
@@ -74,10 +75,12 @@ export default function AppSidebarNav(props: AppSidebarNavProps) {
         </For>
       </div>
 
-      <div class={`mt-auto flex w-full flex-col items-center gap-2 pb-2 ${props.sidebarExpanded ? 'px-1' : ''}`}>
+      <div class={`mt-auto flex w-full flex-col gap-2.5 pb-3 ${props.sidebarExpanded ? 'px-1' : 'items-center'}`}>
         <IconButton
           label={props.sidebarExpanded ? props.t('sidebar.collapse') : props.t('sidebar.expand')}
-          variant="ghost"
+          variant="secondary"
+          size="md"
+          class={props.sidebarExpanded ? 'w-full' : ''}
           onClick={() => props.setSidebarExpanded((value) => !value)}
         >
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
@@ -102,6 +105,8 @@ export default function AppSidebarNav(props: AppSidebarNavProps) {
         <IconButton
           label={props.themeButtonTitle}
           variant="secondary"
+          size="md"
+          class={props.sidebarExpanded ? 'w-full' : ''}
           onClick={() => props.setThemePref((prev) => (prev === 'system' ? 'light' : prev === 'light' ? 'dark' : 'system'))}
         >
           <Show

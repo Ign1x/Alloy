@@ -42,7 +42,7 @@ export function GameAvatar(props: GameAvatarProps) {
       aria-label={label()}
       title={label()}
       class={cn(
-        'relative inline-flex h-6 w-6 flex-none items-center justify-center overflow-hidden rounded-md border shadow-sm dark:shadow-none',
+        'relative inline-flex h-7 w-7 flex-none items-center justify-center overflow-hidden rounded-lg border shadow-sm dark:shadow-none',
         toneFor(props.name),
         props.class,
       )}

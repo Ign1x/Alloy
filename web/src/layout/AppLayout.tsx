@@ -16,8 +16,8 @@ export type AppLayoutProps = {
 
 export default function AppLayout(props: AppLayoutProps) {
   return (
-    <div class="flex min-h-screen bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
-      <nav class="hidden sm:flex w-16 flex-none flex-col items-center gap-3 border-r border-slate-200 bg-white px-2 py-4 dark:border-slate-800 dark:bg-slate-950">
+    <div class="flex min-h-screen bg-transparent text-slate-900 dark:text-slate-100">
+      <nav class="surface-glass hidden w-[4.5rem] flex-none flex-col items-center gap-3 border-r px-2 py-4 shadow-sm sm:flex dark:shadow-none">
         <img src="/logo.svg" class="mt-1 h-9 w-9 rounded-xl" alt={props.t('app.controlPlane')} />
 
         <div class="mt-2 flex w-full flex-col items-center gap-2">
@@ -36,7 +36,7 @@ export default function AppLayout(props: AppLayoutProps) {
       </nav>
 
       <div class="flex min-w-0 flex-1 flex-col">
-        <header class="flex h-14 flex-none items-center justify-between border-b border-slate-200 bg-white/70 px-5 backdrop-blur dark:border-slate-800 dark:bg-slate-950/70">
+        <header class="surface-glass mx-2 mt-2 flex h-14 flex-none items-center justify-between border-b px-3 sm:mx-3 sm:mt-3 sm:px-5">
           <div class="flex min-w-0 items-center gap-4">
             <div class="flex items-center gap-2">
               <img src="/logo.svg" class="h-7 w-7 rounded-lg" alt={props.t('app.controlPlane')} />
@@ -53,7 +53,7 @@ export default function AppLayout(props: AppLayoutProps) {
 
         <main class="min-h-0 flex-1 overflow-hidden">{props.children}</main>
 
-        <nav class="sm:hidden flex h-12 flex-none items-center justify-around border-t border-slate-200 bg-white/70 px-2 dark:border-slate-800 dark:bg-slate-950/80">
+        <nav class="surface-glass mx-2 mb-2 mt-2 flex h-12 flex-none items-center justify-around border-t px-2 sm:hidden">
           <BottomTab active={props.tab === 'instances'} onClick={() => props.onTab('instances')}>
             {props.t('tab.instances')}
           </BottomTab>
@@ -72,10 +72,10 @@ export default function AppLayout(props: AppLayoutProps) {
 function NavButton(props: { active: boolean; onClick: () => void; label: string; children: JSX.Element }) {
   return (
     <button
-      class={`group relative flex h-10 w-10 items-center justify-center rounded-xl transition-colors ${
+      class={`ring-focus motion-surface group relative flex h-10 w-10 items-center justify-center rounded-xl ${
         props.active
-          ? 'bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900'
-          : 'text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-900/60 dark:hover:text-slate-100'
+          ? 'bg-slate-900 text-white shadow-sm dark:bg-slate-100 dark:text-slate-900'
+          : 'text-slate-500 hover:bg-slate-100/90 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-900/70 dark:hover:text-slate-100'
       }`}
       onClick={props.onClick}
       title={props.label}
@@ -88,10 +88,10 @@ function NavButton(props: { active: boolean; onClick: () => void; label: string;
 function BottomTab(props: { active: boolean; onClick: () => void; children: JSX.Element }) {
   return (
     <button
-      class={`flex flex-1 items-center justify-center rounded-xl py-2 text-xs ${
+      class={`ring-focus motion-surface flex flex-1 items-center justify-center rounded-xl py-2 text-xs font-semibold ${
         props.active
-          ? 'bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900'
-          : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-900/60'
+          ? 'bg-slate-900 text-white shadow-sm dark:bg-slate-100 dark:text-slate-900'
+          : 'text-slate-600 hover:bg-slate-100/90 dark:text-slate-300 dark:hover:bg-slate-900/70'
       }`}
       onClick={props.onClick}
     >

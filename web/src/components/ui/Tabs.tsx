@@ -15,16 +15,16 @@ export type TabsProps<T extends string> = {
 
 export function Tabs<T extends string>(props: TabsProps<T>) {
   return (
-    <div class={cn('inline-flex items-center gap-1 rounded-2xl border border-slate-200 bg-white/60 p-1 dark:border-slate-800 dark:bg-slate-950/40', props.class)}>
+    <div class={cn('inline-flex items-center gap-1 rounded-2xl border border-slate-200/90 bg-white/76 p-1 shadow-sm dark:border-slate-800 dark:bg-slate-950/58 dark:shadow-none', props.class)}>
       <For each={props.options}>
         {(opt) => (
           <button
             type="button"
             class={cn(
-              'rounded-xl px-3 py-1.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/35 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-50 dark:focus-visible:ring-amber-400/35 dark:focus-visible:ring-offset-slate-950',
+              'ring-focus motion-surface rounded-xl px-3 py-1.5 text-xs font-semibold tracking-[0.01em]',
               opt.value === props.value
-                ? 'bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900'
-                : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-900/60',
+                ? 'bg-slate-900 text-white shadow-sm dark:bg-slate-100 dark:text-slate-900'
+                : 'text-slate-600 hover:bg-slate-100/90 dark:text-slate-300 dark:hover:bg-slate-900/70',
             )}
             onClick={() => props.onChange(opt.value)}
           >

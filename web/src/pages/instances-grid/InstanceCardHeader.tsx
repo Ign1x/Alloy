@@ -43,7 +43,7 @@ export default function InstanceCardHeader(props: InstanceCardHeaderProps) {
                                     <div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
                                       <Show when={i.config?.node_name ?? null}>
                                         {(agentName) => (
-                                          <span class="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 font-mono text-[11px] text-slate-700 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-200" title={t('instances.card.agentTitle', { name: agentName() })}>
+                                          <span class="inline-flex items-center gap-1 rounded-full border border-slate-200/90 bg-white/74 px-2 py-0.5 font-mono text-[11px] text-slate-700 dark:border-slate-800 dark:bg-slate-950/58 dark:text-slate-200" title={t('instances.card.agentTitle', { name: agentName() })}>
                                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-3 w-3" aria-hidden="true">
                                               <path d="M10 2a2 2 0 00-2 2v1.102a5.002 5.002 0 00-2.33 8.282A3.5 3.5 0 009 20h2a3.5 3.5 0 003.33-6.616A5.002 5.002 0 0012 5.102V4a2 2 0 00-2-2zM9.5 4a.5.5 0 011 0v1.102a5.03 5.03 0 00-1 0V4z" />
                                             </svg>
@@ -53,7 +53,7 @@ export default function InstanceCardHeader(props: InstanceCardHeaderProps) {
                                       </Show>
                                       <button
                                         type="button"
-                                        class="group inline-flex max-w-full cursor-pointer items-center gap-1 rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 font-mono text-[11px] text-slate-700 transition-all duration-150 hover:bg-white active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/35 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-50 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-200 dark:hover:bg-slate-900 dark:focus-visible:ring-amber-400/35 dark:focus-visible:ring-offset-slate-950"
+                                        class="ring-focus motion-surface group inline-flex max-w-full cursor-pointer items-center gap-1 rounded-full border border-slate-200/90 bg-white/74 px-2 py-0.5 font-mono text-[11px] text-slate-700 hover:bg-white dark:border-slate-800 dark:bg-slate-950/58 dark:text-slate-200 dark:hover:bg-slate-900/85"
 	                                        onClick={(e) => {
 	                                          e.preventDefault()
 	                                          e.stopPropagation()
@@ -101,11 +101,11 @@ export default function InstanceCardHeader(props: InstanceCardHeaderProps) {
  	                                          const frpCfg = typeof params?.frp_config === 'string' ? params.frp_config : null
                                           const addr = parseFrpPublicEndpoint(frpCfg, p()) ?? buildDirectConnectAddress(p(), i.config)
 	                                          return (
-	                                            <button
-	                                              type="button"
-	                                              class="group inline-flex max-w-full cursor-pointer items-center gap-1 rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 font-mono text-slate-700 transition-all duration-150 hover:bg-white active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/35 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-50 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-200 dark:hover:bg-slate-900 dark:focus-visible:ring-amber-400/35 dark:focus-visible:ring-offset-slate-950"
-	                                              title={t('instances.card.copyConnectionAddress')}
-	                                              onClick={(e) => {
+                                            <button
+                                              type="button"
+                                              class="ring-focus motion-surface group inline-flex max-w-full cursor-pointer items-center gap-1 rounded-full border border-slate-200/90 bg-white/74 px-2 py-0.5 font-mono text-slate-700 hover:bg-white dark:border-slate-800 dark:bg-slate-950/58 dark:text-slate-200 dark:hover:bg-slate-900/85"
+                                              title={t('instances.card.copyConnectionAddress')}
+                                              onClick={(e) => {
 	                                                e.preventDefault()
                                                 e.stopPropagation()
                                                 void safeCopy(addr)

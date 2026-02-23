@@ -31,23 +31,23 @@ export function Button(props: ButtonProps) {
   const disabled = () => Boolean(local.disabled || local.loading)
 
   const base =
-    'inline-flex items-center justify-center gap-2 rounded-xl border text-sm font-medium shadow-sm transition-all duration-150 active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/35 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:shadow-none dark:focus-visible:ring-amber-400/35 dark:focus-visible:ring-offset-slate-950'
+    'ring-focus motion-surface motion-pop inline-flex items-center justify-center gap-2 rounded-xl border text-sm font-semibold tracking-[0.01em] shadow-sm hover:-translate-y-0.5 hover:shadow-md active:translate-y-0 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none disabled:hover:translate-y-0 dark:shadow-none'
 
   const variants: Record<ButtonVariant, string> = {
     primary:
-      'border-amber-500/20 bg-amber-500/10 text-amber-900 hover:bg-amber-500/15 dark:border-amber-500/25 dark:bg-amber-500/15 dark:text-amber-100 dark:hover:bg-amber-500/20',
+      'border-amber-300/60 bg-gradient-to-b from-amber-200/85 via-amber-300/85 to-amber-400/90 text-amber-950 shadow-amber-900/15 hover:from-amber-200 hover:via-amber-300 hover:to-amber-500 dark:border-amber-500/45 dark:from-amber-500/55 dark:via-amber-500/65 dark:to-amber-600/70 dark:text-amber-100',
     secondary:
-      'border-slate-200 bg-white/70 text-slate-800 hover:bg-white hover:shadow dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:hover:bg-slate-900',
+      'border-slate-200/90 bg-white/78 text-slate-800 hover:bg-white dark:border-slate-800 dark:bg-slate-950/62 dark:text-slate-200 dark:hover:bg-slate-900/90',
     danger:
-      'border-rose-200 bg-rose-50 text-rose-800 hover:bg-rose-100 hover:shadow dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-200 dark:hover:bg-rose-950/30',
+      'border-rose-300/70 bg-gradient-to-b from-rose-100 to-rose-200/85 text-rose-900 shadow-rose-900/15 hover:from-rose-100 hover:to-rose-200 dark:border-rose-900/50 dark:from-rose-950/35 dark:to-rose-950/55 dark:text-rose-200',
     ghost:
-      'border-transparent bg-transparent text-slate-700 shadow-none hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-900/60',
+      'border-transparent bg-transparent text-slate-700 shadow-none hover:bg-slate-100/85 hover:shadow-none dark:text-slate-200 dark:hover:bg-slate-900/70',
   }
 
   const sizes: Record<ButtonSize, string> = {
-    xs: 'px-2.5 py-1.5 text-xs',
-    sm: 'px-3 py-2 text-xs',
-    md: 'px-3.5 py-2.5 text-sm',
+    xs: 'h-8 px-2.5 text-xs',
+    sm: 'h-9 px-3 text-xs',
+    md: 'h-10 px-3.5 text-sm',
   }
 
   return (

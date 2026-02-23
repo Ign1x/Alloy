@@ -1,6 +1,7 @@
 import { For, Show } from 'solid-js'
 import { Button } from '../../components/ui/Button'
 import { DataBoundary } from '../../components/ui/DataBoundary'
+import { Skeleton } from '../../components/ui/Skeleton'
 import InstanceCard from './InstanceCard'
 
 export type InstancesCardsAreaProps = {
@@ -10,6 +11,7 @@ export type InstancesCardsAreaProps = {
 export default function InstancesCardsArea(props: InstancesCardsAreaProps) {
   const {
     filteredInstances,
+    focusCreateEntry,
     getCreateInstanceNameRef,
     highlightInstanceId,
     instanceCardEls,
@@ -46,6 +48,24 @@ export default function InstancesCardsArea(props: InstancesCardsAreaProps) {
     (instances.data ?? []).length > 0 &&
     Number(instancesPollErrorStreak?.() ?? 0) >= 4
 
+  const jumpToCreateEntry = () => {
+    if (typeof focusCreateEntry === 'function') {
+      focusCreateEntry()
+      return
+    }
+    try {
+      getCreateInstanceNameRef?.()?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    } catch {}
+    queueMicrotask(() => getCreateInstanceNameRef?.()?.focus?.())
+  }
+
+  const cardGridClasses = () =>
+    instanceCompact()
+      ? 'sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4'
+      : 'sm:grid-cols-2 2xl:grid-cols-3'
+
+  const loadingCardCount = () => (instanceCompact() ? 8 : 6)
+
   return (
     <>
       <DataBoundary
@@ -74,14 +94,7 @@ export default function InstancesCardsArea(props: InstancesCardsAreaProps) {
               }
               disabled={isReadOnly()}
               title={isReadOnly() ? t('header.readOnlyMode') : t('instances.cards.createInstanceTitle')}
-              onClick={() => {
-                try {
-                  getCreateInstanceNameRef?.()?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-                } catch {
-                  // ignore
-                }
-                queueMicrotask(() => getCreateInstanceNameRef?.()?.focus?.())
-              }}
+              onClick={jumpToCreateEntry}
             >
               {t('instances.cards.createInstance')}
             </Button>
@@ -89,6 +102,19 @@ export default function InstancesCardsArea(props: InstancesCardsAreaProps) {
         }
         loadingClass="border-0 bg-transparent p-0"
         loadingLines={6}
+        loadingFallback={
+          <div class={`grid gap-3 ${cardGridClasses()} xl:gap-4`}>
+            <For each={Array.from({ length: loadingCardCount() })}>
+              {() => (
+                <div class="surface-card rounded-2xl p-4">
+                  <div class="min-h-[11rem]">
+                    <Skeleton lines={7} />
+                  </div>
+                </div>
+              )}
+            </For>
+          </div>
+        }
         onRetry={() => void invalidateInstances()}
         onOpenSettings={openSettingsTab}
         settingsCtaLabel={t('tab.settings')}
@@ -100,7 +126,7 @@ export default function InstancesCardsArea(props: InstancesCardsAreaProps) {
         }}
       >
         <Show when={filteredInstances().length > 0}>
-          <div class={`grid gap-3 ${instanceCompact() ? 'sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4' : 'sm:grid-cols-2 2xl:grid-cols-3'}`}>
+          <div class={`grid gap-3 ${cardGridClasses()} xl:gap-4`}>
             <For each={filteredInstances()}>
               {(i) => (
                 <InstanceCard
@@ -135,8 +161,6 @@ export default function InstancesCardsArea(props: InstancesCardsAreaProps) {
           </div>
         </Show>
       </DataBoundary>
-
-      {/* Logs are shown in the terminal modal; keep the main view clean. */}
     </>
   )
 }

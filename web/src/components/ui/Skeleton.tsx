@@ -14,7 +14,7 @@ export function Skeleton(props: SkeletonProps) {
         {Array.from({ length: count }, (_, idx) => (
           <div
             class={cn(
-              'h-3 animate-pulse rounded-lg bg-slate-200/70 dark:bg-slate-800/60',
+              'h-3 animate-pulse rounded-lg bg-slate-200/80 dark:bg-slate-800/72',
               idx === count - 1 ? 'w-2/3' : 'w-full',
             )}
           />
@@ -22,5 +22,5 @@ export function Skeleton(props: SkeletonProps) {
       </div>
     )
   }
-  return <div class={cn('animate-pulse rounded-xl bg-slate-200/70 dark:bg-slate-800/60', props.class)} />
+  return <div class={cn('animate-pulse rounded-xl bg-slate-200/80 dark:bg-slate-800/72', props.class)} />
 }

@@ -16,7 +16,7 @@ export type BreadcrumbsProps = {
 export function Breadcrumbs(props: BreadcrumbsProps) {
   return (
     <nav aria-label="Breadcrumb" class={cn('min-w-0', props.class)}>
-      <ol class="flex flex-wrap items-center gap-1 text-[11px] text-slate-500 dark:text-slate-400">
+      <ol class="flex flex-wrap items-center gap-1 text-[11px] font-medium text-slate-600 dark:text-slate-300">
         <For each={props.items}>
           {(item, idx) => (
             <>
@@ -36,7 +36,7 @@ export function Breadcrumbs(props: BreadcrumbsProps) {
                 >
                   <button
                     type="button"
-                    class="block min-w-0 truncate rounded-md px-1 py-0.5 text-slate-600 transition-colors hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/35 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-50 dark:text-slate-300 dark:hover:text-slate-100 dark:focus-visible:ring-amber-400/35 dark:focus-visible:ring-offset-slate-950"
+                    class="ring-focus motion-surface block min-w-0 truncate rounded-md px-1 py-0.5 text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-slate-100"
                     onClick={() => item.onClick?.()}
                     title={item.title}
                   >
@@ -51,4 +51,3 @@ export function Breadcrumbs(props: BreadcrumbsProps) {
     </nav>
   )
 }
-

@@ -49,6 +49,8 @@ export default function DeleteNodeModal(props: DeleteNodeModalProps) {
       title={props.t('nodes.deleteModal.title')}
       description={props.t('nodes.deleteModal.desc')}
       size="sm"
+      closeOnOverlayClick={!props.deleting}
+      closeOnEsc={!props.deleting}
       initialFocus={() => inputEl}
       footer={
         <div class="flex gap-3">
@@ -77,6 +79,10 @@ export default function DeleteNodeModal(props: DeleteNodeModalProps) {
             <div class="rounded-2xl border border-rose-200 bg-rose-50/70 p-4 text-[12px] text-rose-900 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-200">
               <div class="text-xs font-semibold uppercase tracking-wider text-rose-700/80 dark:text-rose-200/70">
                 {props.t('nodes.deleteModal.previewTitle')}
+              </div>
+              <div class="mt-2 inline-flex items-center gap-1.5 rounded-md border border-rose-300/70 bg-rose-100/80 px-2 py-1 text-[11px] font-semibold text-rose-800 dark:border-rose-800/55 dark:bg-rose-950/45 dark:text-rose-200">
+                <span aria-hidden="true">!</span>
+                <span>{props.t('nodes.deleteModal.desc')}</span>
               </div>
               <div class="mt-2 flex items-center justify-between gap-3">
                 <div class="text-rose-700/80 dark:text-rose-200/70">{props.t('nodes.deleteModal.node')}</div>

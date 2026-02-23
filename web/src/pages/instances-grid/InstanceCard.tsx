@@ -41,11 +41,11 @@ export default function InstanceCard(props: InstanceCardProps) {
   return (
     <div
       ref={(el) => instanceCardEls.set(i.config.instance_id, el)}
-      class={`group relative overflow-hidden rounded-2xl border border-slate-200 bg-white/50 p-4 shadow-sm transition-all duration-150 hover:-translate-y-0.5 hover:bg-white/58 hover:shadow-md active:scale-[0.99] dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none dark:hover:bg-slate-950/60 ${
+      class={`surface-card lift-on-hover group relative overflow-hidden rounded-2xl p-4 active:scale-[0.99] ${
         selectedInstanceId() === i.config.instance_id
-          ? 'ring-1 ring-amber-500/25'
+          ? 'ring-1 ring-amber-500/30'
           : highlightInstanceId() === i.config.instance_id
-            ? 'ring-2 ring-emerald-400/25'
+            ? 'ring-2 ring-emerald-400/30'
             : 'ring-0 ring-transparent'
       }`}
     >
@@ -61,8 +61,8 @@ export default function InstanceCard(props: InstanceCardProps) {
               loading="lazy"
               decoding="async"
             />
-            <div class="pointer-events-none absolute inset-0 rounded-2xl bg-gradient-to-r from-white/68 via-white/34 to-white/8 dark:from-slate-950/90 dark:via-slate-950/74 dark:to-slate-950/50" />
-            <div class="pointer-events-none absolute inset-0 rounded-2xl bg-gradient-to-b from-transparent to-white/6 dark:to-slate-950/18" />
+            <div class="pointer-events-none absolute inset-0 rounded-2xl bg-gradient-to-r from-white/64 via-white/30 to-white/8 dark:from-slate-950/90 dark:via-slate-950/74 dark:to-slate-950/50" />
+            <div class="pointer-events-none absolute inset-0 rounded-2xl bg-gradient-to-b from-transparent to-white/8 dark:to-slate-950/20" />
             <div class="pointer-events-none absolute inset-0 rounded-2xl bg-[radial-gradient(130%_92%_at_86%_56%,rgba(15,23,42,0)_36%,rgba(15,23,42,0.22)_100%)] dark:bg-[radial-gradient(130%_92%_at_86%_56%,rgba(2,6,23,0)_26%,rgba(2,6,23,0.55)_100%)]" />
             <div class="pointer-events-none absolute inset-x-0 bottom-0 h-24 rounded-b-2xl bg-gradient-to-t from-white/54 via-white/34 to-transparent dark:from-slate-950/78 dark:via-slate-950/64 dark:to-transparent" />
           </>
@@ -104,7 +104,7 @@ export default function InstanceCard(props: InstanceCardProps) {
           (i.status?.message != null || i.status?.exit_code != null)
         }
       >
-        <div class="relative z-10 mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] text-rose-800 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-200">
+        <div class="relative z-10 mt-3 rounded-xl border border-rose-200/95 bg-rose-50/94 px-3 py-2 text-[11px] text-rose-900 dark:border-rose-900/45 dark:bg-rose-950/28 dark:text-rose-200">
           <span class="font-semibold">{t('instances.card.failedLabel')}</span>
           <span class="ml-1">
             <Show when={i.status?.exit_code != null}>
@@ -126,14 +126,14 @@ export default function InstanceCard(props: InstanceCardProps) {
 
       <Show when={i.status?.resources}>
         {(r) => (
-          <div class="relative z-10 mt-3 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
-            <span class="rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 font-mono dark:border-slate-800 dark:bg-slate-950/40">
+          <div class="relative z-10 mt-3 flex flex-wrap items-center gap-2 text-[11px] text-slate-600 dark:text-slate-300">
+            <span class="rounded-full border border-slate-200/90 bg-white/75 px-2 py-0.5 font-mono dark:border-slate-800 dark:bg-slate-950/60">
               cpu {formatCpuPercent(r().cpu_percent_x100)}
             </span>
-            <span class="rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 font-mono dark:border-slate-800 dark:bg-slate-950/40">
+            <span class="rounded-full border border-slate-200/90 bg-white/75 px-2 py-0.5 font-mono dark:border-slate-800 dark:bg-slate-950/60">
               rss {formatBytes(parseU64(r().rss_bytes))}
             </span>
-            <span class="rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 font-mono dark:border-slate-800 dark:bg-slate-950/40">
+            <span class="rounded-full border border-slate-200/90 bg-white/75 px-2 py-0.5 font-mono dark:border-slate-800 dark:bg-slate-950/60">
               io {formatBytes(parseU64(r().read_bytes))}↓ {formatBytes(parseU64(r().write_bytes))}↑
             </span>
           </div>

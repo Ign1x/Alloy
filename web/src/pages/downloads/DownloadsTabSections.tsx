@@ -56,6 +56,15 @@ export function JobRow(props: {
   const progressSpeed = () => props.job.progressSpeedBytesPerSec
   const progressEtaSec = () => props.job.progressEtaSec
   const showReorder = () => Boolean(props.canReorder) && (props.job.state === 'queued' || props.job.state === 'paused')
+  const rowActionsCount = () => {
+    let count = 1
+    if (showReorder()) count += 2
+    if (props.job.state === 'queued') count += 1
+    if (props.job.state === 'paused') count += 1
+    if (props.job.state === 'queued' || props.job.state === 'paused') count += 1
+    if (props.job.state === 'error' || props.job.state === 'success' || props.job.state === 'canceled') count += 1
+    return count
+  }
 
   const speedLabel = () => {
     const v = progressSpeed()
@@ -100,7 +109,7 @@ export function JobRow(props: {
   }
 
   return (
-    <div class="flex flex-wrap items-start justify-between gap-3 px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-900/20">
+    <div class={`flex flex-wrap items-start justify-between gap-3 px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-900/20 ${props.compact ? 'py-2.5' : 'py-3.5'}`}>
       <div class="flex min-w-0 items-start gap-3">
         <div class="min-w-0">
           <div class="flex flex-wrap items-center gap-2">
@@ -163,8 +172,8 @@ export function JobRow(props: {
         </div>
       </div>
 
-      <div class="flex flex-none items-center gap-1">
-        <Button size="xs" variant="secondary" onClick={() => props.onOpenDetails(props.job.id)}>
+      <div class="flex flex-none items-center gap-1" title={props.t('downloads.actionCount', { count: rowActionsCount() })}>
+        <Button size={props.compact ? 'xs' : 'sm'} variant="secondary" onClick={() => props.onOpenDetails(props.job.id)}>
           {props.t('downloads.details')}
         </Button>
 

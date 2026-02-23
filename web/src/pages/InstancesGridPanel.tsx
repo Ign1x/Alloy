@@ -6,10 +6,12 @@ export type InstancesGridPanelProps = {
 }
 
 export default function InstancesGridPanel(props: InstancesGridPanelProps) {
+  const { focusCreateEntry, ...rest } = props as any
+
   return (
     <>
-      <InstancesFilterBar {...props} />
-      <InstancesCardsArea {...props} />
+      <InstancesFilterBar {...rest} focusCreateEntry={focusCreateEntry} />
+      <InstancesCardsArea {...rest} focusCreateEntry={focusCreateEntry} />
     </>
   )
 }

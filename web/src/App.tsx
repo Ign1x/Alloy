@@ -2252,7 +2252,7 @@ function App() {
   }
 
   return (
-    <div class="h-screen w-screen overflow-hidden bg-gradient-to-br from-slate-50 via-white to-amber-50 text-slate-900 dark:from-slate-950 dark:via-slate-950 dark:to-amber-950/25 dark:text-slate-200">
+    <div class="h-[100dvh] min-h-screen w-full overflow-hidden bg-gradient-to-br from-slate-50 via-white to-amber-50 text-slate-900 dark:from-slate-950 dark:via-slate-950 dark:to-amber-950/25 dark:text-slate-200">
       <AppShell
         isAuthed={isAuthed()}
         sidebarNavProps={sidebarNavProps}

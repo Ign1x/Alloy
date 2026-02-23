@@ -1,7 +1,7 @@
 import { For, Show, createMemo, createSignal } from 'solid-js'
 import { HardDrive, Pause, Play, RotateCw, Search, Trash2, ListChecks } from 'lucide-solid'
 import type { I18nTranslate } from '../app/i18n'
-import type { DownloadCenterView, DownloadJob, DownloadTarget } from '../app/types'
+import type { DownloadCenterView, DownloadJob, DownloadTarget, ToastVariant } from '../app/types'
 import { formatBytes, formatRelativeTime } from '../app/helpers/format'
 import { templateDisplayLabel, templateLogoSrc } from '../app/helpers/templateBrand'
 import { queryClient } from '../rspc'
@@ -19,6 +19,7 @@ import { JobRow, VersionManager, type CachedVersionRow, type DownloadStatus, typ
 export type DownloadsTabProps = {
   tab: () => string
   t: I18nTranslate
+  pushToast: (variant: ToastVariant, title: string, message?: string, requestId?: string) => void
   [key: string]: unknown
 }
 
@@ -341,24 +342,29 @@ export default function DownloadsTab(props: DownloadsTabProps) {
 
   const [deletingKey, setDeletingKey] = createSignal<string | null>(null)
   const [pendingCacheDelete, setPendingCacheDelete] = createSignal<PendingCacheDelete | null>(null)
+  const [cacheDeleteFeedback, setCacheDeleteFeedback] = createSignal<string | null>(null)
   const deleteDisabled = createMemo(() => isReadOnly() || Boolean(clearCache.isPending) || Boolean(deletingKey()))
 
-  async function deleteCacheKey(key: string, label: string) {
-    if (isReadOnly()) return
+  async function deleteCacheKey(key: string, label: string): Promise<boolean> {
+    if (isReadOnly()) return false
     try {
       setDeletingKey(key)
       const out = await clearCache.mutateAsync({ keys: [key] })
+      setCacheDeleteFeedback(null)
       pushToast('success', t('downloads.toast.deleted'), t('downloads.toast.freed', { value: formatBytes(Number(out.freed_bytes)) }), undefined, {
         context: { scope: 'job', id: key, label },
       })
       await queryClient.invalidateQueries({ queryKey: ['control.diagnostics', null] })
       await queryClient.invalidateQueries({ queryKey: ['process.cacheStats', null] })
+      return true
     } catch (e) {
+      setCacheDeleteFeedback(t('downloads.deleteFailed'))
       toastError(t('downloads.deleteFailed'), e, {
         context: { scope: 'job', id: key, label },
         retry: { key: `cache.delete:${key}` },
         onRetry: () => deleteCacheKey(key, label),
       })
+      return false
     } finally {
       setDeletingKey(null)
     }
@@ -366,14 +372,17 @@ export default function DownloadsTab(props: DownloadsTabProps) {
 
   function requestDeleteCacheKey(key: string, label: string) {
     if (isReadOnly()) return
+    setCacheDeleteFeedback(null)
     setPendingCacheDelete({ key, label })
   }
 
   async function confirmDeleteCacheKey() {
     const target = pendingCacheDelete()
     if (!target) return
-    await deleteCacheKey(target.key, target.label)
+    const ok = await deleteCacheKey(target.key, target.label)
+    if (!ok) return
     setPendingCacheDelete(null)
+    setCacheDeleteFeedback(null)
   }
 
   const [cacheSearch, setCacheSearch] = createSignal('')
@@ -678,10 +687,10 @@ export default function DownloadsTab(props: DownloadsTabProps) {
     <>
       <Show when={tab() === 'downloads'}>
       <div class="flex min-h-0 flex-1 flex-col overflow-hidden md:flex-row">
-        <aside class="flex w-full flex-none flex-col border-b border-slate-200 bg-white/60 p-3 backdrop-blur dark:border-slate-800 dark:bg-slate-950/60 md:w-[264px] md:border-b-0 md:border-r">
-          <div class="px-2 py-2">
-            <div class="text-sm font-semibold text-slate-900 dark:text-slate-100">{t('downloads.title')}</div>
-            <div class="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+        <aside class="surface-glass flex w-full flex-none flex-col border-b p-2.5 md:w-[272px] md:border-b-0 md:border-r md:p-3">
+          <div class="rounded-xl border border-slate-200/90 bg-white/76 px-3 py-2.5 dark:border-slate-800 dark:bg-slate-950/56">
+            <div class="text-section-title">{t('downloads.title')}</div>
+            <div class="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
               {t('downloads.subtitle')}
             </div>
           </div>
@@ -705,7 +714,7 @@ export default function DownloadsTab(props: DownloadsTabProps) {
             onOpenSettings={openSettingsTab}
             settingsCtaLabel={t('downloads.openSettings')}
           >
-          <nav class="space-y-1">
+          <nav class="space-y-1.5 px-0.5">
             <NavItem
               value="tasks"
               current={view}
@@ -854,7 +863,7 @@ export default function DownloadsTab(props: DownloadsTabProps) {
                 <Section
                   title={t('downloads.nav.tasks')}
                   right={
-                    <>
+                    <div class="flex flex-wrap items-center gap-2">
                       <Badge variant={hasRunningDownloadJobs() ? 'warning' : 'neutral'}>
                         {hasRunningDownloadJobs() ? t('downloads.running') : t('downloads.idle')}
                       </Badge>
@@ -862,15 +871,15 @@ export default function DownloadsTab(props: DownloadsTabProps) {
                         <Badge variant="warning">{t('downloads.queuePaused')}</Badge>
                       </Show>
                       <Button
-                        size="xs"
-                        variant="secondary"
+                        size="sm"
+                        variant="primary"
                         leftIcon={downloadQueuePaused() ? <Play class="h-4 w-4" aria-hidden="true" /> : <Pause class="h-4 w-4" aria-hidden="true" />}
                         onClick={() => void toggleDownloadQueuePaused()}
                       >
                         {downloadQueuePaused() ? t('downloads.resume') : t('downloads.pause')}
                       </Button>
                       <Button
-                        size="xs"
+                        size="sm"
                         variant="secondary"
                         leftIcon={<Trash2 class="h-4 w-4" aria-hidden="true" />}
                         disabled={hasRunningDownloadJobs() || jobs().length === 0}
@@ -879,7 +888,7 @@ export default function DownloadsTab(props: DownloadsTabProps) {
                       >
                         {t('downloads.clearHistory')}
                       </Button>
-                    </>
+                    </div>
                   }
                 >
                   <Show
@@ -914,8 +923,13 @@ export default function DownloadsTab(props: DownloadsTabProps) {
 
                   <Show when={historyJobs().length > 0}>
                     <details class="mt-4 rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
-                      <summary class="cursor-pointer select-none px-4 py-3 text-sm font-medium text-slate-900 hover:bg-slate-50 dark:text-slate-100 dark:hover:bg-slate-900/20">
-                        {t('downloads.historyCount', { count: historyJobs().length })}
+                      <summary class="ring-focus motion-surface cursor-pointer select-none px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-900/20">
+                        <div class="flex items-center justify-between gap-2">
+                          <span class="text-sm font-semibold text-slate-900 dark:text-slate-100">{t('downloads.historyCount', { count: historyJobs().length })}</span>
+                          <span class="rounded-full border border-slate-200 bg-white px-2 py-0.5 font-mono text-[11px] text-slate-700 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200">
+                            {counts().history}
+                          </span>
+                        </div>
                       </summary>
                       <div class="divide-y divide-slate-200 dark:divide-slate-800">
                         <For each={historyJobs()}>
@@ -1150,18 +1164,18 @@ export default function DownloadsTab(props: DownloadsTabProps) {
 
             <Show when={view() === 'cache'}>
               <div class="space-y-4">
-                <div class="flex flex-wrap items-start justify-between gap-3">
+                <div class="surface-card flex flex-wrap items-start justify-between gap-3 p-4">
                   <div class="min-w-0">
-                    <div class="text-lg font-semibold tracking-tight text-slate-900 dark:text-slate-100">{t('downloads.nav.cache')}</div>
-                    <div class="mt-1 text-[12px] text-slate-600 dark:text-slate-400">
+                    <div class="text-page-title">{t('downloads.nav.cache')}</div>
+                    <div class="mt-1 text-desc">
                       {t('downloads.cacheSubtitle')}
                     </div>
                   </div>
-                  <div class="flex flex-wrap items-center gap-2">
-                    <span class="rounded-full border border-slate-200 bg-white px-2 py-0.5 font-mono text-[11px] text-slate-700 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200">
+                  <div class="flex flex-wrap items-center gap-2 self-start">
+                    <span class="rounded-full border border-slate-200 bg-white/88 px-2 py-0.5 font-mono text-[11px] text-slate-700 dark:border-slate-800 dark:bg-slate-950/70 dark:text-slate-200">
                       {t('downloads.entriesCount', { count: cacheEntries().length })}
                     </span>
-                    <span class="rounded-full border border-slate-200 bg-white px-2 py-0.5 font-mono text-[11px] text-slate-700 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200">
+                    <span class="rounded-full border border-slate-200 bg-white/88 px-2 py-0.5 font-mono text-[11px] text-slate-700 dark:border-slate-800 dark:bg-slate-950/70 dark:text-slate-200">
                       {formatBytes(cacheTotalBytes())}
                     </span>
                   </div>
@@ -1188,17 +1202,17 @@ export default function DownloadsTab(props: DownloadsTabProps) {
                       <For each={cacheGroups()}>
                         {(g) => (
                           <div class="overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-800">
-                            <div class="flex flex-wrap items-center justify-between gap-2 bg-slate-50 px-4 py-3 dark:bg-slate-900/20">
-                              <div class="text-sm font-semibold text-slate-900 dark:text-slate-100">{g.title}</div>
+                            <div class="flex flex-wrap items-start justify-between gap-2 bg-slate-50 px-4 py-3 dark:bg-slate-900/20">
+                              <div class="min-w-0">
+                                <div class="text-sm font-semibold text-slate-900 dark:text-slate-100">{g.title}</div>
+                                <div class="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">{t('downloads.cacheGroupUpdatedAt', { value: formatRelativeTime(g.lastUsedUnixMs) })}</div>
+                              </div>
                               <div class="flex flex-wrap items-center gap-2">
-                                <span class="rounded-full border border-slate-200 bg-white px-2 py-0.5 font-mono text-[11px] text-slate-700 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200">
+                                <span class="rounded-full border border-slate-200 bg-white/88 px-2 py-0.5 font-mono text-[11px] text-slate-700 dark:border-slate-800 dark:bg-slate-950/70 dark:text-slate-200">
                                   {t('downloads.entriesCount', { count: g.entries.length })}
                                 </span>
-                                <span class="rounded-full border border-slate-200 bg-white px-2 py-0.5 font-mono text-[11px] text-slate-700 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200">
+                                <span class="rounded-full border border-slate-200 bg-white/88 px-2 py-0.5 font-mono text-[11px] text-slate-700 dark:border-slate-800 dark:bg-slate-950/70 dark:text-slate-200">
                                   {formatBytes(g.totalBytes)}
-                                </span>
-                                <span class="rounded-full border border-slate-200 bg-white px-2 py-0.5 font-mono text-[11px] text-slate-700 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200">
-                                  {formatRelativeTime(g.lastUsedUnixMs)}
                                 </span>
                               </div>
                             </div>
@@ -1206,7 +1220,7 @@ export default function DownloadsTab(props: DownloadsTabProps) {
                             <div class="divide-y divide-slate-200 dark:divide-slate-800">
                               <For each={g.entries}>
                                 {(e) => (
-                                  <div class="grid gap-3 px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-900/20 md:grid-cols-[minmax(0,1fr)_220px] md:items-start">
+                                  <div class="grid gap-3 px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-900/20 md:grid-cols-[minmax(0,1fr)_236px] md:items-start">
                                     <div class="min-w-0">
                                       <div class="flex flex-wrap items-center gap-2">
                                         <div class="text-sm font-semibold text-slate-900 dark:text-slate-100">{e.title}</div>
@@ -1216,17 +1230,23 @@ export default function DownloadsTab(props: DownloadsTabProps) {
                                           </span>
                                         </Show>
                                       </div>
-                                      <div class="mt-1 space-y-1">
-                                        <div class="break-all font-mono text-[12px] text-slate-700 dark:text-slate-200" title={e.key}>
-                                          {e.key}
+                                      <div class="mt-1 space-y-1.5">
+                                        <div>
+                                          <div class="text-kicker">KEY</div>
+                                          <div class="mt-0.5 break-all font-mono text-[12px] text-slate-700 dark:text-slate-200" title={e.key}>
+                                            {e.key}
+                                          </div>
                                         </div>
-                                        <div class="break-all font-mono text-[12px] text-slate-500 dark:text-slate-400" title={e.path}>
-                                          {e.path}
+                                        <div>
+                                          <div class="text-kicker">PATH</div>
+                                          <div class="mt-0.5 break-all font-mono text-[12px] text-slate-500 dark:text-slate-400" title={e.path}>
+                                            {e.path}
+                                          </div>
                                         </div>
                                       </div>
                                     </div>
 
-                                    <div class="flex flex-none items-center justify-between gap-3 md:justify-end">
+                                    <div class="flex flex-none items-center justify-between gap-3 md:justify-end md:gap-4">
                                       <div class="flex flex-col items-end gap-1 font-mono text-[12px] text-slate-600 dark:text-slate-300">
                                         <div class="text-slate-900 dark:text-slate-100">{formatBytes(e.sizeBytes)}</div>
                                         <div title={new Date(e.lastUsedUnixMs).toLocaleString()}>{formatRelativeTime(e.lastUsedUnixMs)}</div>
@@ -1234,7 +1254,9 @@ export default function DownloadsTab(props: DownloadsTabProps) {
                                       <IconButton
                                         label={t('downloads.deleteCacheEntry')}
                                         variant="danger"
+                                        size="md"
                                         disabled={deleteDisabled()}
+                                        title={t('downloads.deleteCacheEntry')}
                                         onClick={() => requestDeleteCacheKey(e.key, `${g.title} ${e.title}`)}
                                       >
                                         <Show
@@ -1264,12 +1286,18 @@ export default function DownloadsTab(props: DownloadsTabProps) {
 
       <Modal
         open={pendingCacheDelete() != null}
-        onClose={() => setPendingCacheDelete(null)}
+        onClose={() => {
+          setPendingCacheDelete(null)
+          setCacheDeleteFeedback(null)
+        }}
         title={t('downloads.deleteCacheEntry')}
         size="sm"
         footer={
           <div class="flex items-center justify-end gap-2">
-            <Button variant="secondary" size="sm" onClick={() => setPendingCacheDelete(null)} disabled={clearCache.isPending}>
+            <Button variant="secondary" size="sm" onClick={() => {
+              setPendingCacheDelete(null)
+              setCacheDeleteFeedback(null)
+            }} disabled={clearCache.isPending}>
               {t('downloads.cancel')}
             </Button>
             <Button variant="danger" size="sm" onClick={() => void confirmDeleteCacheKey()} disabled={clearCache.isPending}>
@@ -1282,6 +1310,9 @@ export default function DownloadsTab(props: DownloadsTabProps) {
           {t('downloads.deleteCachedDataFor', { label: pendingCacheDelete()?.label ?? '' })}
         </p>
         <p class="mt-2 text-xs text-slate-500 dark:text-slate-400">{t('downloads.deleteCacheHint')}</p>
+        <Show when={cacheDeleteFeedback()}>
+          {(message) => <p class="mt-2 text-xs font-medium text-rose-700 dark:text-rose-300">{message()}</p>}
+        </Show>
       </Modal>
     </>
   )

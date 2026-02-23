@@ -1,5 +1,6 @@
 import { createEffect, createMemo, createSignal, Show } from 'solid-js'
 import type { I18nTranslate } from '../app/i18n'
+import type { ToastVariant } from '../app/types'
 import { IconButton } from './ui/IconButton'
 import { Input } from './ui/Input'
 import { VirtualLines } from './ui/VirtualLines'
@@ -14,10 +15,12 @@ function formatIsoMs(unixMs: number) {
   }
 }
 
-async function safeCopy(text: string) {
+async function safeCopy(text: string): Promise<boolean> {
   try {
     await navigator.clipboard.writeText(text)
+    return true
   } catch {}
+  return false
 }
 
 function clampNumber(value: number, min: number, max: number) {
@@ -36,6 +39,8 @@ export type LogViewerProps = {
   onLiveChange?: (live: boolean) => void
   storageKey?: string
   minimal?: boolean
+  titleLevel?: 'page' | 'section'
+  onToast?: (variant: ToastVariant, title: string, message?: string) => void
   class?: string
 }
 
@@ -169,18 +174,24 @@ export function LogViewer(props: LogViewerProps) {
     if (idx == null) return
     const line = props.lines[idx]
     if (!line) return
-    await safeCopy(serializeLines([line]))
+    const ok = await safeCopy(serializeLines([line]))
+    if (ok) props.onToast?.('success', props.t('toast.copied'), props.t('logViewer.copiedSelected'))
+    else props.onToast?.('error', props.t('common.copyFailed'))
   }
 
   async function copyLast() {
     const n = Number.parseInt(copyLastN().trim(), 10)
     const count = Number.isFinite(n) && n > 0 ? n : 200
     const slice = props.lines.slice(Math.max(0, props.lines.length - count))
-    await safeCopy(serializeLines(slice))
+    const ok = await safeCopy(serializeLines(slice))
+    if (ok) props.onToast?.('success', props.t('toast.copied'), props.t('logViewer.copiedTail', { count }))
+    else props.onToast?.('error', props.t('common.copyFailed'))
   }
 
   async function copyAll() {
-    await safeCopy(serializeLines(props.lines))
+    const ok = await safeCopy(serializeLines(props.lines))
+    if (ok) props.onToast?.('success', props.t('toast.copied'), props.t('logViewer.copiedAll', { count: props.lines.length }))
+    else props.onToast?.('error', props.t('common.copyFailed'))
   }
 
   function jumpToMatch(delta: number) {
@@ -226,8 +237,8 @@ export function LogViewer(props: LogViewerProps) {
     <div class={props.class}>
       <div class="flex flex-wrap items-center justify-between gap-3">
         <div class="flex min-w-0 items-center gap-3">
-          <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">{title()}</div>
-          <div class="inline-flex items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400">
+          <div class={props.titleLevel === 'page' ? 'text-page-title' : 'text-section-title'}>{title()}</div>
+          <div class="inline-flex items-center gap-2 text-[11px] text-slate-600 dark:text-slate-300">
             <span class={`h-2 w-2 rounded-full ${statusDot()}`} />
             <span>{statusLabel()}</span>
           </div>
@@ -251,9 +262,9 @@ export function LogViewer(props: LogViewerProps) {
           />
           <Show
             when={matches().length > 0}
-            fallback={<span class="text-[11px] text-slate-500 dark:text-slate-400">{props.t('logViewer.matchesNone')}</span>}
+            fallback={<span class="text-[11px] text-slate-600 dark:text-slate-300">{props.t('logViewer.matchesNone')}</span>}
           >
-            <span class="text-[11px] text-slate-500 dark:text-slate-400">
+            <span class="text-[11px] text-slate-600 dark:text-slate-300">
               {props.t('logViewer.matchesCount', { current: matchIdx() + 1, total: matches().length })}
             </span>
           </Show>
@@ -316,7 +327,7 @@ export function LogViewer(props: LogViewerProps) {
                   <path d="M5 10a.75.75 0 01.75-.75h8.5a.75.75 0 010 1.5h-8.5A.75.75 0 015 10z" />
                 </svg>
               </IconButton>
-              <span class="w-8 text-center text-[11px] text-slate-500 dark:text-slate-400">{fontSize()}px</span>
+              <span class="w-8 text-center text-[11px] text-slate-600 dark:text-slate-300">{fontSize()}px</span>
               <IconButton
                 type="button"
                 label={props.t('logViewer.fontIncrease')}
@@ -370,7 +381,7 @@ export function LogViewer(props: LogViewerProps) {
           </IconButton>
 
           <Show when={minimal()}>
-            <IconButton type="button" label={props.t('logViewer.copyTail')} variant="ghost" onClick={() => copyLast()}>
+            <IconButton type="button" label={props.t('logViewer.copyTail')} variant="secondary" onClick={() => copyLast()}>
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
                 <path d="M5.75 2A2.75 2.75 0 003 4.75v9.5A2.75 2.75 0 005.75 17h1.5a.75.75 0 000-1.5h-1.5c-.69 0-1.25-.56-1.25-1.25v-9.5c0-.69.56-1.25 1.25-1.25h5.5c.69 0 1.25.56 1.25 1.25v1a.75.75 0 001.5 0v-1A2.75 2.75 0 0011.25 2h-5.5z" />
                 <path d="M8.75 6A2.75 2.75 0 006 8.75v6.5A2.75 2.75 0 008.75 18h5.5A2.75 2.75 0 0017 15.25v-6.5A2.75 2.75 0 0014.25 6h-5.5z" />
@@ -409,42 +420,45 @@ export function LogViewer(props: LogViewerProps) {
               </IconButton>
             </form>
 
-            <IconButton
-              type="button"
-              label={props.t('logViewer.copySelected')}
-              variant="secondary"
-              disabled={selectedLineIdx() == null}
-              onClick={() => copySelected()}
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-                <path d="M5.75 2A2.75 2.75 0 003 4.75v9.5A2.75 2.75 0 005.75 17h1.5a.75.75 0 000-1.5h-1.5c-.69 0-1.25-.56-1.25-1.25v-9.5c0-.69.56-1.25 1.25-1.25h5.5c.69 0 1.25.56 1.25 1.25v1a.75.75 0 001.5 0v-1A2.75 2.75 0 0011.25 2h-5.5z" />
-                <path d="M8.75 6A2.75 2.75 0 006 8.75v6.5A2.75 2.75 0 008.75 18h5.5A2.75 2.75 0 0017 15.25v-6.5A2.75 2.75 0 0014.25 6h-5.5z" />
-              </svg>
-            </IconButton>
+            <div class="flex items-center gap-2 rounded-xl border border-slate-200/90 bg-white/76 px-2 py-1 dark:border-slate-800 dark:bg-slate-950/60">
+              <IconButton
+                type="button"
+                label={props.t('logViewer.copySelected')}
+                variant="secondary"
+                disabled={selectedLineIdx() == null}
+                onClick={() => copySelected()}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
+                  <path d="M5.75 2A2.75 2.75 0 003 4.75v9.5A2.75 2.75 0 005.75 17h1.5a.75.75 0 000-1.5h-1.5c-.69 0-1.25-.56-1.25-1.25v-9.5c0-.69.56-1.25 1.25-1.25h5.5c.69 0 1.25.56 1.25 1.25v1a.75.75 0 001.5 0v-1A2.75 2.75 0 0011.25 2h-5.5z" />
+                  <path d="M8.75 6A2.75 2.75 0 006 8.75v6.5A2.75 2.75 0 008.75 18h5.5A2.75 2.75 0 0017 15.25v-6.5A2.75 2.75 0 0014.25 6h-5.5z" />
+                </svg>
+              </IconButton>
 
-            <div class="flex items-center gap-2">
-              <Input value={copyLastN()} onInput={(e) => setCopyLastN(e.currentTarget.value)} class="w-16" />
-              <IconButton type="button" label={props.t('logViewer.copyLastN')} variant="secondary" onClick={() => copyLast()}>
+              <div class="flex items-center gap-2">
+                <Input value={copyLastN()} onInput={(e) => setCopyLastN(e.currentTarget.value)} class="w-16" />
+                <IconButton type="button" label={props.t('logViewer.copyLastN')} variant="secondary" onClick={() => copyLast()}>
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
+                    <path
+                      fill-rule="evenodd"
+                      d="M10 3a7 7 0 100 14 7 7 0 000-14zM8.75 7.5a.75.75 0 011.5 0v2.19l1.47.98a.75.75 0 11-.84 1.25l-1.8-1.2a.75.75 0 01-.33-.62V7.5z"
+                      clip-rule="evenodd"
+                    />
+                  </svg>
+                </IconButton>
+              </div>
+
+              <IconButton type="button" label={props.t('logViewer.copyAll')} variant="secondary" onClick={() => copyAll()}>
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
                   <path
                     fill-rule="evenodd"
-                    d="M10 3a7 7 0 100 14 7 7 0 000-14zM8.75 7.5a.75.75 0 011.5 0v2.19l1.47.98a.75.75 0 11-.84 1.25l-1.8-1.2a.75.75 0 01-.33-.62V7.5z"
+                    d="M3 4.75A2.75 2.75 0 015.75 2h5.5A2.75 2.75 0 0114 4.75v10.5A2.75 2.75 0 0111.25 18h-5.5A2.75 2.75 0 013 15.25V4.75zm5.5 1a.75.75 0 000 1.5h3a.75.75 0 000-1.5h-3zM7.75 9a.75.75 0 000 1.5h3.5a.75.75 0 000-1.5h-3.5zM7.75 12.25a.75.75 0 000 1.5h3.5a.75.75 0 000-1.5h-3.5z"
                     clip-rule="evenodd"
                   />
+                  <path d="M15.5 6.5a.75.75 0 01.75.75v8A3.25 3.25 0 0113 18.5h-.25a.75.75 0 010-1.5H13a1.75 1.75 0 001.75-1.75v-8a.75.75 0 01.75-.75z" />
                 </svg>
               </IconButton>
             </div>
-
-            <IconButton type="button" label={props.t('logViewer.copyAll')} variant="secondary" onClick={() => copyAll()}>
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-                <path
-                  fill-rule="evenodd"
-                  d="M3 4.75A2.75 2.75 0 015.75 2h5.5A2.75 2.75 0 0114 4.75v10.5A2.75 2.75 0 0111.25 18h-5.5A2.75 2.75 0 013 15.25V4.75zm5.5 1a.75.75 0 000 1.5h3a.75.75 0 000-1.5h-3zM7.75 9a.75.75 0 000 1.5h3.5a.75.75 0 000-1.5h-3.5zM7.75 12.25a.75.75 0 000 1.5h3.5a.75.75 0 000-1.5h-3.5z"
-                  clip-rule="evenodd"
-                />
-                <path d="M15.5 6.5a.75.75 0 01.75.75v8A3.25 3.25 0 0113 18.5h-.25a.75.75 0 010-1.5H13a1.75 1.75 0 001.75-1.75v-8a.75.75 0 01.75-.75z" />
-              </svg>
-            </IconButton>
+            <span class="text-[11px] text-slate-500 dark:text-slate-400">{props.t('logViewer.copyActions')}</span>
           </Show>
 
           <IconButton type="button" label={props.t('logViewer.clear')} variant="ghost" disabled={!props.onClear} onClick={() => props.onClear?.()}>
@@ -463,7 +477,7 @@ export function LogViewer(props: LogViewerProps) {
         <div class="mt-3 flex flex-wrap items-center justify-between gap-2">
           <div class="flex items-center gap-2">
             <label
-              class="flex items-center gap-2 text-[12px] text-slate-600 dark:text-slate-300"
+              class="flex items-center gap-2 text-[12px] font-medium text-slate-700 dark:text-slate-200"
               title={props.t('logViewer.includeTimestampHint')}
             >
               <input
@@ -508,7 +522,7 @@ export function LogViewer(props: LogViewerProps) {
             return () => el.removeEventListener('scroll', onScroll)
           }}
           class="!bg-slate-950 !text-slate-100 !border-slate-800 max-h-[55vh] min-h-[240px]"
-          empty={<div class="p-3 text-[12px] text-slate-400">{props.t('logViewer.empty')}</div>}
+          empty={<div class="p-3 text-[12px] text-slate-400">{props.t('logViewer.emptyHint')}</div>}
         />
       </div>
     </div>

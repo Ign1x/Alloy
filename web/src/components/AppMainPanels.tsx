@@ -1,7 +1,7 @@
 import { Show } from 'solid-js'
 
 import type { I18nTranslate } from '../app/i18n'
-import type { UiTab } from '../app/types'
+import type { ToastVariant, UiTab } from '../app/types'
 import { FileBrowser } from './FileBrowser'
 import DownloadsTab, { type DownloadsTabProps } from '../pages/DownloadsTab'
 import FrpTab, { type FrpTabProps } from '../pages/FrpTab'
@@ -34,9 +34,11 @@ export default function AppMainPanels(props: AppMainPanelsProps) {
           t={props.t}
           enabled={props.isAuthed() && props.tab() === 'files'}
           title={props.t('tab.files')}
+          titleLevel="page"
           initialPath={props.fsPath()}
           initialSelectedFile={props.selectedFilePath()}
           onOpenSettings={() => props.setTab('settings')}
+          onToast={(variant: ToastVariant, title: string, message?: string) => props.downloadsTabProps.pushToast(variant, title, message)}
           rootLabel="/data"
         />
       </Show>

@@ -5,7 +5,6 @@ import { formatRelativeTime } from '../../app/helpers/format'
 import { useSearchFocusShortcut } from '../../app/helpers/searchFocusShortcut'
 import { Badge } from '../../components/ui/Badge'
 import { Button } from '../../components/ui/Button'
-import { DataBoundary } from '../../components/ui/DataBoundary'
 import { Dropdown } from '../../components/Dropdown'
 import { Input } from '../../components/ui/Input'
 
@@ -21,6 +20,7 @@ export default function InstancesFilterBar(props: InstancesFilterBarProps) {
     applyInstanceViewPreset,
     deleteInstanceViewPreset,
     filteredInstances,
+    focusCreateEntry,
     getCreateInstanceNameRef,
     instanceSearchInput,
     instanceSortKey,
@@ -31,10 +31,8 @@ export default function InstancesFilterBar(props: InstancesFilterBarProps) {
     instanceTemplateFilterOptions,
     instances,
     instancesLastUpdatedAtUnixMs,
-    invalidateInstances,
     instanceViewPresets,
     isReadOnly,
-    openSettingsTab,
     saveInstanceViewPreset,
     setInstanceSearch,
     setInstanceSearchInput,
@@ -102,6 +100,9 @@ export default function InstancesFilterBar(props: InstancesFilterBarProps) {
     return chips
   })
 
+  const shownInstanceCount = createMemo(() => filteredInstances().length)
+  const totalInstanceCount = createMemo(() => (instances.data ?? []).length)
+
   const presetOptions = createMemo(() => [
     { value: '', label: translate('instances.filters.presets.none') },
     ...instanceViewPresets().map((item: PresetLike) => ({ value: item.id, label: item.name })),
@@ -128,6 +129,19 @@ export default function InstancesFilterBar(props: InstancesFilterBarProps) {
     deleteInstanceViewPreset(id)
   }
 
+  const jumpToCreateEntry = () => {
+    if (typeof focusCreateEntry === 'function') {
+      focusCreateEntry()
+      return
+    }
+    try {
+      getCreateInstanceNameRef?.()?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    } catch {
+      // ignore
+    }
+    queueMicrotask(() => getCreateInstanceNameRef?.()?.focus?.())
+  }
+
   createEffect(() => {
     useSearchFocusShortcut({
       input: () => searchInputEl,
@@ -138,248 +152,218 @@ export default function InstancesFilterBar(props: InstancesFilterBarProps) {
 
   return (
     <>
-                      <div class="flex flex-wrap items-center justify-between gap-3">
-                        <div class="min-w-0">
-                          <div class="text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">
-                            {translate('instances.filter.title')}
-                          </div>
-                      <div class="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400">
-                        <span>{translate('instances.filter.updated', { value: formatRelativeTime(instancesLastUpdatedAtUnixMs()) })}</span>
-                        <span class="text-slate-300 dark:text-slate-700">•</span>
-                            <span>
-                              {translate('instances.filter.showing', {
-                                shown: filteredInstances().length,
-                                total: (instances.data ?? []).length,
-                              })}
-                            </span>
-                            <span class="text-slate-300 dark:text-slate-700">•</span>
-                            <span>{translate('instances.filters.shortcutVisibleHint')}</span>
-                          </div>
-                        </div>
-                        <div class="flex flex-wrap items-center gap-2">
-	                            <Button
-	                              size="xs"
-	                              variant="primary"
-	                              leftIcon={
-	                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-	                                  <path
-	                                    fill-rule="evenodd"
-	                                    d="M10 4.25a.75.75 0 01.75.75v4.25H15a.75.75 0 010 1.5h-4.25V15a.75.75 0 01-1.5 0v-4.25H5a.75.75 0 010-1.5h4.25V5a.75.75 0 01.75-.75z"
-	                                    clip-rule="evenodd"
-	                                  />
-	                                </svg>
-	                              }
-	                              disabled={isReadOnly()}
-	                              title={isReadOnly() ? translate('common.readOnlyMode') : translate('instances.filter.createTitle')}
-	                              onClick={() => {
-                                try {
-                                  getCreateInstanceNameRef?.()?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-                                } catch {
-                                  // ignore
-                                }
-                                queueMicrotask(() => getCreateInstanceNameRef?.()?.focus?.())
-                              }}
-                            >
-                              {translate('instances.filter.create')}
-                            </Button>
-                        </div>
-                      </div>
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div class="min-w-0">
+          <div class="text-section-title">{translate('instances.filter.title')}</div>
+          <div class="mt-1 flex flex-wrap items-center gap-1.5 text-[11px]">
+            <span class="inline-flex items-center rounded-full border border-slate-200/90 bg-white/74 px-2 py-0.5 text-slate-600 dark:border-slate-800 dark:bg-slate-950/52 dark:text-slate-300">
+              {translate('instances.filter.updated', { value: formatRelativeTime(instancesLastUpdatedAtUnixMs()) })}
+            </span>
+            <span class="inline-flex items-center rounded-full border border-amber-200/80 bg-amber-50/85 px-2 py-0.5 font-semibold text-amber-900 dark:border-amber-800/40 dark:bg-amber-950/25 dark:text-amber-200">
+              <span class="mr-1.5 text-[10px] uppercase tracking-wide text-amber-700/90 dark:text-amber-300/90">
+                {translate('instances.filter.statsLabel')}
+              </span>
+              {translate('instances.filter.showing', {
+                shown: shownInstanceCount(),
+                total: totalInstanceCount(),
+              })}
+            </span>
+          </div>
+          <div class="mt-1 text-[11px] text-slate-500 dark:text-slate-400">{translate('instances.filters.shortcutHint')}</div>
+          <div class="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">{translate('instances.filters.shortcutVisibleHint')}</div>
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
+          <Button
+            size="sm"
+            variant="primary"
+            class="min-w-[8.5rem] h-11 px-4 sm:h-9 sm:px-3"
+            leftIcon={
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
+                <path
+                  fill-rule="evenodd"
+                  d="M10 4.25a.75.75 0 01.75.75v4.25H15a.75.75 0 010 1.5h-4.25V15a.75.75 0 01-1.5 0v-4.25H5a.75.75 0 010-1.5h4.25V5a.75.75 0 01.75-.75z"
+                  clip-rule="evenodd"
+                />
+              </svg>
+            }
+            disabled={isReadOnly()}
+            title={isReadOnly() ? translate('common.readOnlyMode') : translate('instances.filter.createTitle')}
+            onClick={jumpToCreateEntry}
+          >
+            {translate('instances.filter.create')}
+          </Button>
+        </div>
+      </div>
 
-                      <div class="mt-3 flex flex-wrap items-center gap-2">
-                        <div class="w-full sm:w-40 lg:w-44">
-                          <Input
-                            ref={(el) => {
-                              searchInputEl = el
-                            }}
-                            value={instanceSearchInput()}
-                            onInput={(e) => setInstanceSearchInput(e.currentTarget.value)}
-                            placeholder={translate('instances.filter.searchPlaceholder')}
-                            aria-label={translate('instances.filter.searchAria')}
-                            spellcheck={false}
-                            leftIcon={<Search class="h-4 w-4" strokeWidth={1.9} />}
-                            rightIcon={
-                              instanceSearchInput().length > 0 ? (
-                                <button
-                                  type="button"
-                                  class="rounded-md p-1 transition hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/30 dark:hover:bg-slate-900/60"
-                                  aria-label={translate('instances.filter.clearSearch')}
-                                  title={translate('instances.filter.clearSearch')}
-                                  onClick={() => {
-                                    clearSearch()
-                                  }}
-                                >
-                                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-                                    <path
-                                      fill-rule="evenodd"
-                                      d="M4.47 4.47a.75.75 0 011.06 0L10 8.94l4.47-4.47a.75.75 0 111.06 1.06L11.06 10l4.47 4.47a.75.75 0 11-1.06 1.06L10 11.06l-4.47 4.47a.75.75 0 11-1.06-1.06L8.94 10 4.47 5.53a.75.75 0 010-1.06z"
-                                      clip-rule="evenodd"
-                                    />
-                                  </svg>
-                                </button>
-                              ) : undefined
-                            }
-                          />
-                        </div>
-                        <div class="w-full sm:w-36">
-                          <Dropdown
-                            label=""
-                            ariaLabel={translate('instances.filter.statusAria')}
-                            title={instanceStatusFilter() === 'all' ? translate('instances.filter.statusAll') : instanceStatusFilter()}
-                            leftIcon={
-                              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-                                <path
-                                  fill-rule="evenodd"
-                                  d="M10 2.25a.75.75 0 01.75.75v6a.75.75 0 01-1.5 0V3a.75.75 0 01.75-.75z"
-                                  clip-rule="evenodd"
-                                />
-                                <path
-                                  fill-rule="evenodd"
-                                  d="M6.22 4.97a.75.75 0 011.06.08.75.75 0 01-.08 1.06 4.75 4.75 0 105.6 0 .75.75 0 01-.08-1.06.75.75 0 011.06-.08 6.25 6.25 0 11-7.48 0z"
-                                  clip-rule="evenodd"
-                                />
-                              </svg>
-                            }
-                            value={instanceStatusFilter()}
-                            options={instanceStatusFilterOptions()}
-                            onChange={(v) => setInstanceStatusFilter(v as any)}
-                          />
-                        </div>
-                        <div class="w-full sm:w-36 lg:w-40">
-                          <Dropdown
-                            label=""
-                            ariaLabel={translate('instances.filter.templateAria')}
-                            title={instanceTemplateFilter() === 'all' ? translate('instances.filter.templateAll') : instanceTemplateFilter()}
-                            leftIcon={
-                              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-                                <path d="M10 2.25l6.5 3.75v7.5L10 17.25 3.5 13.5V6L10 2.25z" />
-                                <path d="M10 9.75L3.5 6 10 2.25 16.5 6 10 9.75z" opacity="0.35" />
-                                <path d="M10 9.75v7.5l6.5-3.75V6L10 9.75z" opacity="0.35" />
-                              </svg>
-                            }
-                            value={instanceTemplateFilter()}
-                            options={instanceTemplateFilterOptions()}
-                            onChange={setInstanceTemplateFilter}
-                          />
-                        </div>
-                      </div>
+      <div class="mt-3 flex flex-wrap items-center gap-2">
+        <div class="w-full sm:w-40 lg:w-44">
+          <Input
+            ref={(el) => {
+              searchInputEl = el
+            }}
+            value={instanceSearchInput()}
+            onInput={(e) => setInstanceSearchInput(e.currentTarget.value)}
+            placeholder={translate('instances.filter.searchPlaceholder')}
+            aria-label={translate('instances.filter.searchAria')}
+            spellcheck={false}
+            leftIcon={<Search class="h-4 w-4" strokeWidth={1.9} />}
+            rightIcon={
+              instanceSearchInput().length > 0 ? (
+                <button
+                  type="button"
+                  class="ring-focus -m-1 inline-flex h-10 w-10 items-center justify-center rounded-md text-slate-500 transition hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-none sm:h-auto sm:w-auto sm:p-1.5 dark:text-slate-400 dark:hover:bg-slate-900/60 dark:hover:text-slate-100"
+                  aria-label={translate('instances.filter.clearSearch')}
+                  title={translate('instances.filter.clearSearch')}
+                  onClick={clearSearch}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
+                    <path
+                      fill-rule="evenodd"
+                      d="M4.47 4.47a.75.75 0 011.06 0L10 8.94l4.47-4.47a.75.75 0 111.06 1.06L11.06 10l4.47 4.47a.75.75 0 11-1.06 1.06L10 11.06l-4.47 4.47a.75.75 0 11-1.06-1.06L8.94 10 4.47 5.53a.75.75 0 010-1.06z"
+                      clip-rule="evenodd"
+                    />
+                  </svg>
+                </button>
+              ) : undefined
+            }
+          />
+        </div>
+        <div class="w-full sm:w-40">
+          <Dropdown
+            label=""
+            ariaLabel={translate('instances.filter.statusAria')}
+            title={instanceStatusFilter() === 'all' ? translate('instances.filter.statusAll') : selectedStatusLabel()}
+            leftIcon={
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="none" class="h-4 w-4" aria-hidden="true">
+                <circle cx="5.5" cy="10" r="1.8" stroke="currentColor" stroke-width="1.5" />
+                <path d="M9.5 8h5" stroke="currentColor" stroke-linecap="round" stroke-width="1.5" />
+                <path d="M9.5 12h3.5" stroke="currentColor" stroke-linecap="round" stroke-width="1.5" />
+              </svg>
+            }
+            value={instanceStatusFilter()}
+            options={instanceStatusFilterOptions()}
+            onChange={(v) => setInstanceStatusFilter(v as any)}
+          />
+        </div>
+        <div class="w-full sm:w-40 lg:w-44">
+          <Dropdown
+            label=""
+            ariaLabel={translate('instances.filter.templateAria')}
+            title={instanceTemplateFilter() === 'all' ? translate('instances.filter.templateAll') : selectedTemplateLabel()}
+            leftIcon={
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="none" class="h-4 w-4" aria-hidden="true">
+                <rect x="2.75" y="4" width="14.5" height="12" rx="2" stroke="currentColor" stroke-width="1.5" />
+                <path d="M8.5 4v12" stroke="currentColor" stroke-width="1.5" />
+                <path d="M2.75 9.5h5.75" stroke="currentColor" stroke-width="1.5" />
+              </svg>
+            }
+            value={instanceTemplateFilter()}
+            options={instanceTemplateFilterOptions()}
+            onChange={setInstanceTemplateFilter}
+          />
+        </div>
+      </div>
 
-                      <div class="mt-2 flex flex-wrap items-center gap-2">
-                        <div class="w-full sm:w-32">
-                          <Dropdown
-                            label=""
-                            ariaLabel={translate('instances.filters.sort')}
-                            title={translate('instances.filter.sortTitle')}
-                            leftIcon={<ArrowUpDown class="h-4 w-4" strokeWidth={1.9} />}
-                            value={instanceSortKey()}
-                            options={instanceSortOptions()}
-                            onChange={(v) => setInstanceSortKey(v as any)}
-                          />
-                        </div>
-                      </div>
+      <div class="mt-2 rounded-xl border border-slate-200/85 bg-white/58 p-2.5 dark:border-slate-800 dark:bg-slate-950/38">
+        <div class="flex flex-wrap items-end gap-2">
+          <div class="w-full sm:w-36 lg:w-40">
+            <Dropdown
+              label=""
+              ariaLabel={translate('instances.filters.sort')}
+              title={translate('instances.filter.sortTitle')}
+              leftIcon={<ArrowUpDown class="h-4 w-4" strokeWidth={1.9} />}
+              value={instanceSortKey()}
+              options={instanceSortOptions()}
+              onChange={(v) => setInstanceSortKey(v as any)}
+            />
+          </div>
+          <div class="w-full sm:w-52 lg:w-60">
+            <Dropdown
+              label=""
+              ariaLabel={translate('instances.filters.presets.label')}
+              title={translate('instances.filters.presets.label')}
+              value={String(activeInstanceViewPresetId())}
+              options={presetOptions()}
+              onChange={(value) => {
+                if (!value) {
+                  applyInstanceViewPreset('')
+                  return
+                }
+                applyInstanceViewPreset(value)
+              }}
+            />
+          </div>
+          <div class="w-full sm:w-44 lg:w-52">
+            <Input
+              value={presetNameInput()}
+              onInput={(e) => setPresetNameInput(e.currentTarget.value)}
+              placeholder={translate('instances.filters.presets.namePlaceholder')}
+              aria-label={translate('instances.filters.presets.nameAria')}
+              spellcheck={false}
+              onKeyDown={(e) => {
+                if (e.key !== 'Enter') return
+                e.preventDefault()
+                savePreset()
+              }}
+            />
+          </div>
+          <div class="flex w-full items-center gap-2 sm:w-auto sm:self-end">
+            <Button size="xs" variant="secondary" class="flex-1 sm:flex-none" disabled={!canSavePreset()} onClick={savePreset}>
+              {translate('instances.filters.presets.save')}
+            </Button>
+            <Button size="xs" variant="ghost" class="flex-1 sm:flex-none" disabled={!activePresetName()} onClick={deleteActivePreset}>
+              {translate('instances.filters.presets.delete')}
+            </Button>
+          </div>
+        </div>
+      </div>
 
-                      <div class="mt-2 flex flex-wrap items-center gap-2">
-                        <div class="w-full sm:w-48 lg:w-56">
-                          <Dropdown
-                            label=""
-                            ariaLabel={translate('instances.filters.presets.label')}
-                            title={translate('instances.filters.presets.label')}
-                            value={String(activeInstanceViewPresetId())}
-                            options={presetOptions()}
-                            onChange={(value) => {
-                              if (!value) {
-                                applyInstanceViewPreset('')
-                                return
-                              }
-                              applyInstanceViewPreset(value)
-                            }}
-                          />
-                        </div>
-                        <div class="w-full sm:w-44 lg:w-48">
-                          <Input
-                            value={presetNameInput()}
-                            onInput={(e) => setPresetNameInput(e.currentTarget.value)}
-                            placeholder={translate('instances.filters.presets.namePlaceholder')}
-                            aria-label={translate('instances.filters.presets.nameAria')}
-                            spellcheck={false}
-                            onKeyDown={(e) => {
-                              if (e.key !== 'Enter') return
-                              e.preventDefault()
-                              savePreset()
-                            }}
-                          />
-                        </div>
-                        <Button size="xs" variant="secondary" disabled={!canSavePreset()} onClick={savePreset}>
-                          {translate('instances.filters.presets.save')}
-                        </Button>
-                        <Button size="xs" variant="ghost" disabled={!activePresetName()} onClick={deleteActivePreset}>
-                          {translate('instances.filters.presets.delete')}
-                        </Button>
-                      </div>
+      <Show when={activeFilterChips().length > 0 || Boolean(activePresetName())}>
+        <div class="mt-3 rounded-xl border border-slate-200/85 bg-white/58 p-2 dark:border-slate-800 dark:bg-slate-950/38">
+          <div class="flex flex-wrap items-center gap-2">
+            <Show when={activeFilterChips().length > 0}>
+              <Button size="xs" variant="secondary" onClick={clearAllFilters}>
+                {translate('instances.filters.clearAllWithCount', { count: activeFilterChips().length })}
+              </Button>
+            </Show>
+            <Show when={activePresetName()}>
+              <Badge variant="neutral" class="max-w-full gap-2 px-2.5 py-1 pr-2.5">
+                <span class="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                  {translate('instances.filters.presets.active')}
+                </span>
+                <span class="max-w-[12rem] truncate text-[11px] font-semibold text-slate-800 dark:text-slate-100">{activePresetName()}</span>
+              </Badge>
+            </Show>
+            <For each={activeFilterChips()}>
+              {(chip) => (
+                <Badge variant="neutral" class="max-w-full gap-2 px-2.5 py-1 pr-1.5">
+                  <span class="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">{chip.label}</span>
+                  <span class="max-w-[16rem] truncate text-[11px] font-semibold text-slate-800 dark:text-slate-100">{chip.value}</span>
+                  <button
+                    type="button"
+                    class="ring-focus rounded-full p-1 text-slate-500 transition hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-none dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+                    aria-label={`${translate('instances.filters.remove')} ${chip.label}`}
+                    title={`${translate('instances.filters.remove')} ${chip.label}`}
+                    onClick={() => chip.onRemove()}
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-3.5 w-3.5">
+                      <path
+                        fill-rule="evenodd"
+                        d="M4.47 4.47a.75.75 0 011.06 0L10 8.94l4.47-4.47a.75.75 0 111.06 1.06L11.06 10l4.47 4.47a.75.75 0 11-1.06 1.06L10 11.06l-4.47 4.47a.75.75 0 11-1.06-1.06L8.94 10 4.47 5.53a.75.75 0 010-1.06z"
+                        clip-rule="evenodd"
+                      />
+                    </svg>
+                  </button>
+                </Badge>
+              )}
+            </For>
+          </div>
+        </div>
+      </Show>
 
-                      <Show when={activeFilterChips().length > 0}>
-                        <div class="mt-3 flex flex-wrap items-center gap-2">
-                          <Show when={activePresetName()}>
-                            <Badge variant="neutral" class="max-w-full gap-1.5 pr-2">
-                              <span class="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                                {translate('instances.filters.presets.active')}
-                              </span>
-                              <span class="max-w-[12rem] truncate">{activePresetName()}</span>
-                            </Badge>
-                          </Show>
-                          <For each={activeFilterChips()}>
-                            {(chip) => (
-                              <Badge variant="neutral" class="max-w-full gap-1.5 pr-1">
-                                <span class="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">{chip.label}</span>
-                                <span class="max-w-[16rem] truncate">{chip.value}</span>
-                                <button
-                                  type="button"
-                                  class="rounded-full p-0.5 text-slate-500 transition hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/30 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100"
-                                  aria-label={`${translate('instances.filters.remove')} ${chip.label}`}
-                                  title={`${translate('instances.filters.remove')} ${chip.label}`}
-                                  onClick={() => chip.onRemove()}
-                                >
-                                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-3.5 w-3.5">
-                                    <path
-                                      fill-rule="evenodd"
-                                      d="M4.47 4.47a.75.75 0 011.06 0L10 8.94l4.47-4.47a.75.75 0 111.06 1.06L11.06 10l4.47 4.47a.75.75 0 11-1.06 1.06L10 11.06l-4.47 4.47a.75.75 0 11-1.06-1.06L8.94 10 4.47 5.53a.75.75 0 010-1.06z"
-                                      clip-rule="evenodd"
-                                    />
-                                  </svg>
-                                </button>
-                              </Badge>
-                            )}
-                          </For>
-                          <Button size="xs" variant="ghost" onClick={clearAllFilters}>
-                            {translate('instances.filters.clearAll')}
-                          </Button>
-                        </div>
-                      </Show>
-
-                      <div class="sr-only" aria-live="polite">
-                        {translate('instances.filters.shortcutHint')}
-                      </div>
-
-                      <DataBoundary
-                        t={translate}
-                        class="mt-4"
-                        loading={false}
-                        error={instances.error}
-                        errorTitle={translate('instances.filter.loadFailed')}
-                        hasData={(instances.data ?? []).length > 0}
-                        empty={false}
-                        onRetry={() => void invalidateInstances()}
-                        onOpenSettings={openSettingsTab}
-                        settingsCtaLabel={translate('tab.settings')}
-                        stale={{
-                          show: instances.isError && instances.data != null,
-                          title: translate('instances.filter.refreshFailed'),
-                          message: translate('instances.filter.snapshotInfo'),
-                          onRetry: () => void invalidateInstances(),
-                        }}
-                      >
-                        <></>
-                      </DataBoundary>
-
+      <div class="sr-only" aria-live="polite">
+        {translate('instances.filters.shortcutHint')}
+      </div>
     </>
   )
 }

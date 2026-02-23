@@ -9,6 +9,7 @@ import NodeDetailPanel from './nodes/NodeDetailPanel'
 import NodesFleetPanel from './nodes/NodesFleetPanel'
 import DeleteNodeModal from './nodes/DeleteNodeModal'
 import TriggerNodeUpdateModal from './nodes/TriggerNodeUpdateModal'
+import { nodeHealthStatus } from './nodes/nodeStatus'
 
 export type NodesTabProps = {
   tab: () => string
@@ -84,8 +85,18 @@ export default function NodesTab(props: NodesTabProps) {
   const [confirmDeleteNodeText, setConfirmDeleteNodeText] = createSignal('')
   const [confirmUpdateMode, setConfirmUpdateMode] = createSignal<'single' | 'batch' | null>(null)
   const [nodeUpdateErrorCooldownUntil, setNodeUpdateErrorCooldownUntil] = createSignal<Record<string, number>>({})
+  const [nodesPollErrorStreak, setNodesPollErrorStreak] = createSignal(0)
 
   const nodeList = createMemo(() => (nodes.data ?? []) as NodeRow[])
+
+  createEffect(() => {
+    const error = nodes.error
+    if (nodes.isError && error) {
+      setNodesPollErrorStreak((prev) => Math.min(prev + 1, 6))
+      return
+    }
+    setNodesPollErrorStreak(0)
+  })
 
   createEffect(() => {
     const ids = new Set(nodeList().map((node) => node.id))
@@ -512,15 +523,16 @@ export default function NodesTab(props: NodesTabProps) {
     const rows = nodeList()
     if (!q) return rows
     return rows.filter((n) => {
-      const status = n.last_error ? 'error' : n.last_seen_at ? 'healthy' : 'unknown'
+      const status = nodeHealthStatus(n)
       const haystack = `${n.name} ${n.endpoint} ${n.agent_version ?? ''} ${status}`.toLowerCase()
       return haystack.includes(q)
     })
   })
 
-  const healthyNodeCount = createMemo(() => nodeList().filter((n) => !n.last_error && Boolean(n.last_seen_at)).length)
-  const errorNodeCount = createMemo(() => nodeList().filter((n) => Boolean(n.last_error)).length)
-  const unknownNodeCount = createMemo(() => nodeList().filter((n) => !n.last_error && !n.last_seen_at).length)
+  const healthyNodeCount = createMemo(() => nodeList().filter((n) => nodeHealthStatus(n) === 'healthy').length)
+  const errorNodeCount = createMemo(() => nodeList().filter((n) => nodeHealthStatus(n) === 'error').length)
+  const unknownNodeCount = createMemo(() => nodeList().filter((n) => nodeHealthStatus(n) === 'unknown').length)
+  const showStaleSnapshot = createMemo(() => nodes.isError && nodeList().length > 0 && nodesPollErrorStreak() >= 2)
 
   createEffect(() => {
     const available = new Set(filteredNodeList().map((n) => n.id))
@@ -577,6 +589,8 @@ export default function NodesTab(props: NodesTabProps) {
               bulkUpdatePending={bulkUpdatePending()}
               isNodeSelected={isNodeSelected}
               setNodeSelected={setNodeSelected}
+              isNodeUpdating={(nodeId) => Boolean(updatingNodeIds()[nodeId])}
+              showStaleSnapshot={showStaleSnapshot()}
             />
           }
           right={
@@ -640,6 +654,8 @@ export default function NodesTab(props: NodesTabProps) {
               )}
               parseResourceMetric={parseResourceMetric}
               needsSelectHint={Boolean(selectedNode() && selectedNodeId() !== (selectedNode() as NodeRow).id)}
+              showStaleSnapshot={showStaleSnapshot()}
+              toggleEnabledLoading={setNodeEnabled.isPending}
             />
           }
         />

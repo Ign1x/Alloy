@@ -42,26 +42,29 @@ export default function AppMobileDrawer(props: AppMobileDrawerProps) {
       closeLabel={props.t('common.close')}
       closeAriaLabel={props.t('common.close')}
     >
-      <div class="space-y-2">
+      <nav class="space-y-2" aria-label={props.t('nav.primary')}>
         <For each={visibleTabs()}>
           {(item) => (
             <button
               type="button"
-              class={`w-full rounded-xl border px-3 py-2 text-left text-sm font-medium transition-colors ${
+              class={`ring-focus motion-surface w-full rounded-xl border px-3 py-2.5 text-left text-sm font-semibold ${
                 props.tab === item.id
-                  ? 'border-amber-500/20 bg-amber-500/10 text-amber-900 dark:border-amber-500/25 dark:bg-amber-500/15 dark:text-amber-100'
-                  : 'border-slate-200 bg-white/70 text-slate-800 hover:bg-white dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:hover:bg-slate-900'
+                  ? 'border-amber-500/25 bg-amber-500/12 text-amber-900 shadow-sm dark:border-amber-500/30 dark:bg-amber-500/18 dark:text-amber-100'
+                  : 'border-slate-200/90 bg-white/76 text-slate-800 hover:bg-white dark:border-slate-800 dark:bg-slate-950/58 dark:text-slate-200 dark:hover:bg-slate-900/90'
               }`}
               onClick={() => {
                 props.setTab(item.id)
                 props.setMobileNavOpen(false)
               }}
+              aria-label={props.t(item.labelKey)}
+              title={props.t(item.labelKey)}
+              aria-current={props.tab === item.id ? 'page' : undefined}
             >
               {props.t(item.labelKey)}
             </button>
           )}
         </For>
-      </div>
+      </nav>
 
       <div class="mt-4 flex flex-wrap items-center gap-2">
         <Button

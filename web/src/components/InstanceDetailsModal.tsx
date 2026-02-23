@@ -248,9 +248,7 @@ export default function InstanceDetailsModal(props: InstanceDetailsModalProps) {
 
               return (
                 <div class="space-y-4">
-                  <div
-                    class="-mx-5 -mt-4 border-b border-slate-200 bg-white/60 px-5 py-3 dark:border-slate-800 dark:bg-slate-950/50"
-                  >
+                  <div class="-mx-5 -mt-4 surface-card rounded-none border-x-0 border-t-0 px-5 py-3">
                     <div class="flex flex-wrap items-center justify-between gap-3">
                       <div class="min-w-0">
 	                        <div class="mt-1 flex flex-wrap items-center gap-2">
@@ -553,7 +551,7 @@ export default function InstanceDetailsModal(props: InstanceDetailsModalProps) {
                   <Show when={instanceDetailTab() === 'overview'}>
                     <div class="space-y-4">
                       <div class="grid gap-4 lg:grid-cols-2">
-                        <div class="rounded-2xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
+                        <div class="surface-card p-4">
                           <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
                             {t('instances.details.statusHeading')}
                           </div>
@@ -577,7 +575,7 @@ export default function InstanceDetailsModal(props: InstanceDetailsModalProps) {
                           </div>
 
                           <Show when={status()?.message != null}>
-                            <div class="mt-3 rounded-xl border border-slate-200 bg-white/60 p-3 text-[12px] text-slate-700 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-200">
+                            <div class="surface-card mt-3 rounded-xl p-3 text-[12px] text-slate-700 dark:text-slate-200">
                               <div class="font-semibold">{t('instances.details.messageHeading')}</div>
                               <div class="mt-1 font-mono text-[11px] whitespace-pre-wrap">{selectedInstanceMessage() ?? ''}</div>
                               <Show when={statusMessageParts(status()).hint}>
@@ -589,7 +587,7 @@ export default function InstanceDetailsModal(props: InstanceDetailsModalProps) {
                           </Show>
                         </div>
 
-                        <div class="rounded-2xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
+                        <div class="surface-card p-4">
                           <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
                             {t('instances.details.resourcesHeading')}
                           </div>
@@ -624,7 +622,7 @@ export default function InstanceDetailsModal(props: InstanceDetailsModalProps) {
                           inst().config.template_id === 'dst:vanilla'
                         }
                       >
-                        <div class="rounded-2xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
+                        <div class="surface-card p-4">
                           <div class="flex items-center justify-between gap-3">
                             <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
                               {t('instances.details.saveHeading')}
@@ -688,7 +686,7 @@ export default function InstanceDetailsModal(props: InstanceDetailsModalProps) {
                               <div class="mt-3 max-h-56 space-y-2 overflow-auto pr-1">
                                 <For each={instanceSaveSearch.data?.results ?? []}>
                                   {(result: any) => (
-                                    <div class="rounded-xl border border-slate-200 bg-white/80 px-3 py-2 dark:border-slate-800 dark:bg-slate-950/40">
+                                    <div class="surface-card rounded-xl px-3 py-2">
                                       <div class="flex items-start justify-between gap-3">
                                         <div class="min-w-0">
                                           <div class="truncate text-[12px] font-semibold text-slate-800 dark:text-slate-100">{result.title}</div>
@@ -836,31 +834,35 @@ export default function InstanceDetailsModal(props: InstanceDetailsModalProps) {
                     <LogViewer
                       t={t}
                       title={t('instances.details.processLogs')}
+                      titleLevel="section"
                       lines={processLogLines()}
                       loading={canTailProcessLogs() ? processLogsTail.isPending : false}
                       error={canTailProcessLogs() && processLogsTail.isError ? processLogsTail.error : undefined}
                       live={processLogLive()}
                       onLiveChange={setProcessLogLive}
                       onClear={() => setProcessLogLines([])}
+                      onToast={(variant, title, message) => pushToast(variant, title, message)}
                       storageKey={`alloy.processlog.${id()}`}
                       class="mt-3"
                     />
                   </Show>
 
                   <Show when={instanceDetailTab() === 'files'}>
-                    <div class="rounded-2xl border border-slate-200 bg-white/70 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
-	                      <FileBrowser
-	                        t={t}
-	                        enabled={isAuthed() && showInstanceModal() && instanceDetailTab() === 'files'}
+                    <div class="surface-card">
+                      <FileBrowser
+                        t={t}
+                        enabled={isAuthed() && showInstanceModal() && instanceDetailTab() === 'files'}
                         title={t('tab.files')}
-	                        rootPath={`instances/${id()}`}
-	                        rootLabel={uiName()}
-	                      />
+                        titleLevel="section"
+                        onToast={(variant, title, message) => pushToast(variant, title, message)}
+                        rootPath={`instances/${id()}`}
+                        rootLabel={uiName()}
+                      />
                     </div>
                   </Show>
 
                   <Show when={instanceDetailTab() === 'config'}>
-                    <div class="rounded-2xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
+                    <div class="surface-card p-4">
                       <div class="flex flex-wrap items-center justify-between gap-2">
                         <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">{t('instances.details.parameters')}</div>
                         <div class="text-[11px] text-slate-500 dark:text-slate-400">

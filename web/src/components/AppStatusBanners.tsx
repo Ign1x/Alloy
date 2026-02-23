@@ -20,15 +20,20 @@ interface AppStatusBannersProps {
 }
 
 export default function AppStatusBanners(props: AppStatusBannersProps) {
+  const backendMessage = () => {
+    const lastOk = formatRelativeTime(props.lastBackendOkAtUnixMs)
+    return props.t('banner.lastOkOfflineHint', { value: lastOk })
+  }
+
   return (
-    <div class="space-y-3">
+    <div class="feedback-stack">
       <Show when={props.pingError}>
         <Banner
           variant="danger"
           title={props.t('banner.backendOffline')}
-          message={props.t('banner.lastOk', { value: formatRelativeTime(props.lastBackendOkAtUnixMs) })}
+          message={backendMessage()}
           actions={
-            <Button size="xs" variant="secondary" onClick={props.retryBackend}>
+            <Button size="xs" variant="secondary" aria-keyshortcuts="R" onClick={props.retryBackend}>
               {props.t('banner.retry')}
             </Button>
           }

@@ -26,7 +26,7 @@ export default function InstanceCardActions(props: InstanceCardActionsProps) {
   } = props as any
 
   return (
-    <div class="relative z-10 mt-3 flex flex-wrap items-center justify-between gap-2">
+    <div class="relative z-10 mt-3 flex flex-wrap items-start justify-between gap-2">
       <InstanceRunActions
         i={i}
         instanceDisplayName={instanceDisplayName}
@@ -41,15 +41,17 @@ export default function InstanceCardActions(props: InstanceCardActionsProps) {
         t={t}
         toastError={toastError}
       />
-      <InstanceQuickActions
-        i={i}
-        isReadOnly={isReadOnly}
-        openEditModal={openEditModal}
-        openFileInFiles={openFileInFiles}
-        openInFiles={openInFiles}
-        setConfirmDeleteInstanceId={setConfirmDeleteInstanceId}
-        t={t}
-      />
+      <div class="ml-auto">
+        <InstanceQuickActions
+          i={i}
+          isReadOnly={isReadOnly}
+          openEditModal={openEditModal}
+          openFileInFiles={openFileInFiles}
+          openInFiles={openInFiles}
+          setConfirmDeleteInstanceId={setConfirmDeleteInstanceId}
+          t={t}
+        />
+      </div>
     </div>
   )
 }

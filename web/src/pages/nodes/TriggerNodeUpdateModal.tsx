@@ -54,6 +54,10 @@ export default function TriggerNodeUpdateModal(props: TriggerNodeUpdateModalProp
           <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
             {props.t('nodes.updateModal.previewTitle')}
           </div>
+          <div class="mt-2 inline-flex items-center gap-1.5 rounded-md border border-amber-300/70 bg-amber-100/80 px-2 py-1 text-[11px] font-semibold text-amber-900 dark:border-amber-800/55 dark:bg-amber-950/45 dark:text-amber-200">
+            <span aria-hidden="true">!</span>
+            <span>{props.mode === 'batch' ? props.t('nodes.updateModal.descBatch') : props.t('nodes.updateModal.descSingle')}</span>
+          </div>
 
           <Show when={props.mode === 'single'} fallback={<div class="mt-2 text-[11px]">{props.t('nodes.updateModal.nodesCount', { count: props.targets.length })}</div>}>
             <Show when={props.targets[0]}>

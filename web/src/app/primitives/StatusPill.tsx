@@ -1,7 +1,7 @@
 function statusDotClass(state: { loading: boolean; error: boolean }) {
-  if (state.loading) return 'bg-slate-600 animate-pulse'
   if (state.error) return 'bg-rose-500'
-  return 'bg-emerald-400'
+  if (state.loading) return 'bg-amber-500 animate-pulse'
+  return 'bg-emerald-500'
 }
 
 export function StatusPill(props: {
@@ -10,11 +10,10 @@ export function StatusPill(props: {
   state: { loading: boolean; error: boolean }
 }) {
   return (
-    <div class="flex items-center gap-2 rounded-full border border-slate-200 bg-white/60 px-2.5 py-1 shadow-sm backdrop-blur-sm dark:border-slate-800 dark:bg-slate-950/60">
+    <div class="motion-surface flex items-center gap-2 rounded-full border border-slate-200/90 bg-white/76 px-2.5 py-1 shadow-sm backdrop-blur dark:border-slate-800 dark:bg-slate-950/58 dark:shadow-none">
       <span class={`h-1.5 w-1.5 rounded-full ${statusDotClass(props.state)}`} />
-      <span class="font-display text-[11px] tracking-wide text-slate-600 dark:text-slate-300">{props.label}</span>
-      <span class="font-mono text-[11px] text-slate-500">{props.status}</span>
+      <span class="font-display text-[11px] font-semibold tracking-wide text-slate-700 dark:text-slate-200">{props.label}</span>
+      <span class="font-mono text-[11px] text-slate-600 dark:text-slate-300">{props.status}</span>
     </div>
   )
 }
-

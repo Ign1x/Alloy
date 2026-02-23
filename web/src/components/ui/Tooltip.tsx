@@ -123,7 +123,7 @@ export function Tooltip(props: TooltipProps) {
           <div
             ref={(el) => (tooltipEl = el)}
             class={cn(
-              'pointer-events-none fixed z-[20000] w-max max-w-[240px] rounded-xl border border-slate-200 bg-white/90 px-2.5 py-1.5 text-[11px] leading-snug text-slate-700 shadow-2xl shadow-slate-900/10 transition-all duration-150 dark:border-slate-800 dark:bg-slate-950/90 dark:text-slate-200',
+              'pointer-events-none fixed z-[var(--z-tooltip)] w-max max-w-[240px] rounded-xl border border-slate-200 bg-white/90 px-2.5 py-1.5 text-[11px] leading-snug text-slate-700 shadow-2xl shadow-slate-900/10 transition-all duration-150 dark:border-slate-700 dark:bg-slate-900/96 dark:text-slate-100',
               tooltipStateClass(),
             )}
             style={{

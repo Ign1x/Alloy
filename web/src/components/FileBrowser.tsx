@@ -1,5 +1,6 @@
 import { createEffect, createMemo, createSignal, For, Show } from 'solid-js'
 import type { I18nTranslate } from '../app/i18n'
+import type { ToastVariant } from '../app/types'
 import { isAlloyApiError, rspc } from '../rspc'
 import { Badge } from './ui/Badge'
 import { cn } from './ui/cn'
@@ -167,6 +168,8 @@ export type FileBrowserProps = {
   onOpenSettings?: () => void
   rootPath?: string
   rootLabel?: string
+  titleLevel?: 'page' | 'section'
+  onToast?: (variant: ToastVariant, title: string, message?: string) => void
   class?: string
 }
 
@@ -416,13 +419,19 @@ export function FileBrowser(props: FileBrowserProps) {
   async function copyPath(pathValue: string) {
     try {
       await navigator.clipboard.writeText(pathValue)
-    } catch {}
+      props.onToast?.('success', props.t('toast.copied'), props.t('fileBrowser.copiedPath'))
+    } catch {
+      props.onToast?.('error', props.t('common.copyFailed'))
+    }
   }
 
   async function copyPreviewText() {
     try {
       await navigator.clipboard.writeText(fileText.data?.text ?? '')
-    } catch {}
+      props.onToast?.('success', props.t('toast.copied'), props.t('fileBrowser.copiedFile'))
+    } catch {
+      props.onToast?.('error', props.t('common.copyFailed'))
+    }
   }
 
   async function copySelectedLine() {
@@ -432,15 +441,18 @@ export function FileBrowser(props: FileBrowserProps) {
     if (line == null) return
     try {
       await navigator.clipboard.writeText(line)
-    } catch {}
+      props.onToast?.('success', props.t('toast.copied'), props.t('fileBrowser.copiedLine'))
+    } catch {
+      props.onToast?.('error', props.t('common.copyFailed'))
+    }
   }
 
   return (
-    <div class={cn('flex min-h-0 flex-1 flex-col md:flex-row', props.class)}>
-      <aside class="flex w-full flex-none flex-col border-b border-slate-200 bg-white/60 dark:border-slate-800 dark:bg-slate-950/60 md:w-[360px] md:border-b-0 md:border-r max-h-[50vh] md:max-h-none">
-          <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-white/60 px-4 py-3 dark:border-slate-800 dark:bg-slate-950/60">
-            <div class="min-w-0">
-              <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">{props.title ?? props.t('fileBrowser.title')}</div>
+    <div class={cn('flex min-h-0 flex-1 flex-col gap-3 md:flex-row', props.class)}>
+      <aside class="surface-glass flex w-full flex-none flex-col border-b md:w-[372px] md:border-b-0 md:border-r max-h-[52vh] md:max-h-none">
+          <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200/90 bg-white/76 px-4 py-3 dark:border-slate-800 dark:bg-slate-950/58">
+              <div class="min-w-0">
+              <div class={props.titleLevel === 'page' ? 'text-page-title' : 'text-section-title'}>{props.title ?? props.t('fileBrowser.title')}</div>
               <div class="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400">
                 <Show when={lastRefreshAt()}>
                   {(timeValue) => <span>{props.t('fileBrowser.updatedAt', { value: formatRelativeTime(timeValue(), props.t) })}</span>}
@@ -527,11 +539,11 @@ export function FileBrowser(props: FileBrowserProps) {
             </div>
           </div>
 
-          <div class="border-b border-slate-200 bg-white/50 px-4 py-3 dark:border-slate-800 dark:bg-slate-950/40">
+          <div class="border-b border-slate-200/90 bg-white/74 px-4 py-3 dark:border-slate-800 dark:bg-slate-950/56">
             <div class="flex flex-wrap items-center gap-1 text-[12px] text-slate-600 dark:text-slate-300">
               <button
                 type="button"
-                class="rounded-lg px-2 py-1 hover:bg-slate-100 dark:hover:bg-slate-900/60"
+                class="ring-focus motion-surface rounded-lg px-2 py-1 hover:bg-slate-100/85 dark:hover:bg-slate-900/70"
                 onClick={() => navigate(rootPath())}
               >
                 {props.rootLabel ?? (rootPath() ? rootPath() : '/data')}
@@ -542,7 +554,7 @@ export function FileBrowser(props: FileBrowserProps) {
                     <span class="text-slate-400">/</span>
                     <button
                       type="button"
-                      class="rounded-lg px-2 py-1 hover:bg-slate-100 dark:hover:bg-slate-900/60"
+                      class="ring-focus motion-surface rounded-lg px-2 py-1 hover:bg-slate-100/85 dark:hover:bg-slate-900/70"
                       onClick={() => navigate(b.path)}
                       title={b.path}
                     >
@@ -569,11 +581,11 @@ export function FileBrowser(props: FileBrowserProps) {
                 rightIcon={
                   <button
                     type="submit"
-                    class={cn(
-                      'rounded-lg p-1.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/35 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:focus-visible:ring-amber-400/35 dark:focus-visible:ring-offset-slate-950',
-                      canNavigateToDraft()
-                        ? 'hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-900/60 dark:hover:text-slate-200'
-                        : '',
+                      class={cn(
+                        'ring-focus motion-surface rounded-lg p-1.5 disabled:cursor-not-allowed disabled:opacity-40',
+                        canNavigateToDraft()
+                          ? 'hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-900/60 dark:hover:text-slate-200'
+                          : '',
                     )}
                     disabled={!canNavigateToDraft()}
                     aria-label={props.t('fileBrowser.go')}
@@ -592,15 +604,15 @@ export function FileBrowser(props: FileBrowserProps) {
             </form>
           </div>
 
-          <div class="min-h-0 flex-1 overflow-auto p-2">
-            <div class="grid grid-cols-[1fr_110px_120px] gap-1 px-2 py-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-              <button type="button" class="text-left hover:text-slate-700 dark:hover:text-slate-200" onClick={() => toggleSort('name')}>
+          <div class="min-h-0 flex-1 overflow-auto p-2 md:p-3">
+            <div class="grid grid-cols-[1fr_96px_92px] gap-1 px-2 py-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 sm:grid-cols-[1fr_110px_120px]">
+              <button type="button" class="ring-focus motion-surface rounded-md px-1 text-left hover:text-slate-700 dark:hover:text-slate-200" onClick={() => toggleSort('name')}>
                 {props.t('fileBrowser.columnName')} {sortKey() === 'name' ? (sortDir() === 'asc' ? '▲' : '▼') : ''}
               </button>
-              <button type="button" class="text-right hover:text-slate-700 dark:hover:text-slate-200" onClick={() => toggleSort('size')}>
+              <button type="button" class="ring-focus motion-surface rounded-md px-1 text-right hover:text-slate-700 dark:hover:text-slate-200" onClick={() => toggleSort('size')}>
                 {props.t('fileBrowser.columnSize')} {sortKey() === 'size' ? (sortDir() === 'asc' ? '▲' : '▼') : ''}
               </button>
-              <button type="button" class="text-right hover:text-slate-700 dark:hover:text-slate-200" onClick={() => toggleSort('modified')}>
+              <button type="button" class="ring-focus motion-surface rounded-md px-1 text-right hover:text-slate-700 dark:hover:text-slate-200" onClick={() => toggleSort('modified')}>
                 {props.t('fileBrowser.columnModified')} {sortKey() === 'modified' ? (sortDir() === 'asc' ? '▲' : '▼') : ''}
               </button>
             </div>
@@ -614,6 +626,7 @@ export function FileBrowser(props: FileBrowserProps) {
               hasData={sortedEntries().length > 0}
               empty={sortedEntries().length === 0}
               emptyTitle={props.t('fileBrowser.emptyDirectory')}
+              emptyDescription={props.t('fileBrowser.emptyDirectoryHint')}
               emptyActions={
                 <IconButton type="button" label={props.t('fileBrowser.refresh')} variant="secondary" onClick={() => fsList.refetch()}>
                   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
@@ -643,10 +656,10 @@ export function FileBrowser(props: FileBrowserProps) {
                     return (
                       <button
                         type="button"
-                        class={`grid w-full grid-cols-[1fr_110px_120px] items-center gap-1 rounded-xl px-2 py-2 text-left text-[12px] transition-colors ${
+                        class={`ring-focus motion-surface grid w-full grid-cols-[1fr_96px_92px] items-center gap-1 rounded-xl px-2 py-2 text-left text-[12px] sm:grid-cols-[1fr_110px_120px] ${
                           isSelected()
-                            ? 'bg-amber-500/10 ring-1 ring-inset ring-amber-500/20'
-                            : 'hover:bg-slate-100 dark:hover:bg-slate-900/60'
+                            ? 'bg-amber-500/12 ring-1 ring-inset ring-amber-500/25'
+                            : 'hover:bg-slate-100/86 dark:hover:bg-slate-900/70'
                         }`}
                         onClick={() => {
                           if (e.is_dir) {
@@ -695,27 +708,27 @@ export function FileBrowser(props: FileBrowserProps) {
           </div>
       </aside>
 
-      <section class="min-w-0 flex-1 overflow-hidden bg-transparent p-4">
-        <div class="mx-auto flex h-full w-full max-w-[min(72rem,92%)] flex-col">
+      <section class="surface-glass min-w-0 flex-1 overflow-hidden p-3 md:p-4">
+        <div class="mx-auto flex h-full w-full max-w-[min(76rem,96%)] flex-col">
           <Show
             when={selectedFile()}
             fallback={
               <div class="flex flex-1 items-center justify-center">
-                <EmptyState title={props.t('fileBrowser.selectFile')} />
+                <EmptyState title={props.t('fileBrowser.selectFile')} description={props.t('fileBrowser.selectFileHint')} />
               </div>
             }
           >
             {(file) => (
             <div class="flex min-h-0 flex-1 flex-col gap-3">
-                <div class="flex flex-wrap items-start justify-between gap-3 rounded-2xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
+                <div class="surface-card flex flex-wrap items-start justify-between gap-3 p-4">
                   <div class="min-w-0">
                     <div class="truncate font-mono text-sm font-semibold text-slate-900 dark:text-slate-100">{selectedFileName()}</div>
-                    <div class="mt-1 truncate font-mono text-[11px] text-slate-500 dark:text-slate-400" title={file()}>
+                    <div class="mt-1 truncate font-mono text-[11px] text-slate-600 dark:text-slate-300" title={file()}>
                       {file()}
                     </div>
                     <Show when={!selectedIsLog() && fileText.data}>
                       {(d) => (
-                        <div class="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400">
+                        <div class="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-slate-600 dark:text-slate-300">
                           <Badge variant="neutral">{formatBytes(d().size_bytes)}</Badge>
                           <Show when={d().size_bytes > READ_LIMIT}>
                             <Badge variant="warning">{props.t('fileBrowser.showingFirst', { size: formatBytes(READ_LIMIT) })}</Badge>
@@ -725,7 +738,7 @@ export function FileBrowser(props: FileBrowserProps) {
                       )}
                     </Show>
                     <Show when={selectedIsLog()}>
-                      <div class="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400">
+                      <div class="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-slate-600 dark:text-slate-300">
                         <Badge variant="neutral">{props.t('fileBrowser.logTail')}</Badge>
                         <Show when={logTail.isPending}>
                           <Badge variant="neutral">{props.t('fileBrowser.statusLoading')}</Badge>
@@ -771,11 +784,13 @@ export function FileBrowser(props: FileBrowserProps) {
                     <LogViewer
                       t={props.t}
                       title={props.t('fileBrowser.tailTitle')}
+                      titleLevel="section"
                       lines={logLines()}
                       loading={logTail.isPending}
                       live={logLive()}
                       onLiveChange={setLogLive}
                       onClear={() => setLogLines([])}
+                      onToast={props.onToast}
                       storageKey={`alloy.filelog.${file()}`}
                       class="min-h-0 flex-1"
                     />
@@ -784,7 +799,7 @@ export function FileBrowser(props: FileBrowserProps) {
 
                 <Show when={!selectedIsLog()}>
                   <Show when={fileText.isPending}>
-                    <div class="rounded-2xl border border-slate-200 bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
+                    <div class="surface-card p-4">
                       <Skeleton lines={8} />
                     </div>
                   </Show>
@@ -799,7 +814,7 @@ export function FileBrowser(props: FileBrowserProps) {
                             <ErrorState t={props.t} error={fileText.error} title={props.t('fileBrowser.errorReadFileTitle')} onRetry={() => fileText.refetch()} />
                             <Show when={fileErrorSuggestion(fileText.error, props.t)}>
                               {(s) => (
-                                <div class="rounded-2xl border border-slate-200 bg-white/70 p-4 text-[12px] text-slate-700 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-200 dark:shadow-none">
+                                <div class="surface-card p-4 text-[12px] text-slate-700 dark:text-slate-200">
                                   <div class="text-sm font-semibold">{s().title}</div>
                                   <ul class="mt-2 list-disc space-y-1 pl-5 text-slate-600 dark:text-slate-300">
                                     <For each={s().hints}>{(h) => <li>{h}</li>}</For>
@@ -815,8 +830,8 @@ export function FileBrowser(props: FileBrowserProps) {
                     }
                   >
                     <Show when={fileText.data?.text != null}>
-                      <div class="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white/70 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
-                        <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-white/50 px-3 py-2 dark:border-slate-800 dark:bg-slate-950/30">
+                      <div class="surface-card flex min-h-0 flex-1 flex-col overflow-hidden">
+                        <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200/90 bg-white/74 px-3 py-2 dark:border-slate-800 dark:bg-slate-950/56">
                           <form
                             class="flex items-center gap-2"
                             onSubmit={(e) => {
@@ -834,7 +849,7 @@ export function FileBrowser(props: FileBrowserProps) {
                                 <button
                                   type="submit"
                                   class={cn(
-                                    'rounded-lg p-1.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/35 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:focus-visible:ring-amber-400/35 dark:focus-visible:ring-offset-slate-950',
+                                    'ring-focus motion-surface rounded-lg p-1.5 disabled:cursor-not-allowed disabled:opacity-40',
                                     !goLineInvalid() && goLineDraft().trim()
                                       ? 'hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-900/60 dark:hover:text-slate-200'
                                       : '',
@@ -867,7 +882,7 @@ export function FileBrowser(props: FileBrowserProps) {
                               <path d="M8.75 6A2.75 2.75 0 006 8.75v6.5A2.75 2.75 0 008.75 18h5.5A2.75 2.75 0 0017 15.25v-6.5A2.75 2.75 0 0014.25 6h-5.5z" />
                             </svg>
                           </IconButton>
-                          <div class="font-mono text-[11px] text-slate-500 dark:text-slate-400">
+                          <div class="font-mono text-[11px] text-slate-600 dark:text-slate-300">
                             {props.t('fileBrowser.lineCount', { count: fileLines().length })}
                           </div>
                         </div>

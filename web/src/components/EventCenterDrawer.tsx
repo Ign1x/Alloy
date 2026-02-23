@@ -1,4 +1,4 @@
-import { Bell, RotateCw } from 'lucide-solid'
+import { AlertTriangle, Bell, CheckCircle2, Info, RotateCw } from 'lucide-solid'
 import { For, Show, createMemo } from 'solid-js'
 
 import { safeCopy } from '../app/helpers/misc'
@@ -44,6 +44,12 @@ function variantLabel(t: I18nTranslate, item: Toast): string {
   if (item.variant === 'error') return t('eventCenter.level.error')
   if (item.variant === 'success') return t('eventCenter.level.success')
   return t('eventCenter.level.info')
+}
+
+function variantIcon(item: Toast) {
+  if (item.variant === 'error') return <AlertTriangle class="h-4 w-4 text-rose-600 dark:text-rose-300" />
+  if (item.variant === 'success') return <CheckCircle2 class="h-4 w-4 text-emerald-600 dark:text-emerald-300" />
+  return <Info class="h-4 w-4 text-slate-600 dark:text-slate-300" />
 }
 
 export default function EventCenterDrawer(props: EventCenterDrawerProps) {
@@ -112,7 +118,8 @@ export default function EventCenterDrawer(props: EventCenterDrawerProps) {
                 <div class={`rounded-xl border p-3 ${item.isRead ? 'border-slate-200 bg-white/70 dark:border-slate-800 dark:bg-slate-950/60' : 'border-amber-200 bg-amber-50/70 dark:border-amber-900/50 dark:bg-amber-950/20'}`}>
                   <div class="flex items-start justify-between gap-2">
                     <div class="min-w-0">
-                    <div class="flex flex-wrap items-center gap-1.5">
+                      <div class="flex flex-wrap items-center gap-1.5">
+                        <span aria-hidden="true">{variantIcon(item)}</span>
                         <Badge variant={variantBadge(item)}>{variantLabel(props.t, item)}</Badge>
                         <Badge variant="neutral">{contextLabel(props.t, item)}</Badge>
                         <Show when={(item.count ?? 1) > 1}>
@@ -142,7 +149,7 @@ export default function EventCenterDrawer(props: EventCenterDrawerProps) {
                     </Show>
 
                     <Show when={item.retry?.key}>
-                      <Button size="xs" variant="secondary" leftIcon={<RotateCw class="h-3.5 w-3.5" />} onClick={() => void retry(item)}>
+                      <Button size="xs" variant="secondary" aria-keyshortcuts="R" leftIcon={<RotateCw class="h-3.5 w-3.5" />} onClick={() => void retry(item)}>
                         {props.t('eventCenter.retry')}
                       </Button>
                     </Show>

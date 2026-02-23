@@ -187,7 +187,7 @@ export function downloadJobPercent(job: DownloadJob): number | null {
 
 export function downloadJobStatusVariant(state: DownloadJobState): 'warning' | 'neutral' | 'success' | 'danger' {
   if (state === 'running') return 'warning'
-  if (state === 'queued' || state === 'paused') return 'neutral'
+  if (state === 'queued' || state === 'paused' || state === 'canceled') return 'neutral'
   if (state === 'success') return 'success'
   return 'danger'
 }

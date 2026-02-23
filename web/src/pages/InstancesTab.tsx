@@ -11,6 +11,7 @@ export default function InstancesTab(props: InstancesTabProps) {
   const { tab, t } = props as any
   const panelProps = props as any
   let createInstanceNameEl: HTMLInputElement | undefined
+  let focusCreateEntry: (() => void) | undefined
 
   return (
     <Show when={tab() === 'instances'}>
@@ -22,9 +23,18 @@ export default function InstancesTab(props: InstancesTabProps) {
             setCreateInstanceNameRef={(el: HTMLInputElement) => {
               createInstanceNameEl = el
             }}
+            setFocusCreateEntry={(fn: () => void) => {
+              focusCreateEntry = fn
+            }}
           />
         }
-        right={<InstancesGridPanel {...panelProps} getCreateInstanceNameRef={() => createInstanceNameEl} />}
+        right={
+          <InstancesGridPanel
+            {...panelProps}
+            getCreateInstanceNameRef={() => createInstanceNameEl}
+            focusCreateEntry={() => focusCreateEntry?.()}
+          />
+        }
       />
     </Show>
   )

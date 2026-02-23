@@ -76,3 +76,18 @@ export function formatDateTime(unixMs: number | null | undefined): string {
     return '—'
   }
 }
+
+export function parseIsoDateTimeMs(value: string | null | undefined): number | null {
+  if (!value) return null
+  const ts = Date.parse(value)
+  if (!Number.isFinite(ts) || ts <= 0) return null
+  return ts
+}
+
+export function formatDateTimeFromIso(value: string | null | undefined): string {
+  return formatDateTime(parseIsoDateTimeMs(value))
+}
+
+export function formatRelativeTimeFromIso(value: string | null | undefined): string {
+  return formatRelativeTime(parseIsoDateTimeMs(value))
+}

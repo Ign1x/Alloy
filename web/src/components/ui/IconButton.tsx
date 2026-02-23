@@ -17,15 +17,15 @@ export function IconButton(props: IconButtonProps) {
   const size = () => local.size ?? 'sm'
 
   const base =
-    'inline-flex items-center justify-center rounded-xl border shadow-sm transition-all duration-150 active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/35 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:shadow-none dark:focus-visible:ring-amber-400/35 dark:focus-visible:ring-offset-slate-950'
+    'ring-focus motion-surface motion-pop inline-flex items-center justify-center rounded-xl border shadow-sm hover:-translate-y-0.5 hover:shadow-md active:translate-y-0 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none disabled:hover:translate-y-0 dark:shadow-none'
 
   const variants: Record<IconButtonVariant, string> = {
     secondary:
-      'border-slate-200 bg-white/70 text-slate-700 hover:bg-white dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:hover:bg-slate-900',
+      'border-slate-200/90 bg-white/78 text-slate-700 hover:bg-white dark:border-slate-800 dark:bg-slate-950/62 dark:text-slate-200 dark:hover:bg-slate-900/90',
     ghost:
-      'border-transparent bg-transparent text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-900/60',
+      'border-transparent bg-transparent text-slate-600 shadow-none hover:bg-slate-100/85 hover:shadow-none dark:text-slate-300 dark:hover:bg-slate-900/65',
     danger:
-      'border-rose-200 bg-rose-50 text-rose-800 hover:bg-rose-100 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-200 dark:hover:bg-rose-950/30',
+      'border-rose-300/70 bg-gradient-to-b from-rose-100 to-rose-200/85 text-rose-800 dark:border-rose-900/50 dark:from-rose-950/35 dark:to-rose-950/55 dark:text-rose-200',
   }
 
   const sizes: Record<IconButtonSize, string> = {

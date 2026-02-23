@@ -19,20 +19,20 @@ interface AppShellProps {
 
 export default function AppShell(props: AppShellProps) {
   return (
-    <div class="flex h-full">
+    <div class="flex h-full bg-transparent">
       <AppSidebarNav {...props.sidebarNavProps} />
 
       <div class="flex min-w-0 flex-1 flex-col">
         <AppTopHeader {...props.topHeaderProps} />
         <AppMobileDrawer {...props.mobileDrawerProps} />
 
-        <main class="relative flex min-h-0 flex-1 overflow-hidden">
+        <main class="relative flex min-h-0 flex-1 overflow-hidden px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:px-3 sm:pb-3">
           <Show when={!props.isAuthed}>
             <AppAuthOverlay {...props.authOverlayProps} />
           </Show>
 
           <div class={`flex min-h-0 flex-1 flex-col ${!props.isAuthed ? 'pointer-events-none blur-sm grayscale opacity-50' : ''}`}>
-            <div class="flex-none px-4 pt-4">
+            <div class="flex-none px-2 pt-3 sm:px-3 sm:pt-4">
               <AppStatusBanners {...props.statusBannersProps} />
             </div>
 

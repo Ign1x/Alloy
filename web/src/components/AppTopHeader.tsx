@@ -10,6 +10,7 @@ import { Badge } from './ui/Badge'
 import { Button } from './ui/Button'
 import { IconButton } from './ui/IconButton'
 import { ensureCsrfCookie } from '../auth'
+import { formatDateTime } from '../app/helpers/format'
 
 type AuthUser = { username: string; is_admin: boolean } | null
 
@@ -215,7 +216,7 @@ export default function AppTopHeader(props: AppTopHeaderProps) {
   }
 
   return (
-    <header class="relative z-50 flex h-14 flex-none items-center justify-between border-b border-slate-200 bg-white/70 px-5 backdrop-blur dark:border-slate-800 dark:bg-slate-950/70">
+    <header class="surface-glass relative z-50 mx-2 mt-2 flex h-14 flex-none items-center justify-between border-b px-3 sm:mx-3 sm:mt-3 sm:px-5">
       <div class="flex items-center gap-4">
         <IconButton label={props.t('header.openMenu')} class="sm:hidden" variant="secondary" onClick={() => props.setMobileNavOpen(true)}>
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
@@ -234,31 +235,35 @@ export default function AppTopHeader(props: AppTopHeaderProps) {
           </div>
         </div>
 
-        <div class="hidden md:flex items-center gap-2 text-[11px] text-slate-500">
+        <div class="hidden sm:flex items-center gap-2 text-[11px] text-slate-500">
           <StatusPill
             label={props.t('status.backend')}
             state={{ loading: props.backendPending, error: props.backendError }}
-            status={props.backendError ? props.t('status.offline') : props.backendPending ? '...' : props.t('status.ok')}
+            status={props.backendError ? props.t('status.offline') : props.backendPending ? props.t('status.loading') : props.t('status.ok')}
           />
         </div>
       </div>
 
       <div class="flex items-center gap-3">
-        <Show when={import.meta.env.MODE !== 'production'}>
-          <Badge variant="warning" title={props.t('header.environment')}>
-            {import.meta.env.MODE.toUpperCase()}
-          </Badge>
-        </Show>
-        <Show when={props.isReadOnly}>
-          <Badge variant="danger" title={props.t('header.readOnlyMode')}>
-            {props.t('header.readOnlyBadge')}
-          </Badge>
+        <Show when={import.meta.env.MODE !== 'production' || props.isReadOnly}>
+          <div class="hidden items-center gap-1.5 sm:inline-flex">
+            <Show when={import.meta.env.MODE !== 'production'}>
+              <Badge variant="warning" title={props.t('header.environment')}>
+                {import.meta.env.MODE.toUpperCase()}
+              </Badge>
+            </Show>
+            <Show when={props.isReadOnly}>
+              <Badge variant="danger" title={props.t('header.readOnlyMode')}>
+                {props.t('header.readOnlyBadge')}
+              </Badge>
+            </Show>
+          </div>
         </Show>
 
         <div class="relative" ref={(el) => (languageMenuRoot = el)}>
           <button
             type="button"
-            class="group inline-flex h-9 min-w-9 items-center justify-center gap-1.5 rounded-2xl border border-slate-200 bg-white/70 px-2.5 text-xs font-semibold text-slate-700 shadow-sm transition-all hover:bg-white hover:shadow dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:hover:bg-slate-900"
+            class="ring-focus motion-surface motion-pop group inline-flex h-9 min-w-9 items-center justify-center gap-1.5 rounded-2xl border border-slate-200/90 bg-white/78 px-2.5 text-xs font-semibold text-slate-700 shadow-sm hover:-translate-y-0.5 hover:bg-white hover:shadow-md dark:border-slate-800 dark:bg-slate-950/62 dark:text-slate-200 dark:hover:bg-slate-900/90"
             title={`${props.t('header.language')}: ${currentLocaleLabel()}`}
             aria-label={`${props.t('header.language')}: ${currentLocaleLabel()}`}
             onPointerDown={(event) => event.stopPropagation()}
@@ -279,20 +284,20 @@ export default function AppTopHeader(props: AppTopHeaderProps) {
 
           <Show when={showLanguageMenu()}>
             <div
-              class="absolute right-0 top-10 z-[9999] mt-1 w-56 overflow-hidden rounded-2xl border border-slate-200 bg-white/95 p-1.5 shadow-2xl shadow-slate-900/10 backdrop-blur dark:border-slate-800 dark:bg-slate-950/95"
+              class="surface-glass motion-enter-pop absolute right-0 top-10 z-[var(--z-popover)] mt-1 w-[min(92vw,14rem)] overflow-hidden p-1.5 shadow-2xl shadow-slate-900/12"
               onPointerDown={(event) => event.stopPropagation()}
             >
-              <div class="px-2 pb-1 pt-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">{props.t('header.language')}</div>
+              <div class="text-kicker px-2 pb-1 pt-0.5">{props.t('header.language')}</div>
               <For each={props.localeOptions}>
                 {(opt) => {
                   const active = () => opt.value === props.locale
                   return (
                     <button
                       type="button"
-                      class={`group flex w-full items-center justify-between rounded-xl px-2.5 py-2 text-left text-sm transition-all ${
+                      class={`ring-focus motion-surface group flex w-full items-center justify-between rounded-xl px-2.5 py-2 text-left text-sm font-medium ${
                         active()
-                          ? 'bg-amber-500/10 text-slate-900 ring-1 ring-inset ring-amber-500/25 dark:bg-amber-500/15 dark:text-slate-100 dark:ring-amber-500/35'
-                          : 'text-slate-700 hover:bg-slate-100/80 dark:text-slate-200 dark:hover:bg-slate-900/60'
+                          ? 'bg-amber-500/12 text-slate-900 ring-1 ring-inset ring-amber-500/30 dark:bg-amber-500/18 dark:text-slate-100 dark:ring-amber-500/40'
+                          : 'text-slate-700 hover:bg-slate-100/85 dark:text-slate-200 dark:hover:bg-slate-900/72'
                       }`}
                       onClick={() => {
                         props.setLocale(opt.value)
@@ -303,7 +308,7 @@ export default function AppTopHeader(props: AppTopHeaderProps) {
                         <span
                           class={`inline-flex h-5 min-w-5 items-center justify-center rounded-md px-1 text-[10px] font-bold ring-1 ring-inset ${
                             active()
-                              ? 'bg-amber-500/20 text-amber-900 ring-amber-500/30 dark:bg-amber-500/25 dark:text-amber-100 dark:ring-amber-500/40'
+                              ? 'bg-amber-500/24 text-amber-900 ring-amber-500/35 dark:bg-amber-500/28 dark:text-amber-100 dark:ring-amber-500/45'
                               : 'bg-slate-100 text-slate-600 ring-slate-200 dark:bg-slate-900 dark:text-slate-300 dark:ring-slate-700'
                           }`}
                         >
@@ -331,8 +336,9 @@ export default function AppTopHeader(props: AppTopHeaderProps) {
         <Show when={props.me?.is_admin}>
           <button
             type="button"
-            class="relative inline-flex h-8 w-8 items-center justify-center rounded-xl border border-slate-200 bg-white/70 text-slate-700 shadow-sm transition-colors hover:bg-white dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:hover:bg-slate-900"
+            class="ring-focus motion-surface motion-pop relative inline-flex h-8 w-8 items-center justify-center rounded-xl border border-slate-200/90 bg-white/78 text-slate-700 shadow-sm hover:-translate-y-0.5 hover:bg-white hover:shadow-md dark:border-slate-800 dark:bg-slate-950/62 dark:text-slate-200 dark:hover:bg-slate-900/90"
             title={hasAnyUpdate() ? props.t('header.updatesAvailable') : props.t('header.updateCenter')}
+            aria-label={hasAnyUpdate() ? props.t('header.updatesAvailable') : props.t('header.updateCenter')}
             onPointerDown={(event) => event.stopPropagation()}
             onClick={() => {
               setShowLanguageMenu(false)
@@ -356,9 +362,10 @@ export default function AppTopHeader(props: AppTopHeaderProps) {
 
         <button
           type="button"
-          class="relative inline-flex h-8 w-8 items-center justify-center rounded-xl border border-slate-200 bg-white/70 text-slate-700 shadow-sm transition-colors hover:bg-white dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:hover:bg-slate-900"
+          class={`ring-focus motion-surface motion-pop relative inline-flex h-8 min-w-8 items-center justify-center rounded-xl border border-slate-200/90 bg-white/78 text-slate-700 shadow-sm hover:-translate-y-0.5 hover:bg-white hover:shadow-md dark:border-slate-800 dark:bg-slate-950/62 dark:text-slate-200 dark:hover:bg-slate-900/90 ${props.eventUnreadCount > 0 ? 'ring-1 ring-amber-500/45 dark:ring-amber-400/45' : ''}`}
           title={props.t('eventCenter.title')}
           aria-label={props.t('eventCenter.title')}
+          aria-haspopup="dialog"
           onPointerDown={(event) => event.stopPropagation()}
           onClick={() => {
             setShowLanguageMenu(false)
@@ -369,6 +376,9 @@ export default function AppTopHeader(props: AppTopHeaderProps) {
         >
           <Bell class="h-4 w-4" strokeWidth={2} />
           <Show when={props.eventUnreadCount > 0}>
+            <span class="sr-only">{props.t('eventCenter.unreadCount', { count: props.eventUnreadCount })}</span>
+          </Show>
+          <Show when={props.eventUnreadCount > 0}>
             <span class="absolute -right-0.5 -top-0.5 inline-flex h-2.5 w-2.5">
               <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400 opacity-75" />
               <span class="relative inline-flex h-2.5 w-2.5 rounded-full bg-amber-500" />
@@ -377,7 +387,8 @@ export default function AppTopHeader(props: AppTopHeaderProps) {
         </button>
 
         <button
-          class="sm:hidden rounded-xl border border-slate-200 bg-white/70 p-2 text-slate-700 shadow-sm transition-colors hover:bg-white dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-300 dark:hover:bg-slate-900"
+          type="button"
+          class="ring-focus motion-surface motion-pop sm:hidden rounded-xl border border-slate-200/90 bg-white/78 p-2 text-slate-700 shadow-sm hover:-translate-y-0.5 hover:bg-white hover:shadow-md dark:border-slate-800 dark:bg-slate-950/62 dark:text-slate-300 dark:hover:bg-slate-900/90"
           title={props.themeButtonTitle}
           onClick={() =>
             props.setThemePref((prev) => (prev === 'system' ? 'light' : prev === 'light' ? 'dark' : 'system'))
@@ -397,7 +408,8 @@ export default function AppTopHeader(props: AppTopHeaderProps) {
             when={props.me}
             fallback={
               <button
-                class="rounded-xl bg-amber-500/10 px-3 py-2 text-xs font-semibold text-amber-800 ring-1 ring-inset ring-amber-500/20 hover:bg-amber-500/15 dark:bg-amber-500/15 dark:text-amber-200 dark:hover:bg-amber-500/20"
+                type="button"
+                class="ring-focus motion-surface motion-pop rounded-xl border border-amber-300/60 bg-gradient-to-b from-amber-200/85 via-amber-300/85 to-amber-400/90 px-3 py-2 text-xs font-semibold text-amber-950 shadow-sm hover:-translate-y-0.5 hover:shadow-md dark:border-amber-500/45 dark:from-amber-500/55 dark:via-amber-500/65 dark:to-amber-600/70 dark:text-amber-100"
                 onClick={props.openLoginModal}
               >
                 {props.t('header.initializeSession')}
@@ -439,16 +451,16 @@ export default function AppTopHeader(props: AppTopHeaderProps) {
 
               <Show when={props.showUpdateCenter}>
                 <Portal>
-                  <div class="fixed inset-0 z-[9998]" onPointerDown={() => props.setShowUpdateCenter(false)}>
+                  <div class="fixed inset-0 z-[var(--z-popover)]" onPointerDown={() => props.setShowUpdateCenter(false)}>
                     <div
-                      class="motion-enter-pop motion-surface absolute right-5 top-14 mt-2 w-[min(92vw,32rem)] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-900/10 backdrop-blur dark:border-slate-800 dark:bg-slate-950"
+                      class="surface-glass motion-enter-pop absolute right-3 top-13 mt-2 w-[min(94vw,32rem)] overflow-hidden shadow-2xl shadow-slate-900/12 sm:right-5 sm:top-14"
                       onPointerDown={(event) => event.stopPropagation()}
                     >
-                      <div class="border-b border-slate-200 px-3 py-2.5 dark:border-slate-800">
+                      <div class="border-b border-slate-200/90 px-3 py-2.5 dark:border-slate-800">
                         <div class="flex items-start justify-between gap-2">
                           <div>
                             <div class="text-sm font-semibold text-slate-900 dark:text-slate-100">{props.t('header.updateCenterTitle')}</div>
-                            <div class="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">{props.t('header.updateCenterDesc')}</div>
+                            <div class="mt-0.5 text-caption">{props.t('header.updateCenterDesc')}</div>
                           </div>
                           <div class="flex flex-wrap items-center justify-end gap-1.5">
                             <Show when={props.updateCheck.isPending || controlUpdateSubmitting() || checkNowSubmitting()}>
@@ -476,19 +488,19 @@ export default function AppTopHeader(props: AppTopHeaderProps) {
 
                       <div class="max-h-[70vh] overflow-auto p-3">
                         <div class="space-y-3">
-                          <div class="motion-surface motion-enter rounded-xl border border-slate-200 bg-white/70 p-3 dark:border-slate-800 dark:bg-slate-950/40">
+                          <div class="surface-card motion-enter rounded-xl p-3">
                             <div class="flex items-center justify-between gap-2">
-                              <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">{props.t('header.control')}</div>
+                              <div class="text-kicker">{props.t('header.control')}</div>
                               <Badge variant={hasControlUpdate() ? 'warning' : 'success'}>
                                 {hasControlUpdate() ? props.t('header.updateAvailable') : props.t('header.upToDate')}
                               </Badge>
                             </div>
-                            <div class="mt-1 text-xs text-slate-600 dark:text-slate-300">
+                            <div class="mt-1 text-xs text-slate-700 dark:text-slate-200">
                               {props.t('header.current')} <span class="font-mono">{props.controlVersion ?? '—'}</span>
                             </div>
                             <Show when={props.updateCheck.data?.latest}>
                               {(latest) => (
-                                <div class="mt-1 text-xs text-slate-600 dark:text-slate-300">
+                                <div class="mt-1 text-xs text-slate-700 dark:text-slate-200">
                                   {props.t('header.latest')}{' '}
                                   <a
                                     href={latest().url}
@@ -503,16 +515,16 @@ export default function AppTopHeader(props: AppTopHeaderProps) {
                             </Show>
                             <Show when={props.updateCheck.data?.latest?.published_at}>
                               {(publishedAt) => (
-                                <div class="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                                <div class="mt-1 text-caption">
                                   {props.t('header.published')} <span class="font-mono">{publishedAt()}</span>
                                 </div>
                               )}
                             </Show>
                           </div>
 
-                          <div class="motion-surface motion-enter rounded-xl border border-slate-200 bg-white/70 p-3 dark:border-slate-800 dark:bg-slate-950/40">
+                          <div class="surface-card motion-enter rounded-xl p-3">
                             <div class="flex items-center justify-between gap-2">
-                              <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">{props.t('header.agent')}</div>
+                              <div class="text-kicker">{props.t('header.agent')}</div>
                               <Badge variant={hasAgentUpdate() ? 'warning' : 'success'}>
                                 {hasAgentUpdate()
                                   ? props.t('header.nodesOutdated', { count: props.agentOutdatedCount })
@@ -521,7 +533,7 @@ export default function AppTopHeader(props: AppTopHeaderProps) {
                             </div>
                             <Show when={props.updateCheck.data?.agent_latest}>
                               {(latest) => (
-                                <div class="mt-1 text-xs text-slate-600 dark:text-slate-300">
+                                <div class="mt-1 text-xs text-slate-700 dark:text-slate-200">
                                   {props.t('header.latest')}{' '}
                                   <a
                                     href={latest().url}
@@ -534,14 +546,14 @@ export default function AppTopHeader(props: AppTopHeaderProps) {
                                 </div>
                               )}
                             </Show>
-                            <div class="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                            <div class="mt-1 text-caption">
                               {props.t('header.nodesManageUpdates', { count: props.agentNodeCount })}
                             </div>
                           </div>
 
                           <Show when={props.updateCheck.data?.source?.kind === 'manifest' ? props.updateCheck.data?.source?.manifest_url : null}>
                             {(manifestUrl) => (
-                              <div class="text-[11px] text-slate-500 dark:text-slate-400">
+                              <div class="text-caption">
                                 {props.t('header.manifestSource')}{' '}
                                 <a
                                   href={manifestUrl()}
@@ -557,15 +569,15 @@ export default function AppTopHeader(props: AppTopHeaderProps) {
 
                           <Show when={effectiveFetchedAtUnixMs()}>
                             {(ts) => (
-                              <div class="text-[11px] text-slate-500 dark:text-slate-400">
-                                {props.t('header.lastCatalogSync')} <span class="font-mono">{new Date(ts()).toISOString()}</span>
+                              <div class="text-caption">
+                                {props.t('header.lastCatalogSync')} <span class="font-mono">{formatDateTime(ts())}</span>
                               </div>
                             )}
                           </Show>
 
                           <Show when={props.updateCheck.data?.compatibility}>
                             {(compat) => (
-                              <div class="rounded-xl border border-slate-200 bg-slate-50 p-3 text-[11px] text-slate-600 dark:border-slate-800 dark:bg-slate-900/40 dark:text-slate-300">
+                              <div class="rounded-xl border border-slate-200/95 bg-slate-50/92 p-3 text-[11px] text-slate-700 dark:border-slate-800 dark:bg-slate-900/45 dark:text-slate-200">
                                 {props.t('header.compatibility')}
                                 <Show when={compat().control_min_agent}>
                                   {(min) => (
@@ -590,14 +602,14 @@ export default function AppTopHeader(props: AppTopHeaderProps) {
 
                           <Show when={props.updateCheck.data?.source?.warning}>
                             {(warning) => (
-                              <div class="rounded-xl border border-amber-200 bg-amber-50 p-3 text-[11px] text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
+                              <div class="rounded-xl border border-amber-200/95 bg-amber-50/94 p-3 text-[11px] text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/35 dark:text-amber-200">
                                 {warning()}
                               </div>
                             )}
                           </Show>
 
                           <Show when={props.updateCheck.isError}>
-                            <div class="rounded-xl border border-rose-200 bg-rose-50 p-3 text-[11px] text-rose-800 dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-200">
+                            <div class="rounded-xl border border-rose-200/95 bg-rose-50/94 p-3 text-[11px] text-rose-900 dark:border-rose-900/60 dark:bg-rose-950/35 dark:text-rose-200">
                               {props.t('header.failedCheckUpdates')}
                             </div>
                           </Show>
@@ -645,14 +657,14 @@ export default function AppTopHeader(props: AppTopHeaderProps) {
                           </div>
 
                           <Show when={props.updateCheck.data && !props.updateCheck.data.can_trigger_update}>
-                            <div class="text-[11px] text-slate-500 dark:text-slate-400">{props.t('header.oneClickWatchtowerHint')}</div>
+                            <div class="text-caption">{props.t('header.oneClickWatchtowerHint')}</div>
                           </Show>
 
                           <Show when={props.updateCheck.data?.latest?.body}>
                             {(body) => (
-                              <details class="rounded-xl border border-slate-200 bg-slate-50 p-3 text-[11px] text-slate-700 dark:border-slate-800 dark:bg-slate-900/40 dark:text-slate-200">
+                              <details class="rounded-xl border border-slate-200/95 bg-slate-50/92 p-3 text-[11px] text-slate-700 dark:border-slate-800 dark:bg-slate-900/45 dark:text-slate-200">
                                 <summary class="cursor-pointer select-none font-medium">{props.t('header.controlReleaseNotes')}</summary>
-                                <pre class="mt-2 max-h-56 overflow-auto whitespace-pre-wrap">{body()}</pre>
+                                <pre class="mt-2 max-h-56 overflow-auto rounded-lg bg-slate-950 px-2.5 py-2 whitespace-pre-wrap text-slate-100">{body()}</pre>
                               </details>
                             )}
                           </Show>
@@ -665,24 +677,24 @@ export default function AppTopHeader(props: AppTopHeaderProps) {
 
               <Show when={props.showAccountMenu}>
                 <Portal>
-                  <div class="fixed inset-0 z-[9999]" onPointerDown={() => props.setShowAccountMenu(false)}>
+                  <div class="fixed inset-0 z-[var(--z-popover)]" onPointerDown={() => props.setShowAccountMenu(false)}>
                     <div
-                      class="absolute right-5 top-14 mt-2 w-56 origin-top-right overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-900/10 backdrop-blur transition-all duration-150 animate-in fade-in zoom-in-95 dark:border-slate-800 dark:bg-slate-950"
+                      class="surface-glass motion-enter-pop absolute right-3 top-13 mt-2 w-[min(92vw,14rem)] origin-top-right overflow-hidden shadow-2xl shadow-slate-900/12 sm:right-5 sm:top-14"
                       onPointerDown={(e) => e.stopPropagation()}
                     >
-                      <div class="border-b border-slate-200 px-3 py-2.5 dark:border-slate-800">
+                      <div class="border-b border-slate-200/90 px-3 py-2.5 dark:border-slate-800">
                         <div class="flex items-center gap-3">
                           <div class="flex h-7 w-7 items-center justify-center rounded-full bg-amber-500/10 text-xs font-semibold text-amber-900 ring-1 ring-inset ring-amber-500/20 dark:bg-amber-500/15 dark:text-amber-100 dark:ring-amber-500/25">
                             {props.me!.username.slice(0, 1).toUpperCase()}
                           </div>
                           <div class="min-w-0">
                             <div class="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">{props.me!.username}</div>
-                            <div class="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+                            <div class="mt-0.5 text-caption">
                               {props.me!.is_admin ? props.t('header.roleAdministrator') : props.t('header.roleUser')}
                             </div>
                             <Show when={props.controlVersion}>
                               {(version) => (
-                                <div class="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+                                <div class="mt-0.5 text-caption">
                                   {props.t('header.control')} <span class="font-mono">v{version()}</span>
                                 </div>
                               )}
@@ -692,7 +704,7 @@ export default function AppTopHeader(props: AppTopHeaderProps) {
                       </div>
                       <button
                         type="button"
-                        class="flex w-full items-center px-3 py-2 text-sm text-slate-700 transition-colors hover:bg-slate-50 active:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-900/50 dark:active:bg-slate-900"
+                        class="ring-focus motion-surface flex w-full items-center px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-900/50"
                         onPointerDown={(e) => e.stopPropagation()}
                         onClick={() => {
                           props.setShowAccountMenu(false)
@@ -704,7 +716,7 @@ export default function AppTopHeader(props: AppTopHeaderProps) {
                       <Show when={props.me?.is_admin}>
                         <button
                           type="button"
-                          class="flex w-full items-center px-3 py-2 text-sm text-slate-700 transition-colors hover:bg-slate-50 active:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-900/50 dark:active:bg-slate-900"
+                          class="ring-focus motion-surface flex w-full items-center px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-900/50"
                           onPointerDown={(e) => e.stopPropagation()}
                           onClick={() => {
                             props.setShowAccountMenu(false)
@@ -716,7 +728,7 @@ export default function AppTopHeader(props: AppTopHeaderProps) {
                       </Show>
                       <button
                         type="button"
-                        class="flex w-full items-center px-3 py-2 text-sm text-slate-700 transition-colors hover:bg-slate-50 active:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-900/50 dark:active:bg-slate-900"
+                        class="ring-focus motion-surface flex w-full items-center px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-900/50"
                         onPointerDown={(e) => e.stopPropagation()}
                         onClick={async () => {
                           props.setShowAccountMenu(false)

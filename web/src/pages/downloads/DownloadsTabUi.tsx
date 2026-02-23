@@ -20,26 +20,27 @@ export function NavItem(props: {
       type="button"
       class={`flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/35 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-50 dark:focus-visible:ring-amber-400/35 dark:focus-visible:ring-offset-slate-950 ${
         active()
-          ? 'bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900'
+          ? 'bg-amber-500/12 text-amber-800 ring-1 ring-inset ring-amber-500/25 dark:text-amber-200'
           : 'text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-900/40'
       }`}
+      aria-current={active() ? 'page' : undefined}
       onClick={() => props.onSelect(props.value)}
     >
       <div class="flex min-w-0 items-center gap-3">
-        <div class={`flex h-6 w-6 flex-none items-center justify-center ${active() ? 'text-white dark:text-slate-900' : 'text-slate-500 dark:text-slate-400'}`}>
+        <div class={`flex h-6 w-6 flex-none items-center justify-center ${active() ? 'text-amber-700 dark:text-amber-300' : 'text-slate-500 dark:text-slate-400'}`}>
           {props.icon}
         </div>
         <div class="min-w-0">
           <div class="truncate font-medium">{props.label}</div>
           <Show when={props.meta}>
-            <div class={`mt-0.5 truncate text-[11px] ${active() ? 'text-white/75 dark:text-slate-700' : 'text-slate-500 dark:text-slate-400'}`}>
+            <div class={`mt-0.5 truncate text-[11px] ${active() ? 'text-amber-800/80 dark:text-amber-300/80' : 'text-slate-500 dark:text-slate-400'}`}>
               {props.meta}
             </div>
           </Show>
         </div>
       </div>
       <Show when={props.right}>
-        <div class={active() ? 'text-white/90 dark:text-slate-700' : 'text-slate-500 dark:text-slate-400'}>{props.right}</div>
+        <div class={active() ? 'text-amber-800/90 dark:text-amber-300/90' : 'text-slate-500 dark:text-slate-400'}>{props.right}</div>
       </Show>
     </button>
   )

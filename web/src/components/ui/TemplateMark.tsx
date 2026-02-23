@@ -129,7 +129,7 @@ export function TemplateMark(props: TemplateMarkProps) {
       role="img"
       aria-label={title()}
       title={title()}
-      class={cn('inline-flex h-9 w-9 flex-none items-center justify-center rounded-xl border shadow-sm dark:shadow-none', meta().class, props.class)}
+      class={cn('inline-flex h-9 w-9 flex-none items-center justify-center rounded-xl border shadow-sm motion-surface dark:shadow-none', meta().class, props.class)}
     >
       {meta().icon}
     </span>

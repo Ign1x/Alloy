@@ -58,13 +58,14 @@ export default function InstanceRunActions(props: InstanceRunActionsProps) {
     })
 
   return (
-    <div class="flex flex-wrap items-center gap-2">
+    <div class="flex min-w-0 flex-wrap items-center gap-2">
       <Show
         when={canStartInstance(i.status)}
         fallback={
           <Button
-            size="xs"
+            size="sm"
             variant="secondary"
+            class="min-w-[6.5rem] h-11 px-4 sm:h-8 sm:px-2.5"
             leftIcon={
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
                 <path d="M5.75 5.75A.75.75 0 016.5 5h7a.75.75 0 01.75.75v8.5a.75.75 0 01-.75.75h-7a.75.75 0 01-.75-.75v-8.5z" />
@@ -103,8 +104,9 @@ export default function InstanceRunActions(props: InstanceRunActionsProps) {
         }
       >
         <Button
-          size="xs"
+          size="sm"
           variant="primary"
+          class="min-w-[6.5rem] h-11 px-4 sm:h-8 sm:px-2.5"
           leftIcon={
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
               <path d="M4.5 3.25a.75.75 0 011.18-.62l10.5 7.25a.75.75 0 010 1.24l-10.5 7.25A.75.75 0 014.5 17.75V3.25z" />
@@ -142,6 +144,7 @@ export default function InstanceRunActions(props: InstanceRunActionsProps) {
         <Button
           size="xs"
           variant="secondary"
+          class="h-11 px-4 sm:h-8 sm:px-2.5"
           leftIcon={
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
               <path

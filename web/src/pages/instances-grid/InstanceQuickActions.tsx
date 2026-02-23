@@ -67,10 +67,10 @@ export default function InstanceQuickActions(props: InstanceQuickActionsProps) {
       </IconButton>
 
       <Show when={open()}>
-        <div class="z-20 w-44 overflow-hidden rounded-2xl border border-slate-200 bg-white/95 p-1 shadow-2xl shadow-slate-900/10 backdrop-blur dark:border-slate-800 dark:bg-slate-950/95" role="menu">
+        <div class="surface-glass motion-enter-pop z-20 w-48 overflow-hidden p-1 shadow-2xl shadow-slate-900/12" role="menu">
           <button
             type="button"
-            class="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-slate-700 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-200 dark:hover:bg-slate-900/50"
+            class="ring-focus motion-surface flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm font-medium text-slate-700 hover:bg-slate-100/88 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-200 dark:hover:bg-slate-900/70"
             title={editDisabledReason()}
             disabled={!canEdit()}
             role="menuitem"
@@ -88,7 +88,7 @@ export default function InstanceQuickActions(props: InstanceQuickActionsProps) {
 
           <button
             type="button"
-            class="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-slate-700 transition-colors hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-900/50"
+            class="ring-focus motion-surface flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm font-medium text-slate-700 hover:bg-slate-100/88 dark:text-slate-200 dark:hover:bg-slate-900/70"
             title={t('instances.actions.openDirectory')}
             role="menuitem"
             onClick={() => {
@@ -105,7 +105,7 @@ export default function InstanceQuickActions(props: InstanceQuickActionsProps) {
           <Show when={i.config.template_id === 'minecraft:vanilla'}>
             <button
               type="button"
-              class="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-slate-700 transition-colors hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-900/50"
+              class="ring-focus motion-surface flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm font-medium text-slate-700 hover:bg-slate-100/88 dark:text-slate-200 dark:hover:bg-slate-900/70"
               title={t('instances.actions.openLatestLog')}
               role="menuitem"
               onClick={() => {
@@ -126,7 +126,7 @@ export default function InstanceQuickActions(props: InstanceQuickActionsProps) {
 
           <button
             type="button"
-            class="mt-0.5 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-rose-700 transition-colors hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-rose-200 dark:hover:bg-rose-950/30"
+            class="ring-focus motion-surface mt-0.5 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm font-medium text-rose-700 hover:bg-rose-50/90 disabled:cursor-not-allowed disabled:opacity-50 dark:text-rose-200 dark:hover:bg-rose-950/35"
             title={deleteDisabledReason()}
             disabled={!canDelete()}
             role="menuitem"

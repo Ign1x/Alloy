@@ -62,6 +62,7 @@ export default function InstancesCreatePanel(props: InstancesCreatePanelProps) {
     setCreateFormError,
     setCreateInstanceNameEl,
     setCreateInstanceNameRef,
+    setFocusCreateEntry,
     setCreateNodeId,
     setCreateNodeSelectEl,
     setCreateSleepSecondsEl,
@@ -91,6 +92,23 @@ export default function InstancesCreatePanel(props: InstancesCreatePanelProps) {
   const translate: I18nTranslate = t
 
   const [createStep, setCreateStep] = createSignal<CreateStep>(1)
+  let createNameInputEl: HTMLInputElement | undefined
+
+  createEffect(() => {
+    if (typeof setFocusCreateEntry !== 'function') return
+    setFocusCreateEntry(() => {
+      setCreateStep(1)
+      queueMicrotask(() => {
+        const el = createNameInputEl
+        if (!el) return
+        try {
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        } catch {}
+        el.focus()
+        el.select()
+      })
+    })
+  })
 
   const fieldLabelForError = (key: string): string | null => {
     if (key === 'node_id') return translate('instancesCreate.errorField.node')
@@ -237,6 +255,7 @@ export default function InstancesCreatePanel(props: InstancesCreatePanelProps) {
         <Field label={translate('instancesCreate.nameLabel')}>
           <Input
             ref={(el) => {
+              createNameInputEl = el
               setCreateInstanceNameRef?.(el)
               setCreateInstanceNameEl?.(el)
             }}

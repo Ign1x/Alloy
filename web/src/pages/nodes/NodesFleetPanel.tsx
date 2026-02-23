@@ -1,11 +1,21 @@
 import { For, Show } from 'solid-js'
-import { formatCpuPercent, formatRelativeTime, metricLevelByPercent, metricLevelClass } from '../../app/helpers/format'
+import {
+  formatCpuPercent,
+  formatDateTimeFromIso,
+  formatRelativeTime,
+  formatRelativeTimeFromIso,
+  metricLevelByPercent,
+  metricLevelClass,
+} from '../../app/helpers/format'
 import type { I18nTranslate } from '../../app/i18n'
+import { Badge } from '../../components/ui/Badge'
 import { Button } from '../../components/ui/Button'
 import { DataBoundary } from '../../components/ui/DataBoundary'
 import { IconButton } from '../../components/ui/IconButton'
+import { Input } from '../../components/ui/Input'
 import type { NodeRow } from '../NodesTab'
 import NodesBatchActionsBar from './NodesBatchActionsBar'
+import { nodeHealthBadgeVariant, nodeHealthLabelKey, nodeHealthStatus } from './nodeStatus'
 
 export type NodesFleetPanelProps = {
   t: I18nTranslate
@@ -39,12 +49,32 @@ export type NodesFleetPanelProps = {
   bulkUpdatePending: boolean
   isNodeSelected: (nodeId: string) => boolean
   setNodeSelected: (nodeId: string, selected: boolean) => void
+  isNodeUpdating: (nodeId: string) => boolean
+  showStaleSnapshot: boolean
 }
 
 export default function NodesFleetPanel(props: NodesFleetPanelProps) {
+  const visibleNodeCount = () => props.filteredNodeList.length
+  const selectedRatio = () => `${props.selectedNodeCount}/${visibleNodeCount()}`
+  const rowButtonRefs: Record<string, HTMLButtonElement | undefined> = {}
+
   return (
     <div class="space-y-3">
-      <div class="flex items-center justify-end gap-2">
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <div class="min-w-0">
+          <div class="text-section-title">{props.t('nodes.fleet')}</div>
+          <div class="mt-1 flex flex-wrap items-center gap-1.5 text-[11px]">
+            <span class="inline-flex items-center rounded-full border border-slate-200/90 bg-white/74 px-2 py-0.5 text-slate-600 dark:border-slate-800 dark:bg-slate-950/52 dark:text-slate-300">
+              {props.t('nodes.totalCount', { count: props.nodeList.length })}
+            </span>
+            <Show when={props.meIsAdmin && visibleNodeCount() > 0}>
+              <span class="inline-flex items-center rounded-full border border-amber-200/85 bg-amber-50/85 px-2 py-0.5 font-semibold text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/25 dark:text-amber-200">
+                {props.t('nodes.selectedSummaryCompact', { ratio: selectedRatio() })}
+              </span>
+            </Show>
+          </div>
+          <div class="mt-1 text-[11px] text-slate-500 dark:text-slate-400">{props.t('nodes.shortcutHint')}</div>
+        </div>
         <Show when={props.meIsAdmin}>
           <IconButton type="button" label={props.t('nodes.addNode')} variant="secondary" onClick={props.onOpenCreateNode}>
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
@@ -81,26 +111,53 @@ export default function NodesFleetPanel(props: NodesFleetPanelProps) {
           {props.t('nodes.searchLabel')}
         </label>
         <div class="mt-2 flex flex-col items-stretch gap-2 sm:flex-row sm:items-center">
-          <input
+          <Input
             id="nodes-search-input"
             ref={props.setNodeSearchInputEl}
-            class="h-9 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-800 outline-none transition focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-            type="text"
             value={props.nodeSearchInput}
             placeholder={props.t('nodes.searchPlaceholder')}
+            aria-label={props.t('nodes.searchAria')}
+            spellcheck={false}
             onInput={(event) => props.setNodeSearchInput(event.currentTarget.value)}
             onKeyDown={(event) => {
+              if (event.key === 'ArrowDown') {
+                event.preventDefault()
+                const first = props.filteredNodeList[0]
+                if (!first) return
+                props.onSelectNode(first.id)
+                return
+              }
               if (event.key !== 'Enter') return
               const first = props.filteredNodeList[0]
               if (!first) return
               props.onSelectNode(first.id)
             }}
+            leftIcon={
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="none" class="h-4 w-4" aria-hidden="true">
+                <path d="M12.75 12.75L16 16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+                <circle cx="8.75" cy="8.75" r="5" stroke="currentColor" stroke-width="1.5" />
+              </svg>
+            }
+            rightIcon={
+              props.nodeSearchInput.trim().length > 0 ? (
+                <button
+                  type="button"
+                  class="ring-focus -m-1 rounded-md p-1.5 text-slate-500 transition hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-none dark:text-slate-400 dark:hover:bg-slate-900/60 dark:hover:text-slate-100"
+                  aria-label={props.t('nodes.clearSearch')}
+                  title={props.t('nodes.clearSearch')}
+                  onClick={() => props.setNodeSearchInput('')}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
+                    <path
+                      fill-rule="evenodd"
+                      d="M4.47 4.47a.75.75 0 011.06 0L10 8.94l4.47-4.47a.75.75 0 111.06 1.06L11.06 10l4.47 4.47a.75.75 0 11-1.06 1.06L10 11.06l-4.47 4.47a.75.75 0 11-1.06-1.06L8.94 10 4.47 5.53a.75.75 0 010-1.06z"
+                      clip-rule="evenodd"
+                    />
+                  </svg>
+                </button>
+              ) : undefined
+            }
           />
-          <Show when={props.nodeSearchInput.trim().length > 0}>
-            <Button size="xs" variant="secondary" class="w-full sm:w-auto" onClick={() => props.setNodeSearchInput('')}>
-              {props.t('nodes.clear')}
-            </Button>
-          </Show>
         </div>
       </div>
 
@@ -148,6 +205,11 @@ export default function NodesFleetPanel(props: NodesFleetPanelProps) {
         emptyTitle={props.nodeSearch.length > 0 ? props.t('nodes.noMatchingNodes') : props.t('nodes.noNodes')}
         emptyActions={
           <div class="flex flex-wrap items-center gap-2">
+            <Show when={props.meIsAdmin && props.nodeList.length === 0 && props.nodeSearch.length === 0}>
+              <Button size="xs" variant="primary" onClick={props.onOpenCreateNode}>
+                {props.t('nodes.addNode')}
+              </Button>
+            </Show>
             <Show when={props.nodeSearch.length > 0}>
               <Button size="xs" variant="secondary" onClick={() => props.setNodeSearchInput('')}>
                 {props.t('nodes.clearSearch')}
@@ -161,12 +223,22 @@ export default function NodesFleetPanel(props: NodesFleetPanelProps) {
         onRetry={props.onRetryNodes}
         onOpenSettings={props.onOpenSettings}
         settingsCtaLabel={props.t('tab.settings')}
+        stale={{
+          show: props.showStaleSnapshot,
+          title: props.t('nodes.refreshFailedTitle'),
+          message: props.t('nodes.refreshFailedMessage'),
+          onRetry: props.onRetryNodes,
+        }}
       >
         <Show when={props.filteredNodeList.length > 0}>
-          <div class="motion-surface motion-enter max-h-[40vh] overflow-auto rounded-xl border border-slate-200 bg-white/60 p-1 dark:border-slate-800 dark:bg-slate-950/40 md:max-h-96">
+          <div
+            class="motion-surface motion-enter max-h-[40vh] overflow-auto rounded-xl border border-slate-200 bg-white/60 p-1 dark:border-slate-800 dark:bg-slate-950/40 md:max-h-96"
+            role="region"
+            aria-label={props.t('nodes.nodeListAria')}
+          >
             <For each={props.filteredNodeList}>
               {(node) => (
-                <div class="flex items-center gap-1 rounded-lg px-1 py-1">
+                <div class="group flex items-center gap-1 border-b border-slate-200/70 px-1 py-1 last:border-b-0 dark:border-slate-800/80">
                   <Show when={props.meIsAdmin}>
                     <input
                       type="checkbox"
@@ -180,25 +252,75 @@ export default function NodesFleetPanel(props: NodesFleetPanelProps) {
 
                   <button
                     type="button"
-                    class={`motion-pop min-w-0 flex-1 rounded-lg px-2 py-2 text-left transition-colors hover:bg-slate-100 dark:hover:bg-slate-900 ${
-                      props.selectedNodeId === node.id ? 'bg-slate-100 dark:bg-slate-900' : ''
+                    aria-current={props.selectedNodeId === node.id ? 'true' : undefined}
+                    class={`motion-pop ring-focus min-w-0 flex-1 rounded-lg border px-2 py-2 text-left transition-colors hover:bg-slate-100 focus-visible:outline-none dark:hover:bg-slate-900 ${
+                      props.selectedNodeId === node.id
+                        ? 'border-amber-300/85 bg-amber-50/60 shadow-sm dark:border-amber-900/45 dark:bg-amber-950/20'
+                        : 'border-transparent'
                     }`}
+                    title={props.t('nodes.selectNode')}
+                    ref={(el) => {
+                      rowButtonRefs[node.id] = el
+                    }}
+                    onKeyDown={(event) => {
+                      const key = event.key.toLowerCase()
+                      if (props.meIsAdmin && (event.metaKey || event.ctrlKey) && key === 'a') {
+                        event.preventDefault()
+                        props.onSelectAllNodes()
+                        return
+                      }
+
+                      const rows = props.filteredNodeList
+                      if (!rows.length) return
+                      const currentIndex = rows.findIndex((item) => item.id === node.id)
+                      if (currentIndex < 0) return
+                      let nextIndex = currentIndex
+                      if (event.key === 'ArrowDown') nextIndex = Math.min(currentIndex + 1, rows.length - 1)
+                      else if (event.key === 'ArrowUp') nextIndex = Math.max(currentIndex - 1, 0)
+                      else if (event.key === 'Home') nextIndex = 0
+                      else if (event.key === 'End') nextIndex = rows.length - 1
+                      else return
+                      event.preventDefault()
+                      const next = rows[nextIndex]
+                      if (!next) return
+                      props.onSelectNode(next.id)
+                      queueMicrotask(() => rowButtonRefs[next.id]?.focus())
+                    }}
                     onClick={() => props.onSelectNode(node.id)}
                   >
                     <div class="flex items-center justify-between gap-2">
                       <div class="min-w-0">
-                        <div class="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">{node.name}</div>
+                        <div class="flex min-w-0 flex-wrap items-center gap-1.5">
+                          <div class="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">{node.name}</div>
+                          <Badge variant={nodeHealthBadgeVariant(nodeHealthStatus(node))}>
+                            {props.t(nodeHealthLabelKey(nodeHealthStatus(node)))}
+                          </Badge>
+                          <Show when={props.isNodeSelected(node.id)}>
+                            <Badge variant="warning">{props.t('nodes.selectedShort')}</Badge>
+                          </Show>
+                        </div>
                         <div class="mt-0.5 truncate font-mono text-[11px] text-slate-500">{node.endpoint}</div>
+                        <div class="mt-1 flex flex-wrap items-center gap-1 text-[10px] text-slate-500 dark:text-slate-400">
+                          <span class="inline-flex items-center rounded-full border border-slate-200/90 bg-white/70 px-1.5 py-0.5 dark:border-slate-800 dark:bg-slate-950/40">
+                            {props.t('nodes.lastSeenRelative', { value: formatRelativeTimeFromIso(node.last_seen_at) })}
+                          </span>
+                          <Show when={node.last_seen_at}>
+                            <span class="truncate" title={formatDateTimeFromIso(node.last_seen_at)}>
+                              {formatDateTimeFromIso(node.last_seen_at)}
+                            </span>
+                          </Show>
+                        </div>
                       </div>
                       <div class="flex items-center gap-1.5">
-                        <span
-                          class={`h-2 w-2 rounded-full ${
-                            node.last_error ? 'bg-rose-500' : node.last_seen_at ? 'bg-emerald-400' : 'bg-slate-500'
-                          }`}
-                        />
                         <Show when={node.cpu_percent_x100 != null}>
                           <span class={`text-[10px] font-semibold ${metricLevelClass(metricLevelByPercent((node.cpu_percent_x100 ?? 0) / 100))}`}>
                             {formatCpuPercent(node.cpu_percent_x100)}
+                          </span>
+                        </Show>
+                        <Show when={props.isNodeUpdating(node.id)}>
+                          <span class="inline-flex items-center gap-1 text-[10px] text-amber-700 dark:text-amber-300">
+                            <span class="h-3.5 w-3.5 animate-spin rounded-full border border-amber-500/50 border-t-transparent" />
+                            {props.t('nodes.updatingShort')}
                           </span>
                         </Show>
                       </div>
@@ -210,6 +332,10 @@ export default function NodesFleetPanel(props: NodesFleetPanelProps) {
           </div>
         </Show>
       </DataBoundary>
+
+      <div class="sr-only" aria-live="polite">
+        {props.t('nodes.shortcutHint')}
+      </div>
     </div>
   )
 }
