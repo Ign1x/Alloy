@@ -12,9 +12,11 @@ use rspc::{Procedure, ProcedureError, ResolverError, Router};
 use specta::Type;
 use std::{
     collections::{BTreeMap, HashMap, VecDeque},
+    path::{Component, Path, PathBuf},
     sync::{Arc, OnceLock},
     time::{Duration, Instant},
 };
+use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
 use crate::agent_transport::AgentTransport;
 use crate::audit;
@@ -37,6 +39,9 @@ const DOWNLOAD_STATE_ERROR: &str = "error";
 const DOWNLOAD_STATE_CANCELED: &str = "canceled";
 const INSTANCE_CREATE_MAX_ATTEMPTS: usize = 3;
 const INSTANCE_START_MAX_ATTEMPTS: usize = 3;
+const FS_CONTROL_NODE_ID: &str = "__control__";
+const FS_READ_DEFAULT_BYTES: u64 = 64 * 1024;
+const FS_READ_MAX_BYTES: u64 = 4 * 1024 * 1024;
 
 fn random_token(n: usize) -> String {
     use base64::Engine;
@@ -1200,6 +1205,7 @@ pub struct DownloadQueueMutationOutput {
 #[derive(Debug, Clone, serde::Deserialize, Type)]
 pub struct ListDirInput {
     pub path: Option<String>,
+    pub node_id: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, Type)]
@@ -1246,6 +1252,7 @@ pub struct ReadFileInput {
     pub path: String,
     pub offset: Option<u32>,
     pub limit: Option<u32>,
+    pub node_id: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, Type)]
@@ -1809,6 +1816,72 @@ fn clamp_u64_to_u32(v: u64) -> u32 {
     } else {
         v as u32
     }
+}
+
+fn control_data_root() -> PathBuf {
+    let raw = std::env::var("ALLOY_DATA_ROOT").unwrap_or_else(|_| "./data".to_string());
+    let p = PathBuf::from(raw);
+    let abs = if p.is_absolute() {
+        p
+    } else {
+        std::env::current_dir()
+            .unwrap_or_else(|_| PathBuf::from("."))
+            .join(p)
+    };
+    std::fs::canonicalize(&abs).unwrap_or(abs)
+}
+
+fn normalize_fs_rel_path(rel: &str) -> Result<PathBuf, &'static str> {
+    if rel.trim().is_empty() {
+        return Ok(PathBuf::new());
+    }
+    let p = Path::new(rel.trim());
+    if p.is_absolute() {
+        return Err("path must be relative");
+    }
+    let mut out = PathBuf::new();
+    for c in p.components() {
+        match c {
+            Component::CurDir => {}
+            Component::Normal(seg) => out.push(seg),
+            Component::ParentDir => return Err("path traversal is not allowed"),
+            Component::Prefix(_) | Component::RootDir => return Err("path must be relative"),
+        }
+    }
+    Ok(out)
+}
+
+fn api_error_from_control_fs_io(ctx: &Ctx, action: &str, err: std::io::Error) -> ApiError {
+    let code = match err.kind() {
+        std::io::ErrorKind::NotFound => "not_found",
+        std::io::ErrorKind::PermissionDenied => "permission_denied",
+        std::io::ErrorKind::InvalidInput => "invalid_param",
+        std::io::ErrorKind::AlreadyExists => "already_exists",
+        _ => "internal",
+    };
+    api_error(ctx, code, format!("{action}: {err}"))
+}
+
+async fn resolve_control_scoped_existing_path(
+    ctx: &Ctx,
+    rel: &str,
+    action: &str,
+) -> Result<PathBuf, ApiError> {
+    let rel_path = normalize_fs_rel_path(rel)
+        .map_err(|msg| api_error(ctx, "invalid_param", format!("{action}: {msg}")))?;
+    let root = control_data_root();
+    let joined = root.join(rel_path);
+    let canon = tokio::fs::canonicalize(&joined)
+        .await
+        .map_err(|e| api_error_from_control_fs_io(ctx, action, e))?;
+    if !canon.starts_with(&root) {
+        return Err(api_error(
+            ctx,
+            "invalid_param",
+            format!("{action}: path escapes data root"),
+        ));
+    }
+    Ok(canon)
 }
 
 fn default_instance_node_name() -> String {
@@ -4205,7 +4278,68 @@ pub fn router() -> Router<Ctx> {
         .procedure(
             "listDir",
             Procedure::builder::<ApiError>().query(|ctx, input: ListDirInput| async move {
-                let transport = agent_transport(&ctx);
+                let node_id = input.node_id.clone().unwrap_or_default();
+                if node_id.trim() == FS_CONTROL_NODE_ID {
+                    let requested = input.path.unwrap_or_default();
+                    let dir = resolve_control_scoped_existing_path(&ctx, &requested, "fs.list_dir")
+                        .await?;
+                    let meta = tokio::fs::metadata(&dir)
+                        .await
+                        .map_err(|e| api_error_from_control_fs_io(&ctx, "fs.list_dir", e))?;
+                    if !meta.is_dir() {
+                        return Err(api_error(
+                            &ctx,
+                            "invalid_param",
+                            "fs.list_dir: path is not a directory",
+                        ));
+                    }
+
+                    let mut entries = Vec::new();
+                    let mut rd = tokio::fs::read_dir(&dir)
+                        .await
+                        .map_err(|e| api_error_from_control_fs_io(&ctx, "fs.list_dir", e))?;
+                    while let Some(de) = rd
+                        .next_entry()
+                        .await
+                        .map_err(|e| api_error_from_control_fs_io(&ctx, "fs.list_dir", e))?
+                    {
+                        let name = de.file_name().to_string_lossy().to_string();
+                        let ft = de
+                            .file_type()
+                            .await
+                            .map_err(|e| api_error_from_control_fs_io(&ctx, "fs.list_dir", e))?;
+                        let m = de
+                            .metadata()
+                            .await
+                            .map_err(|e| api_error_from_control_fs_io(&ctx, "fs.list_dir", e))?;
+                        let modified_unix_ms = m
+                            .modified()
+                            .ok()
+                            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                            .map(|d| d.as_millis().min(u64::MAX as u128) as u64)
+                            .unwrap_or(0);
+                        entries.push(DirEntryDto {
+                            name,
+                            is_dir: ft.is_dir(),
+                            size_bytes: if m.is_file() {
+                                clamp_u64_to_u32(m.len())
+                            } else {
+                                0
+                            },
+                            modified_unix_ms: modified_unix_ms.to_string(),
+                        });
+                    }
+                    entries.sort_by(|a, b| a.name.cmp(&b.name));
+                    return Ok(ListDirOutput { entries });
+                }
+
+                let transport = if node_id.trim().is_empty() {
+                    agent_transport(&ctx)
+                } else {
+                    let requested_node =
+                        resolve_create_instance_node_target(&ctx, Some(node_id)).await?;
+                    agent_transport(&ctx).with_node(requested_node.name)
+                };
                 let resp: alloy_proto::agent_v1::ListDirResponse = transport
                     .call(
                         "/alloy.agent.v1.FilesystemService/ListDir",
@@ -4233,7 +4367,78 @@ pub fn router() -> Router<Ctx> {
         .procedure(
             "readFile",
             Procedure::builder::<ApiError>().query(|ctx, input: ReadFileInput| async move {
-                let transport = agent_transport(&ctx);
+                let node_id = input.node_id.clone().unwrap_or_default();
+                if node_id.trim() == FS_CONTROL_NODE_ID {
+                    let path =
+                        resolve_control_scoped_existing_path(&ctx, &input.path, "fs.read_file")
+                            .await?;
+                    let meta = tokio::fs::metadata(&path)
+                        .await
+                        .map_err(|e| api_error_from_control_fs_io(&ctx, "fs.read_file", e))?;
+                    if !meta.is_file() {
+                        return Err(api_error(
+                            &ctx,
+                            "invalid_param",
+                            "fs.read_file: path is not a file",
+                        ));
+                    }
+
+                    let size = meta.len();
+                    let offset = input.offset.unwrap_or(0) as u64;
+                    if offset > size {
+                        return Err(api_error(
+                            &ctx,
+                            "invalid_param",
+                            "fs.read_file: offset out of range",
+                        ));
+                    }
+                    let limit = input
+                        .limit
+                        .map(|v| v as u64)
+                        .unwrap_or(FS_READ_DEFAULT_BYTES)
+                        .clamp(1, FS_READ_MAX_BYTES);
+                    let remaining = size.saturating_sub(offset);
+                    let to_read = std::cmp::min(remaining, limit) as usize;
+
+                    let mut f = tokio::fs::OpenOptions::new()
+                        .read(true)
+                        .open(&path)
+                        .await
+                        .map_err(|e| api_error_from_control_fs_io(&ctx, "fs.read_file", e))?;
+                    f.seek(std::io::SeekFrom::Start(offset))
+                        .await
+                        .map_err(|e| api_error_from_control_fs_io(&ctx, "fs.read_file", e))?;
+                    let mut buf = vec![0u8; to_read];
+                    if to_read > 0 {
+                        let mut read_total = 0usize;
+                        while read_total < to_read {
+                            let n = f.read(&mut buf[read_total..]).await.map_err(|e| {
+                                api_error_from_control_fs_io(&ctx, "fs.read_file", e)
+                            })?;
+                            if n == 0 {
+                                break;
+                            }
+                            read_total = read_total.saturating_add(n);
+                        }
+                        buf.truncate(read_total);
+                    }
+
+                    let text = String::from_utf8(buf)
+                        .map_err(|_| api_error(&ctx, "invalid_utf8", "file is not valid utf-8"))?;
+
+                    return Ok(ReadFileOutput {
+                        text,
+                        size_bytes: clamp_u64_to_u32(size),
+                    });
+                }
+
+                let transport = if node_id.trim().is_empty() {
+                    agent_transport(&ctx)
+                } else {
+                    let requested_node =
+                        resolve_create_instance_node_target(&ctx, Some(node_id)).await?;
+                    agent_transport(&ctx).with_node(requested_node.name)
+                };
                 let resp: alloy_proto::agent_v1::ReadFileResponse = transport
                     .call(
                         "/alloy.agent.v1.FilesystemService/ReadFile",

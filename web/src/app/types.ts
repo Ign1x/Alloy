@@ -1,4 +1,5 @@
 export type UiTab = 'instances' | 'downloads' | 'files' | 'nodes' | 'frp' | 'settings'
+export type FilesTarget = 'control' | 'node'
 
 export type MinecraftCreateMode = 'vanilla' | 'import'
 export type FrpConfigMode = 'paste' | 'node'

@@ -162,6 +162,7 @@ function compareName(aRaw: string, bRaw: string): number {
 export type FileBrowserProps = {
   t: I18nTranslate
   enabled: boolean
+  fsNodeId?: string | null
   title?: string
   initialPath?: string
   initialSelectedFile?: string | null
@@ -185,6 +186,11 @@ export function FileBrowser(props: FileBrowserProps) {
   const [pathDraft, setPathDraft] = createSignal('')
 
   const rootPath = createMemo(() => normalizePath(props.rootPath ?? ''))
+
+  const fsNodeId = createMemo(() => {
+    const raw = (props.fsNodeId ?? '').trim()
+    return raw.length > 0 ? raw : null
+  })
 
   createEffect(() => {
     const initialSelected = props.initialSelectedFile ? normalizePath(props.initialSelectedFile) : ''
@@ -247,7 +253,7 @@ export function FileBrowser(props: FileBrowserProps) {
   }
 
   const fsList = rspc.createQuery(
-    () => ['fs.listDir', { path: path() ? path() : null }],
+    () => ['fs.listDir', { path: path() ? path() : null, node_id: fsNodeId() ?? '__control__' }],
     () => ({ enabled: props.enabled, refetchOnWindowFocus: false, staleTime: 0 }),
   )
 
@@ -307,21 +313,17 @@ export function FileBrowser(props: FileBrowserProps) {
 
   const selectedIsLog = createMemo(() => {
     const p = selectedFile()
-    if (!p) return false
+    if (!p || !fsNodeId()) return false
     return p.toLowerCase().endsWith('.log')
   })
 
   const READ_LIMIT = 256 * 1024
 
   const fileText = rspc.createQuery(
-    () => [
-      'fs.readFile',
-      {
-        path: selectedFile() ?? '',
-        offset: 0,
-        limit: READ_LIMIT,
-      },
-    ],
+    () => {
+      const p = selectedFile() ?? ''
+      return ['fs.readFile', { path: p, offset: 0, limit: READ_LIMIT, node_id: fsNodeId() ?? '__control__' }]
+    },
     () => ({
       enabled: props.enabled && !!selectedFile() && !selectedIsLog(),
       refetchOnWindowFocus: false,
@@ -344,7 +346,7 @@ export function FileBrowser(props: FileBrowserProps) {
       },
     ],
     () => ({
-      enabled: props.enabled && !!selectedFile() && selectedIsLog(),
+      enabled: props.enabled && !!selectedFile() && selectedIsLog() && !!fsNodeId(),
       refetchInterval: logLive() ? 1000 : false,
       refetchOnWindowFocus: false,
     }),
@@ -628,7 +630,7 @@ export function FileBrowser(props: FileBrowserProps) {
               emptyTitle={props.t('fileBrowser.emptyDirectory')}
               emptyDescription={props.t('fileBrowser.emptyDirectoryHint')}
               emptyActions={
-                <IconButton type="button" label={props.t('fileBrowser.refresh')} variant="secondary" onClick={() => fsList.refetch()}>
+                  <IconButton type="button" label={props.t('fileBrowser.refresh')} variant="secondary" onClick={() => fsList.refetch()}>
                   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
                     <path
                       fill-rule="evenodd"

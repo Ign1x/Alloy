@@ -8,6 +8,8 @@ export type UiTabRouteState = {
   instanceId?: string | null
   fsPath?: string | null
   selectedFilePath?: string | null
+  filesTarget?: string | null
+  filesNodeId?: string | null
 }
 
 export type UiRouteSelection = {
@@ -15,6 +17,8 @@ export type UiRouteSelection = {
   instanceId: string | null
   fsPath: string | null
   selectedFilePath: string | null
+  filesTarget: string | null
+  filesNodeId: string | null
 }
 
 export type UiTabRegistryItem = {
@@ -97,7 +101,7 @@ export function coerceUiTabForRole(tab: UiTab, isAdmin: boolean): UiTab {
 
 export function readUiRouteFromLocation(defaultTab: UiTab = 'instances'): UiRouteSelection {
   if (typeof window === 'undefined') {
-    return { tab: defaultTab, instanceId: null, fsPath: null, selectedFilePath: null }
+    return { tab: defaultTab, instanceId: null, fsPath: null, selectedFilePath: null, filesTarget: null, filesNodeId: null }
   }
   const params = new URLSearchParams(window.location.search)
   const candidate = params.get('tab')
@@ -105,11 +109,15 @@ export function readUiRouteFromLocation(defaultTab: UiTab = 'instances'): UiRout
   const instanceId = tab === 'instances' ? params.get('instance') : null
   const fsPath = tab === 'files' ? params.get('path') : null
   const selectedFilePath = tab === 'files' ? params.get('file') : null
+  const filesTarget = tab === 'files' ? params.get('files_target') : null
+  const filesNodeId = tab === 'files' ? params.get('files_node') : null
   return {
     tab,
     instanceId: instanceId && instanceId.trim() ? instanceId.trim() : null,
     fsPath: fsPath && fsPath.trim() ? fsPath.trim() : null,
     selectedFilePath: selectedFilePath && selectedFilePath.trim() ? selectedFilePath.trim() : null,
+    filesTarget: filesTarget && filesTarget.trim() ? filesTarget.trim() : null,
+    filesNodeId: filesNodeId && filesNodeId.trim() ? filesNodeId.trim() : null,
   }
 }
 
@@ -127,15 +135,23 @@ export function buildTabUrl(route: UiRouteSelection | { tab: UiTab }): string {
   } else if (tab === 'files') {
     const fsPath = 'fsPath' in route ? route.fsPath : null
     const selectedFilePath = 'selectedFilePath' in route ? route.selectedFilePath : null
+    const filesTarget = 'filesTarget' in route ? route.filesTarget : null
+    const filesNodeId = 'filesNodeId' in route ? route.filesNodeId : null
     if (fsPath && fsPath.trim()) url.searchParams.set('path', fsPath.trim())
     else url.searchParams.delete('path')
     if (selectedFilePath && selectedFilePath.trim()) url.searchParams.set('file', selectedFilePath.trim())
     else url.searchParams.delete('file')
+    if (filesTarget && filesTarget.trim()) url.searchParams.set('files_target', filesTarget.trim())
+    else url.searchParams.delete('files_target')
+    if (filesNodeId && filesNodeId.trim()) url.searchParams.set('files_node', filesNodeId.trim())
+    else url.searchParams.delete('files_node')
     url.searchParams.delete('instance')
   } else {
     url.searchParams.delete('instance')
     url.searchParams.delete('path')
     url.searchParams.delete('file')
+    url.searchParams.delete('files_target')
+    url.searchParams.delete('files_node')
   }
   return `${url.pathname}${url.search}${url.hash}`
 }

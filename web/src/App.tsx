@@ -27,6 +27,7 @@ import {
 } from './app/tabRegistry'
 import {
   CREATE_TEMPLATE_MINECRAFT,
+  type FilesTarget,
   MINECRAFT_MODE_BY_TEMPLATE_ID,
   MINECRAFT_TEMPLATE_ID_BY_MODE,
   type FrpConfigMode,
@@ -38,6 +39,12 @@ function App() {
   const [selectedInstanceId, setSelectedInstanceId] = createSignal<string | null>(initialRoute.tab === 'instances' ? initialRoute.instanceId : null)
   const [selectedFilePath, setSelectedFilePath] = createSignal<string | null>(initialRoute.tab === 'files' ? initialRoute.selectedFilePath : null)
   const [fsPath, setFsPath] = createSignal<string>(initialRoute.tab === 'files' ? (initialRoute.fsPath ?? '') : '')
+  const [filesNodeId, setFilesNodeId] = createSignal<string | null>(
+    initialRoute.tab === 'files' ? (initialRoute.filesNodeId ?? null) : null,
+  )
+  const [filesTarget, setFilesTarget] = createSignal<FilesTarget>(
+    initialRoute.tab === 'files' && initialRoute.filesTarget === 'node' ? 'node' : 'control',
+  )
   const { locale, setLocale, localeOptions, localeShort, t } = useAppLocale()
 
   const {
@@ -82,6 +89,8 @@ function App() {
     instanceId: nextTab === 'instances' ? selectedInstanceId() : null,
     fsPath: nextTab === 'files' ? fsPath() || null : null,
     selectedFilePath: nextTab === 'files' ? selectedFilePath() : null,
+    filesTarget: nextTab === 'files' ? filesTarget() : null,
+    filesNodeId: nextTab === 'files' && filesTarget() === 'node' ? filesNodeId() : null,
   })
   const setTab: typeof setTabSignal = (next) => {
     const previous = tab()
@@ -204,6 +213,57 @@ function App() {
       setChangeCredentialsPending(false)
     }
   }
+
+  const setFilesTargetWithRoute = (next: FilesTarget): FilesTarget => {
+    const resolved = setFilesTarget(next)
+    if (resolved !== 'node') {
+      setFilesNodeId(null)
+    }
+    if (tab() === 'files' && typeof window !== 'undefined') {
+      try {
+        const route = currentUiRoute('files')
+        const nextUrl = buildTabUrl({
+          ...route,
+          filesTarget: resolved,
+          filesNodeId: resolved === 'node' ? filesNodeId() : null,
+        })
+        const currentState = (window.history.state as UiTabRouteState | null) ?? {}
+        window.history.replaceState({ ...currentState, ...route }, '', nextUrl)
+      } catch {}
+    }
+    return resolved
+  }
+
+  const setFilesNodeIdWithRoute = (next: string | null): string | null => {
+    const normalized = next && next.trim() ? next.trim() : null
+    setFilesNodeId(normalized)
+    if (tab() === 'files' && typeof window !== 'undefined') {
+      try {
+        const route = currentUiRoute('files')
+        const nextUrl = buildTabUrl({
+          ...route,
+          filesTarget: filesTarget(),
+          filesNodeId: filesTarget() === 'node' ? normalized : null,
+        })
+        const currentState = (window.history.state as UiTabRouteState | null) ?? {}
+        window.history.replaceState({ ...currentState, ...route }, '', nextUrl)
+      } catch {}
+    }
+    return normalized
+  }
+
+  createEffect(() => {
+    if (tab() !== 'files') return
+    if (typeof window === 'undefined') return
+    try {
+      const route = currentUiRoute('files')
+      const nextUrl = buildTabUrl(route)
+      const currentUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`
+      if (currentUrl === nextUrl) return
+      const currentState = (window.history.state as UiTabRouteState | null) ?? {}
+      window.history.replaceState({ ...currentState, ...route }, '', nextUrl)
+    } catch {}
+  })
 
   createEffect(() => {
     if (!showAccountMenu()) return
@@ -568,6 +628,37 @@ function App() {
     controlDiagnostics,
   })
 
+  const filesNodeOptions = createMemo(() =>
+    ((nodes.data ?? []) as any[])
+      .filter((n) => n.enabled)
+      .map((n) => ({
+        value: String(n.id ?? '').trim(),
+        label: String(n.name ?? '').trim() || String(n.id ?? '').trim(),
+        meta: String(n.endpoint ?? '').trim() || undefined,
+      }))
+      .filter((n) => n.value.length > 0),
+  )
+
+  createEffect(() => {
+    const id = (filesNodeId() ?? '').trim()
+    if (!id) return
+    const valid = filesNodeOptions().some((opt) => opt.value === id)
+    if (!valid) setFilesNodeIdWithRoute(null)
+  })
+
+  createEffect(() => {
+    if (filesTarget() !== 'node') return
+    if (filesNodeId()) return
+    const first = filesNodeOptions()[0]?.value ?? null
+    if (first) setFilesNodeIdWithRoute(first)
+  })
+
+  const effectiveFilesNodeId = createMemo(() => {
+    if (filesTarget() !== 'node') return null
+    const id = (filesNodeId() ?? '').trim()
+    return id || null
+  })
+
   const mcVersions = rspc.createQuery(
     () => ['minecraft.versions', null],
     () => ({ enabled: isAuthed(), refetchOnWindowFocus: false }),
@@ -788,6 +879,7 @@ function App() {
   >([])
   const [mcImportPacksPending, setMcImportPacksPending] = createSignal(false)
   const [mcImportUploadPending, setMcImportUploadPending] = createSignal(false)
+  const [mcImportUploadProgressPct, setMcImportUploadProgressPct] = createSignal<number | null>(null)
   const [mcMemory, setMcMemory] = createSignal('2048')
   const [mcPort, setMcPort] = createSignal('')
   const [mcFrpEnabled, setMcFrpEnabled] = createSignal(false)
@@ -868,6 +960,7 @@ function App() {
     }
 
     setMcImportUploadPending(true)
+    setMcImportUploadProgressPct(0)
     try {
       const csrf = await ensureCsrfCookie()
       const form = new FormData()
@@ -875,19 +968,41 @@ function App() {
       if (node_id) form.append('node_id', node_id)
       form.append('file', file)
 
-      const resp = await fetch('/instance/upload-modpack', {
-        method: 'POST',
-        credentials: 'include',
-        headers: {
-          'x-csrf-token': csrf,
-        },
-        body: form,
+      const resp = await new Promise<{ status: number; text: string }>((resolve, reject) => {
+        const xhr = new XMLHttpRequest()
+        xhr.upload.onprogress = (ev) => {
+          const total = ev.lengthComputable && ev.total > 0 ? ev.total : file.size
+          if (!total || total <= 0) return
+          const pct = (ev.loaded / total) * 100
+          if (!Number.isFinite(pct)) return
+          setMcImportUploadProgressPct(Math.max(0, Math.min(100, pct)))
+        }
+        xhr.open('POST', '/instance/upload-modpack')
+        xhr.withCredentials = true
+        xhr.setRequestHeader('x-csrf-token', csrf)
+        xhr.onload = () => {
+          setMcImportUploadProgressPct(100)
+          resolve({ status: xhr.status, text: typeof xhr.responseText === 'string' ? xhr.responseText : '' })
+        }
+        xhr.onerror = () => {
+          reject(new Error('upload failed: network error'))
+        }
+        xhr.onabort = () => {
+          reject(new Error('upload canceled'))
+        }
+        xhr.send(form)
       })
 
-      const payload = (await resp.json().catch(() => null)) as
-        | { path?: string; message?: string }
-        | null
-      if (!resp.ok) throw new Error(payload?.message || `upload failed: ${resp.status}`)
+      const payload = (() => {
+        try {
+          return JSON.parse(resp.text) as { path?: string; message?: string } | null
+        } catch {
+          return null
+        }
+      })()
+      if (resp.status < 200 || resp.status >= 300) {
+        throw new Error(payload?.message || `upload failed: ${resp.status}`)
+      }
 
       const path = (payload?.path || '').trim()
       if (path) setMcImportPack(path)
@@ -897,6 +1012,7 @@ function App() {
       toastError(t('app.uploadFailed'), e)
     } finally {
       setMcImportUploadPending(false)
+      setMcImportUploadProgressPct(null)
     }
   }
 
@@ -1496,6 +1612,7 @@ function App() {
     mcImportPackOptions,
     mcImportPacksPending,
     mcImportUploadPending,
+    mcImportUploadProgressPct,
     mcMemory,
     mcPort,
     mcVersion,
@@ -2230,6 +2347,11 @@ function App() {
     isAuthed,
     fsPath,
     selectedFilePath,
+    filesNodeId: effectiveFilesNodeId,
+    filesTarget,
+    filesNodeOptions,
+    setFilesNodeId: setFilesNodeIdWithRoute,
+    setFilesTarget: setFilesTargetWithRoute,
     instancesTabProps,
     downloadsTabProps,
     frpTabProps,
