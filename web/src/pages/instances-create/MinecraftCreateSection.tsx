@@ -35,6 +35,7 @@ export default function MinecraftCreateSection(props: MinecraftCreateSectionProp
     mcImportPackOptions,
     mcImportPacksPending,
     mcImportUploadPending,
+    mcImportUploadProgressPct,
     setMcImportPack,
     uploadMcImportPackFile,
     setTab,
@@ -172,8 +173,22 @@ export default function MinecraftCreateSection(props: MinecraftCreateSectionProp
                                   }}
                                 />
                                 <Show when={mcImportUploadPending()}>
-                                  <div class="text-[11px] text-slate-500 dark:text-slate-400">
-                                    {t('instancesCreate.minecraftImport.uploadingZip')}
+                                  <div class="space-y-1">
+                                    <div class="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
+                                      <span>{t('instancesCreate.minecraftImport.uploadingZip')}</span>
+                                      <Show when={typeof mcImportUploadProgressPct?.() === 'number'}>
+                                        <span class="font-mono text-slate-700 dark:text-slate-200">
+                                          {mcImportUploadProgressPct()!.toFixed(1)}%
+                                        </span>
+                                      </Show>
+                                    </div>
+                                    <div class="h-2 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
+                                      <div
+                                        class="h-full rounded-full bg-amber-500 transition-all duration-150"
+                                        style={{ width: `${Math.max(0, Math.min(100, mcImportUploadProgressPct?.() ?? 0))}%` }}
+                                        aria-hidden="true"
+                                      />
+                                    </div>
                                   </div>
                                 </Show>
                               </div>
