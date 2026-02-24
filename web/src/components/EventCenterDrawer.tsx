@@ -7,6 +7,7 @@ import type { Toast } from '../app/types'
 import { Badge } from './ui/Badge'
 import { Button } from './ui/Button'
 import { Drawer } from './ui/Drawer'
+import { IconButton } from './ui/IconButton'
 
 type EventCenterDrawerProps = {
   open: boolean
@@ -136,16 +137,21 @@ export default function EventCenterDrawer(props: EventCenterDrawerProps) {
 
                   <div class="mt-2 flex flex-wrap items-center gap-2">
                     <Show when={item.requestId}>
-                      <Button
-                        size="xs"
+                      <IconButton
+                        size="sm"
                         variant="secondary"
+                        class="h-6 w-6"
+                        label={props.t('eventCenter.copyRequestId')}
                         onClick={() => {
                           void safeCopy(item.requestId ?? '')
                           props.pushToast('success', props.t('eventCenter.requestIdCopied'), item.requestId)
                         }}
                       >
-                        {props.t('eventCenter.copyRequestId')}
-                      </Button>
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-3.5 w-3.5">
+                          <path d="M5.75 2A2.75 2.75 0 003 4.75v9.5A2.75 2.75 0 005.75 17h1.5a.75.75 0 000-1.5h-1.5c-.69 0-1.25-.56-1.25-1.25v-9.5c0-.69.56-1.25 1.25-1.25h5.5c.69 0 1.25.56 1.25 1.25v1a.75.75 0 001.5 0v-1A2.75 2.75 0 0011.25 2h-5.5z" />
+                          <path d="M8.75 6A2.75 2.75 0 006 8.75v6.5A2.75 2.75 0 008.75 18h5.5A2.75 2.75 0 0017 15.25v-6.5A2.75 2.75 0 0014.25 6h-5.5z" />
+                        </svg>
+                      </IconButton>
                     </Show>
 
                     <Show when={item.retry?.key}>

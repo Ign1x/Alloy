@@ -34,6 +34,7 @@ export default function MinecraftCreateSection(props: MinecraftCreateSectionProp
     mcImportPack,
     mcImportPackOptions,
     mcImportPacksPending,
+    mcImportPacksError,
     mcImportUploadPending,
     mcImportUploadProgressPct,
     setMcImportPack,
@@ -189,6 +190,11 @@ export default function MinecraftCreateSection(props: MinecraftCreateSectionProp
                                         aria-hidden="true"
                                       />
                                     </div>
+                                  </div>
+                                </Show>
+                                <Show when={mcImportPacksError()}>
+                                  <div class="rounded-lg border border-rose-200 bg-rose-50/80 px-2 py-1.5 text-[11px] text-rose-800 dark:border-rose-900/40 dark:bg-rose-950/30 dark:text-rose-200">
+                                    {mcImportPacksError()}
                                   </div>
                                 </Show>
                               </div>

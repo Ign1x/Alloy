@@ -2,6 +2,7 @@ import { createSignal, For, Show } from 'solid-js'
 import { ensureCsrfCookie } from '../auth'
 import { statusMessageParts } from '../app/helpers/agentErrors'
 import { formatBytes, formatCpuPercent, parseU64 } from '../app/helpers/format'
+import { isRetryableHttpStatus, isRetryableNetworkError, retryBackoffMs, sleep } from '../app/helpers/networkRetry'
 import {
   canEditOrDeleteInstance,
   deleteInstanceActionTitle,
@@ -771,22 +772,55 @@ export default function InstanceDetailsModal(props: InstanceDetailsModalProps) {
                                     if (!file) return
                                     try {
                                       setUploadSavePending(true)
-                                      const csrf = await ensureCsrfCookie()
-                                      const form = new FormData()
-                                      form.set('instance_id', id())
-                                      form.set('file', file, file.name || 'save.zip')
+                                      const uploadOnce = async () => {
+                                        const csrf = await ensureCsrfCookie()
+                                        const form = new FormData()
+                                        form.set('instance_id', id())
+                                        form.set('file', file, file.name || 'save.zip')
+                                        return fetch('/instance/upload-save', {
+                                          method: 'POST',
+                                          credentials: 'include',
+                                          headers: {
+                                            'x-csrf-token': csrf,
+                                          },
+                                          body: form,
+                                        })
+                                      }
 
-                                      const resp = await fetch('/instance/upload-save', {
-                                        method: 'POST',
-                                        credentials: 'include',
-                                        headers: {
-                                          'x-csrf-token': csrf,
-                                        },
-                                        body: form,
-                                      })
-                                      const payload = (await resp.json().catch(() => null)) as any
-                                      if (!resp.ok) {
-                                        throw new Error(payload?.message || t('instances.details.uploadFailed', { status: resp.status }))
+                                      let payload: any = null
+                                      let ok = false
+                                      let lastErr: unknown = null
+                                      for (let attempt = 0; attempt < 3; attempt++) {
+                                        try {
+                                          const resp = await uploadOnce()
+                                          payload = (await resp.json().catch(() => null)) as any
+                                          if (!resp.ok) {
+                                            const err = new Error(payload?.message || t('instances.details.uploadFailed', { status: resp.status }))
+                                            if (attempt < 2 && isRetryableHttpStatus(resp.status)) {
+                                              pushToast('info', t('instances.details.uploadRetrying', { attempt: attempt + 2, total: 3 }), undefined, undefined, {
+                                                context: instanceToastContext(),
+                                              })
+                                              await sleep(retryBackoffMs(attempt, 400, 2200))
+                                              continue
+                                            }
+                                            throw err
+                                          }
+                                          ok = true
+                                          break
+                                        } catch (err) {
+                                          lastErr = err
+                                          if (attempt < 2 && isRetryableNetworkError(err)) {
+                                            pushToast('info', t('instances.details.uploadRetrying', { attempt: attempt + 2, total: 3 }), undefined, undefined, {
+                                              context: instanceToastContext(),
+                                            })
+                                            await sleep(retryBackoffMs(attempt, 400, 2200))
+                                            continue
+                                          }
+                                          throw err
+                                        }
+                                      }
+                                      if (!ok) {
+                                        throw (lastErr instanceof Error ? lastErr : new Error(t('instances.details.importFailed')))
                                       }
                                       pushToast(
                                         'success',

@@ -1,6 +1,7 @@
 import { createEffect, createMemo, createSignal, For, Show } from 'solid-js'
 import type { I18nTranslate } from '../app/i18n'
 import type { ToastVariant } from '../app/types'
+import { retryBackoffMs } from '../app/helpers/networkRetry'
 import { isAlloyApiError, rspc } from '../rspc'
 import { Badge } from './ui/Badge'
 import { cn } from './ui/cn'
@@ -254,7 +255,13 @@ export function FileBrowser(props: FileBrowserProps) {
 
   const fsList = rspc.createQuery(
     () => ['fs.listDir', { path: path() ? path() : null, node_id: fsNodeId() ?? '__control__' }],
-    () => ({ enabled: props.enabled, refetchOnWindowFocus: false, staleTime: 0 }),
+    () => ({
+      enabled: props.enabled,
+      refetchOnWindowFocus: false,
+      staleTime: 0,
+      retry: 2,
+      retryDelay: (attempt) => retryBackoffMs(attempt, 350, 1600),
+    }),
   )
 
   const [lastRefreshAt, setLastRefreshAt] = createSignal<number | null>(null)
@@ -328,6 +335,8 @@ export function FileBrowser(props: FileBrowserProps) {
       enabled: props.enabled && !!selectedFile() && !selectedIsLog(),
       refetchOnWindowFocus: false,
       staleTime: 0,
+      retry: 2,
+      retryDelay: (attempt) => retryBackoffMs(attempt, 350, 1600),
     }),
   )
 
@@ -349,6 +358,8 @@ export function FileBrowser(props: FileBrowserProps) {
       enabled: props.enabled && !!selectedFile() && selectedIsLog() && !!fsNodeId(),
       refetchInterval: logLive() ? 1000 : false,
       refetchOnWindowFocus: false,
+      retry: 2,
+      retryDelay: (attempt) => retryBackoffMs(attempt, 350, 1600),
     }),
   )
 

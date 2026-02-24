@@ -26,6 +26,12 @@ import {
   type UiTabRouteState,
 } from './app/tabRegistry'
 import {
+  isRetryableHttpStatus,
+  isRetryableNetworkError,
+  retryBackoffMs,
+  sleep,
+} from './app/helpers/networkRetry'
+import {
   CREATE_TEMPLATE_MINECRAFT,
   type FilesTarget,
   MINECRAFT_MODE_BY_TEMPLATE_ID,
@@ -878,6 +884,7 @@ function App() {
     { name: string; path: string; size_bytes: string; modified_unix_ms: string }[]
   >([])
   const [mcImportPacksPending, setMcImportPacksPending] = createSignal(false)
+  const [mcImportPacksError, setMcImportPacksError] = createSignal<string | null>(null)
   const [mcImportUploadPending, setMcImportUploadPending] = createSignal(false)
   const [mcImportUploadProgressPct, setMcImportUploadProgressPct] = createSignal<number | null>(null)
   const [mcMemory, setMcMemory] = createSignal('2048')
@@ -931,22 +938,47 @@ function App() {
       return
     }
     setMcImportPacksPending(true)
+    setMcImportPacksError(null)
     try {
       const node_id = createNodeId().trim()
       const params = new URLSearchParams()
       if (node_id) params.set('node_id', node_id)
       const qs = params.toString()
-      const resp = await fetch(`/instance/modpack-packs${qs ? `?${qs}` : ''}`, {
-        method: 'GET',
-        credentials: 'include',
-      })
-      const payload = (await resp.json().catch(() => null)) as
-        | { entries?: { name: string; path: string; size_bytes: string; modified_unix_ms: string }[]; message?: string }
-        | null
-      if (!resp.ok) throw new Error(payload?.message || `list packs failed: ${resp.status}`)
-      setMcImportPacks(Array.isArray(payload?.entries) ? payload!.entries! : [])
+      let lastErr: unknown = null
+      let done = false
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          const resp = await fetch(`/instance/modpack-packs${qs ? `?${qs}` : ''}`, {
+            method: 'GET',
+            credentials: 'include',
+          })
+          const payload = (await resp.json().catch(() => null)) as
+            | { entries?: { name: string; path: string; size_bytes: string; modified_unix_ms: string }[]; message?: string }
+            | null
+          if (!resp.ok) {
+            const err = new Error(payload?.message || `list packs failed: ${resp.status}`)
+            if (attempt < 2 && isRetryableHttpStatus(resp.status)) {
+              await sleep(retryBackoffMs(attempt, 350, 1800))
+              continue
+            }
+            throw err
+          }
+          setMcImportPacks(Array.isArray(payload?.entries) ? payload!.entries! : [])
+          done = true
+          break
+        } catch (err) {
+          lastErr = err
+          if (attempt < 2 && isRetryableNetworkError(err)) {
+            await sleep(retryBackoffMs(attempt, 350, 1800))
+            continue
+          }
+          throw err
+        }
+      }
+      if (!done && lastErr) throw lastErr
     } catch (e) {
       setMcImportPacks([])
+      setMcImportPacksError(friendlyErrorMessage(e))
       toastError(t('app.loadUploadedPacksFailed'), e)
     } finally {
       setMcImportPacksPending(false)
@@ -962,36 +994,73 @@ function App() {
     setMcImportUploadPending(true)
     setMcImportUploadProgressPct(0)
     try {
-      const csrf = await ensureCsrfCookie()
-      const form = new FormData()
-      const node_id = createNodeId().trim()
-      if (node_id) form.append('node_id', node_id)
-      form.append('file', file)
+      const uploadOnce = async () => {
+        const csrf = await ensureCsrfCookie()
+        const form = new FormData()
+        const node_id = createNodeId().trim()
+        if (node_id) form.append('node_id', node_id)
+        form.append('file', file)
+        return new Promise<{ status: number; text: string }>((resolve, reject) => {
+          const xhr = new XMLHttpRequest()
+          xhr.upload.onprogress = (ev) => {
+            const total = ev.lengthComputable && ev.total > 0 ? ev.total : file.size
+            if (!total || total <= 0) return
+            const pct = (ev.loaded / total) * 100
+            if (!Number.isFinite(pct)) return
+            setMcImportUploadProgressPct(Math.max(0, Math.min(100, pct)))
+          }
+          xhr.open('POST', '/instance/upload-modpack')
+          xhr.withCredentials = true
+          xhr.setRequestHeader('x-csrf-token', csrf)
+          xhr.onload = () => {
+            setMcImportUploadProgressPct(100)
+            resolve({ status: xhr.status, text: typeof xhr.responseText === 'string' ? xhr.responseText : '' })
+          }
+          xhr.onerror = () => {
+            reject(new Error('upload failed: network error'))
+          }
+          xhr.onabort = () => {
+            reject(new Error('upload canceled'))
+          }
+          xhr.send(form)
+        })
+      }
 
-      const resp = await new Promise<{ status: number; text: string }>((resolve, reject) => {
-        const xhr = new XMLHttpRequest()
-        xhr.upload.onprogress = (ev) => {
-          const total = ev.lengthComputable && ev.total > 0 ? ev.total : file.size
-          if (!total || total <= 0) return
-          const pct = (ev.loaded / total) * 100
-          if (!Number.isFinite(pct)) return
-          setMcImportUploadProgressPct(Math.max(0, Math.min(100, pct)))
+      let resp: { status: number; text: string } | null = null
+      let lastErr: unknown = null
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          setMcImportUploadProgressPct(0)
+          const out = await uploadOnce()
+          if (out.status < 200 || out.status >= 300) {
+            const payload = (() => {
+              try {
+                return JSON.parse(out.text) as { path?: string; message?: string } | null
+              } catch {
+                return null
+              }
+            })()
+            const err = new Error(payload?.message || `upload failed: ${out.status}`)
+            if (attempt < 2 && isRetryableHttpStatus(out.status)) {
+              pushToast('info', t('app.uploadRetrying', { attempt: attempt + 2, total: 3 }))
+              await sleep(retryBackoffMs(attempt, 400, 2200))
+              continue
+            }
+            throw err
+          }
+          resp = out
+          break
+        } catch (err) {
+          lastErr = err
+          if (attempt < 2 && isRetryableNetworkError(err)) {
+            pushToast('info', t('app.uploadRetrying', { attempt: attempt + 2, total: 3 }))
+            await sleep(retryBackoffMs(attempt, 400, 2200))
+            continue
+          }
+          throw err
         }
-        xhr.open('POST', '/instance/upload-modpack')
-        xhr.withCredentials = true
-        xhr.setRequestHeader('x-csrf-token', csrf)
-        xhr.onload = () => {
-          setMcImportUploadProgressPct(100)
-          resolve({ status: xhr.status, text: typeof xhr.responseText === 'string' ? xhr.responseText : '' })
-        }
-        xhr.onerror = () => {
-          reject(new Error('upload failed: network error'))
-        }
-        xhr.onabort = () => {
-          reject(new Error('upload canceled'))
-        }
-        xhr.send(form)
-      })
+      }
+      if (!resp) throw lastErr instanceof Error ? lastErr : new Error('upload failed')
 
       const payload = (() => {
         try {
@@ -1000,9 +1069,6 @@ function App() {
           return null
         }
       })()
-      if (resp.status < 200 || resp.status >= 300) {
-        throw new Error(payload?.message || `upload failed: ${resp.status}`)
-      }
 
       const path = (payload?.path || '').trim()
       if (path) setMcImportPack(path)
@@ -1015,6 +1081,11 @@ function App() {
       setMcImportUploadProgressPct(null)
     }
   }
+
+  createEffect(() => {
+    createNodeId()
+    setMcImportPacksError(null)
+  })
 
   const mcImportPackOptions = createMemo(() => {
     const current = mcImportPack().trim()
@@ -1608,11 +1679,12 @@ function App() {
     mcFrpEnabled,
     mcFrpMode,
     mcFrpNodeId,
-    mcImportPack,
-    mcImportPackOptions,
-    mcImportPacksPending,
-    mcImportUploadPending,
-    mcImportUploadProgressPct,
+      mcImportPack,
+      mcImportPackOptions,
+      mcImportPacksPending,
+      mcImportPacksError,
+      mcImportUploadPending,
+      mcImportUploadProgressPct,
     mcMemory,
     mcPort,
     mcVersion,

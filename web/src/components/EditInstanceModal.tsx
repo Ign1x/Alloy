@@ -597,10 +597,11 @@ export default function EditInstanceModal(props: EditInstanceModalProps) {
                       <div class="mt-1">{editFormError()!.message}</div>
 	                      <Show when={editFormError()!.requestId}>
 	                        <div class="mt-2 flex items-center justify-between gap-2">
-                          <div class="text-[11px] text-rose-700/80 dark:text-rose-200/70 font-mono">{t('common.requestId')} {editFormError()!.requestId}</div>
+                          <div class="min-w-0 truncate whitespace-nowrap text-[11px] text-rose-700/80 dark:text-rose-200/70 font-mono">{t('common.requestId')} {editFormError()!.requestId}</div>
 	                          <IconButton
 	                            size="sm"
 	                            variant="danger"
+	                            class="h-6 w-6 shrink-0"
 	                            label={t('instances.edit.copyRequestId')}
 	                            onClick={() => safeCopy(editFormError()!.requestId ?? '')}
 	                          >

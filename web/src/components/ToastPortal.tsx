@@ -105,15 +105,14 @@ export default function ToastPortal(props: ToastPortalProps) {
 
                 <Show when={toast.requestId}>
                   <div class="mt-2 flex items-center justify-between gap-2">
-                    <div class="truncate font-mono text-[11px] text-slate-600 dark:text-slate-300">
+                    <div class="min-w-0 truncate whitespace-nowrap font-mono text-[11px] text-slate-600 dark:text-slate-300">
                       {translate('common.requestId')} {toast.requestId}
                     </div>
-                    <button
-                      type="button"
-                      class="ring-focus motion-surface rounded-lg border border-slate-200/90 bg-white/74 px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-white dark:border-slate-800 dark:bg-slate-950/62 dark:text-slate-200 dark:hover:bg-slate-900/90"
-                      onClick={() => safeCopy(toast.requestId ?? '')}
-                    >
-                      {translate('eventCenter.copyRequestId')}
+                    <button type="button" class="ring-focus motion-surface shrink-0 rounded-lg border border-slate-200/90 bg-white/74 p-1.5 text-slate-700 hover:bg-white dark:border-slate-800 dark:bg-slate-950/62 dark:text-slate-200 dark:hover:bg-slate-900/90" aria-label={translate('eventCenter.copyRequestId')} title={translate('eventCenter.copyRequestId')} onClick={() => safeCopy(toast.requestId ?? '')}>
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
+                        <path d="M5.75 2A2.75 2.75 0 003 4.75v9.5A2.75 2.75 0 005.75 17h1.5a.75.75 0 000-1.5h-1.5c-.69 0-1.25-.56-1.25-1.25v-9.5c0-.69.56-1.25 1.25-1.25h5.5c.69 0 1.25.56 1.25 1.25v1a.75.75 0 001.5 0v-1A2.75 2.75 0 0011.25 2h-5.5z" />
+                        <path d="M8.75 6A2.75 2.75 0 006 8.75v6.5A2.75 2.75 0 008.75 18h5.5A2.75 2.75 0 0017 15.25v-6.5A2.75 2.75 0 0014.25 6h-5.5z" />
+                      </svg>
                     </button>
                   </div>
                 </Show>

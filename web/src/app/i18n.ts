@@ -74,6 +74,7 @@ const en = {
   'app.onlyZipSupported': 'Only .zip files are supported.',
   'app.uploadComplete': 'Upload complete',
   'app.uploadFailed': 'Upload failed',
+  'app.uploadRetrying': ({ attempt, total }) => `Upload failed. Retrying (${attempt ?? 1}/${total ?? 1})...`,
   'app.uploadZipOption': 'Upload zip…',
   'app.uploading': 'Uploading...',
   'status.backend': 'Backend',
@@ -231,6 +232,8 @@ const en = {
   'instances.details.imported': 'Imported',
   'instances.details.importFailed': 'Import failed',
   'instances.details.uploadFailed': ({ status }) => `upload failed: ${status ?? ''}`,
+  'instances.details.uploadRetrying': ({ attempt, total }) =>
+    `upload failed. retrying (${attempt ?? 1}/${total ?? 1})...`,
   'instances.details.saveStoppedHint': 'The instance must be stopped. Old save is backed up automatically.',
   'instances.details.configKey': 'Key',
   'instances.details.configValue': 'Value',
@@ -1342,6 +1345,8 @@ const zhCN: Partial<Record<I18nKey, MessageValue>> = {
   'instancesCreate.minecraftImport.loadingUploadedZips': '正在加载已上传的 zip…',
   'instancesCreate.minecraftImport.selectUploadedZip': '选择已上传的 zip…',
   'instancesCreate.minecraftImport.uploadingZip': '正在上传 zip…',
+  'app.uploadRetrying': ({ attempt, total }) => `上传失败，正在重试（${attempt ?? 1}/${total ?? 1}）...`,
+  'instances.details.uploadRetrying': ({ attempt, total }) => `上传失败，正在重试（${attempt ?? 1}/${total ?? 1}）...`,
 
   'instancesCreate.tunnels.paste': '粘贴',
   'instancesCreate.tunnels.node': '节点',
@@ -1999,6 +2004,8 @@ const zhTW: Partial<Record<I18nKey, MessageValue>> = {
   'instancesCreate.minecraftImport.loadingUploadedZips': '正在載入已上傳的 zip…',
   'instancesCreate.minecraftImport.selectUploadedZip': '選擇已上傳的 zip…',
   'instancesCreate.minecraftImport.uploadingZip': '正在上傳 zip…',
+  'app.uploadRetrying': ({ attempt, total }) => `上傳失敗，正在重試（${attempt ?? 1}/${total ?? 1}）...`,
+  'instances.details.uploadRetrying': ({ attempt, total }) => `上傳失敗，正在重試（${attempt ?? 1}/${total ?? 1}）...`,
 
   'instancesCreate.tunnels.paste': '貼上',
   'instancesCreate.tunnels.node': '節點',
@@ -2571,6 +2578,10 @@ const ja: Partial<Record<I18nKey, MessageValue>> = {
   'instancesCreate.minecraftImport.loadingUploadedZips': 'アップロード済み zip を読み込み中…',
   'instancesCreate.minecraftImport.selectUploadedZip': 'アップロード済み zip を選択…',
   'instancesCreate.minecraftImport.uploadingZip': 'zip をアップロード中…',
+  'app.uploadRetrying': ({ attempt, total }) =>
+    `アップロードに失敗しました。再試行中（${attempt ?? 1}/${total ?? 1}）...`,
+  'instances.details.uploadRetrying': ({ attempt, total }) =>
+    `アップロードに失敗しました。再試行中（${attempt ?? 1}/${total ?? 1}）...`,
 
   'instancesCreate.tunnels.paste': '貼り付け',
   'instancesCreate.tunnels.node': 'ノード',
@@ -3228,6 +3239,8 @@ const ko: Partial<Record<I18nKey, MessageValue>> = {
   'instancesCreate.minecraftImport.loadingUploadedZips': '업로드된 zip 로딩 중...',
   'instancesCreate.minecraftImport.selectUploadedZip': '업로드된 zip 선택...',
   'instancesCreate.minecraftImport.uploadingZip': 'zip 업로드 중...',
+  'app.uploadRetrying': ({ attempt, total }) => `업로드 실패. 재시도 중 (${attempt ?? 1}/${total ?? 1})...`,
+  'instances.details.uploadRetrying': ({ attempt, total }) => `업로드 실패. 재시도 중 (${attempt ?? 1}/${total ?? 1})...`,
 
   'instancesCreate.tunnels.paste': '붙여넣기',
   'instancesCreate.tunnels.node': '노드',

@@ -3,6 +3,7 @@ import { createSignal, Show } from 'solid-js'
 import type { I18nTranslate } from '../../app/i18n'
 import { isAlloyApiError } from '../../rspc'
 import { Button } from './Button'
+import { IconButton } from './IconButton'
 import { cn } from './cn'
 
 export type ErrorStateProps = {
@@ -76,13 +77,16 @@ export function ErrorState(props: ErrorStateProps) {
       </div>
 
       <Show when={requestId()}>
-        <div class="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-rose-300/45 bg-rose-100/45 px-2.5 py-2 dark:border-rose-900/40 dark:bg-rose-950/25">
-          <div class="truncate font-mono text-[11px] text-rose-800/70 dark:text-rose-200/70">
+        <div class="mt-2 flex items-center justify-between gap-2 rounded-lg border border-rose-300/45 bg-rose-100/45 px-2.5 py-2 dark:border-rose-900/40 dark:bg-rose-950/25">
+          <div class="min-w-0 truncate whitespace-nowrap font-mono text-[11px] text-rose-800/70 dark:text-rose-200/70">
             {t('common.requestId')} {requestId()}
           </div>
-          <Button size="xs" variant="secondary" onClick={() => safeCopy(requestId())}>
-            {t('eventCenter.copyRequestId')}
-          </Button>
+          <IconButton size="sm" variant="secondary" class="shrink-0" label={t('eventCenter.copyRequestId')} onClick={() => safeCopy(requestId())}>
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
+              <path d="M5.75 2A2.75 2.75 0 003 4.75v9.5A2.75 2.75 0 005.75 17h1.5a.75.75 0 000-1.5h-1.5c-.69 0-1.25-.56-1.25-1.25v-9.5c0-.69.56-1.25 1.25-1.25h5.5c.69 0 1.25.56 1.25 1.25v1a.75.75 0 001.5 0v-1A2.75 2.75 0 0011.25 2h-5.5z" />
+              <path d="M8.75 6A2.75 2.75 0 006 8.75v6.5A2.75 2.75 0 008.75 18h5.5A2.75 2.75 0 0017 15.25v-6.5A2.75 2.75 0 0014.25 6h-5.5z" />
+            </svg>
+          </IconButton>
         </div>
       </Show>
 
