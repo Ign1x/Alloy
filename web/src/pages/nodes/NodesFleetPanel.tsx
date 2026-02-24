@@ -59,21 +59,21 @@ export default function NodesFleetPanel(props: NodesFleetPanelProps) {
   const rowButtonRefs: Record<string, HTMLButtonElement | undefined> = {}
 
   return (
-    <div class="space-y-3">
-      <div class="flex flex-wrap items-center justify-between gap-2">
+    <div class="space-y-4">
+      <div class="flex flex-wrap items-center justify-between gap-3">
         <div class="min-w-0">
-          <div class="text-section-title">{props.t('nodes.fleet')}</div>
-          <div class="mt-1 flex flex-wrap items-center gap-1.5 text-[11px]">
-            <span class="inline-flex items-center rounded-full border border-slate-200/90 bg-white/74 px-2 py-0.5 text-slate-600 dark:border-slate-800 dark:bg-slate-950/52 dark:text-slate-300">
+          <div class="text-section-title text-slate-700 dark:text-slate-300">{props.t('nodes.fleet')}</div>
+          <div class="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px]">
+            <span class="inline-flex items-center rounded-full border border-slate-200/85 bg-white/86 px-2.5 py-0.5 text-slate-600 shadow-sm dark:border-slate-800 dark:bg-slate-950/52 dark:text-slate-300 dark:shadow-none">
               {props.t('nodes.totalCount', { count: props.nodeList.length })}
             </span>
             <Show when={props.meIsAdmin && visibleNodeCount() > 0}>
-              <span class="inline-flex items-center rounded-full border border-amber-200/85 bg-amber-50/85 px-2 py-0.5 font-semibold text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/25 dark:text-amber-200">
+              <span class="inline-flex items-center rounded-full border border-cyan-200/80 bg-cyan-50/88 px-2.5 py-0.5 font-semibold text-cyan-900 shadow-sm dark:border-cyan-900/45 dark:bg-cyan-950/25 dark:text-cyan-200 dark:shadow-none">
                 {props.t('nodes.selectedSummaryCompact', { ratio: selectedRatio() })}
               </span>
             </Show>
           </div>
-          <div class="mt-1 text-[11px] text-slate-500 dark:text-slate-400">{props.t('nodes.shortcutHint')}</div>
+          <div class="mt-1.5 text-[11px] text-slate-500 dark:text-slate-400">{props.t('nodes.shortcutHint')}</div>
         </div>
         <Show when={props.meIsAdmin}>
           <IconButton type="button" label={props.t('nodes.addNode')} variant="secondary" onClick={props.onOpenCreateNode}>
@@ -88,26 +88,26 @@ export default function NodesFleetPanel(props: NodesFleetPanelProps) {
         </Show>
       </div>
 
-      <div class="motion-surface motion-enter rounded-xl border border-slate-200 bg-white/70 p-3 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
+      <div class="motion-surface motion-enter rounded-2xl border border-white/70 bg-gradient-to-br from-white/92 via-white/82 to-slate-100/70 p-3.5 shadow-lg shadow-slate-900/5 dark:border-slate-700/65 dark:from-slate-950/82 dark:via-slate-950/70 dark:to-slate-900/66 dark:shadow-none">
         <div class="flex flex-wrap items-center justify-between gap-2">
-          <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">{props.t('nodes.overview')}</div>
+          <div class="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">{props.t('nodes.overview')}</div>
           <div class="text-[11px] text-slate-500 dark:text-slate-400">{props.t('nodes.totalCount', { count: props.nodeList.length })}</div>
         </div>
-        <div class="mt-2 grid grid-cols-1 gap-2 text-[11px] sm:grid-cols-3">
-          <div class="rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1.5 text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/20 dark:text-emerald-300">
+        <div class="mt-3 grid grid-cols-1 gap-2 text-[11px] sm:grid-cols-3">
+          <div class="rounded-xl border border-emerald-200/90 bg-emerald-50/90 px-2.5 py-2 text-emerald-900 shadow-sm dark:border-emerald-900/45 dark:bg-emerald-950/20 dark:text-emerald-300 dark:shadow-none">
             {props.t('nodes.healthyCount', { count: props.healthyNodeCount })}
           </div>
-          <div class="rounded-lg border border-rose-200 bg-rose-50 px-2 py-1.5 text-rose-800 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-300">
+          <div class="rounded-xl border border-rose-200/90 bg-rose-50/90 px-2.5 py-2 text-rose-900 shadow-sm dark:border-rose-900/45 dark:bg-rose-950/20 dark:text-rose-300 dark:shadow-none">
             {props.t('nodes.errorCount', { count: props.errorNodeCount })}
           </div>
-          <div class="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-slate-700 dark:border-slate-800 dark:bg-slate-900/40 dark:text-slate-300">
+          <div class="rounded-xl border border-slate-200/90 bg-slate-50/90 px-2.5 py-2 text-slate-700 shadow-sm dark:border-slate-800 dark:bg-slate-900/40 dark:text-slate-300 dark:shadow-none">
             {props.t('nodes.unknownCount', { count: props.unknownNodeCount })}
           </div>
         </div>
       </div>
 
-      <div class="motion-surface motion-enter rounded-xl border border-slate-200 bg-white/70 p-3 shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:shadow-none">
-        <label class="block text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400" for="nodes-search-input">
+      <div class="motion-surface motion-enter rounded-2xl border border-white/70 bg-gradient-to-br from-white/92 via-white/82 to-slate-100/70 p-3.5 shadow-lg shadow-slate-900/5 dark:border-slate-700/65 dark:from-slate-950/82 dark:via-slate-950/70 dark:to-slate-900/66 dark:shadow-none">
+        <label class="block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400" for="nodes-search-input">
           {props.t('nodes.searchLabel')}
         </label>
         <div class="mt-2 flex flex-col items-stretch gap-2 sm:flex-row sm:items-center">
@@ -232,13 +232,13 @@ export default function NodesFleetPanel(props: NodesFleetPanelProps) {
       >
         <Show when={props.filteredNodeList.length > 0}>
           <div
-            class="motion-surface motion-enter max-h-[40vh] overflow-auto rounded-xl border border-slate-200 bg-white/60 p-1 dark:border-slate-800 dark:bg-slate-950/40 md:max-h-96"
+            class="motion-surface motion-enter max-h-[40vh] overflow-auto rounded-2xl border border-white/65 bg-white/72 p-1.5 shadow-lg shadow-slate-900/5 dark:border-slate-700/65 dark:bg-slate-950/52 dark:shadow-none md:max-h-96"
             role="region"
             aria-label={props.t('nodes.nodeListAria')}
           >
             <For each={props.filteredNodeList}>
               {(node) => (
-                <div class="group flex items-center gap-1 border-b border-slate-200/70 px-1 py-1 last:border-b-0 dark:border-slate-800/80">
+                <div class="group flex items-center gap-1 border-b border-slate-200/75 px-1 py-1 last:border-b-0 dark:border-slate-800/75">
                   <Show when={props.meIsAdmin}>
                     <input
                       type="checkbox"
@@ -253,10 +253,10 @@ export default function NodesFleetPanel(props: NodesFleetPanelProps) {
                   <button
                     type="button"
                     aria-current={props.selectedNodeId === node.id ? 'true' : undefined}
-                    class={`motion-pop ring-focus min-w-0 flex-1 rounded-lg border px-2 py-2 text-left transition-colors hover:bg-slate-100 focus-visible:outline-none dark:hover:bg-slate-900 ${
+                    class={`motion-pop ring-focus min-w-0 flex-1 rounded-xl border px-2.5 py-2 text-left transition-colors hover:bg-white focus-visible:outline-none dark:hover:bg-slate-900 ${
                       props.selectedNodeId === node.id
-                        ? 'border-amber-300/85 bg-amber-50/60 shadow-sm dark:border-amber-900/45 dark:bg-amber-950/20'
-                        : 'border-transparent'
+                        ? 'border-cyan-300/75 bg-gradient-to-r from-cyan-50/75 via-sky-50/55 to-white/65 shadow-sm dark:border-cyan-800/55 dark:from-cyan-950/32 dark:via-slate-950/60 dark:to-slate-950/45'
+                        : 'border-transparent bg-transparent'
                     }`}
                     title={props.t('nodes.selectNode')}
                     ref={(el) => {
@@ -287,14 +287,14 @@ export default function NodesFleetPanel(props: NodesFleetPanelProps) {
                       queueMicrotask(() => rowButtonRefs[next.id]?.focus())
                     }}
                     onClick={() => props.onSelectNode(node.id)}
-                  >
-                    <div class="flex items-center justify-between gap-2">
-                      <div class="min-w-0">
-                        <div class="flex min-w-0 flex-wrap items-center gap-1.5">
-                          <div class="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">{node.name}</div>
-                          <Badge variant={nodeHealthBadgeVariant(nodeHealthStatus(node))}>
-                            {props.t(nodeHealthLabelKey(nodeHealthStatus(node)))}
-                          </Badge>
+                    >
+                      <div class="flex items-center justify-between gap-2">
+                        <div class="min-w-0">
+                          <div class="flex min-w-0 flex-wrap items-center gap-1.5">
+                            <div class="truncate text-sm font-semibold tracking-tight text-slate-900 dark:text-slate-100">{node.name}</div>
+                            <Badge variant={nodeHealthBadgeVariant(nodeHealthStatus(node))}>
+                              {props.t(nodeHealthLabelKey(nodeHealthStatus(node)))}
+                            </Badge>
                           <Show when={props.isNodeSelected(node.id)}>
                             <Badge variant="warning">{props.t('nodes.selectedShort')}</Badge>
                           </Show>
@@ -313,7 +313,7 @@ export default function NodesFleetPanel(props: NodesFleetPanelProps) {
                       </div>
                       <div class="flex items-center gap-1.5">
                         <Show when={node.cpu_percent_x100 != null}>
-                          <span class={`text-[10px] font-semibold ${metricLevelClass(metricLevelByPercent((node.cpu_percent_x100 ?? 0) / 100))}`}>
+                          <span class={`rounded-md px-1.5 py-0.5 text-[10px] font-semibold ${metricLevelClass(metricLevelByPercent((node.cpu_percent_x100 ?? 0) / 100))}`}>
                             {formatCpuPercent(node.cpu_percent_x100)}
                           </span>
                         </Show>

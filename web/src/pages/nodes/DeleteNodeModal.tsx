@@ -76,11 +76,11 @@ export default function DeleteNodeModal(props: DeleteNodeModalProps) {
       <Show when={node()}>
         {(n) => (
           <div class="space-y-4">
-            <div class="rounded-2xl border border-rose-200 bg-rose-50/70 p-4 text-[12px] text-rose-900 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-200">
+            <div class="rounded-2xl border border-rose-200/85 bg-gradient-to-br from-rose-50/88 via-rose-50/78 to-white/70 p-4 text-[12px] text-rose-900 shadow-sm shadow-rose-900/5 dark:border-rose-900/40 dark:from-rose-950/25 dark:via-rose-950/18 dark:to-slate-950/45 dark:text-rose-200 dark:shadow-none">
               <div class="text-xs font-semibold uppercase tracking-wider text-rose-700/80 dark:text-rose-200/70">
                 {props.t('nodes.deleteModal.previewTitle')}
               </div>
-              <div class="mt-2 inline-flex items-center gap-1.5 rounded-md border border-rose-300/70 bg-rose-100/80 px-2 py-1 text-[11px] font-semibold text-rose-800 dark:border-rose-800/55 dark:bg-rose-950/45 dark:text-rose-200">
+              <div class="mt-2 inline-flex items-center gap-1.5 rounded-md border border-rose-300/75 bg-rose-100/84 px-2 py-1 text-[11px] font-semibold text-rose-800 dark:border-rose-800/55 dark:bg-rose-950/45 dark:text-rose-200">
                 <span aria-hidden="true">!</span>
                 <span>{props.t('nodes.deleteModal.desc')}</span>
               </div>
@@ -111,6 +111,7 @@ export default function DeleteNodeModal(props: DeleteNodeModalProps) {
                 onInput={(e) => props.setConfirmText(e.currentTarget.value)}
                 placeholder={requiredText()}
                 invalid={props.confirmText().trim().length > 0 && !matches()}
+                class="bg-white/86 dark:bg-slate-950/55"
               />
             </Field>
           </div>

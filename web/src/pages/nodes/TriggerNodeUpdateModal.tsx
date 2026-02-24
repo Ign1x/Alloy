@@ -50,11 +50,11 @@ export default function TriggerNodeUpdateModal(props: TriggerNodeUpdateModalProp
       }
     >
       <div class="space-y-3">
-        <div class="rounded-2xl border border-slate-200 bg-white/60 p-4 text-[12px] text-slate-700 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-200">
+        <div class="rounded-2xl border border-white/75 bg-gradient-to-br from-white/92 via-white/84 to-slate-100/72 p-4 text-[12px] text-slate-700 shadow-sm shadow-slate-900/5 dark:border-slate-700/65 dark:from-slate-950/82 dark:via-slate-950/72 dark:to-slate-900/64 dark:text-slate-200 dark:shadow-none">
           <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
             {props.t('nodes.updateModal.previewTitle')}
           </div>
-          <div class="mt-2 inline-flex items-center gap-1.5 rounded-md border border-amber-300/70 bg-amber-100/80 px-2 py-1 text-[11px] font-semibold text-amber-900 dark:border-amber-800/55 dark:bg-amber-950/45 dark:text-amber-200">
+          <div class="mt-2 inline-flex items-center gap-1.5 rounded-md border border-amber-300/75 bg-amber-100/84 px-2 py-1 text-[11px] font-semibold text-amber-900 dark:border-amber-800/55 dark:bg-amber-950/45 dark:text-amber-200">
             <span aria-hidden="true">!</span>
             <span>{props.mode === 'batch' ? props.t('nodes.updateModal.descBatch') : props.t('nodes.updateModal.descSingle')}</span>
           </div>
@@ -73,7 +73,7 @@ export default function TriggerNodeUpdateModal(props: TriggerNodeUpdateModalProp
           </Show>
 
           <Show when={props.mode === 'batch' && props.targets.length > 0}>
-            <div class="mt-2 max-h-32 overflow-auto rounded-xl border border-slate-200 bg-white/60 p-2 font-mono text-[11px] text-slate-700 dark:border-slate-800 dark:bg-slate-950/30 dark:text-slate-200">
+            <div class="mt-2 max-h-32 overflow-auto rounded-xl border border-slate-200/90 bg-white/80 p-2 font-mono text-[11px] text-slate-700 dark:border-slate-700 dark:bg-slate-950/42 dark:text-slate-200">
               <For each={props.targets.slice(0, 8)}>{(n) => <div class="truncate">{n.name}</div>}</For>
               <Show when={props.targets.length > 8}>
                 <div class="truncate text-slate-500 dark:text-slate-400">…</div>
