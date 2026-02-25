@@ -1,6 +1,6 @@
 [package]
 name = "alloy-agent"
-version = "0.2.35"
+version = "0.2.36"
 edition = "2024"
 
 [dependencies]
@@ -11,6 +11,7 @@ hex = "0.4"
 libc = "0.2"
 prost = { workspace = true }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
+urlencoding = "2"
 if-addrs = "0.13"
 serde = { workspace = true }
 serde_json = { workspace = true }
